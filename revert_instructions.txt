@@ -1,0 +1,16 @@
+Este arquivo foi criado para preparar o revert.
+Os seguintes commits serão revertidos (em ordem reversa de mais recente para mais antigo):
+
+- e0b9c33: diag(gsu): collapse repeated GO/STOP logs + trace SNES SFR polling
+- 42bb819: diag(iso): trace menu device screen
+- de857fa: fix(iso): wait for cdfs disc-ready before first opendir (picodrive method)
+- 56e8445: fix(iso): restore disc BGM by gating the cdfs scan on CdfsWaitReady
+- b68a378: Revert "fix(iso): restore disc BGM by gating the cdfs scan on CdfsWaitReady"
+- c095cb9: Revert "fix(iso): wait for cdfs disc-ready before first opendir (picodrive method)"
+- 405b954: feat(iso): restore disc BGM + robust cdfs via sceCd* probe (OPL method)
+- 0072adc: Revert "feat(iso): restore disc BGM + robust cdfs via sceCd* probe (OPL method)"
+
+Após este revert, o repositório voltará ao estado do commit c2837d8:
+"fix(iso): don't auto-scan CD/DVD for menu BGM (fixes device-screen freeze)"
+
+Este é o último estado funcional no PS2 real e emulador com ISO.
