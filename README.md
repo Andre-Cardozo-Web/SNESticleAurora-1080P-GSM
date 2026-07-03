@@ -1,4 +1,5 @@
-# SNESticle Revived
+# SNESticle Revive
+# Playstation 2 Homebrew and emulator.
 
 Revived and actively-maintained source of **SNESticle**, the long-rumored
 **Super Nintendo (SNES) emulator** written by **Icer Addis (iaddis)**.
@@ -17,6 +18,11 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 > Debian via Termux — no full desktop required.
 
 ---
+
+## Notes
+**attention**
+There's no need to create ISOs in this version; only do so if you want to distribute it to the community. Don't remove my credits or my name from the homebrew!
+
 
 ## Features
 
@@ -365,13 +371,5 @@ Icer Addis's portions is preserved verbatim inside [`LICENSE`](LICENSE).
 - Copyright (c) 2026 ReyFxck — SNESticleRevive fork
 - DSP‑4 HLE (`src/snes/core/dsp4emu.*`): © 1997–2008 ZSNES Team (GPLv2)
 
-## TODO
 
-- [ ] **[PS2]** Replace precompiled IRX modules with PS2DEV‑generated ones. *(hard)*
-- [ ] **[PS2]** Replace libcdvd with the latest PS2DEV libcdvd. *(medium)*
-- [x] **[PS2]** Update the Makefile for newer PS2SDK versions.
-- [ ] **[PS2]** Finish moving custom GS code to gsKit where possible. *(ongoing)*
-- [ ] **[NES]** Profile and bring heavy scenes back to a stable 60 fps.
-- [ ] **[SNES]** Track down the Final Fight 2 sprite data/upload bug.
-
-<sub>Yes, we still have a lot of free time :)</sub>
+# Yes, we still have a lot of free time :)
