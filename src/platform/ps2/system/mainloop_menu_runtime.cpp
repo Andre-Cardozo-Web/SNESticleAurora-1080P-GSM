@@ -231,7 +231,7 @@ void _MenuDraw()
             (config.ipaddr.s_addr >>24) & 0xFF
                     );
 
-    static const char *_AppVersionStr = "SNESticle Revive v1.0.0";
+    static const char *_AppVersionStr = "SNESticle Revive PS2 v1.0.1";
     FontPuts(256 - 16 - FontGetStrWidth(_AppVersionStr),
              vy, _AppVersionStr);
 
