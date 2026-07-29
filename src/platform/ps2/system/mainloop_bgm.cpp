@@ -28,6 +28,8 @@
 #include <string.h>
 #include <time.h>
 #include <dirent.h>
+#include <sys/stat.h>
+#include <libcdvd.h>
 
 #include "types.h"
 
@@ -115,6 +117,26 @@ extern "C" void DLog(const char *fmt, ...);
    real (~107ms) e destravam o caso do boot. */
 #define BGM_DRAIN_MAXFRAMES 12
 
+/* O cdfs.irx chama sceCdDiskReady(0) internamente ao abrir a primeira
+   pasta. Esse modo e' BLOQUEANTE e foi a causa da Issue #16 quando o
+   BGM tentou abrir cdfs:/BGM logo no primeiro frame do menu. A sondagem
+   abaixo e' feita aos poucos, com mode=1 (nao bloqueante), antes de
+   permitir qualquer opendir no disco.
+
+   - grace: deixa BIOS/mechacon/OPL assentarem depois do SifIopReset;
+   - poll: evita um RPC de CDVD em todo frame;
+   - stable: exige duas respostas prontas consecutivas;
+   - giveup: em ELF sem disco, para de mostrar "Searching" apos ~15 s. */
+#define BGM_DISC_GRACE_FRAMES    90
+#define BGM_DISC_POLL_FRAMES     15
+#define BGM_DISC_STABLE_POLLS     2
+#define BGM_DISC_GIVEUP_FRAMES  900
+
+/* O Makefile preserva subpastas da origem ao montar BGM/ na ISO. Escanear
+   alguns niveis garante que essas faixas tambem sejam encontradas, sem
+   permitir recursao ilimitada em dispositivos arbitrarios. */
+#define BGM_SCAN_MAX_DEPTH 4
+
 /* Pastas tentadas, em ordem.  BGM_PATH (se definido pelo Makefile) vem
    primeiro.  A primeira faixa .mod/.xm encontrada e' tocada. */
 static const char *s_dirs[] = {
@@ -147,8 +169,8 @@ static int  s_drainWait = 0;           /* frames esperando dreno da cauda */
 static int  s_gapFrames = 0;           /* frames de silencio na troca de faixa */
 
 /* Frequencias de sintese oferecidas no Video Config (Hz).  Mais alta =
-   melhor qualidade e mais CPU (48000 pode derrubar o fps).  32000 e' o
-   padrao recomendado.  A saida e' sempre reamostrada para 48 kHz. */
+   melhor qualidade e mais CPU (48000 pode derrubar o fps).  24000 e' o
+   padrao seguro. A saida e' sempre reamostrada para 48 kHz. */
 static const int s_rateList[] = { 16000, 22050, 24000, 32000, 38000, 44100, 48000 };
 #define BGM_RATE_COUNT ((int)(sizeof(s_rateList) / sizeof(s_rateList[0])))
 
@@ -165,6 +187,15 @@ typedef struct { char path[256]; int kind; } BgmTrackT; /* kind 1=mod 2=xm */
 static BgmTrackT s_index[BGM_INDEX_MAX];
 static int       s_indexCount = -1;    /* -1 = ainda nao escaneado */
 static int       s_trackIdx   = 0;     /* faixa atual no indice    */
+
+enum BgmDiscScanE {
+    BGM_DISC_PENDING = 0,
+    BGM_DISC_DONE
+};
+static int          s_discScanState   = BGM_DISC_PENDING;
+static unsigned int s_discScanFrames  = 0;
+static int          s_discStablePolls = 0;
+static char         s_bootBgm[256];
 
 /* buffers de geracao (estaticos: evitam pressao de pilha na EE) */
 static short s_inter[BGM_OUT_CHUNK * 2] __attribute__((aligned(64))); /* 48k L,R,L,R */
@@ -201,14 +232,7 @@ static Bool _HasExt(const char *name, const char *ext)
    LADO do ELF. */
 char *MainGetBootDir();
 
-/* Um caminho aponta pro DRIVE de CD/DVD?  O primeiro acesso a cdfs:/cdrom:
-   logo no boot por ISO (num PS2 real) TRAVA: o menu abre e congela na tela
-   de selecao de dispositivo, porque o mecha ainda esta identificando o
-   disco (pos-SifIopReset + sceCdInit SCECdINoD, que nao espera disco).  A
-   varredura automatica da trilha de menu era o unico acesso ao disco nessa
-   tela, entao ela pula o disco -- o browser le o cdfs: so' quando o usuario
-   entra nele (segundos depois, drive ja' assentado).  BGM de mc0:/mass:
-   continua normal. */
+/* Um caminho aponta pro drive de CD/DVD? */
 static Bool _IsDiscPath(const char *p)
 {
     if (!p) return FALSE;
@@ -216,70 +240,206 @@ static Bool _IsDiscPath(const char *p)
             strncmp(p, "cdrom", 5) == 0) ? TRUE : FALSE;
 }
 
-static void _BuildIndex(void)
+/* Tipos que o cdfs.irx do PS2SDK reconhece como discos com filesystem. */
+static Bool _DiscTypeHasFilesystem(int type)
 {
-    size_t d;
-    char   bootBgm[256];
-
-    s_indexCount = 0;
-
-    /* Monta o caminho da pasta "bgm" AO LADO DO ELF (boot dir).  Assim, se
-       o usuario deixar a pasta bgm junto do ELF no dispositivo, ela e' usada
-       automaticamente -- sem precisar recompilar com BGM_PATH.  Tentada
-       PRIMEIRO; as pastas padrao ficam de fallback. */
-    bootBgm[0] = 0;
+    switch (type)
     {
-        const char *bd = MainGetBootDir();
-        if (bd && bd[0])
-        {
-            int n = 0;
-            while (bd[n] && n < (int)sizeof(bootBgm) - 6)
-            {
-                bootBgm[n] = (bd[n] == '\\') ? '/' : bd[n];  /* normaliza '\' */
-                n++;
-            }
-            if (n > 0 && bootBgm[n - 1] != '/') bootBgm[n++] = '/';
-            bootBgm[n] = 0;
-            strncat(bootBgm, "bgm", sizeof(bootBgm) - strlen(bootBgm) - 1);
-        }
+        case SCECdPSCD:
+        case SCECdPSCDDA:
+        case SCECdPS2CD:
+        case SCECdPS2CDDA:
+        case SCECdPS2DVD:
+        case SCECdDVDV:
+            return TRUE;
+        default:
+            return FALSE;
+    }
+}
+
+static void _BuildBootBgm(void)
+{
+    const char *bd = MainGetBootDir();
+    int n = 0;
+
+    s_bootBgm[0] = 0;
+    if (!bd || !bd[0]) return;
+
+    while (bd[n] && n < (int)sizeof(s_bootBgm) - 6)
+    {
+        s_bootBgm[n] = (bd[n] == '\\') ? '/' : bd[n];
+        n++;
+    }
+    s_bootBgm[n] = 0;
+
+    /* argv[0] de um ELF na ISO normalmente vem como cdrom0:/...; toda a
+       pilha moderna deste projeto usa cdfs:. Converta antes de guardar o
+       caminho ao lado do ELF. */
+    if (strncmp(s_bootBgm, "cdrom", 5) == 0)
+    {
+        char converted[sizeof(s_bootBgm)];
+        const char *colon = strchr(s_bootBgm, ':');
+        const char *tail = colon ? colon + 1 : "";
+        snprintf(converted, sizeof(converted), "cdfs:%s", tail);
+        strncpy(s_bootBgm, converted, sizeof(s_bootBgm) - 1);
+        s_bootBgm[sizeof(s_bootBgm) - 1] = 0;
+        n = (int)strlen(s_bootBgm);
     }
 
-    /* d==0: pasta ao lado do ELF; d>=1: pastas padrao (s_dirs[d-1]). */
-    for (d = 0; d <= BGM_NUM_DIRS && s_indexCount < BGM_INDEX_MAX; d++)
+    if (n > 0 && s_bootBgm[n - 1] != '/') s_bootBgm[n++] = '/';
+    s_bootBgm[n] = 0;
+    strncat(s_bootBgm, "bgm",
+            sizeof(s_bootBgm) - strlen(s_bootBgm) - 1);
+}
+
+static Bool _IndexHasPath(const char *path)
+{
+    int i;
+
+    for (i = 0; i < s_indexCount; i++)
     {
-        const char    *scanDir = (d == 0) ? bootBgm : s_dirs[d - 1];
-        DIR *pDir;
-        struct dirent *pEnt;
+        const char *a = s_index[i].path;
+        const char *b = path;
 
-        if (!scanDir || !scanDir[0]) continue;
-
-        /* Nunca toca o drive de CD/DVD automaticamente na tela de menu
-           (trava o boot por ISO no PS2 real -- ver _IsDiscPath). */
-        if (_IsDiscPath(scanDir))
+        if (_IsDiscPath(a) && _IsDiscPath(b))
         {
-            DLog("[bgm] scan skip disc path '%s'", scanDir);
+            while (*a && *b)
+            {
+                char ca = (*a == '\\') ? '/' : *a;
+                char cb = (*b == '\\') ? '/' : *b;
+                if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + 32);
+                if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + 32);
+                if (ca != cb) break;
+                a++;
+                b++;
+            }
+            if (!*a && !*b) return TRUE;
+        }
+        else if (strcmp(a, b) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void _IndexAdd(const char *path, int kind)
+{
+    size_t len;
+
+    if (!path || !path[0] || !kind ||
+        s_indexCount >= BGM_INDEX_MAX || _IndexHasPath(path))
+        return;
+
+    len = strlen(path);
+    if (len >= sizeof(s_index[s_indexCount].path))
+    {
+        DLog("[bgm] skip overlong path (%u byte(s))", (unsigned int)len);
+        return;
+    }
+    memcpy(s_index[s_indexCount].path, path, len + 1);
+    s_index[s_indexCount].kind = kind;
+    s_indexCount++;
+}
+
+static void _IndexRemove(int index)
+{
+    int i;
+
+    if (index < 0 || index >= s_indexCount) return;
+    for (i = index; i + 1 < s_indexCount; i++)
+        s_index[i] = s_index[i + 1];
+    s_indexCount--;
+
+    if (s_indexCount <= 0)
+        s_trackIdx = 0;
+    else if (s_trackIdx >= s_indexCount)
+        s_trackIdx = 0;
+}
+
+/* Retorna 1 se a pasta abriu. A recursao e' limitada e so faz stat()
+   quando d_type nao informa se a entrada e' diretorio (caso do cdfs). */
+static int _ScanDir(const char *scanDir, int depth)
+{
+    DIR *pDir;
+    struct dirent *pEnt;
+
+    DLog("[bgm] scan opendir('%s')...", scanDir);
+    pDir = opendir(scanDir);
+    DLog("[bgm] scan opendir('%s') -> %p", scanDir, (void *)pDir);
+    if (!pDir) return 0;
+
+    while ((pEnt = readdir(pDir)) != NULL &&
+           s_indexCount < BGM_INDEX_MAX)
+    {
+        char child[256];
+        const char *sep;
+        int kind = 0;
+        int written;
+
+        if (!strcmp(pEnt->d_name, ".") || !strcmp(pEnt->d_name, ".."))
+            continue;
+
+        sep = (scanDir[0] &&
+               (scanDir[strlen(scanDir) - 1] == '/' ||
+                scanDir[strlen(scanDir) - 1] == '\\')) ? "" : "/";
+        written = snprintf(child, sizeof(child), "%s%s%s",
+                           scanDir, sep, pEnt->d_name);
+        if (written < 0 || written >= (int)sizeof(child))
+            continue;
+
+        if (_HasExt(pEnt->d_name, ".mod")) kind = 1;
+        else if (_HasExt(pEnt->d_name, ".xm")) kind = 2;
+        if (kind)
+        {
+            _IndexAdd(child, kind);
             continue;
         }
 
-        DLog("[bgm] scan opendir('%s')...", scanDir);
-        pDir = opendir(scanDir);
-        DLog("[bgm] scan opendir('%s') -> %p", scanDir, (void *)pDir);
-        if (!pDir) continue;
-
-        while ((pEnt = readdir(pDir)) != NULL && s_indexCount < BGM_INDEX_MAX)
+        if (depth < BGM_SCAN_MAX_DEPTH)
         {
-            int kind = 0;
-            if (_HasExt(pEnt->d_name, ".mod")) kind = 1;
-            else if (_HasExt(pEnt->d_name, ".xm")) kind = 2;
-            if (!kind) continue;
-
-            snprintf(s_index[s_indexCount].path, sizeof(s_index[0].path),
-                     "%s/%s", scanDir, pEnt->d_name);
-            s_index[s_indexCount].kind = kind;
-            s_indexCount++;
+            Bool isDir = FALSE;
+            Bool typeKnown = FALSE;
+#ifdef DT_DIR
+            if (pEnt->d_type == DT_DIR)
+            {
+                isDir = TRUE;
+                typeKnown = TRUE;
+            }
+            else if (pEnt->d_type == DT_REG)
+            {
+                typeKnown = TRUE;
+            }
+#endif
+            if (!typeKnown)
+            {
+                struct stat st;
+                if (stat(child, &st) == 0)
+                    isDir = S_ISDIR(st.st_mode) ? TRUE : FALSE;
+            }
+            if (isDir)
+                _ScanDir(child, depth + 1);
         }
-        closedir(pDir);
     }
+    closedir(pDir);
+    return 1;
+}
+
+static void _BuildIndex(void)
+{
+    size_t d;
+
+    s_indexCount = 0;
+    s_discScanState = BGM_DISC_PENDING;
+    s_discScanFrames = 0;
+    s_discStablePolls = 0;
+    _BuildBootBgm();
+
+    /* Primeiro escaneia somente caminhos que nunca tocam o CD/DVD. */
+    if (s_bootBgm[0] && !_IsDiscPath(s_bootBgm))
+        _ScanDir(s_bootBgm, 0);
+
+    for (d = 0; d < BGM_NUM_DIRS && s_indexCount < BGM_INDEX_MAX; d++)
+        if (!_IsDiscPath(s_dirs[d]))
+            _ScanDir(s_dirs[d], 0);
 
     /* faixa inicial pseudo-aleatoria (clock varia conforme o tempo de
        boot); se nao houver entropia, cai no indice 0 -- sem problema. */
@@ -288,7 +448,79 @@ static void _BuildIndex(void)
         unsigned int seed = (unsigned int)clock();
         s_trackIdx = (int)(seed % (unsigned int)s_indexCount);
     }
-    DLog("[bgm] index built: %d track(s)", s_indexCount);
+    DLog("[bgm] local index built: %d track(s), disc pending", s_indexCount);
+}
+
+/* Um passo curto por frame. Nenhum loop de espera e nenhum acesso a cdfs:
+   acontece antes de o mechacon responder "pronto" duas vezes. O opendir
+   posterior ainda e' sincrono, mas nessa altura o cdfs.irx nao entra no
+   sceCdDiskReady(0) enquanto o drive esta detectando. */
+static void _DiscScanStep(void)
+{
+    int type;
+    int ready;
+    int before;
+    size_t d;
+    DIR *root;
+
+    if (s_discScanState == BGM_DISC_DONE) return;
+
+    s_discScanFrames++;
+    if (s_discScanFrames < BGM_DISC_GRACE_FRAMES) return;
+    if (((s_discScanFrames - BGM_DISC_GRACE_FRAMES) %
+         BGM_DISC_POLL_FRAMES) != 0) return;
+
+    type = sceCdGetDiskType();
+    if (!_DiscTypeHasFilesystem(type))
+    {
+        s_discStablePolls = 0;
+        if (s_discScanFrames >= BGM_DISC_GIVEUP_FRAMES)
+        {
+            s_discScanState = BGM_DISC_DONE;
+            DLog("[bgm] disc scan timeout (type=%d)", type);
+        }
+        return;
+    }
+
+    /* mode=1: consulta e volta; nunca espera o drive terminar de girar. */
+    ready = sceCdDiskReady(1);
+    if (ready != SCECdComplete)
+    {
+        s_discStablePolls = 0;
+        return;
+    }
+
+    if (++s_discStablePolls < BGM_DISC_STABLE_POLLS) return;
+
+    /* Confirma que o device cdfs: realmente responde. Se o RPC ainda nao
+       estiver pronto, mantem PENDING e tenta novamente em outro frame. */
+    root = opendir("cdfs:/");
+    if (!root)
+    {
+        DLog("[bgm] disc ready, but cdfs root is not mounted yet");
+        s_discStablePolls = 0;
+        return;
+    }
+    closedir(root);
+
+    before = s_indexCount;
+    if (s_bootBgm[0] && _IsDiscPath(s_bootBgm))
+        _ScanDir(s_bootBgm, 0);
+
+    for (d = 0; d < BGM_NUM_DIRS && s_indexCount < BGM_INDEX_MAX; d++)
+        if (_IsDiscPath(s_dirs[d]))
+            _ScanDir(s_dirs[d], 0);
+
+    s_discScanState = BGM_DISC_DONE;
+    if (before == 0 && s_indexCount > 0)
+    {
+        unsigned int seed = (unsigned int)clock();
+        s_trackIdx = (int)(seed % (unsigned int)s_indexCount);
+        if (s_state == BGM_FAILED)
+            s_state = BGM_UNTRIED;
+    }
+    DLog("[bgm] disc index complete: +%d, total=%d",
+         s_indexCount - before, s_indexCount);
 }
 
 /* Le um arquivo inteiro para um buffer malloc'd.  Retorna NULL em erro. */
@@ -323,52 +555,63 @@ static char *_LoadFileAlloc(const char *path, long *outLen)
 
 static void _TryLoad(void)
 {
-    const char *path;
-    int  kind;
-
     if (s_indexCount < 0) _BuildIndex();
-    if (s_indexCount == 0) { s_state = BGM_FAILED; return; }
-    if (s_trackIdx < 0 || s_trackIdx >= s_indexCount) s_trackIdx = 0;
-
-    path = s_index[s_trackIdx].path;
-    kind = s_index[s_trackIdx].kind;
-
-    DLog("[bgm] load track[%d] kind=%d '%s'", s_trackIdx, kind, path);
-
-    if (kind == 1) /* MOD */
+    if (s_indexCount <= 0)
     {
-        jar_mod_init(&s_mod);                 /* defaults: 48000/16/stereo */
-        jar_mod_setcfg(&s_mod, s_rate, 16, 1, 1, 1); /* taxa de sintese */
-        if (jar_mod_load_file(&s_mod, path) != 0)
-        {
-            s_state = BGM_MOD;                /* jar_mod faz loop sozinho  */
-            return;
-        }
-        jar_mod_unload(&s_mod);
         s_state = BGM_FAILED;
         return;
     }
 
-    /* XM */
+    /* Uma faixa truncada ou incompatível nao deve derrubar a playlist
+       inteira. Tenta somente uma entrada por frame: se ela falhar, remove
+       do indice e deixa a seguinte para o proximo BgmUpdate, evitando um
+       congelamento longo quando ha varios arquivos ruins. */
     {
-        long len = 0;
-        s_xmBuf = _LoadFileAlloc(path, &len);
-        if (s_xmBuf &&
-            jar_xm_create_context_safe(&s_xm, s_xmBuf, (size_t)len, s_rate) == 0)
+        const char *path;
+        int kind;
+
+        if (s_trackIdx < 0 || s_trackIdx >= s_indexCount) s_trackIdx = 0;
+        path = s_index[s_trackIdx].path;
+        kind = s_index[s_trackIdx].kind;
+        DLog("[bgm] load track[%d] kind=%d '%s'",
+             s_trackIdx, kind, path);
+
+        if (kind == 1) /* MOD */
         {
-            jar_xm_set_max_loop_count(s_xm, 0); /* 0 = loop infinito       */
-            /* interpolacao linear LIGADA (default): som mais limpo (sem o
-               aliasing/aspereza do nearest).  O custo extra de CPU e'
-               compensado pela taxa de sintese mais baixa (BGM_RATE=24000)
-               e pelo teto de sintese por frame -- a reproducao continua
-               fluida.  Se algum modulo de 32ch ainda engasgar, baixe a
-               taxa no Video Config. */
-            s_state = BGM_XM;
-            return;
+            jar_mod_init(&s_mod);             /* defaults: 48000/16/stereo */
+            jar_mod_setcfg(&s_mod, s_rate, 16, 1, 1, 1);
+            if (jar_mod_load_file(&s_mod, path) != 0)
+            {
+                s_state = BGM_MOD;            /* jar_mod faz loop sozinho */
+                return;
+            }
+            jar_mod_unload(&s_mod);
         }
-        if (s_xmBuf) { free(s_xmBuf); s_xmBuf = NULL; }
-        s_state = BGM_FAILED;
+        else /* XM */
+        {
+            long len = 0;
+            s_xm = NULL;
+            s_xmBuf = _LoadFileAlloc(path, &len);
+            if (s_xmBuf &&
+                jar_xm_create_context_safe(&s_xm, s_xmBuf, (size_t)len,
+                                           s_rate) == 0)
+            {
+                jar_xm_set_max_loop_count(s_xm, 0); /* loop infinito */
+                /* Interpolacao linear LIGADA (default): som mais limpo.
+                   Se algum modulo de muitos canais engasgar, baixe a
+                   taxa no Video Config. */
+                s_state = BGM_XM;
+                return;
+            }
+            if (s_xm) { jar_xm_free_context(s_xm); s_xm = NULL; }
+            if (s_xmBuf) { free(s_xmBuf); s_xmBuf = NULL; }
+        }
+
+        DLog("[bgm] rejected unreadable/invalid track '%s'", path);
+        _IndexRemove(s_trackIdx);
     }
+
+    s_state = (s_indexCount > 0) ? BGM_UNTRIED : BGM_FAILED;
 }
 
 
@@ -467,10 +710,16 @@ int BgmGetVolume(void)
 
 int BgmTrackCount(void)
 {
-    /* escaneia o indice na 1a chamada (cacheado depois) para o menu poder
-       mostrar "No Track" quando nao ha arquivos. */
+    /* O indice local nasce imediatamente; o pedaço cdfs e' acrescentado
+       depois, sem bloquear o primeiro frame do menu. */
     if (s_indexCount < 0) _BuildIndex();
     return s_indexCount;
+}
+
+int BgmIsSearching(void)
+{
+    if (s_indexCount < 0) _BuildIndex();
+    return s_discScanState == BGM_DISC_PENDING ? 1 : 0;
 }
 
 int BgmGetRate(void)
@@ -507,7 +756,9 @@ void BgmUpdate(void)
     static Bool s_logged = FALSE;
     if (!s_logged) { DLog("[bgm] BgmUpdate first call: vol=%d", s_volume); s_logged = TRUE; }
 
-    if (s_volume <= 0)         return;   /* OFF: nem carrega, nem usa RAM */
+    if (s_volume <= 0)         return;   /* OFF: nem toca o drive */
+    if (s_indexCount < 0)      _BuildIndex();
+    _DiscScanStep();
     if (!Aud_IsInitialized())  return;
 
     /* Respiro entre faixas: apos detectar o fim e avancar (decoder ja'

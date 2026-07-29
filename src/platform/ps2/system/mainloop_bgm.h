@@ -45,9 +45,10 @@ void BgmNext(void);
 void BgmSetVolume(int vol);
 int  BgmGetVolume(void);
 
-/* Numero de faixas .mod/.xm achadas (cache; escaneia 1x).  0 = nenhuma
-   (o menu mostra "No Track"). */
+/* Numero de faixas .mod/.xm achadas. Dispositivos locais sao escaneados
+   imediatamente; o CD/DVD e' acrescentado depois de uma sondagem segura. */
 int  BgmTrackCount(void);
+int  BgmIsSearching(void);
 
 /* Frequencia de sintese (Hz).  A saida e' sempre 48 kHz (reamostrada).
    BgmCycleRate(+1/-1) percorre a lista de frequencias oferecidas. */

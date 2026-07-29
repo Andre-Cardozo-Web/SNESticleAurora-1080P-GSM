@@ -208,8 +208,10 @@ Background music plays in the ROM browser and the pause menu — tracker modules
 in **`.mod`** (Amiga ProTracker) and **`.xm`** (FastTracker II) formats, decoded
 on the EE by the bundled single‑file players **jar_mod** / **jar_xm**.
 
-Drop one or more tracks in any of these folders (scanned **once** and cached in
-RAM, so it never re‑hits the disk while you browse):
+Drop one or more tracks in any of these folders. Local devices are indexed
+immediately; CD/DVD is checked a little later with non-blocking readiness polls
+so booting an ISO cannot stall while the drive is still detecting the disc.
+Subfolders are supported (up to four levels), and the resulting index is cached:
 
 - the `BGM_PATH` folder (if you built with one — see below)
 - `mc0:/SNESticle/bgm`, `mc1:/SNESticle/bgm`
@@ -224,8 +226,8 @@ a game** and return to the menu (when more than one track is present).
 | Option | Range | Notes |
 |--------|-------|-------|
 | **Game Volume** | 0–100 | Loudness of the emulated SNES/NES audio. **100 = the default** (matches Snes9x); 0 mutes. Applies to both cores. |
-| **Menu Music** | Off / 1–100 | Background‑music volume. **0 = Off** — the player isn't loaded and uses no RAM. Shows **No Track** when no `.mod`/`.xm` is found. |
-| **Frequency** | 16–48 kHz | Synthesis rate of the menu music (the output is always resampled to 48 kHz). Higher = better quality but more CPU; **32 kHz** is the default and recommended. |
+| **Menu Music** | Off / 1–100 | Background‑music volume. **0 = Off** — the player isn't loaded and uses no RAM. Shows **Searching** while CD/DVD detection is pending, then **No Track** only when no playable `.mod`/`.xm` is found. |
+| **Frequency** | 16–48 kHz | Synthesis rate of the menu music (the output is always resampled to 48 kHz). Higher = better quality but more CPU; **24 kHz** is the default and safest setting for a steady frame rate. |
 
 All three persist to the memory card (press ✕ to save), and work the same for
 SNES and NES (the menu and audio path are shared).
@@ -237,8 +239,9 @@ make BGM_PATH=mass:/snes/bgm    # where to look for .mod/.xm first
 make BGM_RATE=24000             # 16000/22050/24000/32000/38000/44100/48000
 ```
 
-When building an ISO, add `bgm=` to bundle a folder of tracks (they land in
-`cdfs:/BGM`):
+When building an ISO, add `bgm=` (or `BGM=`) to bundle a folder of tracks (they
+land in `cdfs:/BGM`). The build stops with an error if that folder contains no
+`.mod`/`.xm`, which prevents accidentally producing a music-less ISO:
 
 ```bash
 make iso roms=/path/to/roms bgm=/path/to/tracks

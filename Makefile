@@ -111,13 +111,12 @@ CXXFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fn
 	-DDEBUG_BOOT_SCREEN=$(DEBUG_BOOT_SCREEN) \
 	-DMAINLOOP_DEBUG_GS_TEST=$(MAINLOOP_DEBUG_GS_TEST)
 
-# ---- versao (OPT-IN) + data/hora da build (TZ Brasilia, UTC-3) -------
-# APP_VERSION e' VAZIO por padrao: os nomes ficam "SNESticle_Revive" e o
-# banner mostra so' "SNESticle Revive" (sem numero).  Passe
-# APP_VERSION=1.0.0 para incluir "_v1.0.0" nos nomes e "v1.0.0" no banner.
+# ---- versao + data/hora da build (TZ Brasilia, UTC-3) -----------------
+# A release atual e' o padrao; passe APP_VERSION= para gerar nomes/banner
+# sem numero ou APP_VERSION=x.y.z para testar uma versao futura.
 # __DATE__/__TIME__ pegariam UTC (3h adiantado no Brasil); por isso a
 # data/hora vem do Makefile com TZ fixo de Brasilia.
-APP_VERSION ?=
+APP_VERSION ?= 1.0.3
 ifeq ($(strip $(APP_VERSION)),)
 VER_SUFFIX      :=
 APP_VERSION_DEF :=
@@ -906,6 +905,8 @@ ISO_VMODE     ?= NTSC
 OUT ?= 
 out ?= $(OUT)
 roms ?= $(ROMS)
+BGM ?=
+bgm ?= $(BGM)
 
 .PHONY: iso-check iso-root iso
 
@@ -1001,9 +1002,14 @@ iso-root: $(TARGET) iso-check
 		fi; \
 		mkdir -p "$(ISO_ROOT_DIR)/BGM"; \
 		( cd "$(bgm)" && \
+		  bgm_count=$$(find . -type f \( -iname '*.mod' -o -iname '*.xm' \) -print | wc -l | tr -d ' '); \
+		  if [ "$$bgm_count" -eq 0 ]; then \
+			echo "ERRO: nenhuma faixa .mod/.xm encontrada em $(bgm)"; \
+			exit 1; \
+		  fi; \
 		  find . -type f \( -iname '*.mod' -o -iname '*.xm' \) \
-			-exec cp -f --parents {} "$(ISO_ROOT_DIR)/BGM/" \; ) ; \
-		echo "[ ISO-ROOT ] BGM copiada de $(bgm) -> cdfs:/BGM"; \
+			-exec cp -f --parents {} "$(ISO_ROOT_DIR)/BGM/" \; ; \
+		  echo "[ ISO-ROOT ] BGM: $$bgm_count faixa(s) de $(bgm) -> cdfs:/BGM" ) ; \
 	fi
 	@if [ -d "$(CURDIR)/cdroot" ]; then \
 		cp -a "$(CURDIR)/cdroot/." "$(ISO_ROOT_DIR)/"; \
