@@ -183,6 +183,8 @@ void _MainLoopUnloadRom()
 	_pNesFDSDisk->Unload();
     _bStateSaved = FALSE;
     _pSystem = NULL;
+    _RomPath[0] = 0;
+    MainLoopStateOnRomChanged();
 
 	_fbTexture[0]->Clear();
 	_fbTexture[1]->Clear();
@@ -201,11 +203,18 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	   truncation has to match that size. Otherwise a long ROM path
 	   silently overflows the old FileName[256] in strcpy() below. */
 	char FileName[1024];
+	char OriginalPath[1024];
 
 	if (pFileName==NULL)
 	{
 		return FALSE;
 	}
+
+	/* Keep the browser-facing path as well as the mapped I/O path.  For an
+	   internal-HDD ROM this preserves hdd0:/PARTITION/... so save states
+	   can remount that exact APA partition later; pFileName itself becomes
+	   pfs0:/... below and no longer contains the partition identity. */
+	snprintf(OriginalPath, sizeof(OriginalPath), "%s", pFileName);
 
 	/* HD interno (APA): traduz "hdd0:/PARTICAO/.../rom" -> "pfs0:/.../rom"
 	   (monta a particao em pfs0:).  Para os demais dispositivos e' no-op,
@@ -407,6 +416,8 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	pSystem->Reset();
 
     _pSystem = pSystem;
+    snprintf(_RomPath, sizeof(_RomPath), "%s", OriginalPath);
+    MainLoopStateOnRomChanged();
 
 	ConPrint("ROM Loaded: %s\n", pFileName);
 

@@ -60,14 +60,6 @@
 #define MAINLOOP_NETPORT (6113)
 #endif
 
-#ifndef MAINLOOP_STATEPATH
-#if MAINLOOP_MEMCARD
-#define MAINLOOP_STATEPATH "host0:"
-#else
-#define MAINLOOP_STATEPATH "host0:/cygdrive/d/emu/"
-#endif
-#endif
-
 #ifndef MAINLOOP_SNESSTATEDEBUG
 #define MAINLOOP_SNESSTATEDEBUG (CODE_DEBUG && 0)
 #endif
@@ -88,6 +80,7 @@
 /* ---- Strings / paths ---------------------------------------------- */
 
 extern Char _RomName[256];
+extern Char _RomPath[1024];
 extern Char _SramPath[256];
 extern Char _MainLoop_SaveTitle[];
 extern Char _MainLoop_ModalStr[256];
@@ -139,8 +132,12 @@ extern CWavFile _WavFile;
 /* ---- UI screens ---------------------------------------------------- */
 
 extern CBrowserScreen *_MainLoop_pBrowserScreen;
+extern CBrowserScreen *_MainLoop_pStateBrowserScreen;
 extern CNetworkScreen *_MainLoop_pNetworkScreen;
 extern CMenuScreen    *_MainLoop_pMenuScreen;
+extern CMenuScreen    *_MainLoop_pStateScreen;
+extern CMenuScreen    *_MainLoop_pStateDeviceScreen;
+extern CMenuScreen    *_MainLoop_pMemCardFormatScreen;
 extern CLogScreen     *_MainLoop_pLogScreen;
 extern CVideoScreen   *_MainLoop_pVideoScreen;
 extern CScreen        *_MainLoop_pScreen;

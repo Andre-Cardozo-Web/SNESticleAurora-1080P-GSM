@@ -43,11 +43,18 @@ extern "C" int AudMixGameGetVolume(void)
 
 AudMixBuffer::AudMixBuffer(Uint32 uSampleRate, Bool bAsync)
 {
-    m_iPrevSample[0]=0;
-    m_iPrevSample[1]=0;
-    m_nOutSamples = 0;
     m_uSampleRate = uSampleRate;
     m_bAsync      = bAsync;
+    Reset();
+}
+
+void AudMixBuffer::Reset()
+{
+    m_iPrevSample[0] = 0;
+    m_iPrevSample[1] = 0;
+    m_nOutSamples = 0;
+    m_uLastOutput = 0;
+    memset(m_OutData, 0, sizeof(m_OutData));
 }
 
 
@@ -326,5 +333,4 @@ void AudMixBuffer::OutputSamplesMono(Int16 *pSamples,Int32 nSamples)
 {
     OutputSamplesStereo(pSamples, pSamples, nSamples);
 }
-
 

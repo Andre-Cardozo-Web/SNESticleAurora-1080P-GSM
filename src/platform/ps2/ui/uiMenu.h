@@ -14,6 +14,7 @@ class CMenuScreen : public CScreen
 
 	Int32 	m_iSelect;   // current selected item
 	Int32	m_nItems;	 // total number of items
+	Int32	m_iTop;		 // title/header vertical position
 
 	char 	m_strText[4][256];
 
@@ -25,6 +26,8 @@ public:
 	void SetEntries(char **ppStrings);
 	void SetTitle(const char *pTitle);
 	void SetText(int iText, const char *pStr);
+	void SetSelection(Int32 iSelect);
+	void SetTop(Int32 iTop) {m_iTop = iTop;}
 	char *GetText(int iText) {return m_strText[iText];}
 
 	void Draw();
@@ -34,4 +37,3 @@ public:
 
 
 #endif
-

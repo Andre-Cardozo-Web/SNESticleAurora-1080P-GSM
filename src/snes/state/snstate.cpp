@@ -31,6 +31,12 @@ Int32 SnesSystem::GetStateSize()
 
 void SnesSystem::SaveState(SnesStateT *pState)
 {
+	/* The state is persisted as an opaque payload by the PS2 front-end.
+	   Clear padding and currently-unused fields first so two equivalent
+	   states have deterministic bytes (and therefore a deterministic
+	   CRC), instead of leaking whatever happened to be in the buffer. */
+	memset(pState, 0, sizeof(*pState));
+
 	// set tag
 	pState->Tag[0] = 'S';
 	pState->Tag[1] = 'N';
@@ -64,7 +70,7 @@ void SnesSystem::SaveState(SnesStateT *pState)
 
 	// save memory state
 	memcpy(pState->Ram, m_Ram, sizeof(pState->Ram));
-	memcpy(pState->SRam, m_SRam, sizeof(pState->Ram));
+	memcpy(pState->SRam, m_SRam, sizeof(pState->SRam));
 
     // copy spc ram
     pState->SPC.bRomEnable = m_Spc.bRomEnable;
@@ -104,6 +110,13 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
 	m_PPU.RestoreState(&pState->PPU);
 	m_DMAC.RestoreState(&pState->DMAC);
 	m_IO.RestoreState(&pState->IO);
+	/* The legacy state payload does not contain the DSP write queue,
+	   echo history or noise generator.  Reset those transient pieces
+	   before applying the serialized registers/channels so a load does
+	   not inherit audio work from the future state it is replacing. */
+	m_SpcDsp.Reset();
+	m_SpcDspMixer.Reset();
+	m_SpcDspSilentMixer.Reset();
 	m_SpcDsp.RestoreState(&pState->SPCDSP);
 	m_SpcDspMixer.RestoreState(&pState->SPCDSP);
 	m_SpcIO.RestoreState(&pState->SPCIO);
@@ -231,6 +244,5 @@ void SNStateCompare(SnesStateT *pStateA, SnesStateT *pStateB)
     _SNStateMemDiff("DMAC", (Uint8 *)&pStateA->DMAC, (Uint8 *)&pStateB->DMAC, sizeof(pStateA->DMAC));
 
 }
-
 
 

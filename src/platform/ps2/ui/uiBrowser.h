@@ -57,6 +57,7 @@ class CBrowserScreen : public CScreen
 
 	Bool	m_bSubMenu;
 	CMenuScreen m_SubMenu;
+	Bool	m_bStateManager;
 
 	static int MenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2);
 
@@ -78,6 +79,7 @@ public:
 
 	void SetDir(const Char *pDir);
 	void Chdir(const Char *pSubDir);
+	void SetStateManager(Bool bEnabled) { m_bStateManager = bEnabled; }
 
 };
 

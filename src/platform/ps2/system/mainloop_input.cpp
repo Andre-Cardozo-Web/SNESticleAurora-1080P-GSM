@@ -4,6 +4,8 @@
 #include <libpad.h>
 
 #include "mainloop_input.h"
+#include "mainloop_iop.h"
+#include "mainloop_menu.h"
 #include "mainloop_state.h"
 #include "mainloop_ui.h"
 #include "mainloop_shared.h"
@@ -12,12 +14,22 @@
 #include "memcard.h"
 #include "prof.h"
 
+extern "C" {
+#include "audio.h"
+}
+
 
 #define MENU_REPEAT (16)
 
 //#define MENU_REPEATBUTTONS (PAD_UP|PAD_DOWN|PAD_SQUARE|PAD_CIRCLE)
 #define MENU_REPEATBUTTONS (PAD_UP|PAD_DOWN|PAD_SQUARE|PAD_CIRCLE|PAD_CROSS|PAD_TRIANGLE|PAD_LEFT|PAD_RIGHT)
 
+static Bool _MainLoop_bSuppressGameInputUntilRelease = FALSE;
+
+void _MainLoopInputSuppressUntilRelease()
+{
+	_MainLoop_bSuppressGameInputUntilRelease = TRUE;
+}
 
 static Uint16 _MainLoopSnesInput(Uint32 cond)
 {
@@ -43,6 +55,11 @@ static Uint16 _MainLoopSnesInput(Uint32 cond)
 
 Uint16 _MainLoopInput(Uint32 pad)
 {
+	if (_MainLoop_bSuppressGameInputUntilRelease)
+	{
+		return 0;
+	}
+
 	if (pad & (PAD_R2|PAD_L2))
     {
         return 0;
@@ -63,12 +80,73 @@ Uint16 _MainLoopInput(Uint32 pad)
  
 }
 
+static void _MainLoopQuickStateAction(Bool bSave)
+{
+	Bool bOK;
+
+	/* The first quick-save opens the isolated destination chooser. Its
+	   selection callback remembers the target, performs this pending save
+	   and closes back to the game; later L2+X presses save directly. */
+	if (bSave && !MainLoopStateHasDeviceChoice())
+	{
+		_MainLoopStateDevicePromptOpen();
+		return;
+	}
+
+	if (_MainLoop_bAudioReady)
+	{
+		Aud_Setvol(0);
+	}
+
+	MainLoopModalPrintf(
+		1,
+		bSave ? "Saving state slot %d..." : "Loading state slot %d...",
+		(int)MainLoopStateGetSlot() + 1
+	);
+
+	bOK = bSave ? _MainLoopSaveState() : _MainLoopLoadState();
+
+	if (bSave && !bOK && MainLoopStateGetUnformattedCard() >= 0)
+	{
+		Int32 iPort = MainLoopStateGetUnformattedCard();
+
+		if (_MainLoop_bAudioReady)
+		{
+			Aud_Setvol(0x3FFF);
+		}
+		_MainLoopMemCardFormatPromptOpen(
+			iPort,
+			MAINLOOP_MEMCARDFORMAT_STATE_SAVE
+		);
+		return;
+	}
+
+	if (_MainLoop_bAudioReady)
+	{
+		Aud_Setvol(0x3FFF);
+	}
+
+	MainLoopStatusPrintf(
+		bOK ? 90 : 180,
+		"%s",
+		MainLoopStateGetLastMessage()
+	);
+}
+
 void _MainLoopInputProcess(Uint32 buttons)
 {
 	static Uint32 lastbuttons= ~0;
 	static Uint32 repeat=0;
+	static int _MenuTriggerTimeout[2] = {0,0};
+	static Bool bStateHotkeyHeld = FALSE;
 	Uint32 trigger;
 
+	if (_MainLoop_bSuppressGameInputUntilRelease &&
+	    !(buttons & (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT |
+	                 PAD_CROSS | PAD_CIRCLE | PAD_START)))
+	{
+		_MainLoop_bSuppressGameInputUntilRelease = FALSE;
+	}
 
 	if (!(buttons& MENU_REPEATBUTTONS))
 	{
@@ -86,7 +164,72 @@ void _MainLoopInputProcess(Uint32 buttons)
 	trigger = ((buttons ^ lastbuttons) & buttons);
 	lastbuttons = buttons;
 
-#if 1
+	if (!(buttons & PAD_L2) ||
+	    !(buttons & (PAD_CROSS | PAD_CIRCLE)))
+	{
+		bStateHotkeyHeld = FALSE;
+	}
+
+	/* Release-build quick states, matching the recovered iaddis controls:
+	     L2 + Cross  = save
+	     L2 + Circle = load
+	   L2+R2 remains exclusively the menu/SRAM shortcut below.  The latch
+	   prevents the menu's key-repeat logic from writing a state repeatedly
+	   when the combination is held. */
+	if (!_bMenu &&
+	    !bStateHotkeyHeld &&
+	    (buttons & PAD_L2) &&
+	    !(buttons & PAD_R2))
+	{
+		Bool bSaveTrigger =
+			(buttons & PAD_CROSS) &&
+			(trigger & (PAD_L2 | PAD_CROSS));
+		Bool bLoadTrigger =
+			(buttons & PAD_CIRCLE) &&
+			(trigger & (PAD_L2 | PAD_CIRCLE));
+
+		if (bSaveTrigger || bLoadTrigger)
+		{
+			bStateHotkeyHeld = TRUE;
+			_MenuTriggerTimeout[0] = 0;
+			_MenuTriggerTimeout[1] = 0;
+			_MainLoopQuickStateAction(bSaveTrigger);
+			return;
+		}
+	}
+
+	/* The one-time destination prompt is intentionally isolated from the
+	   regular L1/R1 menu ring and from the L2+R2 SRAM shortcut. */
+	if (_bMenu &&
+	    _MainLoop_pScreen == (CScreen *)_MainLoop_pStateDeviceScreen)
+	{
+		if (trigger & PAD_CIRCLE)
+		{
+			_MainLoopStateDevicePromptCancel();
+		}
+		else
+		{
+			_MainLoop_pStateDeviceScreen->Input(buttons, trigger);
+		}
+		return;
+	}
+
+	if (_bMenu &&
+	    _MainLoop_pScreen ==
+	            (CScreen *)_MainLoop_pMemCardFormatScreen)
+	{
+		if (trigger & PAD_CIRCLE)
+		{
+			_MainLoopMemCardFormatPromptCancel();
+		}
+		else
+		{
+			_MainLoop_pMemCardFormatScreen->Input(buttons, trigger);
+		}
+		return;
+	}
+
+	#if 1
 	/* Profiler capture: R3 (right-stick click) OR hold L2+R2 together.
 	   L2+R2 is easy to reach on the NetherSX2 touch layout (L3/R3 usually
 	   aren't shown there) and isn't used by SNES/NES games or the menu.
@@ -133,10 +276,6 @@ void _MainLoopInputProcess(Uint32 buttons)
     #ifdef DEBUG // CODE_DEBUG
 	if (buttons & PAD_L2)
 	{
-        if (trigger&PAD_CROSS)
-            _MainLoopSaveState();
-        if (trigger&PAD_CIRCLE)
-            _MainLoopLoadState();
         if (trigger&PAD_TRIANGLE)
 		{
             _MainLoop_uDebugDisplay++;
@@ -251,8 +390,6 @@ void _MainLoopInputProcess(Uint32 buttons)
 	}
 	#endif
 
-	static int _MenuTriggerTimeout[2] = {0,0};
-
 	if (trigger & PAD_L2)
 	{
 		_MenuTriggerTimeout[0]=5;
@@ -293,13 +430,22 @@ void _MainLoopInputProcess(Uint32 buttons)
 	{
 		if (_MainLoop_pScreen)
 		{
+		    if (_MainLoop_pScreen ==
+		            (CScreen *)_MainLoop_pStateBrowserScreen &&
+		        (trigger & PAD_L1))
+		    {
+		        _MainLoopStateMenuRefresh();
+		        _MainLoopSetScreen((CScreen *)_MainLoop_pStateScreen);
+		        return;
+		    }
+
 		    /* L1 / R1 cycle through every available screen including
 		       the message Log. The previous hand-written chain stopped
 		       at Menu when going right and never reached Log when going
 		       left, so the Log tab was effectively unreachable from the
-		       UI. _MainLoopCycleScreen iterates Browser->Network->Menu
-		       ->Log in either direction and skips screens that aren't
-		       constructed. */
+		       UI. _MainLoopCycleScreen iterates Browser->State Manager
+		       ->Network->Menu->Log->Video Config in either direction.
+		       State Manager remains available while a game is paused. */
 		    if (trigger & PAD_R1)
 		    {
 		        _MainLoopCycleScreen(+1);

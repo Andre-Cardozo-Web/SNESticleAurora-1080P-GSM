@@ -22,6 +22,7 @@
 
 #include "mainloop_debug.h"
 #include "mainloop_shared.h"
+#include "mainloop_menu.h"
 #include "mainloop_state.h"
 #include "mainloop_ui.h"
 #include "mainloop_iop.h"
@@ -53,6 +54,8 @@ extern "C" {
 
 void _MenuEnable(Bool bEnable)
 {
+	Bool bPromptMemCardFormat = FALSE;
+
 	if (bEnable!=_bMenu)
 	{
 		/* Mute audsrv BEFORE the SRAM save block below runs.
@@ -85,7 +88,7 @@ void _MenuEnable(Bool bEnable)
 		// if menu is enabled, then attempt to save sram immediately
 		if (bEnable)
 		{
-            #if 1 
+			#if 1
 			/* Force a fresh dirty-flag check before deciding to save.
 			   _MainLoopCheckSRAM() throttles its full-SRAM checksum
 			   to once every ~30 frames (~0.5s) since its only job
@@ -99,36 +102,56 @@ void _MenuEnable(Bool bEnable)
 
 			if (_MainLoopHasSRAM() && _MainLoop_SRAMUpdated)
 			{
-			   	MainLoopModalPrintf(10, "Saving SRAM...");
+				#if MAINLOOP_MEMCARD
+				if (MemCardGetStatus(0) ==
+				    MEMCARD_STATUS_UNFORMATTED)
+				{
+					/* Finish entering the menu first; the confirmation
+					   screen is opened below and never formats by itself. */
+					bPromptMemCardFormat = TRUE;
+				}
+				else
+				#endif
+				{
+					MainLoopModalPrintf(10, "Saving SRAM...");
 
-			    if (_MainLoopHasSRAM())
-			    {
-					#if MAINLOOP_MEMCARD
-					if (_MainLoop_bMCSaveReady) MCSave_WriteSync(1, NULL);
-
-					if (MemCardCheckNewCard())
+					if (_MainLoopHasSRAM())
 					{
-						printf("New memcard detected\n");
-						if (MemCardCreateSave(_SramPath, _MainLoop_SaveTitle, FALSE))
+						#if MAINLOOP_MEMCARD
+						if (_MainLoop_bMCSaveReady) MCSave_WriteSync(1, NULL);
+
+						if (MemCardCheckNewCard())
 						{
-							MemCardCreateSave(_SramPath, _MainLoop_SaveTitle, FALSE);
+							printf("New memcard detected\n");
+							if (MemCardCreateSave(_SramPath, _MainLoop_SaveTitle, FALSE))
+							{
+								MemCardCreateSave(_SramPath, _MainLoop_SaveTitle, FALSE);
+							}
+						}
+						#endif
+
+						if (_MainLoopSaveSRAM(TRUE))
+						{
+							MainLoopModalPrintf(60, "SRAM saved.\n");
+						} else
+						{
+							MainLoopModalPrintf(60 * 1 + 30, "Error Saving SRAM!\n");
 						}
 					}
-					#endif
-
-				    if (_MainLoopSaveSRAM(TRUE))
-				    {
-					    MainLoopModalPrintf(60, "SRAM saved.\n");
-				    } else
-				    {
-					    MainLoopModalPrintf(60 * 1 + 30, "Error Saving SRAM!\n");
-				    }
-			    }
+				}
 			}
-            #endif
+			#endif
 		}
 
 		_bMenu = bEnable;
+
+		if (bPromptMemCardFormat)
+		{
+			_MainLoopMemCardFormatPromptOpen(
+				0,
+				MAINLOOP_MEMCARDFORMAT_SRAM_SAVE
+			);
+		}
 
 		/* Saindo do menu (inicio de jogo ou retomada): para a trilha de
 		   fundo e libera o decoder, devolvendo o audsrv ao core do jogo.
@@ -231,7 +254,7 @@ void _MenuDraw()
             (config.ipaddr.s_addr >>24) & 0xFF
                     );
 
-    static const char *_AppVersionStr = "SNESticle Revive PS2 v1.0.1";
+    static const char *_AppVersionStr = "SNESticle Revive PS2 v1.0.2";
     FontPuts(256 - 16 - FontGetStrWidth(_AppVersionStr),
              vy, _AppVersionStr);
 

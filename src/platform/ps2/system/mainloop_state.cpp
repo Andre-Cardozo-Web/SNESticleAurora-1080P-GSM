@@ -1,16 +1,22 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
+#include <errno.h>
+#include <sys/stat.h>
 
 #include "types.h"
 #include "console.h"
 #include "file.h"
 #include "prof.h"
 #include "memcard.h"
+#include "miniz.h"
 #include "mainloop_debug.h"
+#include "embedded_irx.h"
 
 extern "C" {
 int MCSave_Write(char *pPath, char *pData, int nBytes);
 int MCSave_WriteSync(int block, int *pResult);
+#include "netplay_ee.h"
 }
 
 #include "mainloop_shared.h"
@@ -31,8 +37,6 @@ extern Bool _MainLoop_bMCSaveReady;
 extern Uint32 _nHistory;
 #endif
 
-
-/* MAINLOOP_STATEPATH lives in mainloop_shared.h (included above). */
 
 static Uint32 _PathCalcHash(const char *pStr)
 {
@@ -73,7 +77,9 @@ void PathTruncFileName(Char *pOut, Char *pStr, Int32 nMaxChars)
 
 int PathGetMaxFileNameLength(const char *pPath)
 {
-    if (pPath[0] == 'm' && pPath[1] == 'c')
+    if ((pPath[0] == 'm' && pPath[1] == 'c') ||
+        (pPath[0] == 'm' && pPath[1] == 'm' &&
+         pPath[2] == 'c' && pPath[3] == 'e'))
     {
         return 32;
     }
@@ -347,105 +353,1383 @@ Bool _MainLoopCheckSRAM()
     return TRUE;
 }
 
-void _MainLoopLoadState()
+/* ---- Versioned SNES save states ------------------------------------
+ *
+ * The recovered iaddis code wrote SnesStateT directly to host0:.  Besides
+ * being a development-only path, that format had no version, ROM identity
+ * or integrity check, and its load path could restore stale RAM after a
+ * failed read.  The PS2 front-end now wraps the core payload in a small
+ * header and keeps two banks per slot.  A bank only becomes visible after
+ * its full payload has been flushed and the committed header is written.
+ * The other bank remains untouched, so a reset/power loss during saving
+ * cannot destroy the last known-good state.
+ */
+
+#define MAINLOOP_STATE_SLOT_NUM       5
+#define MAINLOOP_STATE_BANK_NUM       2
+/* Bump whenever SnesStateT's layout or restore semantics become incompatible. */
+#define MAINLOOP_STATE_FORMAT_VERSION 1
+#define MAINLOOP_STATE_HEADER_BYTES   64
+#define MAINLOOP_STATE_MAX_ROOTS      8
+#define MAINLOOP_STATE_MAX_CANDIDATES (MAINLOOP_STATE_MAX_ROOTS * MAINLOOP_STATE_BANK_NUM)
+#define MAINLOOP_STATE_PAYLOAD_RAW     0
+#define MAINLOOP_STATE_PAYLOAD_DEFLATE 1
+/* mz_compressBound() currently uses a conservative 110% + 128 bound.
+   Keeping the buffer static avoids heap fragmentation on the 32 MB PS2. */
+#define MAINLOOP_STATE_COMPRESS_BYTES \
+    ((sizeof(SnesStateT) * 110) / 100 + 128)
+
+struct MainLoopStateFileHeaderT
+{
+    Uint8  Magic[8];
+    Uint32 uVersion;
+    Uint32 nHeaderBytes;
+    Uint32 nPayloadBytes;
+    Uint32 uPayloadCRC;
+    Uint32 uRomCRC;
+    Uint32 nRomBytes;
+    Uint32 uRomFlags;
+    Uint32 iSlot;
+    Uint32 uGeneration;
+    /* Reserved[0] = payload encoding (raw/deflate).
+       Reserved[1] = CRC32 of the stored compressed bytes. The public
+       uPayloadCRC remains the CRC32 of the uncompressed SnesStateT. */
+    Uint32 Reserved[5];
+};
+
+struct MainLoopStateConfigT
+{
+    Uint8  Magic[8];
+    Uint32 uVersion;
+    Uint32 nConfigBytes;
+    Uint32 eDevice;
+    Uint32 iSlot;
+    Uint32 Reserved[2];
+};
+
+struct MainLoopStateRootT
+{
+    Char Root[16];
+    Char DeviceName[24];
+    Bool bMemCard;
+};
+
+struct MainLoopStateCandidateT
 {
     Char Path[1024];
+    Char DeviceName[16];
+    MainLoopStateFileHeaderT Header;
+};
 
-    /*
-    printf("%d\n", sizeof(_SnesState));
-    printf("SNStateCPUT %d\n",sizeof(SNStateCPUT ));
-    printf("SNStatePPUT %d\n",sizeof(SNStatePPUT ));
-    printf("SNStateIOT %d\n",sizeof(SNStateIOT ));
-    printf("SNStateDMACT %d\n",sizeof(SNStateDMACT ));
-    printf("SNStateSPCT %d\n",sizeof(SNStateSPCT ));
-    printf("SNStateSPCDSPT %d\n",sizeof(SNStateSPCDSPT ));
-    */
+typedef char MainLoopStateHeaderSizeCheck[
+    sizeof(MainLoopStateFileHeaderT) == MAINLOOP_STATE_HEADER_BYTES ? 1 : -1
+];
+typedef char MainLoopStateConfigSizeCheck[
+    sizeof(MainLoopStateConfigT) == 32 ? 1 : -1
+];
 
-    if (!_pSystem)
-        return;
+static const Uint8 _MainLoop_StateMagic[8] =
+{
+    'S', 'N', 'R', 'S', 'T', 'A', 'T', 'E'
+};
+static const Uint8 _MainLoop_StateConfigMagic[8] =
+{
+    'S', 'N', 'R', 'S', 'C', 'F', 'G', '1'
+};
 
-    if (_pSystem == _pSnes)
-    {
-        snprintf(Path, sizeof(Path), "%s%s.sns", MAINLOOP_STATEPATH, _RomName);
-        ML_TRACE("State load path: %s", Path);
+static MainLoopStateDeviceE _MainLoop_StateDevice = MAINLOOP_STATEDEVICE_AUTO;
+static Int32 _MainLoop_StateSlot = 0;
+static Bool _MainLoop_StateDeviceChosen = FALSE;
+static Char _MainLoop_StateLastMessage[192] = "No save-state operation yet.";
+static Char _MainLoop_StateAvailability[192];
+static Bool _MainLoop_StateRomCRCValid = FALSE;
+static Uint32 _MainLoop_StateRomCRC = 0;
+static MainLoopStateCandidateT _MainLoop_StateCandidates[MAINLOOP_STATE_MAX_CANDIDATES];
+static Uint8 _MainLoop_StateCompressed[MAINLOOP_STATE_COMPRESS_BYTES]
+    __attribute__((aligned(64)));
+static Int32 _MainLoop_StateUnformattedCard = -1;
 
-        if (FileReadMem(Path, &_SnesState, sizeof(_SnesState)))
-        {
-            _bStateSaved = TRUE;
-            ConPrint("State loaded from %s\n", Path);
-            ML_TRACE("State load ok");
-        }
-        else
-        {
-            ML_TRACE("State load failed or file missing");
-        }
+static Bool _MainLoopStateEnsureOneDir(const Char *pPath);
 
-        if (_bStateSaved)
-        {
-            _pSnes->RestoreState(&_SnesState);
-            ML_TRACE("State restore applied");
-        }
-    }
+static void _MainLoopStateSetMessage(const Char *pFormat, ...)
+{
+    va_list Args;
 
-#if 0
-    else if (_pSystem == _pNes)
-    {
-        sprintf(Path, "%s%s.nst", MAINLOOP_STATEPATH, _RomName);
-
-        if (FileReadMem(Path, &_NesState, sizeof(_NesState)))
-        {
-            _bStateSaved = TRUE;
-            ConPrint("State loaded from %s\n", Path);
-        }
-
-        if (_bStateSaved)
-        {
-            _pNes->RestoreState(&_NesState);
-        }
-    }
-#endif
+    va_start(Args, pFormat);
+    vsnprintf(
+        _MainLoop_StateLastMessage,
+        sizeof(_MainLoop_StateLastMessage),
+        pFormat,
+        Args
+    );
+    va_end(Args);
 }
 
-void _MainLoopSaveState()
+void MainLoopStateOnRomChanged()
 {
-    Char Path[1024];
+    _MainLoop_StateRomCRCValid = FALSE;
+    _MainLoop_StateRomCRC = 0;
+    _MainLoop_StateUnformattedCard = -1;
+    _bStateSaved = FALSE;
+}
+
+Int32 MainLoopStateGetSlot()
+{
+    return _MainLoop_StateSlot;
+}
+
+MainLoopStateDeviceE MainLoopStateGetDevice()
+{
+    return _MainLoop_StateDevice;
+}
+
+const Char *MainLoopStateGetDeviceName()
+{
+    switch (_MainLoop_StateDevice)
+    {
+        case MAINLOOP_STATEDEVICE_USB:     return "USB";
+        case MAINLOOP_STATEDEVICE_MEMCARD: return "Memory Card";
+        case MAINLOOP_STATEDEVICE_MMCE:    return "MMCE";
+        case MAINLOOP_STATEDEVICE_HDD:     return "Internal HDD";
+        default:                           return "Auto";
+    }
+}
+
+const Char *MainLoopStateGetLastMessage()
+{
+    return _MainLoop_StateLastMessage;
+}
+
+Int32 MainLoopStateGetUnformattedCard()
+{
+    return _MainLoop_StateUnformattedCard;
+}
+
+Bool MainLoopStateHasDeviceChoice()
+{
+    return _MainLoop_StateDeviceChosen;
+}
+
+void MainLoopStateForgetDeviceChoice()
+{
+    _MainLoop_StateDevice = MAINLOOP_STATEDEVICE_AUTO;
+    _MainLoop_StateSlot = 0;
+    _MainLoop_StateDeviceChosen = FALSE;
+    remove("mc0:/SNESticle/state.cfg");
+    remove("mc1:/SNESticle/state.cfg");
+}
+
+void MainLoopStateSetDevice(MainLoopStateDeviceE eDevice)
+{
+    if (eDevice >= MAINLOOP_STATEDEVICE_AUTO &&
+        eDevice < MAINLOOP_STATEDEVICE_NUM)
+    {
+        _MainLoop_StateDevice = eDevice;
+        if (eDevice == MAINLOOP_STATEDEVICE_AUTO)
+        {
+            _MainLoop_StateSlot = 0;
+        }
+    }
+}
+
+Bool MainLoopStateDeviceAvailable(MainLoopStateDeviceE eDevice)
+{
+    switch (eDevice)
+    {
+        case MAINLOOP_STATEDEVICE_AUTO:
+            return TRUE;
+
+        case MAINLOOP_STATEDEVICE_USB:
+            return MassStorageIsEnabled() ? TRUE : FALSE;
+
+        case MAINLOOP_STATEDEVICE_MEMCARD:
+            return TRUE;
+
+        case MAINLOOP_STATEDEVICE_MMCE:
+            return MmceSupportIsEnabled() ? TRUE : FALSE;
+
+        case MAINLOOP_STATEDEVICE_HDD:
+            return HddSupportIsEnabled() &&
+                   (!strncmp(_RomPath, "hdd0:", 5) ||
+                    !strncmp(_RomPath, "pfs0:", 5));
+
+        default:
+            return FALSE;
+    }
+}
+
+void MainLoopStateCycleSlot()
+{
+    /* Auto is intentionally a zero-configuration quick-save mode. Its
+       quick slot is always the first slot, including configurations
+       written by older builds. Explicit devices retain all five slots. */
+    if (_MainLoop_StateDevice == MAINLOOP_STATEDEVICE_AUTO)
+    {
+        _MainLoop_StateSlot = 0;
+        return;
+    }
+
+    _MainLoop_StateSlot++;
+    if (_MainLoop_StateSlot >= MAINLOOP_STATE_SLOT_NUM)
+    {
+        _MainLoop_StateSlot = 0;
+    }
+}
+
+void MainLoopStateCycleDevice()
+{
+    _MainLoop_StateDevice = (MainLoopStateDeviceE)(_MainLoop_StateDevice + 1);
+    if (_MainLoop_StateDevice >= MAINLOOP_STATEDEVICE_NUM)
+    {
+        _MainLoop_StateDevice = MAINLOOP_STATEDEVICE_AUTO;
+    }
+    if (_MainLoop_StateDevice == MAINLOOP_STATEDEVICE_AUTO)
+    {
+        _MainLoop_StateSlot = 0;
+    }
+}
+
+void MainLoopStateSettingsLoad()
+{
+    MainLoopStateConfigT Config;
+    static const Char *pConfigPaths[] =
+    {
+        "mc0:/SNESticle/state.cfg",
+        "mc1:/SNESticle/state.cfg"
+    };
+    Int32 i;
+
+    _MainLoop_StateDevice = MAINLOOP_STATEDEVICE_AUTO;
+    _MainLoop_StateSlot = 0;
+    _MainLoop_StateDeviceChosen = FALSE;
+
+    for (i = 0; i < 2; i++)
+    {
+        if (!MemCardReadFile(
+                (char *)pConfigPaths[i],
+                (Uint8 *)&Config,
+                sizeof(Config)))
+        {
+            continue;
+        }
+
+        if (memcmp(
+                Config.Magic,
+                _MainLoop_StateConfigMagic,
+                sizeof(Config.Magic)) ||
+            Config.uVersion != 2 ||
+            Config.nConfigBytes != sizeof(Config) ||
+            Config.eDevice >= MAINLOOP_STATEDEVICE_NUM ||
+            Config.iSlot >= MAINLOOP_STATE_SLOT_NUM)
+        {
+            continue;
+        }
+
+        _MainLoop_StateDevice = (MainLoopStateDeviceE)Config.eDevice;
+        _MainLoop_StateSlot = (Int32)Config.iSlot;
+        if (_MainLoop_StateDevice == MAINLOOP_STATEDEVICE_AUTO)
+        {
+            _MainLoop_StateSlot = 0;
+        }
+        _MainLoop_StateDeviceChosen = TRUE;
+        return;
+    }
+}
+
+Bool MainLoopStateSettingsSave()
+{
+    MainLoopStateConfigT Config;
+    static const Char *pConfigDirectories[] =
+    {
+        "mc0:/SNESticle",
+        "mc1:/SNESticle"
+    };
+    static const Char *pConfigPaths[] =
+    {
+        "mc0:/SNESticle/state.cfg",
+        "mc1:/SNESticle/state.cfg"
+    };
+    Int32 i;
+
+    memset(&Config, 0, sizeof(Config));
+    memcpy(Config.Magic, _MainLoop_StateConfigMagic, sizeof(Config.Magic));
+    /* Version 2 deliberately invalidates the earlier menu-based target
+       choice so the redesigned one-time chooser is shown once after update. */
+    Config.uVersion = 2;
+    Config.nConfigBytes = sizeof(Config);
+    Config.eDevice = (Uint32)_MainLoop_StateDevice;
+    Config.iSlot = (Uint32)_MainLoop_StateSlot;
+    _MainLoop_StateDeviceChosen = TRUE;
+
+    /* A state can be the first thing the user saves for a ROM with no
+       battery-backed SRAM, so the normal SRAM path may not have created
+       the application directory yet. */
+    for (i = 0; i < 2; i++)
+    {
+        if (_MainLoopStateEnsureOneDir(pConfigDirectories[i]) &&
+            MemCardWriteFile(
+                (char *)pConfigPaths[i],
+                (Uint8 *)&Config,
+                sizeof(Config)))
+        {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+static const Char *_MainLoopStateGetUnsupportedChip(Uint32 uFlags)
+{
+    if (uFlags & SNROM_FLAG_SUPERFX) return "SuperFX";
+    if (uFlags & SNROM_FLAG_GAMEBOY) return "Super Game Boy";
+    if (uFlags & SNROM_FLAG_DSP1)    return "DSP-1";
+    if (uFlags & SNROM_FLAG_DSP2)    return "DSP-2";
+    if (uFlags & SNROM_FLAG_DSP3)    return "DSP-3";
+    if (uFlags & SNROM_FLAG_DSP4)    return "DSP-4";
+    if (uFlags & SNROM_FLAG_OBC1)    return "OBC1";
+    if (uFlags & SNROM_FLAG_CX4)     return "CX4";
+    if (uFlags & SNROM_FLAG_SDD1)    return "S-DD1";
+    if (uFlags & SNROM_FLAG_SRTC)    return "S-RTC";
+    return NULL;
+}
+
+static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
+{
+    const Char *pChip;
+    NetPlayRPCStatusT NetStatus;
 
     if (!_pSystem)
-        return;
-
-    if (_pSystem == _pSnes)
     {
-        snprintf(Path, sizeof(Path), "%s%s.sns", MAINLOOP_STATEPATH, _RomName);
-        ML_TRACE("State save path: %s", Path);
+        snprintf(pReason, nReasonBytes, "No game loaded.");
+        return FALSE;
+    }
 
-        _pSnes->SaveState(&_SnesState);
-        _bStateSaved = TRUE;
+    if (_pSystem != _pSnes)
+    {
+        snprintf(pReason, nReasonBytes, "NES save states are not available yet.");
+        return FALSE;
+    }
 
-        if (FileWriteMem(Path, &_SnesState, sizeof(_SnesState)))
+    if (!_pSnesRom || !_pSnesRom->IsLoaded())
+    {
+        snprintf(pReason, nReasonBytes, "No SNES ROM loaded.");
+        return FALSE;
+    }
+
+    pChip = _MainLoopStateGetUnsupportedChip(_pSnesRom->m_Flags);
+    if (pChip)
+    {
+        snprintf(pReason, nReasonBytes, "%s state is not serialized yet.", pChip);
+        return FALSE;
+    }
+
+    if (s_pMovieClip &&
+        (s_pMovieClip->IsRecording() || s_pMovieClip->IsPlaying()))
+    {
+        snprintf(pReason, nReasonBytes, "Stop movie recording/playback first.");
+        return FALSE;
+    }
+
+    memset(&NetStatus, 0, sizeof(NetStatus));
+    NetPlayGetStatus(&NetStatus);
+    if (NetStatus.eServerStatus != NETPLAY_STATUS_IDLE ||
+        NetStatus.eClientStatus != NETPLAY_STATUS_IDLE)
+    {
+        snprintf(pReason, nReasonBytes, "Save states are disabled during netplay.");
+        return FALSE;
+    }
+
+    snprintf(pReason, nReasonBytes, "Ready: base SNES hardware.");
+    return TRUE;
+}
+
+const Char *MainLoopStateGetAvailability()
+{
+    _MainLoopStateCheckAvailability(
+        _MainLoop_StateAvailability,
+        sizeof(_MainLoop_StateAvailability)
+    );
+    return _MainLoop_StateAvailability;
+}
+
+static Bool _MainLoopStateGetRomIdentity(
+    Uint32 *puCRC,
+    Uint32 *pnBytes,
+    Uint32 *puFlags)
+{
+    Uint8 *pRomData;
+    Uint32 nRomBytes;
+
+    if (!_pSnesRom || !_pSnesRom->IsLoaded())
+    {
+        return FALSE;
+    }
+
+    pRomData = _pSnesRom->GetData();
+    nRomBytes = _pSnesRom->GetBytes();
+    if (!pRomData || !nRomBytes)
+    {
+        return FALSE;
+    }
+
+    if (!_MainLoop_StateRomCRCValid)
+    {
+        _MainLoop_StateRomCRC = (Uint32)mz_crc32(
+            MZ_CRC32_INIT,
+            pRomData,
+            nRomBytes
+        );
+        _MainLoop_StateRomCRCValid = TRUE;
+    }
+
+    *puCRC = _MainLoop_StateRomCRC;
+    *pnBytes = nRomBytes;
+    *puFlags = _pSnesRom->m_Flags;
+    return TRUE;
+}
+
+static Bool _MainLoopStateIsMassRoot(const Char *pPath, Char *pRoot, Int32 nRootBytes)
+{
+    const Char *pColon;
+    Int32 nLength;
+    Int32 i;
+
+    if (!pPath || strncmp(pPath, "mass", 4))
+    {
+        return FALSE;
+    }
+
+    pColon = strchr(pPath, ':');
+    if (!pColon)
+    {
+        return FALSE;
+    }
+
+    nLength = (Int32)(pColon - pPath) + 1;
+    if (nLength < 5 || nLength >= nRootBytes)
+    {
+        return FALSE;
+    }
+
+    for (i = 4; i < nLength - 1; i++)
+    {
+        if (pPath[i] < '0' || pPath[i] > '9')
         {
-            ConPrint("State saved to %s\n", Path);
-            ML_TRACE("State save ok");
+            return FALSE;
+        }
+    }
+
+    memcpy(pRoot, pPath, nLength);
+    pRoot[nLength] = 0;
+    return TRUE;
+}
+
+static Bool _MainLoopStateIsNumberedRoot(
+    const Char *pPath,
+    const Char *pPrefix,
+    Int32 nPrefixBytes,
+    Char *pRoot,
+    Int32 nRootBytes)
+{
+    const Char *pColon;
+    Int32 nLength;
+    Int32 i;
+
+    if (!pPath || strncmp(pPath, pPrefix, nPrefixBytes))
+    {
+        return FALSE;
+    }
+
+    pColon = strchr(pPath, ':');
+    if (!pColon)
+    {
+        return FALSE;
+    }
+
+    nLength = (Int32)(pColon - pPath) + 1;
+    if (nLength <= nPrefixBytes + 1 || nLength >= nRootBytes)
+    {
+        return FALSE;
+    }
+
+    for (i = nPrefixBytes; i < nLength - 1; i++)
+    {
+        if (pPath[i] < '0' || pPath[i] > '9')
+        {
+            return FALSE;
+        }
+    }
+
+    memcpy(pRoot, pPath, nLength);
+    pRoot[nLength] = 0;
+    return TRUE;
+}
+
+static Bool _MainLoopStateIsMemCardRoot(
+    const Char *pPath,
+    Char *pRoot,
+    Int32 nRootBytes)
+{
+    return _MainLoopStateIsNumberedRoot(
+        pPath,
+        "mc",
+        2,
+        pRoot,
+        nRootBytes
+    );
+}
+
+static Bool _MainLoopStateIsMMCERoot(
+    const Char *pPath,
+    Char *pRoot,
+    Int32 nRootBytes)
+{
+    return _MainLoopStateIsNumberedRoot(
+        pPath,
+        "mmce",
+        4,
+        pRoot,
+        nRootBytes
+    );
+}
+
+static Bool _MainLoopStateGetHddRoot(Char *pRoot, Int32 nRootBytes)
+{
+    Char MappedPath[1024];
+
+    if (!_RomPath[0])
+    {
+        return FALSE;
+    }
+
+    if (!strncmp(_RomPath, "pfs0:", 5))
+    {
+        snprintf(pRoot, nRootBytes, "pfs0:");
+        return TRUE;
+    }
+
+    if (strncmp(_RomPath, "hdd0:", 5) ||
+        !HddSupportIsEnabled() ||
+        HddLoadEmbeddedIrx() < 0)
+    {
+        return FALSE;
+    }
+
+    if (HddMapPath(_RomPath, MappedPath, sizeof(MappedPath)) != 1)
+    {
+        return FALSE;
+    }
+
+    snprintf(pRoot, nRootBytes, "pfs0:");
+    return TRUE;
+}
+
+static void _MainLoopStateAddRoot(
+    MainLoopStateRootT *pRoots,
+    Int32 *pnRoots,
+    const Char *pRoot,
+    const Char *pDeviceName,
+    Bool bMemCard)
+{
+    Int32 i;
+
+    for (i = 0; i < *pnRoots; i++)
+    {
+        if (!strcmp(pRoots[i].Root, pRoot))
+        {
+            return;
+        }
+    }
+
+    if (*pnRoots >= MAINLOOP_STATE_MAX_ROOTS)
+    {
+        return;
+    }
+
+    snprintf(pRoots[*pnRoots].Root, sizeof(pRoots[*pnRoots].Root), "%s", pRoot);
+    snprintf(
+        pRoots[*pnRoots].DeviceName,
+        sizeof(pRoots[*pnRoots].DeviceName),
+        "%s",
+        pDeviceName
+    );
+    pRoots[*pnRoots].bMemCard = bMemCard;
+    (*pnRoots)++;
+}
+
+static Int32 _MainLoopStateBuildRoots(
+    MainLoopStateDeviceE eDevice,
+    MainLoopStateRootT *pRoots)
+{
+    Int32 nRoots = 0;
+    Char Root[16];
+    Bool bAuto = eDevice == MAINLOOP_STATEDEVICE_AUTO;
+    Bool bMMCEReady = FALSE;
+
+    if ((bAuto || eDevice == MAINLOOP_STATEDEVICE_MMCE) &&
+        MmceSupportIsEnabled() &&
+        MmceLoadEmbeddedIrx() == 0)
+    {
+        bMMCEReady = TRUE;
+    }
+
+    /* Auto starts with the ROM's own device.  This also covers mass2+,
+       mc2+ and future MMCE unit numbers without hard-coding them. */
+    if (bAuto)
+    {
+        if (_MainLoopStateIsMassRoot(_RomPath, Root, sizeof(Root)))
+        {
+            _MainLoopStateAddRoot(pRoots, &nRoots, Root, Root, FALSE);
+        }
+        else if (_MainLoopStateIsMemCardRoot(_RomPath, Root, sizeof(Root)))
+        {
+            _MainLoopStateAddRoot(pRoots, &nRoots, Root, Root, TRUE);
+        }
+        else if (bMMCEReady &&
+                 _MainLoopStateIsMMCERoot(_RomPath, Root, sizeof(Root)))
+        {
+            _MainLoopStateAddRoot(pRoots, &nRoots, Root, Root, TRUE);
+        }
+        else if (_MainLoopStateGetHddRoot(Root, sizeof(Root)))
+        {
+            _MainLoopStateAddRoot(
+                pRoots,
+                &nRoots,
+                Root,
+                "Internal HDD",
+                FALSE
+            );
+        }
+    }
+    else if (eDevice == MAINLOOP_STATEDEVICE_USB &&
+             _MainLoopStateIsMassRoot(_RomPath, Root, sizeof(Root)))
+    {
+        _MainLoopStateAddRoot(pRoots, &nRoots, Root, Root, FALSE);
+    }
+    else if (eDevice == MAINLOOP_STATEDEVICE_MEMCARD &&
+             _MainLoopStateIsMemCardRoot(_RomPath, Root, sizeof(Root)))
+    {
+        _MainLoopStateAddRoot(pRoots, &nRoots, Root, Root, TRUE);
+    }
+    else if (eDevice == MAINLOOP_STATEDEVICE_MMCE &&
+             bMMCEReady &&
+             _MainLoopStateIsMMCERoot(_RomPath, Root, sizeof(Root)))
+    {
+        _MainLoopStateAddRoot(pRoots, &nRoots, Root, Root, TRUE);
+    }
+    else if (eDevice == MAINLOOP_STATEDEVICE_HDD &&
+             _MainLoopStateGetHddRoot(Root, sizeof(Root)))
+    {
+        _MainLoopStateAddRoot(
+            pRoots,
+            &nRoots,
+            Root,
+            "Internal HDD",
+            FALSE
+        );
+    }
+
+    if (bAuto || eDevice == MAINLOOP_STATEDEVICE_USB)
+    {
+        _MainLoopStateAddRoot(pRoots, &nRoots, "mass0:", "mass0:", FALSE);
+        _MainLoopStateAddRoot(pRoots, &nRoots, "mass1:", "mass1:", FALSE);
+        _MainLoopStateAddRoot(pRoots, &nRoots, "mass:", "mass:", FALSE);
+    }
+
+    if (bAuto || eDevice == MAINLOOP_STATEDEVICE_MEMCARD)
+    {
+        _MainLoopStateAddRoot(pRoots, &nRoots, "mc0:", "mc0:", TRUE);
+        _MainLoopStateAddRoot(pRoots, &nRoots, "mc1:", "mc1:", TRUE);
+    }
+
+    if ((bAuto || eDevice == MAINLOOP_STATEDEVICE_MMCE) && bMMCEReady)
+    {
+        _MainLoopStateAddRoot(pRoots, &nRoots, "mmce0:", "mmce0:", TRUE);
+        _MainLoopStateAddRoot(pRoots, &nRoots, "mmce1:", "mmce1:", TRUE);
+    }
+
+    return nRoots;
+}
+
+static Bool _MainLoopStateEnsureOneDir(const Char *pPath)
+{
+    struct stat Status;
+
+    if (mkdir(pPath, 0777) == 0 || errno == EEXIST)
+    {
+        return TRUE;
+    }
+
+    return stat(pPath, &Status) == 0 && S_ISDIR(Status.st_mode);
+}
+
+static Bool _MainLoopStateEnsureRoot(const MainLoopStateRootT *pRoot)
+{
+    Char Path[256];
+
+    /* MMCE also uses the short memory-card filename rules, hence
+       bMemCard, but only real mcN: roots have PS2-card format state. */
+    if (pRoot->Root[0] == 'm' &&
+        pRoot->Root[1] == 'c' &&
+        pRoot->Root[2] >= '0' &&
+        pRoot->Root[2] <= '1' &&
+        pRoot->Root[3] == ':')
+    {
+        Int32 iPort = pRoot->Root[2] - '0';
+        MemCardStatusE eStatus = MemCardGetStatus(iPort);
+
+        if (eStatus == MEMCARD_STATUS_UNFORMATTED)
+        {
+            if (_MainLoop_StateUnformattedCard < 0)
+            {
+                _MainLoop_StateUnformattedCard = iPort;
+            }
+            return FALSE;
+        }
+        /* For READY, absent and unknown results, retain the established
+           mkdir/stat write probe below. It is the compatibility fallback
+           for unusual drivers that support stdio but not GetStat on "/". */
+    }
+
+    snprintf(Path, sizeof(Path), "%s/SNESticle", pRoot->Root);
+    if (!_MainLoopStateEnsureOneDir(Path))
+    {
+        return FALSE;
+    }
+
+    if (!pRoot->bMemCard)
+    {
+        snprintf(Path, sizeof(Path), "%s/SNESticle/states", pRoot->Root);
+        if (!_MainLoopStateEnsureOneDir(Path))
+        {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
+static void _MainLoopStateBuildBankPath(
+    const MainLoopStateRootT *pRoot,
+    Int32 iSlot,
+    Int32 iBank,
+    Char *pPath,
+    Int32 nPathBytes)
+{
+    Char SaveName[256];
+    Char Directory[256];
+    Int32 nMaxName;
+
+    if (pRoot->bMemCard)
+    {
+        snprintf(Directory, sizeof(Directory), "%s/SNESticle", pRoot->Root);
+    }
+    else
+    {
+        snprintf(Directory, sizeof(Directory), "%s/SNESticle/states", pRoot->Root);
+    }
+
+    nMaxName = PathGetMaxFileNameLength(Directory) - 4;
+    PathTruncFileName(SaveName, _RomName, nMaxName);
+    snprintf(
+        pPath,
+        nPathBytes,
+        "%s/%s.s%d%c",
+        Directory,
+        SaveName,
+        iSlot + 1,
+        iBank ? 'b' : 'a'
+    );
+}
+
+/* Header result: 1 = valid/current ROM, 0 = missing,
+   -1 = incomplete/corrupt, -2 = valid format but another ROM. */
+static Int32 _MainLoopStateReadHeader(
+    const Char *pPath,
+    Int32 iSlot,
+    Uint32 uRomCRC,
+    Uint32 nRomBytes,
+    Uint32 uRomFlags,
+    MainLoopStateFileHeaderT *pHeader)
+{
+    FILE *pFile;
+    size_t nRead;
+    Bool bPayloadLayoutValid;
+
+    pFile = fopen(pPath, "rb");
+    if (!pFile)
+    {
+        return 0;
+    }
+
+    nRead = fread(pHeader, 1, sizeof(*pHeader), pFile);
+    fclose(pFile);
+    if (nRead != sizeof(*pHeader))
+    {
+        return -1;
+    }
+
+    bPayloadLayoutValid =
+        (pHeader->Reserved[0] == MAINLOOP_STATE_PAYLOAD_RAW &&
+         pHeader->nPayloadBytes == sizeof(_SnesState)) ||
+        (pHeader->Reserved[0] == MAINLOOP_STATE_PAYLOAD_DEFLATE &&
+         pHeader->nPayloadBytes > 0 &&
+         pHeader->nPayloadBytes <= sizeof(_MainLoop_StateCompressed));
+
+    if (memcmp(pHeader->Magic, _MainLoop_StateMagic, sizeof(pHeader->Magic)) ||
+        pHeader->uVersion != MAINLOOP_STATE_FORMAT_VERSION ||
+        pHeader->nHeaderBytes != sizeof(*pHeader) ||
+        !bPayloadLayoutValid ||
+        pHeader->iSlot != (Uint32)iSlot)
+    {
+        return -1;
+    }
+
+    if (pHeader->uRomCRC != uRomCRC ||
+        pHeader->nRomBytes != nRomBytes ||
+        pHeader->uRomFlags != uRomFlags)
+    {
+        return -2;
+    }
+
+    return 1;
+}
+
+static Bool _MainLoopStateReadPayload(
+    const Char *pPath,
+    const MainLoopStateFileHeaderT *pExpectedHeader)
+{
+    MainLoopStateFileHeaderT Header;
+    FILE *pFile;
+    size_t nRead;
+    Uint32 uCRC;
+    Bool bDecoded = FALSE;
+
+    pFile = fopen(pPath, "rb");
+    if (!pFile)
+    {
+        return FALSE;
+    }
+
+    nRead = fread(&Header, 1, sizeof(Header), pFile);
+    if (nRead != sizeof(Header) ||
+        memcmp(&Header, pExpectedHeader, sizeof(Header)))
+    {
+        fclose(pFile);
+        return FALSE;
+    }
+
+    if (Header.Reserved[0] == MAINLOOP_STATE_PAYLOAD_RAW)
+    {
+        nRead = fread(&_SnesState, 1, sizeof(_SnesState), pFile);
+        bDecoded = nRead == sizeof(_SnesState);
+    }
+    else if (Header.Reserved[0] == MAINLOOP_STATE_PAYLOAD_DEFLATE)
+    {
+        mz_ulong nDecodedBytes = sizeof(_SnesState);
+
+        nRead = fread(
+            _MainLoop_StateCompressed,
+            1,
+            Header.nPayloadBytes,
+            pFile
+        );
+        if (nRead == Header.nPayloadBytes &&
+            mz_uncompress(
+                (Uint8 *)&_SnesState,
+                &nDecodedBytes,
+                _MainLoop_StateCompressed,
+                Header.nPayloadBytes
+            ) == MZ_OK &&
+            nDecodedBytes == sizeof(_SnesState))
+        {
+            bDecoded = TRUE;
+        }
+    }
+
+    fclose(pFile);
+    if (!bDecoded)
+    {
+        return FALSE;
+    }
+
+    uCRC = (Uint32)mz_crc32(
+        MZ_CRC32_INIT,
+        (const Uint8 *)&_SnesState,
+        sizeof(_SnesState)
+    );
+    return uCRC == Header.uPayloadCRC;
+}
+
+static Bool _MainLoopStateWriteBank(
+    const Char *pPath,
+    MainLoopStateFileHeaderT *pHeader,
+    const Uint8 *pPayload,
+    Uint32 nPayloadBytes)
+{
+    MainLoopStateFileHeaderT PendingHeader;
+    FILE *pFile;
+    Bool bOK = TRUE;
+
+    PendingHeader = *pHeader;
+    memset(PendingHeader.Magic, 0, sizeof(PendingHeader.Magic));
+
+    pFile = fopen(pPath, "wb");
+    if (!pFile)
+    {
+        return FALSE;
+    }
+
+    if (fwrite(&PendingHeader, 1, sizeof(PendingHeader), pFile) != sizeof(PendingHeader) ||
+        fwrite(pPayload, 1, nPayloadBytes, pFile) != nPayloadBytes ||
+        fflush(pFile) != 0 ||
+        fseek(pFile, 0, SEEK_SET) != 0 ||
+        fwrite(pHeader, 1, sizeof(*pHeader), pFile) != sizeof(*pHeader) ||
+        fflush(pFile) != 0)
+    {
+        bOK = FALSE;
+    }
+
+    if (fclose(pFile) != 0)
+    {
+        bOK = FALSE;
+    }
+
+    return bOK;
+}
+
+static Bool _MainLoopStateGenerationNewer(Uint32 uA, Uint32 uB)
+{
+    return (Int32)(uA - uB) > 0;
+}
+
+static Int32 _MainLoopStateScanCandidates(
+    MainLoopStateDeviceE eDevice,
+    Int32 iSlot,
+    Uint32 uRomCRC,
+    Uint32 nRomBytes,
+    Uint32 uRomFlags,
+    Bool *pbWrongRom,
+    Bool *pbCorrupt)
+{
+    MainLoopStateRootT Roots[MAINLOOP_STATE_MAX_ROOTS];
+    Int32 nRoots;
+    Int32 nCandidates = 0;
+    Int32 iRoot;
+    Int32 iBank;
+
+    nRoots = _MainLoopStateBuildRoots(eDevice, Roots);
+    for (iRoot = 0; iRoot < nRoots; iRoot++)
+    {
+        for (iBank = 0; iBank < MAINLOOP_STATE_BANK_NUM; iBank++)
+        {
+            MainLoopStateFileHeaderT Header;
+            Char Path[1024];
+            Int32 Result;
+
+            _MainLoopStateBuildBankPath(
+                &Roots[iRoot],
+                iSlot,
+                iBank,
+                Path,
+                sizeof(Path)
+            );
+            Result = _MainLoopStateReadHeader(
+                Path,
+                iSlot,
+                uRomCRC,
+                nRomBytes,
+                uRomFlags,
+                &Header
+            );
+
+            if (Result == 1 && nCandidates < MAINLOOP_STATE_MAX_CANDIDATES)
+            {
+                MainLoopStateCandidateT *pCandidate =
+                    &_MainLoop_StateCandidates[nCandidates++];
+                snprintf(pCandidate->Path, sizeof(pCandidate->Path), "%s", Path);
+                snprintf(
+                    pCandidate->DeviceName,
+                    sizeof(pCandidate->DeviceName),
+                    "%s",
+                    Roots[iRoot].DeviceName
+                );
+                pCandidate->Header = Header;
+            }
+            else if (Result == -2)
+            {
+                *pbWrongRom = TRUE;
+            }
+            else if (Result == -1)
+            {
+                *pbCorrupt = TRUE;
+            }
+        }
+    }
+
+    return nCandidates;
+}
+
+static void _MainLoopStateSortCandidates(Int32 nCandidates)
+{
+    Int32 i;
+    Int32 j;
+
+    for (i = 0; i < nCandidates; i++)
+    {
+        for (j = i + 1; j < nCandidates; j++)
+        {
+            if (_MainLoopStateGenerationNewer(
+                    _MainLoop_StateCandidates[j].Header.uGeneration,
+                    _MainLoop_StateCandidates[i].Header.uGeneration))
+            {
+                MainLoopStateCandidateT Temp = _MainLoop_StateCandidates[i];
+                _MainLoop_StateCandidates[i] = _MainLoop_StateCandidates[j];
+                _MainLoop_StateCandidates[j] = Temp;
+            }
+        }
+    }
+}
+
+Bool _MainLoopLoadState()
+{
+    Char Reason[192];
+    Uint32 uRomCRC;
+    Uint32 nRomBytes;
+    Uint32 uRomFlags;
+    Bool bWrongRom = FALSE;
+    Bool bCorrupt = FALSE;
+    Int32 nCandidates;
+    Int32 iCandidate;
+
+    _bStateSaved = FALSE;
+
+    if (!_MainLoopStateCheckAvailability(Reason, sizeof(Reason)))
+    {
+        _MainLoopStateSetMessage("%s", Reason);
+        return FALSE;
+    }
+
+    if (!_MainLoopStateGetRomIdentity(&uRomCRC, &nRomBytes, &uRomFlags))
+    {
+        _MainLoopStateSetMessage("Cannot identify the loaded ROM.");
+        return FALSE;
+    }
+
+    nCandidates = _MainLoopStateScanCandidates(
+        _MainLoop_StateDevice,
+        _MainLoop_StateSlot,
+        uRomCRC,
+        nRomBytes,
+        uRomFlags,
+        &bWrongRom,
+        &bCorrupt
+    );
+    _MainLoopStateSortCandidates(nCandidates);
+
+    for (iCandidate = 0; iCandidate < nCandidates; iCandidate++)
+    {
+        MainLoopStateCandidateT *pCandidate =
+            &_MainLoop_StateCandidates[iCandidate];
+
+        if (_MainLoopStateReadPayload(
+                pCandidate->Path,
+                &pCandidate->Header) &&
+            _pSnes->RestoreState(&_SnesState))
+        {
+            Int32 nSramBytes = _pSystem->GetSRAMBytes();
+
+            _bStateSaved = TRUE;
+            _MainLoop_SaveCounter = 0;
+            if (nSramBytes > 0)
+            {
+                _MainLoop_SRAMChecksum = _CalcChecksum(
+                    (Uint32 *)_pSystem->GetSRAMData(),
+                    nSramBytes / 4
+                );
+                _MainLoop_SRAMUpdated = TRUE;
+            }
+
+            if (_AudMix)
+            {
+                _AudMix->Reset();
+            }
+
+            _MainLoopResetInputChecksums();
+#if MAINLOOP_HISTORY
+            _MainLoopResetHistory();
+#endif
+
+            _MainLoopStateSetMessage(
+                "Loaded slot %d from %s.",
+                _MainLoop_StateSlot + 1,
+                pCandidate->DeviceName
+            );
+            ConPrint("State loaded: %s\n", pCandidate->Path);
+            ML_TRACE("State load ok: %s", pCandidate->Path);
+            return TRUE;
+        }
+
+        bCorrupt = TRUE;
+    }
+
+    if (bCorrupt)
+    {
+        _MainLoopStateSetMessage(
+            "Slot %d is incomplete or corrupt.",
+            _MainLoop_StateSlot + 1
+        );
+    }
+    else if (bWrongRom)
+    {
+        _MainLoopStateSetMessage(
+            "Slot %d belongs to another ROM.",
+            _MainLoop_StateSlot + 1
+        );
+    }
+    else
+    {
+        _MainLoopStateSetMessage(
+            "No state found in slot %d.",
+            _MainLoop_StateSlot + 1
+        );
+    }
+
+    ML_TRACE("State load failed: %s", _MainLoop_StateLastMessage);
+    return FALSE;
+}
+
+Bool _MainLoopSaveState()
+{
+    Char Reason[192];
+    Uint32 uRomCRC;
+    Uint32 nRomBytes;
+    Uint32 uRomFlags;
+    Uint32 uGeneration = 1;
+    Uint32 uPayloadCRC;
+    Uint32 uStoredCRC;
+    Uint32 nPayloadBytes;
+    Uint32 ePayloadEncoding;
+    const Uint8 *pPayload;
+    mz_ulong nCompressedBytes;
+    Bool bWrongRom = FALSE;
+    Bool bCorrupt = FALSE;
+    Int32 nAllCandidates;
+    Int32 i;
+    MainLoopStateRootT Roots[MAINLOOP_STATE_MAX_ROOTS];
+    Int32 nRoots;
+    Int32 iRoot;
+
+    _bStateSaved = FALSE;
+    _MainLoop_StateUnformattedCard = -1;
+
+    if (!_MainLoopStateCheckAvailability(Reason, sizeof(Reason)))
+    {
+        _MainLoopStateSetMessage("%s", Reason);
+        return FALSE;
+    }
+
+    if (!_MainLoopStateGetRomIdentity(&uRomCRC, &nRomBytes, &uRomFlags))
+    {
+        _MainLoopStateSetMessage("Cannot identify the loaded ROM.");
+        return FALSE;
+    }
+
+    /* Scan the selected target set for its next generation.  Keeping this
+       scoped avoids loading optional MMCE/HDD modules when the user chose
+       an unrelated explicit target such as USB. */
+    nAllCandidates = _MainLoopStateScanCandidates(
+        _MainLoop_StateDevice,
+        _MainLoop_StateSlot,
+        uRomCRC,
+        nRomBytes,
+        uRomFlags,
+        &bWrongRom,
+        &bCorrupt
+    );
+    for (i = 0; i < nAllCandidates; i++)
+    {
+        Uint32 uCandidateGeneration =
+            _MainLoop_StateCandidates[i].Header.uGeneration;
+        if (uGeneration == 1 ||
+            _MainLoopStateGenerationNewer(uCandidateGeneration + 1, uGeneration))
+        {
+            uGeneration = uCandidateGeneration + 1;
+            if (!uGeneration)
+            {
+                uGeneration = 1;
+            }
+        }
+    }
+
+    nRoots = _MainLoopStateBuildRoots(_MainLoop_StateDevice, Roots);
+
+    /* Snapshot and compress exactly once while the game is paused. Older
+       code repeated SaveState for every fallback root, then wrote the full
+       ~500 KB structure. Fast deflate substantially cuts slow memory-card
+       I/O while keeping the on-disk format backward compatible: version-1
+       raw banks still load, and Reserved[0] advertises compressed banks. */
+    _pSnes->SaveState(&_SnesState);
+    uPayloadCRC = (Uint32)mz_crc32(
+        MZ_CRC32_INIT,
+        (const Uint8 *)&_SnesState,
+        sizeof(_SnesState)
+    );
+
+    pPayload = (const Uint8 *)&_SnesState;
+    nPayloadBytes = sizeof(_SnesState);
+    ePayloadEncoding = MAINLOOP_STATE_PAYLOAD_RAW;
+    nCompressedBytes = sizeof(_MainLoop_StateCompressed);
+    if (mz_compress2(
+            _MainLoop_StateCompressed,
+            &nCompressedBytes,
+            (const Uint8 *)&_SnesState,
+            sizeof(_SnesState),
+            MZ_BEST_SPEED) == MZ_OK &&
+        nCompressedBytes < sizeof(_SnesState))
+    {
+        pPayload = _MainLoop_StateCompressed;
+        nPayloadBytes = (Uint32)nCompressedBytes;
+        ePayloadEncoding = MAINLOOP_STATE_PAYLOAD_DEFLATE;
+    }
+    uStoredCRC = (Uint32)mz_crc32(
+        MZ_CRC32_INIT,
+        pPayload,
+        nPayloadBytes
+    );
+
+    ML_TRACE(
+        "State payload: raw=%u stored=%u encoding=%s",
+        (unsigned int)sizeof(_SnesState),
+        (unsigned int)nPayloadBytes,
+        ePayloadEncoding == MAINLOOP_STATE_PAYLOAD_DEFLATE
+            ? "deflate"
+            : "raw"
+    );
+
+    for (iRoot = 0; iRoot < nRoots; iRoot++)
+    {
+        MainLoopStateFileHeaderT BankHeader[MAINLOOP_STATE_BANK_NUM];
+        Int32 BankResult[MAINLOOP_STATE_BANK_NUM];
+        Int32 iBank;
+        Int32 iTargetBank;
+        Char Path[1024];
+        MainLoopStateFileHeaderT Header;
+
+        if (!_MainLoopStateEnsureRoot(&Roots[iRoot]))
+        {
+            continue;
+        }
+
+        /* The generation scan above already opened every candidate header.
+           Reuse those copies here instead of opening both target files a
+           second time -- directory and file-open latency is noticeable on
+           a PS2 memory card even when only 64 bytes are read. */
+        for (iBank = 0; iBank < MAINLOOP_STATE_BANK_NUM; iBank++)
+        {
+            _MainLoopStateBuildBankPath(
+                &Roots[iRoot],
+                _MainLoop_StateSlot,
+                iBank,
+                Path,
+                sizeof(Path)
+            );
+            BankResult[iBank] = 0;
+            for (i = 0; i < nAllCandidates; i++)
+            {
+                if (!strcmp(Path, _MainLoop_StateCandidates[i].Path))
+                {
+                    BankHeader[iBank] =
+                        _MainLoop_StateCandidates[i].Header;
+                    BankResult[iBank] = 1;
+                    break;
+                }
+            }
+        }
+
+        if (BankResult[0] == 1 && BankResult[1] == 1)
+        {
+            /* Overwrite the older bank and preserve the newest one. CRC is
+               checked when loading, where a damaged newest bank naturally
+               falls back to the other bank. Avoiding a full pre-save read
+               is the main latency win on mc0:/mc1:. */
+            iTargetBank = _MainLoopStateGenerationNewer(
+                BankHeader[0].uGeneration,
+                BankHeader[1].uGeneration
+            ) ? 1 : 0;
+        }
+        else if (BankResult[0] == 1)
+        {
+            iTargetBank = 1;
         }
         else
         {
-            ML_TRACE("State save failed");
+            iTargetBank = 0;
         }
-    }
 
-#if 0
-    else if (_pSystem == _pNes)
-    {
-        sprintf(Path, "%s%s.nst", MAINLOOP_STATEPATH, _RomName);
+        _MainLoopStateBuildBankPath(
+            &Roots[iRoot],
+            _MainLoop_StateSlot,
+            iTargetBank,
+            Path,
+            sizeof(Path)
+        );
 
-        _pNes->SaveState(&_NesState);
-        _bStateSaved = TRUE;
+        memset(&Header, 0, sizeof(Header));
+        memcpy(Header.Magic, _MainLoop_StateMagic, sizeof(Header.Magic));
+        Header.uVersion = MAINLOOP_STATE_FORMAT_VERSION;
+        Header.nHeaderBytes = sizeof(Header);
+        Header.nPayloadBytes = nPayloadBytes;
+        Header.uPayloadCRC = uPayloadCRC;
+        Header.uRomCRC = uRomCRC;
+        Header.nRomBytes = nRomBytes;
+        Header.uRomFlags = uRomFlags;
+        Header.iSlot = (Uint32)_MainLoop_StateSlot;
+        Header.uGeneration = uGeneration;
+        Header.Reserved[0] = ePayloadEncoding;
+        Header.Reserved[1] =
+            ePayloadEncoding == MAINLOOP_STATE_PAYLOAD_DEFLATE
+                ? uStoredCRC
+                : 0;
 
-        if (FileWriteMem(Path, &_NesState, sizeof(_NesState)))
+        ML_TRACE("State save path: %s", Path);
+        if (_MainLoopStateWriteBank(
+                Path,
+                &Header,
+                pPayload,
+                nPayloadBytes))
         {
-            ConPrint("State saved to %s\n", Path);
+            _bStateSaved = TRUE;
+            _MainLoopStateSetMessage(
+                "Saved slot %d to %s.",
+                _MainLoop_StateSlot + 1,
+                Roots[iRoot].DeviceName
+            );
+            ConPrint("State saved: %s\n", Path);
+            ML_TRACE("State save ok: %s", Path);
+            return TRUE;
         }
+
+        ML_TRACE("State save failed: %s", Path);
     }
-#endif
+
+    if (_MainLoop_StateUnformattedCard >= 0)
+    {
+        _MainLoopStateSetMessage(
+            "mc%d: is not formatted.",
+            _MainLoop_StateUnformattedCard
+        );
+    }
+    else
+    {
+        _MainLoopStateSetMessage(
+            "Could not save slot %d to %s.",
+            _MainLoop_StateSlot + 1,
+            MainLoopStateGetDeviceName()
+        );
+    }
+    return FALSE;
 }
 
 

@@ -28,6 +28,7 @@ public:
 
     void SetSampleRate(Uint32 uSampleRate) {m_uSampleRate = uSampleRate;}
 	Uint32 GetLastOutput() {return m_uLastOutput;}
+    void Reset();
 
     virtual void GetFormat(Uint32 *puSampleRate, Uint32 *pnSampleBits, Uint32 *pnChannels);
     virtual Int32 GetOutputSamples();
@@ -50,4 +51,3 @@ int  AudMixGameGetVolume(void);
 
 
 #endif
-

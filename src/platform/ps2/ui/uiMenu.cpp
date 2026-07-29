@@ -27,6 +27,7 @@ CMenuScreen::CMenuScreen()
 {
 	m_iSelect = 0;
 	m_nItems  = 0;
+	m_iTop    = 40;
 	memset(m_strText, 0, sizeof(m_strText));
 	m_strTitle[0] = 0;
 ///	SetEntries(_TestStr);
@@ -41,6 +42,19 @@ void CMenuScreen::SetTitle(const char *pTitle)
 void CMenuScreen::SetText(int iText, const char *pStr)
 {
 	strcpy(m_strText[iText], pStr);
+}
+
+void CMenuScreen::SetSelection(Int32 iSelect)
+{
+	if (m_nItems <= 0)
+	{
+		m_iSelect = 0;
+		return;
+	}
+
+	if (iSelect < 0) iSelect = 0;
+	if (iSelect >= m_nItems) iSelect = m_nItems - 1;
+	m_iSelect = iSelect;
 }
 
 static void _MenuPrintAlignCenter(int x, int y, const char *str, Bool bHighlight = FALSE)
@@ -74,7 +88,9 @@ void CMenuScreen::Draw()
 
 	vx -= 80;
 
-	_MenuHeader(vy, m_strTitle);
+	/* The title may move independently, while entries and help text retain
+	   the established layout shared by the other menu screens. */
+	_MenuHeader(m_iTop, m_strTitle);
 	vy+=FontGetHeight() * 2;
 
 	FontColor4f(1.0, 1.0f, 1.0f, 1.0f);
@@ -140,7 +156,4 @@ void CMenuScreen::Input(Uint32 buttons, Uint32 trigger)
 	}
 
 }
-
-
-
 

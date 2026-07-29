@@ -7,10 +7,20 @@
 extern "C" {
 #endif
 
+typedef enum MemCardStatusE
+{
+	MEMCARD_STATUS_ERROR       = -1,
+	MEMCARD_STATUS_NOT_PRESENT = 0,
+	MEMCARD_STATUS_READY       = 1,
+	MEMCARD_STATUS_UNFORMATTED = 2
+} MemCardStatusE;
+
 void MemCardInit(void);
 void MemCardShutdown(void);
 int  MemCardCreateSave(char *pDir, char *pTitle, Bool bForceWrite);
 Bool MemCardCheckNewCard(void);
+MemCardStatusE MemCardGetStatus(Int32 iPort);
+Bool MemCardFormat(Int32 iPort);
 Bool MemCardReadFile(char *pPath, Uint8 *pData, Uint32 nBytes);
 Bool MemCardWriteFile(char *pPath, Uint8 *pData, Uint32 nBytes);
 

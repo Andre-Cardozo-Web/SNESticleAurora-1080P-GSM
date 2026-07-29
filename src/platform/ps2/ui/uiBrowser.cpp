@@ -41,6 +41,19 @@ static const char *_MenuEntries[]=
 	NULL
 };
 
+static Bool BrowserIsStateBankName(const Char *pName)
+{
+	size_t nLength = pName ? strlen(pName) : 0;
+
+	return nLength >= 4 &&
+	       pName[nLength - 4] == '.' &&
+	       pName[nLength - 3] == 's' &&
+	       pName[nLength - 2] >= '1' &&
+	       pName[nLength - 2] <= '5' &&
+	       (pName[nLength - 1] == 'a' ||
+	        pName[nLength - 1] == 'b');
+}
+
 /* ------------------------------------------------------------------
    Browser long-name UX: ellipsis truncation + marquee scroll.
 
@@ -562,23 +575,59 @@ int CBrowserScreen::MenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
 					}
 					break;
 				case 2: // delete file
+				{
+					Char DeletePath[1024];
+					const Char *pDeletePath = str;
 
-			        printf("Deleting %s...\n", str);
+					/* The browser keeps an hdd0:/PART/... UI path, while
+					   actual file I/O for that partition must use pfs0:. */
+					if (HddMapPath(
+							str,
+							DeletePath,
+							sizeof(DeletePath)) == 1)
+					{
+						pDeletePath = DeletePath;
+					}
+
+			        printf("Deleting %s...\n", pDeletePath);
 					switch (pBrowser->GetEntryType())
 					{
 						case BROWSER_ENTRYTYPE_DRIVE:
 							break;
 						case BROWSER_ENTRYTYPE_DIR:
-							rmdir(str);
+							rmdir(pDeletePath);
 							break;
 						default:
-							unlink(str);
-							rmdir(str);
+							/* State Manager groups the two power-safe banks
+							   as one logical slot. Deleting either .sNa or
+							   .sNb therefore removes its partner too. */
+							if (pBrowser->m_bStateManager)
+							{
+								size_t nLength = strlen(pDeletePath);
+								if (BrowserIsStateBankName(pDeletePath))
+								{
+									Char PairPath[1024];
+									snprintf(
+										PairPath,
+										sizeof(PairPath),
+										"%s",
+										pDeletePath
+									);
+									PairPath[nLength - 1] =
+										pDeletePath[nLength - 1] == 'a'
+											? 'b'
+											: 'a';
+									unlink(PairPath);
+								}
+							}
+							unlink(pDeletePath);
+							rmdir(pDeletePath);
 							break;
 					}
 					pBrowser->Chdir(".");
 
 					break;
+				}
 			}
 
 			pBrowser->m_bSubMenu = FALSE;
@@ -600,6 +649,7 @@ CBrowserScreen::CBrowserScreen(Uint32 uMaxEntries)
 	m_MaxLines = (209 / 11 - 1); // umm, hacked
 	m_bMCDir = FALSE;
 	m_bSubMenu = FALSE;
+	m_bStateManager = FALSE;
 	m_pDirEntries = new BrowserEntryT[uMaxEntries];
 
 	m_SubMenu.SetTitle("File Menu");
@@ -1289,6 +1339,15 @@ void CBrowserScreen::SetDir(const Char *pDir)
 				}
 				else
 				{
+					/* The dedicated manager must never invite deletion of
+					   SRAM, state.cfg, icons, or unrelated files that share
+					   mc0:/SNESticle with memory-card state banks. */
+					if (m_bStateManager &&
+					    !BrowserIsStateBankName(de->d_name))
+					{
+						continue;
+					}
+
 					eType = (BrowserEntryTypeE)SendMessage(
 						2, 0, (void *)de->d_name);
 					if (eType != BROWSER_ENTRYTYPE_EXECUTABLE)

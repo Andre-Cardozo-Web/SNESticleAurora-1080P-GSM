@@ -21,6 +21,7 @@
 #include "mainloop_net.h"
 #include "mainloop_ui.h"
 #include "mainloop_menu.h"
+#include "mainloop_state.h"
 #include "mainloop_browser.h"
 #include "mainloop_load.h"
 #include "mainloop.h"
@@ -281,6 +282,7 @@ GPFifoInit((Uint128 *)_MainLoop_GfxPipe, sizeof(_MainLoop_GfxPipe));
        480i before the card was available.  Default (480i) users take the
        else branch and the GS is left exactly as it was. */
     VideoSettingsLoad();
+    MainLoopStateSettingsLoad();
     /* MX4SIO (SD via SIO2) carrega AQUI, depois da config -- nunca no boot.
        So' se o suporte a Mass estiver ligado (padrao on).  Best-effort:
        em quem nao tem o adaptador, so' nao acha hardware. */
@@ -405,11 +407,40 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	_MainLoop_pBrowserScreen->SetMsgFunc(_MainLoopBrowserEvent);
 	_MainLoop_pBrowserScreen->SetDir(MENU_STARTDIR);
 
+	/* Separate, smaller browser for state-file maintenance.  Keeping it
+	   independent means opening State Manager never destroys the user's
+	   current ROM-browser directory or selection. */
+	_MainLoop_pStateBrowserScreen = new CBrowserScreen(1024);
+	_MainLoop_pStateBrowserScreen->SetMsgFunc(_MainLoopStateBrowserEvent);
+	_MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
+
 	_MainLoop_pNetworkScreen = new CNetworkScreen();
 	_MainLoop_pNetworkScreen->SetMsgFunc(_MainLoopNetworkEvent);
 	_MainLoop_pNetworkScreen->SetPort(MAINLOOP_NETPORT);
 
 	_MainLoop_pVideoScreen = new CVideoScreen();
+
+	_MainLoop_pStateScreen = new CMenuScreen();
+	_MainLoop_pStateScreen->SetMsgFunc(_MainLoopStateMenuEvent);
+	_MainLoop_pStateScreen->SetTitle("Save States");
+	_MainLoop_pStateScreen->SetTop(20);
+	_MainLoop_pStateScreen->SetEntries(_MainLoopStateMenuEntries);
+	_MainLoopStateMenuRefresh();
+
+	/* Transient one-time destination chooser.  It is deliberately not
+	   part of the L1/R1 screen ring; L2+X opens it only when no quick-save
+	   target has been chosen yet. */
+	_MainLoop_pStateDeviceScreen = new CMenuScreen();
+	_MainLoop_pStateDeviceScreen->SetMsgFunc(_MainLoopStateDeviceMenuEvent);
+	_MainLoop_pStateDeviceScreen->SetTitle("Save State Location");
+	_MainLoop_pStateDeviceScreen->SetTop(20);
+
+	_MainLoop_pMemCardFormatScreen = new CMenuScreen();
+	_MainLoop_pMemCardFormatScreen->SetMsgFunc(
+		_MainLoopMemCardFormatMenuEvent
+	);
+	_MainLoop_pMemCardFormatScreen->SetTitle("Memory Card");
+	_MainLoop_pMemCardFormatScreen->SetTop(20);
 
 	_MainLoop_pMenuScreen = new CMenuScreen();
 	_MainLoop_pMenuScreen->SetMsgFunc(_MainLoopMenuEvent);

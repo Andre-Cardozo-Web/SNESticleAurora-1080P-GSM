@@ -5,6 +5,7 @@
 #include "console.h"
 #include "mainloop_ui.h"
 #include "mainloop_shared.h"
+#include "mainloop_menu.h"
 
 #include "poly.h"
 #include "font.h"
@@ -110,22 +111,25 @@ void _MainLoopSetScreen(CScreen *pScreen)
 static int _UIGetIdx(void)
 {
     if (_MainLoop_pScreen == (CScreen*)_MainLoop_pBrowserScreen) return 0;
-    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pNetworkScreen) return 1;
-    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pMenuScreen)    return 2;
-    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pLogScreen)     return 3;
-    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pVideoScreen)   return 4;
+    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pStateScreen ||
+        _MainLoop_pScreen == (CScreen*)_MainLoop_pStateBrowserScreen) return 1;
+    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pNetworkScreen) return 2;
+    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pMenuScreen)    return 3;
+    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pLogScreen)     return 4;
+    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pVideoScreen)   return 5;
     return 0;
 }
 
 static CScreen* _UIByIdx(int idx)
 {
-    switch (idx % 5)
+    switch (idx % 6)
     {
         case 0: return (CScreen*)_MainLoop_pBrowserScreen;
-        case 1: return (CScreen*)_MainLoop_pNetworkScreen;
-        case 2: return (CScreen*)_MainLoop_pMenuScreen;
-        case 3: return (CScreen*)_MainLoop_pLogScreen;
-        case 4: return (CScreen*)_MainLoop_pVideoScreen;
+        case 1: return (CScreen*)_MainLoop_pStateScreen;
+        case 2: return (CScreen*)_MainLoop_pNetworkScreen;
+        case 3: return (CScreen*)_MainLoop_pMenuScreen;
+        case 4: return (CScreen*)_MainLoop_pLogScreen;
+        case 5: return (CScreen*)_MainLoop_pVideoScreen;
     }
     return (CScreen*)_MainLoop_pBrowserScreen;
 }
@@ -133,12 +137,16 @@ static CScreen* _UIByIdx(int idx)
 void _UICycle(int dir)
 {
     int idx = _UIGetIdx();
-    for (int n = 0; n < 5; n++)
+    for (int n = 0; n < 6; n++)
     {
-        idx = (idx + dir + 5) % 5;
+        idx = (idx + dir + 6) % 6;
         CScreen *scr = _UIByIdx(idx);
         if (scr)
         {
+            if (scr == (CScreen*)_MainLoop_pStateScreen)
+            {
+                _MainLoopStateMenuRefresh();
+            }
             _MainLoopSetScreen(scr);
             _bMenu = TRUE;
             ConPrint("UI: screen=%d (L1/R1)\n", idx);
@@ -150,22 +158,25 @@ void _UICycle(int dir)
 static int _MainLoopGetScreenIndex(void)
 {
     if (_MainLoop_pScreen == (CScreen*)_MainLoop_pBrowserScreen) return 0;
-    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pNetworkScreen) return 1;
-    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pMenuScreen)    return 2;
-    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pLogScreen)     return 3;
-    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pVideoScreen)   return 4;
+    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pStateScreen ||
+        _MainLoop_pScreen == (CScreen*)_MainLoop_pStateBrowserScreen) return 1;
+    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pNetworkScreen) return 2;
+    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pMenuScreen)    return 3;
+    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pLogScreen)     return 4;
+    if (_MainLoop_pScreen == (CScreen*)_MainLoop_pVideoScreen)   return 5;
     return 0;
 }
 
 static CScreen* _MainLoopGetScreenByIndex(int idx)
 {
-    switch (idx % 5)
+    switch (idx % 6)
     {
         case 0: return (CScreen*)_MainLoop_pBrowserScreen;
-        case 1: return (CScreen*)_MainLoop_pNetworkScreen;
-        case 2: return (CScreen*)_MainLoop_pMenuScreen;
-        case 3: return (CScreen*)_MainLoop_pLogScreen;
-        case 4: return (CScreen*)_MainLoop_pVideoScreen;
+        case 1: return (CScreen*)_MainLoop_pStateScreen;
+        case 2: return (CScreen*)_MainLoop_pNetworkScreen;
+        case 3: return (CScreen*)_MainLoop_pMenuScreen;
+        case 4: return (CScreen*)_MainLoop_pLogScreen;
+        case 5: return (CScreen*)_MainLoop_pVideoScreen;
     }
     return (CScreen*)_MainLoop_pBrowserScreen;
 }
@@ -173,12 +184,16 @@ static CScreen* _MainLoopGetScreenByIndex(int idx)
 void _MainLoopCycleScreen(int dir)
 {
     int idx = _MainLoopGetScreenIndex();
-    for (int n = 0; n < 5; n++)
+    for (int n = 0; n < 6; n++)
     {
-        idx = (idx + dir + 5) % 5;
+        idx = (idx + dir + 6) % 6;
         CScreen *scr = _MainLoopGetScreenByIndex(idx);
         if (scr)
         {
+            if (scr == (CScreen*)_MainLoop_pStateScreen)
+            {
+                _MainLoopStateMenuRefresh();
+            }
             _MainLoopSetScreen(scr);
             _bMenu = TRUE;
             return;

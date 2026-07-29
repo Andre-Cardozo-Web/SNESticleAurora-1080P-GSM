@@ -54,6 +54,9 @@ There's no need to create ISOs in this version; only do so if you want to distri
   [Menu music & audio](#menu-music--audio).
 - Audio via **audsrv**, with separate **Game Volume** and **Menu Music**
   controls in the Video Config screen.
+- **SNES save states** — five slots; USB, memory-card, MMCE and internal-HDD
+  storage; ROM and CRC validation; and two-bank writes that preserve the
+  previous valid state.
 - Controller / memory‑card / IRX bring‑up aligned to **Open‑PS2‑Loader** style.
 - **Storage**: USB (×2), external HDD/SSD and **MX4SIO** SD cards as
   `mass0:`/`mass1:`; the internal **HDD** (`hdd0:`); memory cards
@@ -67,7 +70,8 @@ There's no need to create ISOs in this version; only do so if you want to distri
 ## Controls
 
 The PS2 pad maps to an SNES controller. **L2 + R2** (pressed together) toggles
-between the game and the menu at any time.
+between the game and the menu at any time, flushing changed SRAM when the menu
+opens.
 
 **In a game**
 
@@ -81,7 +85,9 @@ between the game and the menu at any time.
 | <img src="docs/controls/l1.svg" height="20" alt="L1"> / <img src="docs/controls/r1.svg" height="20" alt="R1"> | L / R |
 | <img src="docs/controls/select.svg" height="20" alt="Select"> | Select |
 | <img src="docs/controls/start.svg" height="20" alt="Start"> | Start |
-| <img src="docs/controls/l2.svg" height="20" alt="L2"> + <img src="docs/controls/r2.svg" height="20" alt="R2"> | Open the menu |
+| <img src="docs/controls/l2.svg" height="20" alt="L2"> + <img src="docs/controls/cross.svg" height="20" alt="Cross"> | Save state to the current slot |
+| <img src="docs/controls/l2.svg" height="20" alt="L2"> + <img src="docs/controls/circle.svg" height="20" alt="Circle"> | Load state from the current slot |
+| <img src="docs/controls/l2.svg" height="20" alt="L2"> + <img src="docs/controls/r2.svg" height="20" alt="R2"> | Open the menu and flush changed SRAM |
 
 **Menu & ROM browser**
 
@@ -93,8 +99,66 @@ between the game and the menu at any time.
 | <img src="docs/controls/square.svg" height="20" alt="Square"> | Page up — *or swap the cover image when cover art is on (see below)* |
 | <img src="docs/controls/circle.svg" height="20" alt="Circle"> | Page down |
 | <img src="docs/controls/select.svg" height="20" alt="Select"> | File menu (copy / paste / delete) |
-| <img src="docs/controls/l1.svg" height="20" alt="L1"> / <img src="docs/controls/r1.svg" height="20" alt="R1"> | Switch screen (Browser ⇆ Network ⇆ Menu ⇆ Log) |
+| <img src="docs/controls/l1.svg" height="20" alt="L1"> / <img src="docs/controls/r1.svg" height="20" alt="R1"> | Switch screen (Browser ⇆ State Manager ⇆ Network ⇆ Menu ⇆ Log ⇆ Video Config), including while a game is paused. |
 | <img src="docs/controls/l2.svg" height="20" alt="L2"> + <img src="docs/controls/r2.svg" height="20" alt="R2"> | Return to the game |
+
+**First save-state destination**
+
+The first in-game **L2 + Cross** press opens a small, temporary **Save State
+Location** screen. Select **Auto**, **USB**, **Memory Card**, **MMCE**, or
+**Internal HDD** and press Cross: the target is remembered, the first state is
+saved, and the screen closes back to the game automatically. Press Circle to
+cancel. MMCE is shown only when its support is enabled; Internal HDD is shown
+only when the current ROM came from an enabled internal-HDD partition.
+
+Later **L2 + Cross** presses save directly and **L2 + Circle** loads directly.
+This temporary selector pauses without flushing SRAM; **L2 + R2** remains the
+dedicated menu/SRAM shortcut. The choice is stored in
+`mc0:/SNESticle/state.cfg`, falling back to `mc1:`, when a card is available.
+
+**Auto** first tries the device that supplied the ROM, then the available
+`massN:`, `mc0:`/`mc1:` and enabled `mmce0:`/`mmce1:` devices. **USB** covers
+USB flash drives, external USB HDD/SSD and MX4SIO devices exposed as `massN:`.
+**Memory Card** tries both PS2 slots. **MMCE** tries both MMCE slots when MMCE
+support is enabled in Video Config. **Internal HDD** writes to the same mounted
+APA/PFS partition as the current ROM, so it is available only when that ROM
+was opened from the internal HDD. Auto always uses quick-save slot 1; with only
+a PS2 memory card available it falls through to that card, preferring `mc0:`.
+
+If a selected PS2 memory card is present but unformatted, the emulator asks
+before formatting it. The safe **No / Cancel** option is selected by default,
+and the warning makes clear that formatting erases the entire card. The same
+confirmation is used when a changed SRAM needs the unformatted `mc0:` card.
+
+**State Manager**
+
+The regular L1/R1 tab is a file manager available both on the initial homebrew
+screens and while a game is paused:
+
+| Option | Action |
+|--------|--------|
+| **Browse State Files** | Open the state folder for the selected storage device. The separate browser hides unrelated files; press Select to open the file menu and delete a state, or L1 to return. |
+| **Storage** | Cycle through `mass0:`, `mass1:`, the legacy `mass:` alias, `mc0:`, `mc1:`, enabled MMCE slots, and the enabled internal HDD. |
+| **Quick Slot** | Select quick-save slot 1–5 for an explicit device. Auto stays on slot 1. |
+| **Ask Save Location Again** | Forget the current target so the next L2 + Cross asks again. |
+
+Internal-HDD management first opens its APA partition list; enter the desired
+partition and then `SNESticle/states`. Each slot has an `a` and a `b` bank;
+deleting either matching `.sNa` or `.sNb` file from the state browser removes
+both banks automatically.
+
+Each slot keeps two banks. A new bank is committed only after its complete
+payload has been written, and every load checks the format version, ROM CRC,
+ROM size and payload CRC. If the newest bank is incomplete or corrupt, the
+older valid bank is used automatically. New banks use fast deflate compression
+and reuse the header scan without rereading the payload after a successful
+write, reducing slow device I/O; existing uncompressed version-1 banks remain
+loadable.
+
+Save states currently cover **base SNES hardware only**. Games using DSP,
+SuperFX, CX4, OBC1, S‑DD1, S‑RTC or Super Game Boy hardware are rejected with
+an explicit message until those coprocessor states are serialized. NES save
+states are not available yet.
 
 **Video Config screen**
 
@@ -291,6 +355,9 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
   See [Storage & devices](#storage--devices).
 - **Boot / input**: controller and IRX bring‑up reworked to behave on real
   hardware, not just emulators.
+- **Save states**: restored the dormant iaddis-era feature as a release menu
+  with five slots, USB/memory-card selection, versioned files, ROM/CRC checks
+  and power-loss-safe two-bank writes.
 - **Build system**: parallel jobs, `VERBOSE`, `PROFILE`, friendlier `make help`,
   and ISO builds that honor `JOBS`.
 - **Bug fixes**: C++17 / build warnings cleaned up, plus three real
@@ -302,6 +369,8 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
 ## Known issues / still missing
 
 **SNES**
+- Save states currently support base-hardware games only; coprocessor games
+  are blocked until each extra chip has complete serialization.
 - **Final Fight 2** — large (32×32) / page‑1 object sprites render garbled. The
   OBJ fetch/render path has been verified correct against hardware references
   (bsnes/Anomie) and host‑side; the cause is suspected to be the VRAM

@@ -43,8 +43,12 @@
 /* ---- UI screens --------------------------------------------------- */
 
 CBrowserScreen *_MainLoop_pBrowserScreen;
+CBrowserScreen *_MainLoop_pStateBrowserScreen;
 CNetworkScreen *_MainLoop_pNetworkScreen;
 CMenuScreen    *_MainLoop_pMenuScreen;
+CMenuScreen    *_MainLoop_pStateScreen;
+CMenuScreen    *_MainLoop_pStateDeviceScreen;
+CMenuScreen    *_MainLoop_pMemCardFormatScreen;
 CLogScreen     *_MainLoop_pLogScreen;
 CVideoScreen   *_MainLoop_pVideoScreen;
 CScreen        *_MainLoop_pScreen = NULL;
@@ -70,6 +74,7 @@ Int32        _MainLoop_iDisk          = 0;
 Bool         _MainLoop_bDiskInserted  = FALSE;
 
 Char _RomName[256];
+Char _RomPath[1024];
 
 #if MAINLOOP_MEMCARD
 Char _SramPath[256] = "mc0:/SNESticle";

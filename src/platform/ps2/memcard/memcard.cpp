@@ -1,6 +1,10 @@
 
 #include <kernel.h>
 #include <libmc.h>
+#define NEWLIB_PORT_AWARE
+#include <fileXio.h>
+#include <fileXio_rpc.h>
+#undef NEWLIB_PORT_AWARE
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -15,6 +19,70 @@ static Uint8 _MemCard_IconData[]={
 };
 
 static Bool _MemCard_bInitialized=FALSE;
+
+/* PS2SDK extends the newlib errno table with EFORMAT. Keep the fallback
+   for older SDK snapshots that expose the mcman result but not the name. */
+#ifndef EFORMAT
+#define EFORMAT 47
+#endif
+
+MemCardStatusE MemCardGetStatus(Int32 iPort)
+{
+	char Root[8];
+	iox_stat_t Status;
+	int Result;
+
+	if (!_MemCard_bInitialized || iPort < 0 || iPort > 1)
+	{
+		return MEMCARD_STATUS_ERROR;
+	}
+
+	snprintf(Root, sizeof(Root), "mc%d:/", (int)iPort);
+	memset(&Status, 0, sizeof(Status));
+	Result = fileXioGetStat(Root, &Status);
+	printf("MemCard: status('%s') -> %d\n", Root, Result);
+
+	if (Result >= 0)
+	{
+		return MEMCARD_STATUS_READY;
+	}
+
+	if (Result == -EFORMAT)
+	{
+		return MEMCARD_STATUS_UNFORMATTED;
+	}
+
+	/* mcman maps no-card/detection failures to ENXIO. Treat the other
+	   ordinary path/device failures as absent too; callers only need to
+	   distinguish the destructive, user-actionable unformatted case. */
+	if (Result == -ENXIO || Result == -ENODEV || Result == -ENOENT)
+	{
+		return MEMCARD_STATUS_NOT_PRESENT;
+	}
+
+	return MEMCARD_STATUS_ERROR;
+}
+
+Bool MemCardFormat(Int32 iPort)
+{
+	char Device[8];
+	int Result;
+
+	if (!_MemCard_bInitialized || iPort < 0 || iPort > 1)
+	{
+		return FALSE;
+	}
+
+	snprintf(Device, sizeof(Device), "mc%d:", (int)iPort);
+
+	/* Use fileXio -> iomanX -> mcman's format operation. This deliberately
+	   avoids libmc/mcInit: its separate MCSERV RPC bind can hang on the same
+	   real-hardware/NetherSX2 setups for which all normal card I/O was moved
+	   to newlib stdio in the first place. */
+	Result = fileXioFormat(Device, NULL, NULL, 0);
+	printf("MemCard: format('%s') -> %d\n", Device, Result);
+	return Result >= 0 ? TRUE : FALSE;
+}
 
 /* Converte ASCII -> Shift-JIS fullwidth (2 bytes/char) no campo title do
    icon.sys.  O OSDSYS do PS2 exige SJIS: ASCII de 1 byte NAO aparece no
