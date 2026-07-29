@@ -477,27 +477,20 @@ SDK_EXTRA_IRX := ioptrap.irx poweroff.irx
 # init_ps2_filesystem_driver() brings up the modern cdfs.irx which
 # registers the cdfs: device with iomanX, and the browser / ROM
 # loader reach the disc through plain newlib stdio.
-EMBED_IRX_NAMES := audsrv freesd sio2man mcman mcserv padman mtapman ps2dev9 netman smap ps2ip usbd bdm bdmfs_fatfs usbmass_bd ps2atad ps2hdd
+EMBED_IRX_NAMES := audsrv freesd sio2man mcman mcserv padman mtapman ps2dev9 netman smap ps2ip usbd bdm bdmfs_fatfs usbmass_bd ps2atad ps2hdd mmceman mx4sio_bd
 
-# mmceman.irx (MemCard PRO2 / SD2PSX -> mmce0:/mmce1:) e' OPCIONAL: so'
-# embute se existir no PS2SDK, para nao quebrar o build em SDK que nao
-# tenha o modulo.  Define HAVE_MMCEMAN quando presente.
-MMCEMAN_IRX_PATH ?= $(PS2SDK)/iop/irx/mmceman.irx
-ifneq ($(wildcard $(MMCEMAN_IRX_PATH)),)
-EMBED_IRX_NAMES += mmceman
-CFLAGS   += -DHAVE_MMCEMAN=1
-CXXFLAGS += -DHAVE_MMCEMAN=1
-endif
-
-# mx4sio_bd.irx (MX4SIO: cartao SD pela porta de memory card / SIO2) tambem
-# e' OPCIONAL.  E' um block device BDM -> o SD aparece como um massN:,
-# igual a um pendrive (NAO e' mmce).  So' embute se existir no PS2SDK.
-MX4SIO_BD_IRX_PATH ?= $(PS2SDK)/iop/irx/mx4sio_bd.irx
-ifneq ($(wildcard $(MX4SIO_BD_IRX_PATH)),)
-EMBED_IRX_NAMES += mx4sio_bd
-CFLAGS   += -DHAVE_MX4SIO=1
-CXXFLAGS += -DHAVE_MX4SIO=1
-endif
+# Pin the complete SIO2 storage/input group to one verified PS2SDK revision.
+# This prevents a future SDK update from mixing an incompatible sio2man with
+# mmceman/mx4sio, mcman or padman.  It also prevents the v1.0.2 regression
+# where optional missing drivers still produced visible empty menu entries.
+# Paths remain overridable for driver testing; missing files fail check-env.
+SIO2MAN_IRX_PATH   ?= $(CURDIR)/irx/sio2man.irx
+MCMAN_IRX_PATH     ?= $(CURDIR)/irx/mcman.irx
+MCSERV_IRX_PATH    ?= $(CURDIR)/irx/mcserv.irx
+PADMAN_IRX_PATH    ?= $(CURDIR)/irx/padman.irx
+MTAPMAN_IRX_PATH   ?= $(CURDIR)/irx/mtapman.irx
+MMCEMAN_IRX_PATH   ?= $(CURDIR)/irx/mmceman.irx
+MX4SIO_BD_IRX_PATH ?= $(CURDIR)/irx/mx4sio_bd.irx
 
 # ps2fs.irx (PFS): sistema de arquivos das particoes APA do HD interno.
 # Necessario para MONTAR e ler dentro de uma particao (pfs0:).  Opcional:
@@ -514,15 +507,6 @@ EMBED_HEADERS := $(patsubst %,$(EMBED_DIR)/%_irx.h,$(EMBED_IRX_NAMES))
 
 AUDSRV_IRX_PATH  ?= $(PS2SDK)/iop/irx/audsrv.irx
 FREESD_IRX_PATH  ?= $(PS2SDK)/iop/irx/freesd.irx
-SIO2MAN_IRX_PATH ?= $(PS2SDK)/iop/irx/sio2man.irx
-MCMAN_IRX_PATH   ?= $(PS2SDK)/iop/irx/mcman.irx
-MCSERV_IRX_PATH  ?= $(PS2SDK)/iop/irx/mcserv.irx
-# Modern PS2SDK pad / multitap manager. Stacks on top of the modern
-# sio2man.irx loaded by the memcard bring-up; works on real PS2 *and*
-# emulators, unlike the BIOS-resident rom0:XPADMAN that conflicts with
-# the already-loaded modern sio2man on retail hardware.
-PADMAN_IRX_PATH  ?= $(PS2SDK)/iop/irx/padman.irx
-MTAPMAN_IRX_PATH ?= $(PS2SDK)/iop/irx/mtapman.irx
 PS2DEV9_IRX_PATH ?= $(PS2SDK)/iop/irx/ps2dev9.irx
 NETMAN_IRX_PATH  ?= $(PS2SDK)/iop/irx/netman.irx
 SMAP_IRX_PATH    ?= $(PS2SDK)/iop/irx/smap.irx
@@ -549,6 +533,13 @@ all: check-env $(TARGET)
 check-env: ensure-ps2dev
 	@test -d "$(PS2SDK)" || (echo "ERROR: PS2SDK not found at $(PS2SDK)"; exit 1)
 	@test -d "$(IRX_DIR)" || (echo "ERRO: pasta de IRX nao encontrada em $(IRX_DIR)"; exit 1)
+	@test -f "$(SIO2MAN_IRX_PATH)" || (echo "ERROR: required SIO2MAN IRX not found: $(SIO2MAN_IRX_PATH)"; exit 1)
+	@test -f "$(MCMAN_IRX_PATH)" || (echo "ERROR: required MCMAN IRX not found: $(MCMAN_IRX_PATH)"; exit 1)
+	@test -f "$(MCSERV_IRX_PATH)" || (echo "ERROR: required MCSERV IRX not found: $(MCSERV_IRX_PATH)"; exit 1)
+	@test -f "$(PADMAN_IRX_PATH)" || (echo "ERROR: required PADMAN IRX not found: $(PADMAN_IRX_PATH)"; exit 1)
+	@test -f "$(MTAPMAN_IRX_PATH)" || (echo "ERROR: required MTAPMAN IRX not found: $(MTAPMAN_IRX_PATH)"; exit 1)
+	@test -f "$(MMCEMAN_IRX_PATH)" || (echo "ERROR: required MMCE IRX not found: $(MMCEMAN_IRX_PATH)"; exit 1)
+	@test -f "$(MX4SIO_BD_IRX_PATH)" || (echo "ERROR: required MX4SIO IRX not found: $(MX4SIO_BD_IRX_PATH)"; exit 1)
 
 $(OBJ_DIR):
 	@mkdir -p "$(OBJ_DIR)"

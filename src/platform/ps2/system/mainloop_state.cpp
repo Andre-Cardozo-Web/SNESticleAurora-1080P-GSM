@@ -546,7 +546,7 @@ Bool MainLoopStateDeviceAvailable(MainLoopStateDeviceE eDevice)
             return TRUE;
 
         case MAINLOOP_STATEDEVICE_MMCE:
-            return MmceSupportIsEnabled() ? TRUE : FALSE;
+            return MmceProbeAvailableSlots() ? TRUE : FALSE;
 
         case MAINLOOP_STATEDEVICE_HDD:
             return HddSupportIsEnabled() &&
@@ -965,13 +965,12 @@ static Int32 _MainLoopStateBuildRoots(
     Int32 nRoots = 0;
     Char Root[16];
     Bool bAuto = eDevice == MAINLOOP_STATEDEVICE_AUTO;
-    Bool bMMCEReady = FALSE;
+    Int32 iMMCESlots = 0;
 
     if ((bAuto || eDevice == MAINLOOP_STATEDEVICE_MMCE) &&
-        MmceSupportIsEnabled() &&
-        MmceLoadEmbeddedIrx() == 0)
+        MmceSupportIsEnabled())
     {
-        bMMCEReady = TRUE;
+        iMMCESlots = MmceProbeAvailableSlots();
     }
 
     /* Auto starts with the ROM's own device.  This also covers mass2+,
@@ -986,8 +985,9 @@ static Int32 _MainLoopStateBuildRoots(
         {
             _MainLoopStateAddRoot(pRoots, &nRoots, Root, Root, TRUE);
         }
-        else if (bMMCEReady &&
-                 _MainLoopStateIsMMCERoot(_RomPath, Root, sizeof(Root)))
+        else if (_MainLoopStateIsMMCERoot(_RomPath, Root, sizeof(Root)) &&
+                 Root[4] >= '0' && Root[4] <= '1' &&
+                 (iMMCESlots & (1 << (Root[4] - '0'))))
         {
             _MainLoopStateAddRoot(pRoots, &nRoots, Root, Root, TRUE);
         }
@@ -1013,8 +1013,9 @@ static Int32 _MainLoopStateBuildRoots(
         _MainLoopStateAddRoot(pRoots, &nRoots, Root, Root, TRUE);
     }
     else if (eDevice == MAINLOOP_STATEDEVICE_MMCE &&
-             bMMCEReady &&
-             _MainLoopStateIsMMCERoot(_RomPath, Root, sizeof(Root)))
+             _MainLoopStateIsMMCERoot(_RomPath, Root, sizeof(Root)) &&
+             Root[4] >= '0' && Root[4] <= '1' &&
+             (iMMCESlots & (1 << (Root[4] - '0'))))
     {
         _MainLoopStateAddRoot(pRoots, &nRoots, Root, Root, TRUE);
     }
@@ -1043,10 +1044,12 @@ static Int32 _MainLoopStateBuildRoots(
         _MainLoopStateAddRoot(pRoots, &nRoots, "mc1:", "mc1:", TRUE);
     }
 
-    if ((bAuto || eDevice == MAINLOOP_STATEDEVICE_MMCE) && bMMCEReady)
+    if (bAuto || eDevice == MAINLOOP_STATEDEVICE_MMCE)
     {
-        _MainLoopStateAddRoot(pRoots, &nRoots, "mmce0:", "mmce0:", TRUE);
-        _MainLoopStateAddRoot(pRoots, &nRoots, "mmce1:", "mmce1:", TRUE);
+        if (iMMCESlots & 1)
+            _MainLoopStateAddRoot(pRoots, &nRoots, "mmce0:", "mmce0:", TRUE);
+        if (iMMCESlots & 2)
+            _MainLoopStateAddRoot(pRoots, &nRoots, "mmce1:", "mmce1:", TRUE);
     }
 
     return nRoots;

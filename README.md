@@ -108,8 +108,9 @@ The first in-game **L2 + Cross** press opens a small, temporary **Save State
 Location** screen. Select **Auto**, **USB**, **Memory Card**, **MMCE**, or
 **Internal HDD** and press Cross: the target is remembered, the first state is
 saved, and the screen closes back to the game automatically. Press Circle to
-cancel. MMCE is shown only when its support is enabled; Internal HDD is shown
-only when the current ROM came from an enabled internal-HDD partition.
+cancel. MMCE is shown only when its support is enabled **and a device answers
+the port probe**; Internal HDD is shown only when the current ROM came from an
+enabled internal-HDD partition.
 
 Later **L2 + Cross** presses save directly and **L2 + Circle** loads directly.
 This temporary selector pauses without flushing SRAM; **L2 + R2** remains the
@@ -268,9 +269,17 @@ tables (so drives larger than 2 TB work), mirroring modern OPL. The internal
 HDD additionally uses `ps2atad` + `ps2hdd` for the APA `hdd0:` device.
 
 > **Build note:** the USB/BDM and internal‑HDD modules are embedded from your
-> `$(PS2SDK)/iop/irx`. `mmceman.irx` (MMCE) and `mx4sio_bd.irx` (MX4SIO) are
-> **optional** — they are only baked in if your PS2SDK ships them, so a missing
-> module never breaks the build (those entries just stay empty).
+> `$(PS2SDK)/iop/irx`. The complete SIO2 device group (`sio2man`, memory-card,
+> pad/multitap, MMCE and MX4SIO) is pinned to one verified PS2SDK revision
+> under [`irx/`](irx/) and is mandatory. An official build can therefore no
+> longer silently expose an empty device backed by no driver or mix
+> incompatible SIO2 modules. MMCE slots are listed only after a successful
+> hardware PING.
+>
+> MMCE and MX4SIO both hook SIO2 and are therefore mutually exclusive. Turning
+> one on turns the other setting off. If the opposite driver is already
+> resident, Video Config shows **Restart** and applies the change safely on the
+> next boot.
 >
 > Each storage module prints its load result on the boot splash
 > (`bdm.irx = 0`, `hdd (hdd0:) = N`, …), so a failure is visible in a photo of

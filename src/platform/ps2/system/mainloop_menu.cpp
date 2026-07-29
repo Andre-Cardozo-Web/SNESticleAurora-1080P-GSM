@@ -167,8 +167,10 @@ static Bool _MainLoopStateManagerStorageAvailable(Int32 iStorage)
                         return MassStorageIsEnabled() ? TRUE : FALSE;
 
                 case MAINLOOP_STATEMANAGER_MMCE0:
+                        return (MmceProbeAvailableSlots() & 1) ? TRUE : FALSE;
+
                 case MAINLOOP_STATEMANAGER_MMCE1:
-                        return MmceSupportIsEnabled() ? TRUE : FALSE;
+                        return (MmceProbeAvailableSlots() & 2) ? TRUE : FALSE;
 
                 case MAINLOOP_STATEMANAGER_HDD:
                         return HddSupportIsEnabled() ? TRUE : FALSE;

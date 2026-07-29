@@ -6,7 +6,6 @@
 #include <sifrpc.h>
 #include <loadfile.h>
 #include <kernel.h>
-#include <iopheap.h>
 #include <iopcontrol.h>
 #include <sbv_patches.h>
 #define NEWLIB_PORT_AWARE
@@ -71,9 +70,6 @@ extern "C" void _ps2sdk_fileXio_init(void);
 
 
 
-const char *updateloader = "rom0:UDNL ";
-const char *eeloadcnf = "rom0:EELOADCNF";
-
 static char *_Main_pBootPath;
 static char _Main_BootDir[256];
 
@@ -107,54 +103,6 @@ void MainSetBootDir(const char *pPath)
 	_Main_BootDir[i] = 0;
 }
 
-/* Reset the IOP and all of its subsystems.
-
-   Only reachable when booted from a memory card (see main()), which is
-   not the common ELF/ISO path on emulators.  We still avoid the legacy
-   custom CDVD.IRX RPC here for the same reason described next to the
-   removed cdvdInit() call in main() below: the modern cdfs.irx loaded
-   by ps2_drivers does not register the cdvd RPC at 0x80000592 that the
-   in-tree cdvdInit() expects, so calling it spins forever in
-   SifBindRpc.  All the cdfs cleanup we used to do here is now folded
-   into deinit_ps2_filesystem_driver(). */
-int full_reset()
-{
-	char imgcmd[64];
-	FILE *fp;
-
-	/* rom0:EELOADCNF is served by the BIOS rom0 device, which iomanX in
-	   fileXio.irx exposes to newlib stdio.  Older Japanese models don't
-	   have EELOADCNF, so we fall back on the default image if so. */
-	*imgcmd = '\0';
-
-	if ((fp = fopen(eeloadcnf, "rb")) != NULL) {
-		fclose(fp);
-
-		strcpy(imgcmd, updateloader);
-		strcat(imgcmd, eeloadcnf);
-	}
-
-	deinit_ps2_filesystem_driver();
-	SifExitIopHeap();
-	SifLoadFileExit();
-	SifExitRpc();
-
-	SifIopReset(imgcmd, 0);
-	while (!SifIopSync()) ;
-
-	SifInitRpc(0);
-	FlushCache(0);
-
-	return 0;
-}
-
-
-
-
-
-
-
-
 /* Your program's main entry point */
 int main(int argc, char **argv) 
 {
@@ -179,11 +127,19 @@ int main(int argc, char **argv)
 	   tail of init_ps2_filesystem_driver() - specifically the mcman /
 	   poweroff hand-off - hangs silently after dev9 init prints its
 	   banner.  This is exactly the sequence picodrive's plat.c follows
-	   in platform/ps2/plat.c::reset_IOP. */
+	   in platform/ps2/plat.c::reset_IOP.
+
+	   This is the one and only reset for every boot device.  The old
+	   memory-card path reset the IOP a second time after loading all drivers,
+	   erased their RPC servers, and retained stale EE "loaded" flags.  That
+	   sequence was especially fragile on Deckard-based slim consoles. */
 	// DLog("[boot] SifIopReset: enter");
-	while (!SifIopReset(NULL, 0)) {}
+	while (!SifIopReset("", 0)) {}
 	while (!SifIopSync()) {}
 	SifInitRpc(0);
+	SifLoadFileInit();
+	FlushCache(0);
+	EmbeddedIrxResetRuntimeState();
 	// DLog("[boot] SifIopReset done");
 
 	/* Patch the rom0:LOADFILE service so SifExecModuleBuffer (used by
@@ -365,25 +321,6 @@ int main(int argc, char **argv)
 	// DLog("[fxprobe] direct fileXio probe end");
 #endif
 
-	if (_Main_pBootPath[0]=='m' && _Main_pBootPath[1]=='c')
-	{
-		/* Reset the IOP if we were loaded from a memory card.
-		   We do this AFTER the filesystem stack is up because full_reset
-		   needs fopen("rom0:EELOADCNF") to work, and rom0: is only
-		   routed to newlib stdio once iomanX has been brought up. */
-		// DLog("[boot] booted from mc -> full_reset");
-		full_reset();
-		// DLog("[boot] full_reset done -> re-init filesystem");
-		init_poweroff_driver();
-		init_fileXio_driver();
-		__fileXioOpsInitializeImpl();
-		_ps2sdk_fileXio_init();
-		MemCardLoadEmbeddedIrx();
-		UsbBdmLoadEmbeddedIrx();
-		init_cdfs_driver();
-		// DLog("[boot] filesystem re-init done");
-	}
-
 	/* cdvdInit(CDVD_INIT_NOWAIT) used to live here.  It is intentionally
 	   gone now: it binds to RPC 0x80000592 (CDVD_INIT_BIND_RPC, see
 	   src/platform/ps2/cdvd/cd.c) which was served by the iaddis-era
@@ -428,4 +365,3 @@ int main(int argc, char **argv)
 
 	return 0;
 }
-

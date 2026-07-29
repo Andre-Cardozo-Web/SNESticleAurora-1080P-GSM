@@ -43,12 +43,8 @@
 #ifdef HAVE_PS2FS
 #include "ps2fs_irx.h"
 #endif
-#ifdef HAVE_MMCEMAN
 #include "mmceman_irx.h"
-#endif
-#ifdef HAVE_MX4SIO
 #include "mx4sio_bd_irx.h"
-#endif
 
 /* Log visivel no splash de boot (real hardware) -- definido em audio_audsrv.c. */
 extern "C" void ScrPrintf(const char *pFormat, ...);
@@ -163,14 +159,48 @@ extern "C" int EmbeddedIrxLoad(const unsigned char *data,
                                int                  arg_len,
                                const char          *args)
 {
-    int result = 0;
-    int ret;
+    int start_result = 1; /* MODULE_NO_RESIDENT_END until proven otherwise. */
+    int module_id;
 
     /* SifExecModuleBuffer transfers the IRX from EE RAM to IOP RAM and
-       starts it. Returns the module ID on success. */
-    ret = SifExecModuleBuffer((void *)data, size, arg_len, args, &result);
-    if (ret < 0) return ret;
-    return ret;
+       starts it.  Its return value only says that LOADFILE executed the
+       module; _start() can still reject the hardware/dependencies and return
+       MODULE_NO_RESIDENT_END (1).  The old loader discarded that second
+       result, which made MMCE/MX4SIO appear "loaded" with no live device. */
+    module_id = SifExecModuleBuffer(
+        (void *)data,
+        size,
+        arg_len,
+        args,
+        &start_result
+    );
+    if (module_id < 0)
+    {
+        return module_id;
+    }
+
+    /* Standard IRX results are 0=resident, 1=not resident and 2=resident
+       but removable.  Keep compatibility with modules that use another
+       positive resident value; only 1 and negative errors mean failure. */
+    if (start_result < 0)
+    {
+        printf(
+            "EmbeddedIrxLoad: module %d _start failed (%d)\n",
+            module_id,
+            start_result
+        );
+        return start_result;
+    }
+    if (start_result == 1)
+    {
+        printf(
+            "EmbeddedIrxLoad: module %d did not stay resident\n",
+            module_id
+        );
+        return EMBEDDED_IRX_ERROR_NOT_RESIDENT;
+    }
+
+    return module_id;
 }
 
 /* Memory-card stack bring-up.
@@ -246,31 +276,69 @@ extern "C" int MemCardLoadEmbeddedIrx(void)
  * NAO usa dev9 (so' USB), entao nao tem o risco de travar boot do HD
  * interno.  Cada passo loga via ScrPrintf, visivel no splash de boot --
  * se der b.o., a ultima linha na tela mostra qual modulo falhou. */
+static int s_usb_bdm_loaded_result = 1; /* 1 = not yet attempted */
+static int s_dev9_loaded_result = 1;    /* shared by HDD and network */
+
+static int Dev9LoadEmbeddedIrxOnce(void)
+{
+    int ret;
+
+    if (s_dev9_loaded_result != 1)
+        return s_dev9_loaded_result;
+
+    ret = EmbeddedIrxLoad(ps2dev9_irx, sizeof(ps2dev9_irx), 0, NULL);
+    if (ret < 0)
+    {
+        s_dev9_loaded_result = ret;
+        return s_dev9_loaded_result;
+    }
+
+    s_dev9_loaded_result = 0;
+    return s_dev9_loaded_result;
+}
+
 extern "C" int UsbBdmLoadEmbeddedIrx(void)
 {
     int ret;
 
+    if (s_usb_bdm_loaded_result != 1)
+        return s_usb_bdm_loaded_result;
+
     ret = EmbeddedIrxLoad(usbd_irx, sizeof(usbd_irx), 0, NULL);
     BootImport("usbd", ret);
-    if (ret < 0) { printf("UsbBdm: usbd.irx failed (%d)\n", ret); return -1; }
+    if (ret < 0)
+    {
+        printf("UsbBdm: usbd.irx failed (%d)\n", ret);
+        s_usb_bdm_loaded_result = -1;
+        return s_usb_bdm_loaded_result;
+    }
 
     ret = EmbeddedIrxLoad(bdm_irx, sizeof(bdm_irx), 0, NULL);
     BootImport("bdm", ret);
-    if (ret < 0) { printf("UsbBdm: bdm.irx failed (%d)\n", ret); return -2; }
+    if (ret < 0)
+    {
+        printf("UsbBdm: bdm.irx failed (%d)\n", ret);
+        s_usb_bdm_loaded_result = -2;
+        return s_usb_bdm_loaded_result;
+    }
 
     ret = EmbeddedIrxLoad(bdmfs_fatfs_irx, sizeof(bdmfs_fatfs_irx), 0, NULL);
     BootImport("bdmfs_fatfs", ret);
-    if (ret < 0) { printf("UsbBdm: bdmfs_fatfs.irx failed (%d)\n", ret); return -3; }
+    if (ret < 0)
+    {
+        printf("UsbBdm: bdmfs_fatfs.irx failed (%d)\n", ret);
+        s_usb_bdm_loaded_result = -3;
+        return s_usb_bdm_loaded_result;
+    }
 
     ret = EmbeddedIrxLoad(usbmass_bd_irx, sizeof(usbmass_bd_irx), 0, NULL);
     BootImport("usbmass_bd", ret);
-    if (ret < 0) { printf("UsbBdm: usbmass_bd.irx failed (%d)\n", ret); return -4; }
-
-#ifdef HAVE_MX4SIO
-    /* MX4SIO saiu do boot: agora carrega DEPOIS da config (Mx4sioLoadIfEnabled,
-       chamado em mainloop_init), e so' se o suporte a Mass estiver ligado.
-       Evita tocar o SIO2 no boot de quem nao usa o adaptador SD. */
-#endif
+    if (ret < 0)
+    {
+        printf("UsbBdm: usbmass_bd.irx failed (%d)\n", ret);
+        s_usb_bdm_loaded_result = -4;
+        return s_usb_bdm_loaded_result;
+    }
 
     /* HD INTERNO (APA): dev9 + ps2atad + ps2hdd -- DESABILITADO no boot.
      *
@@ -292,13 +360,8 @@ extern "C" int UsbBdmLoadEmbeddedIrx(void)
      *   ret = EmbeddedIrxLoad(ps2hdd_irx,  sizeof(ps2hdd_irx),  0, NULL);
      */
 
-#ifdef HAVE_MMCEMAN
-    /* MMCE (MemCard PRO2 / SD2PSX) NAO carrega mais no boot.  Agora e'
-       opcional e preguicoso, igual ao HDD (ver MmceLoadEmbeddedIrx):
-       evita ocupar RAM do IOP e tocar o SIO2 no boot de quem nao usa. */
-#endif
-
-    return 0;
+    s_usb_bdm_loaded_result = 0;
+    return s_usb_bdm_loaded_result;
 }
 
 /* HD INTERNO (APA) -- carga PREGUICOSA e opcional.
@@ -312,6 +375,7 @@ extern "C" int UsbBdmLoadEmbeddedIrx(void)
  * OPL: padrao DESLIGADO, quem tem HD liga. */
 static int s_hdd_enabled = 0;   /* toggle (persistido no video.cfg) */
 static int s_hdd_loaded  = 0;   /* modulos ja carregados nesta sessao */
+static char s_hdd_mounted[128] = { 0 };
 
 extern "C" int HddSupportIsEnabled(void)
 {
@@ -341,17 +405,25 @@ extern "C" int HddLoadEmbeddedIrx(void)
     static const char hddarg[] = "-o\0" "4\0" "-n\0" "20";   /* 4 open, 20 buffers */
     static const char pfsarg[] = "-m\0" "4\0" "-o\0" "10\0" "-n\0" "40"; /* 4 mount, 10 open, 40 buf */
 
-    ret = EmbeddedIrxLoad(ps2dev9_irx, sizeof(ps2dev9_irx), 0, NULL);
+    ret = Dev9LoadEmbeddedIrxOnce();
     printf("HddLoad: dev9 = %d\n", ret);
+    if (ret < 0) return -1;
+
     ret = EmbeddedIrxLoad(ps2atad_irx, sizeof(ps2atad_irx), 0, NULL);
     printf("HddLoad: atad = %d\n", ret);
+    if (ret < 0) return -2;
+
     ret = EmbeddedIrxLoad(ps2hdd_irx,  sizeof(ps2hdd_irx),  sizeof(hddarg), hddarg);
     printf("HddLoad: hdd  = %d\n", ret);
+    if (ret < 0) return -3;
+
 #ifdef HAVE_PS2FS
     ret = EmbeddedIrxLoad(ps2fs_irx,   sizeof(ps2fs_irx),   sizeof(pfsarg), pfsarg);
     printf("HddLoad: pfs  = %d\n", ret);
+    if (ret < 0) return -4;
 #else
     printf("HddLoad: pfs  = (nao embutido)\n");
+    return -4;
 #endif
 
     s_hdd_loaded = 1;
@@ -369,8 +441,6 @@ extern "C" int HddLoadEmbeddedIrx(void)
  * Mantem uma unica particao montada de cada vez (pfs0:). */
 extern "C" int HddMapPath(const char *uiPath, char *out, int outsz)
 {
-    static char s_mounted[128] = { 0 };
-
     if (!uiPath || strncmp(uiPath, "hdd0:", 5) != 0)
         return 0;
 
@@ -388,15 +458,19 @@ extern "C" int HddMapPath(const char *uiPath, char *out, int outsz)
     part[i] = 0;
     const char *rest = p + i;            /* "/sub/..." ou "" */
 
-    if (strcmp(s_mounted, part) != 0)    /* montar/remontar pfs0: */
+    if (strcmp(s_hdd_mounted, part) != 0)    /* montar/remontar pfs0: */
     {
-        if (s_mounted[0]) { fileXioUmount("pfs0:"); s_mounted[0] = 0; }
+        if (s_hdd_mounted[0])
+        {
+            fileXioUmount("pfs0:");
+            s_hdd_mounted[0] = 0;
+        }
         char dev[160];
         snprintf(dev, sizeof(dev), "hdd0:%s", part);
         if (fileXioMount("pfs0:", dev, FIO_MT_RDWR) < 0)
             return -1;
-        strncpy(s_mounted, part, sizeof(s_mounted) - 1);
-        s_mounted[sizeof(s_mounted) - 1] = 0;
+        strncpy(s_hdd_mounted, part, sizeof(s_hdd_mounted) - 1);
+        s_hdd_mounted[sizeof(s_hdd_mounted) - 1] = 0;
     }
 
     if (out && outsz)
@@ -404,12 +478,32 @@ extern "C" int HddMapPath(const char *uiPath, char *out, int outsz)
     return 1;
 }
 
-/* MMCE (MemCard PRO2 / SD2PSX via mmceman) -- carga PREGUICOSA e opcional,
- * mesma logica do HDD.  So' carrega mmceman.irx quando o usuario entra em
- * mmce0:/mmce1:, e so' se o toggle estiver ligado.  Mantem o IOP/SIO2
- * livres no boot de quem nao usa esses cartoes modificados. */
-static int s_mmce_enabled = 0;   /* toggle (persistido no video.cfg) */
-static int s_mmce_loaded  = 0;   /* mmceman ja carregado nesta sessao */
+/* MMCE and MX4SIO both hook the active sio2man transport.  wLaunchELF builds
+ * either feature against the same homebrew SIO2 stack; dynamically stacking
+ * both hooks is unsafe and has caused SIO2 deadlocks on real hardware.
+ *
+ * One backend therefore owns SIO2 for the rest of this IOP session.  Changing
+ * the configured backend is still allowed, but takes effect after reboot,
+ * where the normal single IOP reset starts from a clean module table. */
+enum StorageSio2Backend
+{
+    STORAGE_SIO2_NONE = 0,
+    STORAGE_SIO2_MMCE,
+    STORAGE_SIO2_MX4SIO
+};
+
+enum { MMCE_DEVCTL_PING = 0x01 };
+
+static int s_storage_sio2_backend = STORAGE_SIO2_NONE;
+
+static int s_mmce_enabled    = 0;  /* toggle persisted in video.cfg */
+static int s_mmce_loaded     = 0;
+static int s_mmce_slot_mask  = -1; /* -1 = not probed, bits 0/1 = ports */
+static int s_mmce_last_error = 0;
+
+static int s_mx4sio_enabled    = 0;
+static int s_mx4sio_loaded     = 0;
+static int s_mx4sio_last_error = 0;
 
 extern "C" int MmceSupportIsEnabled(void)
 {
@@ -418,25 +512,113 @@ extern "C" int MmceSupportIsEnabled(void)
 
 extern "C" void MmceSupportSetEnabled(int enabled)
 {
-    s_mmce_enabled = enabled ? 1 : 0;
+    int next = enabled ? 1 : 0;
+
+    if (next != s_mmce_enabled)
+    {
+        s_mmce_slot_mask = -1;
+        s_mmce_last_error = 0;
+    }
+    s_mmce_enabled = next;
+
+    /* The newly selected backend wins old configs that accidentally enabled
+       both features.  An already resident opposite backend is not unloaded;
+       MmceNeedsRestart() reports that safe pending state. */
+    if (next)
+    {
+        s_mx4sio_enabled = 0;
+    }
 }
 
 extern "C" int MmceLoadEmbeddedIrx(void)
 {
-    if (!s_mmce_enabled) return -1;   /* desligado: nem tenta */
-    if (s_mmce_loaded)   return 0;    /* ja carregado: no-op */
+    int ret;
 
-#ifdef HAVE_MMCEMAN
+    if (!s_mmce_enabled) return -1;
+    if (s_mmce_loaded)   return 0;
+
+    if (s_storage_sio2_backend == STORAGE_SIO2_MX4SIO)
     {
-        int ret = EmbeddedIrxLoad(mmceman_irx, sizeof(mmceman_irx), 0, NULL);
-        printf("MmceLoad: mmceman = %d\n", ret);
-        s_mmce_loaded = 1;
+        s_mmce_last_error = EMBEDDED_IRX_ERROR_RESTART_REQUIRED;
+        return s_mmce_last_error;
+    }
+
+    ret = EmbeddedIrxLoad(mmceman_irx, sizeof(mmceman_irx), 0, NULL);
+    printf("MmceLoad: mmceman = %d\n", ret);
+    if (ret < 0)
+    {
+        s_mmce_last_error = ret;
+        return ret;
+    }
+
+    s_mmce_loaded = 1;
+    s_mmce_slot_mask = -1;
+    s_mmce_last_error = 0;
+    s_storage_sio2_backend = STORAGE_SIO2_MMCE;
+    return 0;
+}
+
+extern "C" int MmceProbeAvailableSlots(void)
+{
+    int slot;
+    int mask = 0;
+
+    if (MmceLoadEmbeddedIrx() < 0)
+    {
         return 0;
     }
-#else
-    /* mmceman.irx nao foi embutido neste build (PS2SDK sem o modulo). */
-    return -2;
-#endif
+    if (s_mmce_slot_mask >= 0)
+    {
+        return s_mmce_slot_mask;
+    }
+
+    /* MMCEMAN command 1 is MMCE_CMD_PING.  Loading the IRX only proves that
+       its SIO2 hook and filesystem registered; this command proves that an
+       MMCE device actually answered on the corresponding physical port. */
+    for (slot = 0; slot < 2; slot++)
+    {
+        char device[] = "mmce0:";
+        int ping_result;
+
+        device[4] = (char)('0' + slot);
+        ping_result = fileXioDevctl(
+            device,
+            MMCE_DEVCTL_PING,
+            NULL,
+            0,
+            NULL,
+            0
+        );
+        printf("MmceProbe: %s ping = %d\n", device, ping_result);
+        if (ping_result >= 0)
+        {
+            mask |= 1 << slot;
+        }
+    }
+
+    s_mmce_slot_mask = mask;
+    return s_mmce_slot_mask;
+}
+
+extern "C" int MmceGetAvailableSlots(void)
+{
+    return s_mmce_slot_mask < 0 ? 0 : s_mmce_slot_mask;
+}
+
+extern "C" int MmceIsLoaded(void)
+{
+    return s_mmce_loaded;
+}
+
+extern "C" int MmceGetLastError(void)
+{
+    return s_mmce_last_error;
+}
+
+extern "C" int MmceNeedsRestart(void)
+{
+    return s_mmce_enabled &&
+           s_storage_sio2_backend == STORAGE_SIO2_MX4SIO;
 }
 
 /* ------------------------------------------------------------------------
@@ -458,35 +640,68 @@ extern "C" void MassStorageSetEnabled(int e) { s_mass_enabled = e ? 1 : 0; }
 extern "C" int  HostIsEnabled(void)          { return s_host_enabled; }
 extern "C" void HostSetEnabled(int e)        { s_host_enabled = e ? 1 : 0; }
 
-/* MX4SIO (cartao SD pela porta de memory card / SIO2) -> aparece como um
- * massN: (block device BDM).  Tirado do boot: carrega DEPOIS da config
- * (chamado em mainloop_init), e so' se o suporte a Mass estiver ligado.
- * Carga unica. */
-static int s_mx4sio_loaded = 0;
-/* MX4SIO num toggle PROPRIO (separado do Mass/USB), padrao DESLIGADO.  O
- * mx4sio_bd.irx fica sondando o SIO2 atras de um cartao SD; quem nao tem o
- * adaptador nao deve carregar (evita o flood de "Trying to init card" e os
- * "Unhandled SIO mode" do emulador).  USB Mass (usbmass_bd) e' independente. */
-static int s_mx4sio_enabled = 0;
+extern "C" int Mx4sioIsEnabled(void)
+{
+    return s_mx4sio_enabled;
+}
 
-extern "C" int  Mx4sioIsEnabled(void)        { return s_mx4sio_enabled; }
-extern "C" void Mx4sioSetEnabled(int en)     { s_mx4sio_enabled = en ? 1 : 0; }
+extern "C" void Mx4sioSetEnabled(int enabled)
+{
+    int next = enabled ? 1 : 0;
+
+    if (next != s_mx4sio_enabled)
+    {
+        s_mx4sio_last_error = 0;
+    }
+    s_mx4sio_enabled = next;
+    if (next)
+    {
+        s_mmce_enabled = 0;
+        s_mmce_slot_mask = -1;
+    }
+}
 
 extern "C" int Mx4sioLoadIfEnabled(void)
 {
-    if (!s_mx4sio_enabled) return -1; /* toggle MX4SIO desligado (padrao) */
-    if (s_mx4sio_loaded) return 0;    /* ja carregado */
+    int ret;
 
-#ifdef HAVE_MX4SIO
+    if (!s_mx4sio_enabled) return -1;
+    if (s_mx4sio_loaded)   return 0;
+
+    if (s_storage_sio2_backend == STORAGE_SIO2_MMCE)
     {
-        int ret = EmbeddedIrxLoad(mx4sio_bd_irx, sizeof(mx4sio_bd_irx), 0, NULL);
-        printf("Mx4sioLoad: mx4sio_bd = %d\n", ret);
-        s_mx4sio_loaded = 1;
-        return 0;
+        s_mx4sio_last_error = EMBEDDED_IRX_ERROR_RESTART_REQUIRED;
+        return s_mx4sio_last_error;
     }
-#else
-    return -2;   /* mx4sio_bd.irx nao embutido neste build */
-#endif
+
+    ret = EmbeddedIrxLoad(mx4sio_bd_irx, sizeof(mx4sio_bd_irx), 0, NULL);
+    printf("Mx4sioLoad: mx4sio_bd = %d\n", ret);
+    if (ret < 0)
+    {
+        s_mx4sio_last_error = ret;
+        return ret;
+    }
+
+    s_mx4sio_loaded = 1;
+    s_mx4sio_last_error = 0;
+    s_storage_sio2_backend = STORAGE_SIO2_MX4SIO;
+    return 0;
+}
+
+extern "C" int Mx4sioIsLoaded(void)
+{
+    return s_mx4sio_loaded;
+}
+
+extern "C" int Mx4sioGetLastError(void)
+{
+    return s_mx4sio_last_error;
+}
+
+extern "C" int Mx4sioNeedsRestart(void)
+{
+    return s_mx4sio_enabled &&
+           s_storage_sio2_backend == STORAGE_SIO2_MMCE;
 }
 
 /* Network IRX stack bring-up.
@@ -540,7 +755,7 @@ extern "C" int NetIfLoadEmbeddedIrx(void)
 
     if (s_netif_loaded_result != 1) return s_netif_loaded_result;
 
-    ret = EmbeddedIrxLoad(ps2dev9_irx, sizeof(ps2dev9_irx), 0, NULL);
+    ret = Dev9LoadEmbeddedIrxOnce();
     if (ret < 0)
     {
         printf("NetIfLoadEmbeddedIrx: ps2dev9.irx failed (%d)\n", ret);
@@ -641,4 +856,26 @@ extern "C" int PadLoadEmbeddedIrx(void)
 
     s_pad_loaded_result = 0;
     return 0;
+}
+
+extern "C" void EmbeddedIrxResetRuntimeState(void)
+{
+    /* An IOP reset destroys every resident module and mount.  Keeping any of
+       these EE-side caches set would skip a required reload and leave callers
+       talking to RPC services that no longer exist. */
+    s_memcard_loaded = 0;
+    s_usb_bdm_loaded_result = 1;
+    s_dev9_loaded_result = 1;
+    s_hdd_loaded = 0;
+    s_hdd_mounted[0] = 0;
+
+    s_mmce_loaded = 0;
+    s_mmce_slot_mask = -1;
+    s_mmce_last_error = 0;
+    s_mx4sio_loaded = 0;
+    s_mx4sio_last_error = 0;
+    s_storage_sio2_backend = STORAGE_SIO2_NONE;
+
+    s_netif_loaded_result = 1;
+    s_pad_loaded_result = 1;
 }

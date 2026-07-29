@@ -91,6 +91,12 @@ void VideoSettingsLoad(void)
 	if (MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg)) &&
 	    cfg.magic == VIDEOCFG_MAGIC && cfg.version == VIDEOCFG_VERSION)
 	{
+		/* v1.0.2 allowed both SIO2 storage hooks to be saved at once.
+		   Prefer MMCE when importing such a legacy config; all new changes
+		   are mutually exclusive in the setters below. */
+		if (cfg.mmceenable == 1 && cfg.mx4sioenable == 1)
+			cfg.mx4sioenable = 0;
+
 		if (cfg.mode >= 0 && cfg.mode < GSK_VIDMODE_COUNT)
 			g_GskVideoMode = cfg.mode;
 
@@ -149,6 +155,30 @@ static void _VideoHeader(int vy, const char *pStr)
 	PolyRect(32, vy, 256 - 64, 9);
 	FontColor4f(0.0f, 0.8f, 0.8f, 1.0f);
 	_VideoCenter(128, vy, pStr);
+}
+
+static const char *_VideoMmceStatus()
+{
+	int slots;
+
+	if (!MmceSupportIsEnabled()) return "Off";
+	if (MmceNeedsRestart())      return "Restart";
+	if (MmceGetLastError() < 0)  return "Driver Error";
+	if (!MmceIsLoaded())         return "On";
+
+	slots = MmceGetAvailableSlots();
+	if (slots == 1) return "Slot 1";
+	if (slots == 2) return "Slot 2";
+	if (slots == 3) return "Slots 1+2";
+	return "Not Found";
+}
+
+static const char *_VideoMx4sioStatus()
+{
+	if (!Mx4sioIsEnabled())       return "Off";
+	if (Mx4sioNeedsRestart())     return "Restart";
+	if (Mx4sioGetLastError() < 0) return "Driver Error";
+	return Mx4sioIsLoaded() ? "On" : "Enabled";
 }
 
 void CVideoScreen::Draw()
@@ -212,11 +242,11 @@ void CVideoScreen::Draw()
 		_VideoRow(vy, 10, m_iSelect, "HDD Support",
 		          HddSupportIsEnabled() ? "On" : "Off"); vy += 12;
 		_VideoRow(vy, 11, m_iSelect, "MMCE Cards",
-		          MmceSupportIsEnabled() ? "On" : "Off"); vy += 12;
+		          _VideoMmceStatus()); vy += 12;
 		_VideoRow(vy, 12, m_iSelect, "Host (PC link)",
 		          HostIsEnabled() ? "On" : "Off"); vy += 12;
 		_VideoRow(vy, 13, m_iSelect, "MX4SIO (SD)",
-		          Mx4sioIsEnabled() ? "On" : "Off"); vy += 12;
+		          _VideoMx4sioStatus()); vy += 12;
 	}
 
 	/* controls / hints (clear of the vy=215 footer) */
@@ -229,6 +259,11 @@ void CVideoScreen::Draw()
 	{
 		FontColor4f(1.0f, 0.88f, 0.46f, 1.0f);
 		_VideoCenter(128, vy, "mode applies after reboot");
+	}
+	else if (MmceNeedsRestart() || Mx4sioNeedsRestart())
+	{
+		FontColor4f(1.0f, 0.88f, 0.46f, 1.0f);
+		_VideoCenter(128, vy, "storage applies after reboot");
 	}
 }
 
@@ -326,6 +361,8 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 
 		case 11: /* MMCE (mmce0/1) on/off -- lista + carga preguicosa. */
 			MmceSupportSetEnabled(!MmceSupportIsEnabled());
+			if (MmceSupportIsEnabled())
+				MmceProbeAvailableSlots();
 			break;
 
 		case 12: /* Host (host:) on/off -- so' lista a entrada (sem modulo). */
@@ -336,6 +373,8 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		            Padrao OFF: quem nao tem o adaptador evita o flood de
 		            sondagem do SIO2.  Independente do Mass/USB. */
 			Mx4sioSetEnabled(!Mx4sioIsEnabled());
+			if (Mx4sioIsEnabled())
+				Mx4sioLoadIfEnabled();
 			break;
 		}
 	}

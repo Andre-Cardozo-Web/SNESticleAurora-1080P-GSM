@@ -1231,6 +1231,7 @@ void CBrowserScreen::SetDir(const Char *pDir)
     const Char *openPath = pDir;
     /* 0=nao-hdd, 1=dentro de particao (pfs0:), 2=lista de particoes, -1=falha */
     int hddKind = 0;
+    int mmceUnavailable = 0;
 
     DLog("[ui] SetDir enter: '%s'", pDir);
 
@@ -1245,10 +1246,15 @@ void CBrowserScreen::SetDir(const Char *pDir)
 		if (hddKind == 1) openPath = openBuf;   /* "pfs0:/..." */
 	}
 
-	/* Idem para MMCE (MemCard PRO2 / SD2PSX): carrega mmceman ao entrar
-	   em mmce0:/mmce1:, nunca no boot. */
+	/* MMCE is not considered present merely because mmceman registered.
+	   Validate the requested physical port with MMCE_CMD_PING first. */
 	if (pDir[0] == 'm' && pDir[1] == 'm' && pDir[2] == 'c' && pDir[3] == 'e')
-		MmceLoadEmbeddedIrx();
+	{
+		int slot = pDir[4] - '0';
+		int slots = MmceProbeAvailableSlots();
+		if (slot < 0 || slot > 1 || !(slots & (1 << slot)))
+			mmceUnavailable = 1;
+	}
 
 	ResetEntries();
 
@@ -1261,6 +1267,11 @@ void CBrowserScreen::SetDir(const Char *pDir)
 
 	ForceDraw();
 
+	if (mmceUnavailable)
+	{
+		DLog("[ui] MMCE path unavailable: '%s'", pDir);
+		return;
+	}
 
 	if (hddKind == 2)
 	{
@@ -1388,14 +1399,18 @@ void CBrowserScreen::SetDir(const Char *pDir)
            feita em SetDir() ao entrar -- nunca no boot. */
         if (HddSupportIsEnabled())
             AddEntry("hdd0:", BROWSER_ENTRYTYPE_DRIVE, 0);
-        /* MMCE (MemCard PRO2 / SD2PSX): so' listado se o toggle estiver
-           ligado; mmceman carrega preguicoso ao entrar (ver SetDir). */
+        /* A registered mmceman driver is not proof of hardware.  PING both
+           physical ports and list only devices that actually answered. */
         if (MmceSupportIsEnabled())
-            AddEntry("mmce0:", BROWSER_ENTRYTYPE_DRIVE, 0);
+        {
+            int mmceSlots = MmceProbeAvailableSlots();
+            if (mmceSlots & 1)
+                AddEntry("mmce0:", BROWSER_ENTRYTYPE_DRIVE, 0);
+            if (mmceSlots & 2)
+                AddEntry("mmce1:", BROWSER_ENTRYTYPE_DRIVE, 0);
+        }
         AddEntry("mc0:", BROWSER_ENTRYTYPE_DRIVE, 0);
         AddEntry("mc1:", BROWSER_ENTRYTYPE_DRIVE, 0);
-        if (MmceSupportIsEnabled())
-            AddEntry("mmce1:", BROWSER_ENTRYTYPE_DRIVE, 0);
 //        AddEntry("rom:", BROWSER_ENTRYTYPE_DRIVE, 0);
 	}
 
