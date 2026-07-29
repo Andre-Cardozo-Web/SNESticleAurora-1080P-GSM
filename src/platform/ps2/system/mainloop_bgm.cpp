@@ -1,10 +1,10 @@
 /* mainloop_bgm.cpp
  *
- * Trilha sonora de fundo do menu (.mod / .xm) via jar_mod / jar_xm.
+ * Trilha sonora de fundo do menu (.mod / .xm) via libxmp-lite.
  *
  * Arquitetura (igual ao resto do projeto): sem thread.  A cada frame de
  * menu, MainLoopRender chama BgmUpdate(), que gera PCM na EE com o
- * player de tracker e empurra para o audsrv via Aud_Enqueue().  Durante
+ * player de tracker e empurra para o audsrv via Aud_Enqueue(). Durante
  * o menu o core do SNES/NES nao roda, entao o BGM e' o unico produtor
  * de audio -- nao briga com o AudMixBuffer do jogo.
  *
@@ -13,14 +13,11 @@
  * playlist: ao terminar uma faixa avanca para a proxima (e ao sair de uma
  * ROM, via BgmNext, tambem avanca para dar variedade).
  *
- * Players de terceiros:
- *   jar_mod.h  - dominio publico (unlicense), Joshua Reisenauer/mackron
- *   jar_xm.h   - WTFPL, Joshua Reisenauer / Romain Dalmaso
- * As unidades de implementacao ficam em src/third_party/jar/jar_*.c.
- * Aqui incluimos APENAS jar_mod.h (header limpo, so declaracoes); para
- * o XM forward-declaramos as funcoes que usamos, porque a parte publica
- * do jar_xm.h define corpos de funcao (geraria simbolo duplicado se
- * incluido em mais de um .o).
+ * O player anterior (jar_mod/jar_xm) implementava apenas parte dos efeitos
+ * de tracker e tinha erros em sample loops/pattern loops. libxmp-lite e'
+ * usado por um port nativo de PS2 e preserva as regras ProTracker/FastTracker
+ * para que andamento, instrumentos, E6 loops e saltos de pattern sejam
+ * reproduzidos como no tracker original.
  */
 
 #include <stdio.h>
@@ -37,28 +34,8 @@ extern "C" {
 #include "audio.h"
 }
 
-/* jar_mod.h: header limpo, da' a struct de contexto e as declaracoes. */
-#include "jar_mod.h"
-
-/* jar_xm: tipo opaco + so as funcoes que usamos (ver comentario acima). */
 extern "C" {
-    struct jar_xm_context_s;
-    typedef struct jar_xm_context_s jar_xm_context_t;
-    int  jar_xm_create_context_safe(jar_xm_context_t **ctx, const char *moddata,
-                                    size_t moddata_length, unsigned int rate);
-    void jar_xm_free_context(jar_xm_context_t *ctx);
-    void jar_xm_generate_samples(jar_xm_context_t *ctx, float *output,
-                                 size_t numsamples);
-    void jar_xm_generate_samples_16bit(jar_xm_context_t *ctx, short *output,
-                                       size_t numsamples);
-    void jar_xm_set_max_loop_count(jar_xm_context_t *ctx, unsigned char loopcnt);
-    /* numero de vezes que o modulo ja' deu a volta inteira (loop).  Usado
-       para detectar fim de faixa e avancar para a proxima (playlist). */
-    unsigned char jar_xm_get_loop_count(jar_xm_context_t *ctx);
-    /* liga/desliga interpolacao linear.  Desligada (nearest) e' mais barata
-       por sample -- usada no PS2 p/ segurar modulos de muitos canais (32ch)
-       em tempo real. */
-    void jar_xm_set_linear_interpolation(jar_xm_context_t *ctx, int enable);
+#include "xmp.h"
 }
 
 #include "mainloop_bgm.h"
@@ -174,9 +151,7 @@ static int  s_gapFrames = 0;           /* frames de silencio na troca de faixa *
 static const int s_rateList[] = { 16000, 22050, 24000, 32000, 38000, 44100, 48000 };
 #define BGM_RATE_COUNT ((int)(sizeof(s_rateList) / sizeof(s_rateList[0])))
 
-static jar_mod_context_t  s_mod;       /* contexto do tocador de MOD      */
-static jar_xm_context_t  *s_xm  = NULL;/* contexto do tocador de XM       */
-static char              *s_xmBuf = NULL; /* buffer do arquivo .xm (vivo) */
+static xmp_context s_xmp = NULL;       /* um player correto para MOD e XM */
 
 /* Indice (cache) de TODAS as faixas .mod/.xm achadas -- escaneado UMA vez
    (sem reler o disco toda hora).  s_trackIdx aponta a faixa atual; e'
@@ -197,9 +172,14 @@ static unsigned int s_discScanFrames  = 0;
 static int          s_discStablePolls = 0;
 static char         s_bootBgm[256];
 
-/* buffers de geracao (estaticos: evitam pressao de pilha na EE) */
-static short s_inter[BGM_OUT_CHUNK * 2] __attribute__((aligned(64))); /* 48k L,R,L,R */
-static float s_xmf  [BGM_OUT_CHUNK * 2] __attribute__((aligned(64))); /* scratch XM float */
+/* Buffer-fonte na taxa do tracker e estado do reamostrador CONTINUO.
+   O codigo antigo reiniciava a fase em zero e descartava 1-2 amostras a
+   cada frame de video; isso introduzia jitter de andamento/pitch e pequenas
+   descontinuidades. Agora a fracao e as amostras restantes sobrevivem entre
+   chamadas de BgmUpdate(). */
+static short        s_inter[BGM_OUT_CHUNK * 2] __attribute__((aligned(64)));
+static int          s_sourceFrames = 0;
+static unsigned int s_resampleFrac = 0; /* fracao exata / 48000 */
 static short s_left [BGM_OUT_CHUNK]     __attribute__((aligned(64)));
 static short s_right[BGM_OUT_CHUNK]     __attribute__((aligned(64)));
 
@@ -553,6 +533,12 @@ static char *_LoadFileAlloc(const char *path, long *outLen)
 
 /* ---- carga (lazy) ---------------------------------------------------- */
 
+static void _ResetResampler(void)
+{
+    s_sourceFrames = 0;
+    s_resampleFrac = 0;
+}
+
 static void _TryLoad(void)
 {
     if (s_indexCount < 0) _BuildIndex();
@@ -576,38 +562,54 @@ static void _TryLoad(void)
         DLog("[bgm] load track[%d] kind=%d '%s'",
              s_trackIdx, kind, path);
 
-        if (kind == 1) /* MOD */
+        long len = 0;
+        char *fileBuf = _LoadFileAlloc(path, &len);
+        int loadRet = -XMP_ERROR_SYSTEM;
+        int startRet = -XMP_ERROR_STATE;
+
+        s_xmp = xmp_create_context();
+        if (fileBuf && s_xmp)
         {
-            jar_mod_init(&s_mod);             /* defaults: 48000/16/stereo */
-            jar_mod_setcfg(&s_mod, s_rate, 16, 1, 1, 1);
-            if (jar_mod_load_file(&s_mod, path) != 0)
+            loadRet = xmp_load_module_from_memory(s_xmp, fileBuf, len);
+            if (loadRet == 0)
             {
-                s_state = BGM_MOD;            /* jar_mod faz loop sozinho */
-                return;
+                startRet = xmp_start_player(s_xmp, s_rate, 0);
+                if (startRet == 0)
+                {
+                    struct xmp_module_info info;
+                    memset(&info, 0, sizeof(info));
+
+                    /* Linear custa bem menos que spline e evita o aliasing
+                       forte de nearest. O proprio loader escolhe as regras
+                       ProTracker ou FastTracker de acordo com o modulo. */
+                    xmp_set_player(s_xmp, XMP_PLAYER_INTERP,
+                                   XMP_INTERP_LINEAR);
+                    xmp_get_module_info(s_xmp, &info);
+                    DLog("[bgm] libxmp %s: %d ch, %d pattern(s), %d Hz",
+                         (info.mod && info.mod->type[0]) ?
+                             info.mod->type : "tracker",
+                         info.mod ? info.mod->chn : 0,
+                         info.mod ? info.mod->pat : 0,
+                         s_rate);
+
+                    free(fileBuf);
+                    _ResetResampler();
+                    s_state = (kind == 1) ? BGM_MOD : BGM_XM;
+                    return;
+                }
             }
-            jar_mod_unload(&s_mod);
-        }
-        else /* XM */
-        {
-            long len = 0;
-            s_xm = NULL;
-            s_xmBuf = _LoadFileAlloc(path, &len);
-            if (s_xmBuf &&
-                jar_xm_create_context_safe(&s_xm, s_xmBuf, (size_t)len,
-                                           s_rate) == 0)
-            {
-                jar_xm_set_max_loop_count(s_xm, 0); /* loop infinito */
-                /* Interpolacao linear LIGADA (default): som mais limpo.
-                   Se algum modulo de muitos canais engasgar, baixe a
-                   taxa no Video Config. */
-                s_state = BGM_XM;
-                return;
-            }
-            if (s_xm) { jar_xm_free_context(s_xm); s_xm = NULL; }
-            if (s_xmBuf) { free(s_xmBuf); s_xmBuf = NULL; }
         }
 
-        DLog("[bgm] rejected unreadable/invalid track '%s'", path);
+        if (fileBuf) free(fileBuf);
+        if (s_xmp)
+        {
+            xmp_free_context(s_xmp);
+            s_xmp = NULL;
+        }
+        _ResetResampler();
+
+        DLog("[bgm] rejected track '%s' (load=%d start=%d)",
+             path, loadRet, startRet);
         _IndexRemove(s_trackIdx);
     }
 
@@ -624,9 +626,12 @@ static void _TryLoad(void)
    sem re-esperar o dreno da cauda do jogo. */
 static void _BgmFreeDecoder(void)
 {
-    if (s_state == BGM_MOD) jar_mod_unload(&s_mod);
-    if (s_state == BGM_XM && s_xm) { jar_xm_free_context(s_xm); s_xm = NULL; }
-    if (s_xmBuf) { free(s_xmBuf); s_xmBuf = NULL; }
+    if (s_xmp)
+    {
+        xmp_free_context(s_xmp);
+        s_xmp = NULL;
+    }
+    _ResetResampler();
     s_state  = BGM_UNTRIED;
 }
 
@@ -751,7 +756,7 @@ void BgmCycleRate(int dir)
 
 void BgmUpdate(void)
 {
-    int avail, n, synthN, j;
+    int avail, n, j;
 
     static Bool s_logged = FALSE;
     if (!s_logged) { DLog("[bgm] BgmUpdate first call: vol=%d", s_volume); s_logged = TRUE; }
@@ -813,67 +818,97 @@ void BgmUpdate(void)
     if (n > BGM_OUT_CHUNK - 2) n = BGM_OUT_CHUNK - 2;
     if (n < 1) return;
 
-    /* frames a sintetizar na taxa s_rate p/ render n frames @48k (+guarda) */
-    synthN = (int)(((unsigned int)n * (unsigned int)s_rate) / 48000u) + 2;
-    if (synthN > BGM_OUT_CHUNK) synthN = BGM_OUT_CHUNK;
-    if (synthN < 2) synthN = 2;
+    /* Descobre quantos frames-fonte o reamostrador vai acessar, preservando
+       a fase exata como fracao /48000. Nao ha arredondamento cumulativo:
+       por exemplo, 44100 gera exatamente 44100 frames-fonte para cada
+       48000 frames enviados ao audsrv. */
+    {
+        unsigned long long lastPhase =
+            (unsigned long long)s_resampleFrac +
+            (unsigned long long)(n - 1) * (unsigned int)s_rate;
+        int needed = (int)(lastPhase / 48000u) + 2;
+        int append;
 
-    /* gera synthN frames interleaved (L,R,...) a s_rate em s_inter */
-    if (s_state == BGM_MOD)
-    {
-        jar_mod_fillbuffer(&s_mod, s_inter, (unsigned long)synthN, NULL);
-    }
-    else
-    {
-        /* float -> int16 na mao: evita o malloc/free por chamada que
-           jar_xm_generate_samples_16bit faz internamente. */
-        int k;
-        jar_xm_generate_samples(s_xm, s_xmf, (size_t)synthN);
-        for (k = 0; k < synthN * 2; k++)
+        if (needed > BGM_OUT_CHUNK)
+            needed = BGM_OUT_CHUNK; /* defesa para configuracoes futuras */
+
+        append = needed - s_sourceFrames;
+        if (append > 0)
         {
-            float f = s_xmf[k] * 32767.0f;
-            if (f >  32767.0f) f =  32767.0f;
-            if (f < -32768.0f) f = -32768.0f;
-            s_inter[k] = (short)f;
+            struct xmp_frame_info fi;
+            int loopLimit = (s_indexCount > 1) ? 1 : 0;
+            int ret;
+
+            memset(&fi, 0, sizeof(fi));
+            ret = xmp_play_buffer(
+                s_xmp,
+                &s_inter[s_sourceFrames * 2],
+                append * 2 * (int)sizeof(short),
+                loopLimit);
+            xmp_get_frame_info(s_xmp, &fi);
+
+            /* Com playlist, libxmp interrompe no primeiro loop completo.
+               Assim nao vazam amostras do recomeco da faixa nem um pattern
+               preso. Com uma faixa apenas, ela continua em loop infinito. */
+            if (s_indexCount > 1 && fi.loop_count > 0)
+            {
+                if (_BgmAdvance())
+                {
+                    s_gapFrames = BGM_GAP_FRAMES;
+                    return;
+                }
+            }
+            if (ret < 0)
+            {
+                DLog("[bgm] libxmp playback ended with %d", ret);
+                if (_BgmAdvance())
+                    s_gapFrames = BGM_GAP_FRAMES;
+                else
+                {
+                    _BgmFreeDecoder();
+                    s_state = BGM_FAILED;
+                }
+                return;
+            }
+
+            s_sourceFrames += append;
         }
     }
 
-    /* Auto-advance (playlist): detecta o fim da faixa (o player completou
-       uma passada e voltou ao inicio) ANTES de enfileirar.  O buffer recem
-       sintetizado ja' pode conter o RECOMECO do loop -- enfileira-lo daria
-       os "estralos"/fragmentos.  Entao, se terminou, DESCARTA este buffer
-       e avanca: o ponto de loop e' o fim musical da faixa, cortar ali e' o
-       certo.  A cauda ja' no ring do audsrv cobre a troca enquanto a nova
-       faixa carrega.  Com 0/1 faixa _BgmAdvance retorna FALSE: caimos no
-       enqueue normal e a faixa unica segue em loop (sem descartar -> sem
-       silenciar). */
+    /* Reamostra s_rate -> 48 kHz e desinterleava para L/R. A fase e os
+       frames nao consumidos ficam guardados para a proxima chamada. */
     {
-        Bool ended = FALSE;
-        if      (s_state == BGM_MOD)        ended = (s_mod.loopcount > 0);
-        else if (s_state == BGM_XM && s_xm) ended = (jar_xm_get_loop_count(s_xm) > 0);
-        if (ended && _BgmAdvance()) { s_gapFrames = BGM_GAP_FRAMES; return; }  /* respiro + carrega a proxima */
-    }
+        unsigned long long phase = s_resampleFrac;
+        int consume;
+        int remain;
 
-    /* reamostra s_rate -> 48 kHz (linear, ponto fixo 16.16) e
-       desinterleava para L/R (Aud_Enqueue reinterleava). */
-    {
-        unsigned int step = (unsigned int)(((unsigned int)s_rate << 16) / 48000u);
-        unsigned int pos  = 0;
         for (j = 0; j < n; j++)
         {
-            unsigned int i  = pos >> 16;
-            unsigned int fr = pos & 0xFFFF;
+            unsigned int i  = (unsigned int)(phase / 48000u);
+            unsigned int fr = (unsigned int)(phase % 48000u);
             unsigned int i1 = i + 1;
             int l0, l1, r0, r1;
 
-            if (i1 >= (unsigned int)synthN) i1 = (unsigned int)(synthN - 1);
+            if (i1 >= (unsigned int)s_sourceFrames)
+                i1 = (unsigned int)(s_sourceFrames - 1);
 
             l0 = s_inter[i * 2 + 0]; l1 = s_inter[i1 * 2 + 0];
             r0 = s_inter[i * 2 + 1]; r1 = s_inter[i1 * 2 + 1];
-            s_left [j] = (short)(l0 + (int)(((long long)(l1 - l0) * fr) >> 16));
-            s_right[j] = (short)(r0 + (int)(((long long)(r1 - r0) * fr) >> 16));
-            pos += step;
+            s_left [j] = (short)(l0 +
+                (int)(((long long)(l1 - l0) * fr) / 48000));
+            s_right[j] = (short)(r0 +
+                (int)(((long long)(r1 - r0) * fr) / 48000));
+            phase += (unsigned int)s_rate;
         }
+
+        consume = (int)(phase / 48000u);
+        s_resampleFrac = (unsigned int)(phase % 48000u);
+        if (consume > s_sourceFrames) consume = s_sourceFrames;
+        remain = s_sourceFrames - consume;
+        if (remain > 0 && consume > 0)
+            memmove(s_inter, &s_inter[consume * 2],
+                    (size_t)remain * 2 * sizeof(short));
+        s_sourceFrames = remain;
     }
 
     /* garante volume audivel: o menu de pausa muta o audsrv (Aud_Setvol(0))

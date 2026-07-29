@@ -206,7 +206,9 @@ decode time; they are cached in RAM and prefetched so browsing stays smooth.
 
 Background music plays in the ROM browser and the pause menu — tracker modules
 in **`.mod`** (Amiga ProTracker) and **`.xm`** (FastTracker II) formats, decoded
-on the EE by the bundled single‑file players **jar_mod** / **jar_xm**.
+on the EE by the bundled PS2 port of **libxmp-lite**. It applies the original
+ProTracker/FastTracker effect, tempo, instrument and loop rules instead of the
+partial tracker players used by earlier builds.
 
 Drop one or more tracks in any of these folders. Local devices are indexed
 immediately; CD/DVD is checked a little later with non-blocking readiness polls
@@ -247,8 +249,8 @@ land in `cdfs:/BGM`). The build stops with an error if that folder contains no
 make iso roms=/path/to/roms bgm=/path/to/tracks
 ```
 
-> **Licenses:** `jar_mod` is public domain (CC0); `jar_xm` is WTFPL. Both are
-> single‑header players vendored from raylib's `src/external`.
+> **License:** `libxmp-lite` is MIT licensed. The vendored source, license and
+> exact PS2-port revision are under `src/third_party/libxmp-lite/`.
 
 ---
 
@@ -355,8 +357,8 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
   browsing stays smooth even from a CD; toggle it in Video Config, point it at a
   shared folder with `COVERS_PATH`, and cycle box/title/gameplay with □.
 - **Menu music & audio controls**: tracker music (`.mod` / `.xm`) plays in the
-  ROM browser and pause menu via bundled single‑file players (jar_mod / jar_xm),
-  decoded on the EE and resampled to the SPU2's 48 kHz. Added **Game Volume**,
+  ROM browser and pause menu via the PS2 port of **libxmp-lite**, decoded on the
+  EE and continuously resampled to the SPU2's 48 kHz. Added **Game Volume**,
   **Menu Music** volume (0 = off, frees its RAM) and a synthesis **Frequency**
   picker in Video Config — all persisted, shared by SNES and NES. A random track
   plays at boot and a new one each time you leave a game.
@@ -366,7 +368,8 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
   HDD (`hdd0:`, APA) and MMCE carts (`mmce0:`/`mmce1:`, MemCard PRO 2 / SD2PSX).
   See [Storage & devices](#storage--devices).
 - **Boot / input**: controller and IRX bring‑up reworked to behave on real
-  hardware, not just emulators.
+  hardware, not just emulators. Direct ELF boot also tolerates launchers that
+  omit the executable path instead of crashing before video initialization.
 - **Save states**: restored the dormant iaddis-era feature as a release menu
   with five slots, USB/memory-card selection, versioned files, ROM/CRC checks
   and power-loss-safe two-bank writes.
@@ -430,7 +433,7 @@ tools/         host‑side test harnesses (chip + OBJ verification)
 - **Sardu** — for releasing the recovered source under the MIT license (2022).
 - **[jay-kumogata/InfoNES](https://github.com/jay-kumogata/InfoNES)** — the NES core integrated here.
 - **[upng](https://github.com/elanthis/upng)** — Sean Middleditch & Lode Vandevenne; the bundled single‑file PNG decoder used for cover art (zlib license). Extended in this repo with palette/indexed support.
-- **jar_mod / jar_xm** — Joshua Reisenauer (jar_xm based on **libxm** by Romain "Artefact2" Dalmaso); the bundled single‑file `.mod` / `.xm` tracker players used for menu music (public domain / WTFPL), vendored from raylib's `src/external`.
+- **[libxmp-lite](https://github.com/tatokis/libxmp-lite-ps2)** — Claudio Matsuoka, Hipolito Carraro Jr and PS2 porter tatokis; the embedded MOD/XM replay engine used for accurate tracker effects, timing and loops (MIT).
 - **[hugorsgarcia/PS2SNESticle](https://github.com/hugorsgarcia/PS2SNESticle)** — **Hugo Garcia**, whose PS2 work was the reference for the controller / memory‑card / IRX bring‑up and the netplay module.
 - **Open‑PS2‑Loader**, **picodrive‑PS2** and **uLaunchELF** — references for correct PS2 boot, IOP and video behavior.
 - **ReyFxck** — this revival/fork and ongoing development.

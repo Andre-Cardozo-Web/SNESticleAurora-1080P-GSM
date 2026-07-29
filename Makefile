@@ -46,6 +46,7 @@ OBJ_DIR := $(CURDIR)/build
 PKG_DIR := $(OBJ_DIR)/pkg
 EMBED_DIR := $(OBJ_DIR)/embed
 TARGET        := $(OBJ_DIR)/SNESticle.elf
+TARGET_STRIPPED := $(OBJ_DIR)/SNESticle.stripped.elf
 TARGET_PACKED := $(OBJ_DIR)/SNESticle.packed.elf
 BIN2C   ?= $(PS2SDK)/bin/bin2c
 
@@ -110,6 +111,12 @@ CXXFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fn
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
 	-DDEBUG_BOOT_SCREEN=$(DEBUG_BOOT_SCREEN) \
 	-DMAINLOOP_DEBUG_GS_TEST=$(MAINLOOP_DEBUG_GS_TEST)
+
+# libxmp-lite's official PS2 port builds the embedded/core configuration.
+# It keeps the MOD/XM effect and loop engines while omitting desktop-only
+# depackers and format extras, which matters for both ELF size and EE CPU.
+CFLAGS   += -DLIBXMP_CORE_PLAYER
+CXXFLAGS += -DLIBXMP_CORE_PLAYER
 
 # ---- versao + data/hora da build (TZ Brasilia, UTC-3) -----------------
 # A release atual e' o padrao; passe APP_VERSION= para gerar nomes/banner
@@ -246,6 +253,9 @@ INCS := \
 	-I$(CURDIR)/src/third_party/miniz \
 	-I$(CURDIR)/src/third_party/upng \
 	-I$(CURDIR)/src/third_party/jar \
+	-I$(CURDIR)/src/third_party/libxmp-lite/include \
+	-I$(CURDIR)/src/third_party/libxmp-lite/src \
+	-I$(CURDIR)/src/third_party/libxmp-lite/src/loaders \
 	-I$(PS2SDK)/common/include \
 	-I$(PS2SDK)/ee/include \
 	-I$(PS2SDK)/ports/include \
@@ -318,8 +328,31 @@ SRCS := \
 	src/third_party/miniz/miniz_tinfl.c \
 	src/third_party/miniz/miniz_zip.c \
 	src/third_party/upng/upng.c \
-	src/third_party/jar/jar_mod.c \
-	src/third_party/jar/jar_xm.c \
+	src/third_party/libxmp-lite/src/virtual.c \
+	src/third_party/libxmp-lite/src/format.c \
+	src/third_party/libxmp-lite/src/period.c \
+	src/third_party/libxmp-lite/src/player.c \
+	src/third_party/libxmp-lite/src/read_event.c \
+	src/third_party/libxmp-lite/src/dataio.c \
+	src/third_party/libxmp-lite/src/lfo.c \
+	src/third_party/libxmp-lite/src/scan.c \
+	src/third_party/libxmp-lite/src/control.c \
+	src/third_party/libxmp-lite/src/filter.c \
+	src/third_party/libxmp-lite/src/effects.c \
+	src/third_party/libxmp-lite/src/mixer.c \
+	src/third_party/libxmp-lite/src/mix_all.c \
+	src/third_party/libxmp-lite/src/load_helpers.c \
+	src/third_party/libxmp-lite/src/load.c \
+	src/third_party/libxmp-lite/src/hio.c \
+	src/third_party/libxmp-lite/src/smix.c \
+	src/third_party/libxmp-lite/src/memio.c \
+	src/third_party/libxmp-lite/src/loaders/common.c \
+	src/third_party/libxmp-lite/src/loaders/itsex.c \
+	src/third_party/libxmp-lite/src/loaders/sample.c \
+	src/third_party/libxmp-lite/src/loaders/xm_load.c \
+	src/third_party/libxmp-lite/src/loaders/mod_load.c \
+	src/third_party/libxmp-lite/src/loaders/s3m_load.c \
+	src/third_party/libxmp-lite/src/loaders/it_load.c \
 	src/modules/netplay/netplay_ee.c \
 	src/modules/netplay/protocol/netclient.c \
 	src/modules/netplay/protocol/netpacket.c \
@@ -423,7 +456,7 @@ OBJS := \
 # Rastreamento de dependencia de headers.  -MMD faz o compilador gerar um
 # .d por objeto listando os headers que ele inclui; -MP adiciona alvos
 # phony para cada header (evita erro se um header for removido).  O
-# -include puxa esses .d de volta, entao editar um header (ex.: jar_xm.h)
+# -include puxa esses .d de volta, entao editar um header (ex.: xmp.h)
 # recompila TODO .c/.cpp que o inclui.  Sem isso, um .o velho linkava
 # contra um header desatualizado -> ex.: "undefined reference" a uma
 # funcao recem-adicionada no header.  (DEPFLAGS ja' era usado nas regras
@@ -691,9 +724,13 @@ $(OBJ_DIR)/%.o: src/%.S | $(OBJ_DIR)
 $(TARGET): $(OBJS) | $(OBJ_DIR)
 	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) $(LIBDIRS) $(LIBS))
 
-strip: $(TARGET)
-	@echo "STRIP $<"
-	@$(EE_STRIP) "$(TARGET)"
+$(TARGET_STRIPPED): $(TARGET)
+	@cp -f "$(TARGET)" "$@"
+	@$(EE_STRIP) "$@"
+	@echo "[ STRIP ] $@ ($$(wc -c <'$@') bytes)"
+
+strip: $(TARGET_STRIPPED)
+	@echo "$(TARGET_STRIPPED)"
 
 # Local ps2-packer rebuilt from source.  We compile a private copy
 # under build/tools/ps2-packer/ on demand whenever the system one is
@@ -794,24 +831,24 @@ packed: $(TARGET_PACKED)
 # PSXLink / PCSX2 directly without burning a disc.
 #
 # Usage:
-#   make elf                    # builds build/SNESticle.elf (+ .packed.elf)
+#   make elf                    # builds stripped + packed standalone ELFs
 #   make elf out=<pasta>        # copies SNESticle(.packed).elf -> <pasta>/
 #
-# When PACK=1 (default) both the unpacked and the packed ELF are
+# When PACK=1 (default) both the stripped/unpacked and the packed ELF are
 # copied; the packed one (`SNESticle.packed.elf`, ~490 KB) is the one
-# you want to ship.  When PACK=0 only the unstripped ELF is copied;
-# add `ee-strip` yourself if you need it.
-elf: $(TARGET) $(if $(filter 1,$(PACK)),$(TARGET_PACKED))
+# you want to ship. The linked ELF with debug symbols remains available as
+# build/SNESticle.elf, but is never copied as a standalone release file.
+elf: $(TARGET_STRIPPED) $(if $(filter 1,$(PACK)),$(TARGET_PACKED))
 	@if [ -n "$(strip $(out))" ]; then \
 		mkdir -p "$(out)"; \
-		cp -f "$(TARGET)" "$(out)/$(ELF_OUT_NAME).elf"; \
-		echo "[elf] $(ELF_OUT_NAME).elf -> $(out)/ ($$(wc -c <'$(TARGET)') bytes, unpacked)"; \
+		cp -f "$(TARGET_STRIPPED)" "$(out)/$(ELF_OUT_NAME).elf"; \
+		echo "[elf] $(ELF_OUT_NAME).elf -> $(out)/ ($$(wc -c <'$(TARGET_STRIPPED)') bytes, stripped/unpacked)"; \
 		if [ "$(PACK)" = "1" ] && [ -f "$(TARGET_PACKED)" ]; then \
 			cp -f "$(TARGET_PACKED)" "$(out)/$(ELF_OUT_NAME).packed.elf"; \
 			echo "[elf] $(ELF_OUT_NAME).packed.elf -> $(out)/ ($$(wc -c <'$(TARGET_PACKED)') bytes, packed)"; \
 		fi; \
 	else \
-		echo "[elf] $(TARGET) ($$(wc -c <'$(TARGET)') bytes, unpacked)"; \
+		echo "[elf] $(TARGET_STRIPPED) ($$(wc -c <'$(TARGET_STRIPPED)') bytes, stripped/unpacked)"; \
 		if [ "$(PACK)" = "1" ] && [ -f "$(TARGET_PACKED)" ]; then \
 			echo "[elf] $(TARGET_PACKED) ($$(wc -c <'$(TARGET_PACKED)') bytes, packed)"; \
 		fi; \
@@ -819,12 +856,12 @@ elf: $(TARGET) $(if $(filter 1,$(PACK)),$(TARGET_PACKED))
 	fi
 
 
-package: check-env $(TARGET) package-irx
+package: check-env $(TARGET_STRIPPED) package-irx
 
-package-irx: | $(PKG_DIR)
+package-irx: $(TARGET_STRIPPED) | $(PKG_DIR)
 	@set -e; \
 	echo "PKG $(PKG_DIR)"; \
-	cp "$(TARGET)" "$(PKG_DIR)/SNESticle.elf"; \
+	cp "$(TARGET_STRIPPED)" "$(PKG_DIR)/SNESticle.elf"; \
 	copy_sdk() { \
 		f="$$1"; found=""; \
 		for cand in "$$f" "$$(printf '%s' "$$f" | tr '[:upper:]' '[:lower:]')" "$$(printf '%s' "$$f" | tr '[:lower:]' '[:upper:]')"; do \
@@ -923,7 +960,7 @@ iso-check:
 		y|Y|yes|YES|s|S|sim|SIM) $(MAKE) --no-print-directory install-iso-tool ;; \
 		*) echo "[ SETUP ] skipped ISO tool install"; exit 1 ;; \
 	esac
-iso-root: $(TARGET) iso-check
+iso-root: $(TARGET_STRIPPED) iso-check
 	@rm -rf "$(ISO_ROOT_DIR)"
 	@mkdir -p "$(ISO_ROOT_DIR)"
 	@# Ship a ps2-packer'd ELF inside the ISO when PACK=1 (default).
@@ -951,13 +988,8 @@ iso-root: $(TARGET) iso-check
 		cp "$(TARGET_PACKED)" "$(ISO_ROOT_DIR)/$(ISO_BOOT)"; \
 		echo "[ ISO-ROOT ] packed $(ISO_BOOT) ($$(wc -c <"$(ISO_ROOT_DIR)/$(ISO_BOOT)") bytes)"; \
 	else \
-		cp "$(TARGET)" "$(ISO_ROOT_DIR)/$(ISO_BOOT)"; \
-		if command -v $(EE_STRIP) >/dev/null 2>&1; then \
-			$(EE_STRIP) "$(ISO_ROOT_DIR)/$(ISO_BOOT)"; \
-			echo "[ ISO-ROOT ] stripped $(ISO_BOOT) ($$(wc -c <"$(ISO_ROOT_DIR)/$(ISO_BOOT)") bytes)"; \
-		else \
-			echo "[ ISO-ROOT ] copied $(ISO_BOOT) ($$(wc -c <"$(ISO_ROOT_DIR)/$(ISO_BOOT)") bytes, unstripped)"; \
-		fi; \
+		cp "$(TARGET_STRIPPED)" "$(ISO_ROOT_DIR)/$(ISO_BOOT)"; \
+		echo "[ ISO-ROOT ] stripped $(ISO_BOOT) ($$(wc -c <"$(ISO_ROOT_DIR)/$(ISO_BOOT)") bytes)"; \
 	fi
 	@# SYSTEM.CNF must use CRLF line endings: real PS2 BIOS and the
 	@# AetherSX2 / ArmSX2 / OPL parsers reject LF-only files (silent
@@ -1095,7 +1127,7 @@ iso-build-image:
 	if [ -n "$(strip $(out))" ]; then \
 		mkdir -p "$(out)"; \
 		cp -f "$(ISO_OUT)" "$(out)/"; \
-		cp -f "$(TARGET)" "$(out)/$(ELF_OUT_NAME).elf"; \
+		cp -f "$(TARGET_STRIPPED)" "$(out)/$(ELF_OUT_NAME).elf"; \
 		copied="$(out)/$$(basename "$(ISO_OUT)"); $(out)/$(ELF_OUT_NAME).elf"; \
 		printf "$${green}[ COPY ]$${reset} ISO -> $(out)/$$(basename "$(ISO_OUT)")\n"; \
 		printf "$${green}[ COPY ]$${reset} ELF -> $(out)/$(ELF_OUT_NAME).elf\n"; \
@@ -1271,11 +1303,11 @@ build-begin:
 	@date +%s > "$(BUILD_START_EPOCH)"
 	@date "+%Y-%m-%d %H:%M:%S" > "$(BUILD_START_TEXT)"
 
-copy-output:
+copy-output: $(TARGET_STRIPPED)
 	@if [ -n "$(strip $(out))" ]; then \
 		mkdir -p "$(out)"; \
-		cp -f "$(TARGET)" "$(out)/$(ELF_OUT_NAME).elf"; \
-		bytes=$$(wc -c <"$(TARGET)"); \
+		cp -f "$(TARGET_STRIPPED)" "$(out)/$(ELF_OUT_NAME).elf"; \
+		bytes=$$(wc -c <"$(TARGET_STRIPPED)"); \
 		reset=""; green=""; \
 		if [ "$(COLOR)" = "1" ]; then reset="\033[0m"; green="\033[32m"; fi; \
 		printf "$${green}[ COPY ]$${reset} $(ELF_OUT_NAME).elf -> $(out)/ (%s bytes)\n" "$$bytes"; \

@@ -70,8 +70,14 @@ extern "C" void _ps2sdk_fileXio_init(void);
 
 
 
-static char *_Main_pBootPath;
-static char _Main_BootDir[256];
+/* Some launchers (and PCSX2's direct ELF loader in particular) are allowed
+   to enter main() without a useful argv[0].  The old code kept a NULL
+   pointer in that case and immediately passed it to strcpy(), crashing
+   before video or the boot log existed.  Keep owned, always-valid buffers
+   instead of retaining the launcher's pointer. */
+static char  _Main_BootPath[256] = "host:";
+static char *_Main_pBootPath     = _Main_BootPath;
+static char  _Main_BootDir[256]  = "host:";
 
 
 char *MainGetBootDir()
@@ -86,21 +92,39 @@ char *MainGetBootPath()
 
 void MainSetBootDir(const char *pPath)
 {
-	int i;
-	strcpy(_Main_BootDir, pPath);
+	size_t len;
+	size_t keep = 0;
+	size_t i;
 
-	i = strlen(_Main_BootDir);
+	if (!pPath || !pPath[0])
+		pPath = "host:";
 
-	// search backward for start of filename
-	while (i>0 
-			&& _Main_BootDir[i]!='/'
-			&& _Main_BootDir[i]!='\\'
-			&& _Main_BootDir[i]!=':'
-		) i--;
+	strncpy(_Main_BootDir, pPath, sizeof(_Main_BootDir) - 1);
+	_Main_BootDir[sizeof(_Main_BootDir) - 1] = 0;
+	len = strlen(_Main_BootDir);
 
-	i++;
+	/* Keep everything through the final device/path separator.  A launcher
+	   that only supplies "SNESticle.elf" gives us no directory information;
+	   host: is the only safe fallback and is also what ps2link/PCSX2 expose
+	   for a directly loaded ELF. */
+	for (i = len; i > 0; i--)
+	{
+		char c = _Main_BootDir[i - 1];
+		if (c == '/' || c == '\\' || c == ':')
+		{
+			keep = i;
+			break;
+		}
+	}
 
-	_Main_BootDir[i] = 0;
+	if (keep == 0)
+	{
+		strcpy(_Main_BootDir, "host:");
+	}
+	else
+	{
+		_Main_BootDir[keep] = 0;
+	}
 }
 
 /* Your program's main entry point */
@@ -108,17 +132,19 @@ int main(int argc, char **argv)
 {
     int iArg;
 
-	if (argc>=1)
+	if (argc > 0 && argv && argv[0] && argv[0][0])
 	{
-		_Main_pBootPath = argv[0];
+		strncpy(_Main_BootPath, argv[0], sizeof(_Main_BootPath) - 1);
+		_Main_BootPath[sizeof(_Main_BootPath) - 1] = 0;
 	}
 
 	MainSetBootDir(_Main_pBootPath);
 
-	// DLog("[boot] main: enter, bootpath=%s", _Main_pBootPath ? _Main_pBootPath : "(null)");
+	DLog("[boot] main: argc=%d path='%s' dir='%s'",
+	     argc, _Main_pBootPath, _Main_BootDir);
 
 	SifInitRpc(0);
-	// DLog("[boot] SifInitRpc done");
+	DLog("[boot] SifInitRpc done");
 
 	/* Reset the IOP so the BIOS-resident modules (sceCdvdfsv, sceSio2man,
 	   sceMcMan, sceMcServ, etc.) are unloaded before ps2_drivers tries
@@ -133,14 +159,14 @@ int main(int argc, char **argv)
 	   memory-card path reset the IOP a second time after loading all drivers,
 	   erased their RPC servers, and retained stale EE "loaded" flags.  That
 	   sequence was especially fragile on Deckard-based slim consoles. */
-	// DLog("[boot] SifIopReset: enter");
+	DLog("[boot] SifIopReset: enter");
 	while (!SifIopReset("", 0)) {}
 	while (!SifIopSync()) {}
 	SifInitRpc(0);
 	SifLoadFileInit();
 	FlushCache(0);
 	EmbeddedIrxResetRuntimeState();
-	// DLog("[boot] SifIopReset done");
+	DLog("[boot] SifIopReset done");
 
 	/* Patch the rom0:LOADFILE service so SifExecModuleBuffer (used by
 	   our embedded-IRX loader in src/platform/ps2/system/embedded_irx.cpp)
@@ -155,7 +181,7 @@ int main(int argc, char **argv)
 	   reloads rom0:LOADFILE in its pristine, unpatched state. */
 	sbv_patch_enable_lmb();
 	sbv_patch_disable_prefix_check();
-	// DLog("[boot] sbv patches applied");
+	DLog("[boot] sbv patches applied");
 
 	/* Bring up the modern PS2DEV filesystem stack: iomanX, fileXio,
 	   poweroff, mcman/mcserv, cdfs, usb.  Once this is done, newlib
@@ -182,13 +208,13 @@ int main(int argc, char **argv)
 	   and most retail PS2s.  Inlining the bring-up here lets us bracket
 	   every step with a DLog so the next hang, if any, can be pinpointed
 	   directly from the EE_SIO emulator log. */
-	// DLog("[boot] init_poweroff_driver: enter");
+	DLog("[boot] init_poweroff_driver: enter");
 	init_poweroff_driver();
-	// DLog("[boot] init_poweroff_driver: done");
+	DLog("[boot] init_poweroff_driver: done");
 
-	// DLog("[boot] init_fileXio_driver: enter");
+	DLog("[boot] init_fileXio_driver: enter");
 	init_fileXio_driver();
-	// DLog("[boot] init_fileXio_driver: done");
+	DLog("[boot] init_fileXio_driver: done");
 
 	/* Route newlib stdio (fopen / opendir / stat / mkdir / ...) through
 	   fileXio -> iomanX instead of the legacy fio backend.  Must come
@@ -228,23 +254,23 @@ int main(int argc, char **argv)
 	   pins the IRX versions to whatever the in-tree PS2SDK supplies,
 	   makes the load order visible in source, and matches the pattern
 	   used by picodrive / OPL / hugorsgarcia/PS2SNESticle. */
-	// DLog("[boot] MemCardLoadEmbeddedIrx: enter");
+	DLog("[boot] MemCardLoadEmbeddedIrx: enter");
 	{
 		int mcret = MemCardLoadEmbeddedIrx();
-		// DLog("[boot] MemCardLoadEmbeddedIrx: done (ret=%d)", mcret);
+		DLog("[boot] MemCardLoadEmbeddedIrx: done (ret=%d)", mcret);
 		(void)mcret;
 	}
 
-	// DLog("[boot] init_usb_driver: enter");
+	DLog("[boot] UsbBdmLoadEmbeddedIrx: enter");
 	/* USB via stack BDM moderna embutida (FAT/exFAT/MBR/GPT, multi-drive),
 	   no lugar do init_usb_driver() do ps2_drivers.  Nao usa dev9, entao
 	   nao corre o risco de travar boot do HD interno. */
 	UsbBdmLoadEmbeddedIrx();
-	// DLog("[boot] init_usb_driver: done");
+	DLog("[boot] UsbBdmLoadEmbeddedIrx: done");
 
-	// DLog("[boot] init_cdfs_driver: enter");
+	DLog("[boot] init_cdfs_driver: enter");
 	init_cdfs_driver();
-	// DLog("[boot] init_cdfs_driver: done");
+	DLog("[boot] init_cdfs_driver: done");
 
 	/* Inicia o cdvd SEM checar disco (SCECdINoD), nao SCECdINIT.  No boot
 	   por DISCO num PS2 real, o drive ainda esta assentando/girando e o
@@ -253,9 +279,9 @@ int main(int argc, char **argv)
 	   subsistema sem o check, evitando o lockup -- mesma defesa do
 	   wLaunchELF (loadCdModules).  O tipo do disco e' consultado depois,
 	   quando o browser entra em cdfs: (drive ja' pronto). */
-	// DLog("[boot] sceCdInit: enter");
+	DLog("[boot] sceCdInit(INoD): enter");
 	sceCdInit(SCECdINoD);
-	// DLog("[boot] sceCdInit: done (diskType=%d)", sceCdGetDiskType());
+	DLog("[boot] sceCdInit(INoD): done (diskType=%d)", sceCdGetDiskType());
 
 	/* Probes de boot DESATIVADOS (#if 0): faziam opendir/stat/fileXioDopen
 	   em cdfs: durante a inicializacao (codigo de debug -- os DLog ja'
@@ -335,21 +361,22 @@ int main(int argc, char **argv)
 
     for (iArg=0; iArg < argc; iArg++)
     {
-        // DLog("[boot] argv[%d] = %s", iArg, argv[iArg] ? argv[iArg] : "(null)");
+        DLog("[boot] argv[%d] = %s", iArg,
+             (argv && argv[iArg]) ? argv[iArg] : "(null)");
     }
 
 	DmaReset();
-	// DLog("[boot] DmaReset done");
+	DLog("[boot] DmaReset done");
 
     install_VRstart_handler();
-    // DLog("[boot] install_VRstart_handler done");
+    DLog("[boot] install_VRstart_handler done");
 
 	ConInit();
-	// DLog("[boot] ConInit done -> MainLoopInit");
+	DLog("[boot] ConInit done -> MainLoopInit");
 
 	if (MainLoopInit())
 	{
-		// DLog("[boot] MainLoopInit OK -> entering MainLoopProcess loop");
+		DLog("[boot] MainLoopInit OK -> entering MainLoopProcess loop");
 		while (MainLoopProcess())
 		{
 		}
@@ -358,7 +385,7 @@ int main(int argc, char **argv)
 	}
 	else
 	{
-		// DLog("[boot] MainLoopInit FAILED");
+		DLog("[boot] MainLoopInit FAILED");
 	}
 
 	ConShutdown();
