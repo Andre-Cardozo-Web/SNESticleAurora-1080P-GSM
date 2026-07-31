@@ -22,7 +22,22 @@ build and study today.
 On top of the SNES core, the project now also integrates **InfoNES** to bring
 **NES** emulation to the **PlayStation 2**.
 
-## Notes
+## 📚 Table of Contents
+
+- [⚠️ Notes](#️-notes)
+- [🚀 Features](#-features)
+- [🎮 Controls](#-controls)
+- [🖼 Cover Art](#-cover-art-capas)
+- [🎵 Menu Music & Audio](#-menu-music--audio)
+- [💾 Storage & Devices](#-storage--devices)
+- [🔨 Building](#-building-playstation-2)
+- [📝 What's been done recently](#-whats-been-done-recently)
+- [🐞 Known issues](#-known-issues--still-missing)
+- [📂 Project layout](#-project-layout)
+- [❤️ Credits](#-credits)
+- [📜 License](#-license)
+
+## ⚠️ Notes
 
 > [!WARNING]
 > **Attention**
@@ -33,9 +48,9 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 >
 > **Please don't remove the credits of Icer Addis (iaddis), the original creator of SNESticle, or my credits (ReyFxck), maintainer of SNESticle Revive, from the homebrew.**
 
-## Features
+## 🚀 Features
 <details>
-<summary>SNES Progress</summary>
+<summary>Show details</summary>
 
 **Systems**
 - **SNES** — the original SNESticle core (65816 ASM CPU, SPC700, PPU).
@@ -54,7 +69,7 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 - **S‑RTC** — Daikaijuu Monogatari II (`snsrtc`)
 </details>
 <details>
-<summary>PS2 Progress</summary>
+<summary>Show details</summary>
 
 **PlayStation 2 platform**
 - gsKit‑based video backend with a **Video Config** screen.
@@ -82,11 +97,14 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 
 ---
 
-## Controls
+## 🎮 Controls
 
 The PS2 pad maps to an SNES controller. **L2 + R2** (pressed together) toggles
 between the game and the menu at any time, flushing changed SRAM when the menu
 opens.
+
+<details>
+<summary>🎮 In Game</summary>
 
 **In a game**
 
@@ -104,6 +122,11 @@ opens.
 | <img src="docs/controls/l2.svg" height="20" alt="L2"> + <img src="docs/controls/circle.svg" height="20" alt="Circle"> | Load state from the current slot |
 | <img src="docs/controls/l2.svg" height="20" alt="L2"> + <img src="docs/controls/r2.svg" height="20" alt="R2"> | Open the menu and flush changed SRAM |
 
+</details>
+
+<details>
+<summary>📂 Menu & ROM Browser</summary>
+
 **Menu & ROM browser**
 
 | Button | Action |
@@ -116,6 +139,11 @@ opens.
 | <img src="docs/controls/select.svg" height="20" alt="Select"> | File menu (copy / paste / delete) |
 | <img src="docs/controls/l1.svg" height="20" alt="L1"> / <img src="docs/controls/r1.svg" height="20" alt="R1"> | Switch screen (Browser ⇆ State Manager ⇆ Network ⇆ Menu ⇆ Log ⇆ Video Config), including while a game is paused. |
 | <img src="docs/controls/l2.svg" height="20" alt="L2"> + <img src="docs/controls/r2.svg" height="20" alt="R2"> | Return to the game |
+
+</details>
+
+<details>
+<summary>💾 Save States</summary>
 
 **First save-state destination**
 
@@ -176,6 +204,11 @@ SuperFX, CX4, OBC1, S‑DD1, S‑RTC or Super Game Boy hardware are rejected wit
 an explicit message until those coprocessor states are serialized. NES save
 states are not available yet.
 
+</details>
+
+<details>
+<summary>⚙️ Video Config</summary>
+
 **Video Config screen**
 
 | Button | Action |
@@ -185,9 +218,15 @@ states are not available yet.
 | <img src="docs/controls/square.svg" height="20" alt="Square"> | Reset the screen offset |
 | <img src="docs/controls/cross.svg" height="20" alt="Cross"> or <img src="docs/controls/start.svg" height="20" alt="Start"> | Save settings to the memory card |
 
+</details>
+
 ---
 
-## Cover art (capas)
+## 🖼️ Cover art (capas)
+
+<details>
+<summary>Show details</summary>
+
 
 The ROM browser can show box art / screenshots beside the game list.
 
@@ -217,7 +256,14 @@ decode time; they are cached in RAM and prefetched so browsing stays smooth.
 
 ---
 
-## Menu music & audio
+
+</details>
+
+## 🎵 Menu music & audio
+
+<details>
+<summary>Show details</summary>
+
 
 Background music plays in the ROM browser and the pause menu — tracker modules
 in **`.mod`** (Amiga ProTracker) and **`.xm`** (FastTracker II) formats, decoded
@@ -269,7 +315,14 @@ make iso roms=/path/to/roms bgm=/path/to/tracks
 
 ---
 
-## Storage & devices
+
+</details>
+
+## 💾 Storage & devices
+
+<details>
+<summary>Show details</summary>
+
 
 The ROM browser lists every storage device the build can reach. Pick one to
 browse it. There are no build flags for this — it all comes up automatically
@@ -308,7 +361,14 @@ HDD additionally uses `ps2atad` + `ps2hdd` for the APA `hdd0:` device.
 
 ---
 
-## Building (PlayStation 2)
+
+</details>
+
+## 🔨 Building (PlayStation 2)
+
+<details>
+<summary>Show details</summary>
+
 
 You need **PS2SDK** installed. Follow the
 [ps2dev](https://github.com/ps2dev/ps2dev.git) instructions and use the
@@ -353,7 +413,14 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
 
 ---
 
-## What's been done recently
+
+</details>
+
+## 📝 What's been done recently
+
+<details>
+<summary>Show details</summary>
+
 
 - **Coprocessors**: added DSP‑1, DSP‑2, CX4, OBC1, S‑DD1 and S‑RTC, each
   written clean‑room and verified bit‑exact host‑side against public references.
@@ -396,7 +463,14 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
 
 ---
 
-## Known issues / still missing
+
+</details>
+
+## 🐞 Known issues / still missing
+
+<details>
+<summary>Show details</summary>
+
 
 **SNES**
 - Save states currently support base-hardware games only; coprocessor games
@@ -426,7 +500,14 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
 
 ---
 
-## Project layout
+
+</details>
+
+## 📂 Project layout
+
+<details>
+<summary>Show details</summary>
+
 
 ```
 src/snes/      SNES core (cpu, spc, ppu, coprocessors)
@@ -439,7 +520,14 @@ tools/         host‑side test harnesses (chip + OBJ verification)
 
 ---
 
-## Credits
+
+</details>
+
+## ❤️ Credits
+
+<details>
+<summary>Show details</summary>
+
 
 - **[iaddis/SNESticle](https://github.com/iaddis/SNESticle)** — Icer Addis, the original emulator.
 - **[ZSNES Team](https://www.zsnes.com)** — zsKnight, _Demo_, pagefault, Nach; their GPLv2 DSP‑4 HLE (`chips/dsp4emu.c`) is ported here as `src/snes/core/dsp4emu.*` (Top Gear 3000 support).
@@ -457,7 +545,14 @@ tools/         host‑side test harnesses (chip + OBJ verification)
 
 ---
 
-## License
+
+</details>
+
+## 📜 License
+
+<details>
+<summary>Show details</summary>
+
 
 **GNU GPL v2** — see [`LICENSE`](LICENSE).
 
@@ -472,3 +567,5 @@ Icer Addis's portions is preserved verbatim inside [`LICENSE`](LICENSE).
 
 
 # Yes, we still have a lot of free time :)
+
+</details>
