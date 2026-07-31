@@ -22,6 +22,8 @@ build and study today.
 On top of the SNES core, the project now also integrates **InfoNES** to bring
 **NES** emulation to the **PlayStation 2**.
 
+---
+
 ## 📚 Table of Contents
 
 - [⚠️ Notes](#️-notes)
@@ -37,6 +39,8 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 - [❤️ Credits](#-credits)
 - [📜 License](#-license)
 
+---
+
 ## ⚠️ Notes
 
 > [!WARNING]
@@ -47,7 +51,7 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 > There's no need to create ISOs in this version; only do so if you want to distribute them to the community.
 >
 > **Please don't remove the credits of Icer Addis (iaddis), the original creator of SNESticle, or my credits (ReyFxck), maintainer of SNESticle Revive, from the homebrew.**
-
+---
 ## 🚀 Features
 <details>
 <summary>🕹️ SNES Progress</summary>
@@ -254,10 +258,9 @@ palette/indexed (1/2/4/8‑bit). **Interlaced (Adam7) PNGs are not supported** �
 re‑save those as non‑interlaced. Keep covers small (≈256 px) to save memory and
 decode time; they are cached in RAM and prefetched so browsing stays smooth.
 
----
-
-
 </details>
+
+---
 
 ## 🎵 Menu music & audio
 
@@ -313,10 +316,9 @@ make iso roms=/path/to/roms bgm=/path/to/tracks
 > **License:** `libxmp-lite` is MIT licensed. The vendored source, license and
 > exact PS2-port revision are under `src/third_party/libxmp-lite/`.
 
----
-
-
 </details>
+
+---
 
 ## 💾 Storage & devices
 
@@ -359,10 +361,9 @@ HDD additionally uses `ps2atad` + `ps2hdd` for the APA `hdd0:` device.
 > the screen. On a console without an internal HDD the `dev9`/`hdd` probe just
 > reports "no hardware" and boot continues — it does not hang.
 
----
-
-
 </details>
+
+---
 
 ## 🔨 Building (PlayStation 2)
 
@@ -411,10 +412,9 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
 > own (make only tracks file timestamps). Run `make clean` first when toggling
 > compile flags.
 
----
-
-
 </details>
+
+---
 
 ## 📝 What's been done recently
 
@@ -461,10 +461,9 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
   out‑of‑bounds bugs fixed in the InfoNES core (`APU_Reg`, mapper 19 & 45 arrays)
   and a sequence‑point UB fixed in the 6502 core.
 
----
-
-
 </details>
+
+---
 
 ## 🐞 Known issues / still missing
 
@@ -498,10 +497,9 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
 > Some bugs only reproduce on **real PS2 hardware** (emulators like NetherSX2 /
 > PCSX2 are more forgiving), which makes them harder to track down.
 
----
-
-
 </details>
+
+---
 
 ## 📂 Project layout
 
@@ -518,10 +516,9 @@ src/common/    shared helpers (render, base, io, debug)
 tools/         host‑side test harnesses (chip + OBJ verification)
 ```
 
----
-
-
 </details>
+
+---
 
 ## ❤️ Credits
 
@@ -543,10 +540,10 @@ tools/         host‑side test harnesses (chip + OBJ verification)
 - **Adriano Oliveira** — real‑hardware testing.
 - **Control‑prompt icons** (`docs/controls/*.svg`) — original SVGs drawn for this repo; reuse freely.
 
----
-
 
 </details>
+
+---
 
 ## 📜 License
 
@@ -566,5 +563,7 @@ Icer Addis's portions is preserved verbatim inside [`LICENSE`](LICENSE).
 - DSP‑4 HLE (`src/snes/core/dsp4emu.*`): © 1997–2008 ZSNES Team (GPLv2)
 
 </details>
+
+---
 
 # Yes, we still have a lot of free time :)
