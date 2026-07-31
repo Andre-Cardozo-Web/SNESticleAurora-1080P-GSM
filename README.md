@@ -34,6 +34,8 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 > **Please don't remove the credits of Icer Addis (iaddis), the original creator of SNESticle, or my credits (ReyFxck), maintainer of SNESticle Revive, from the homebrew.**
 
 ## Features
+<details>
+<summary>SNES Progress</summary>
 
 **Systems**
 - **SNES** — the original SNESticle core (65816 ASM CPU, SPC700, PPU).
@@ -50,6 +52,9 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 - **OBC1** — Metal Combat (`snobc1`)
 - **S‑DD1** — Star Ocean, Street Fighter Alpha 2 (`snsdd1`)
 - **S‑RTC** — Daikaijuu Monogatari II (`snsrtc`)
+</details>
+<details>
+<summary>PS2 Progress</summary>
 
 **PlayStation 2 platform**
 - gsKit‑based video backend with a **Video Config** screen.
@@ -73,6 +78,7 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
   `mmce0:`/`mmce1:`. Reads FAT16/FAT32/**exFAT** with MBR/GPT partition
   tables via the bundled BDM stack. See [Storage & devices](#storage--devices).
 - Netplay code (`src/modules/netplay/`).
+</details>
 
 ---
 
