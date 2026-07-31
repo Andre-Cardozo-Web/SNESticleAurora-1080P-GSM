@@ -50,7 +50,7 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 
 ## 🚀 Features
 <details>
-<summary>Show details</summary>
+<summary>🕹️ SNES Progress</summary>
 
 **Systems**
 - **SNES** — the original SNESticle core (65816 ASM CPU, SPC700, PPU).
@@ -69,7 +69,7 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 - **S‑RTC** — Daikaijuu Monogatari II (`snsrtc`)
 </details>
 <details>
-<summary>Show details</summary>
+<summary>🎮 PS2 Progress</summary>
 
 **PlayStation 2 platform**
 - gsKit‑based video backend with a **Video Config** screen.
@@ -565,7 +565,6 @@ Icer Addis's portions is preserved verbatim inside [`LICENSE`](LICENSE).
 - Copyright (c) 2026 ReyFxck — SNESticleRevive fork
 - DSP‑4 HLE (`src/snes/core/dsp4emu.*`): © 1997–2008 ZSNES Team (GPLv2)
 
+</details>
 
 # Yes, we still have a lot of free time :)
-
-</details>
