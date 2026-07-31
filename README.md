@@ -22,15 +22,16 @@ build and study today.
 On top of the SNES core, the project now also integrates **InfoNES** to bring
 **NES** emulation to the **PlayStation 2**.
 
-> Primary target: **PlayStation 2** (EE/IOP, gsKit). Development is done on
-> The add-on is working on all devices that support the PS2SDK.
-
----
-
 ## Notes
-**attention**
-There's no need to create ISOs in this version; only do so if you want to distribute it to the community. Don't remove my credits or my name from the homebrew!
 
+> [!WARNING]
+> **Attention**
+>
+> **Primary target:** **PlayStation 2** (EE/IOP, gsKit). Development is done on PS2SDK, and the add-on works on all devices that support the PS2SDK.
+>
+> There's no need to create ISOs in this version; only do so if you want to distribute them to the community.
+>
+> **Please don't remove the credits of Icer Addis (iaddis), the original creator of SNESticle, or my credits (ReyFxck), maintainer of SNESticle Revive, from the homebrew.**
 
 ## Features
 
