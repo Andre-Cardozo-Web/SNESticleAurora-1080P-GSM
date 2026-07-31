@@ -1,5 +1,13 @@
-# SNESticle Revive
-# Playstation 2 Homebrew and emulator.
+<p align="center" style="margin-bottom: 4px;">
+  <img src="docs/controls/SNESTICLE.png" alt="SNESTICLE" width="500">
+</p>
+
+<p align="center" style="margin-top: 0;">
+  <b><font size="7">
+    SNESticle Revive PlayStation 2<br>
+    Homebrew and S/NES emulator!
+  </font></b>
+</p>
 
 Revived and actively-maintained source of **SNESticle**, the long-rumored
 **Super Nintendo (SNES) emulator** written by **Icer Addis (iaddis)**.
