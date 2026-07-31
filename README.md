@@ -23,7 +23,7 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 **NES** emulation to the **PlayStation 2**.
 
 > Primary target: **PlayStation 2** (EE/IOP, gsKit). Development is done on
-> Debian via Termux — no full desktop required.
+> The add-on is working on all devices that support the PS2SDK.
 
 ---
 
