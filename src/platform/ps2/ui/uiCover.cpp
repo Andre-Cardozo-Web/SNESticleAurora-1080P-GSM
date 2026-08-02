@@ -52,8 +52,6 @@ extern "C" {
 #include "upng.h"
 }
 
-extern "C" void DLog(const char *fmt, ...);
-
 /* Pasta de onde o ELF foi carregado (definida em main.cpp com linkage
    C++).  Declarada SEM extern "C" para casar com a definicao (igual
    mainloop_init.cpp); usar extern "C" geraria undefined reference. */
@@ -341,8 +339,6 @@ static void _EnsureIndex(const char *romDir)
 	}
 
 	s_indexGen++;
-	DLog("[cover] indexed %d png(s) across %d dir(s) in %s\n",
-	     (int)s_indexCount, (int)s_nDirs, romDir);
 }
 
 static Bool _IndexBuiltFor(const char *romDir)

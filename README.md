@@ -274,15 +274,32 @@ on the EE by the bundled PS2 port of **libxmp-lite**. It applies the original
 ProTracker/FastTracker effect, tempo, instrument and loop rules instead of the
 partial tracker players used by earlier builds.
 
-Drop one or more tracks in any of these folders. Local devices are indexed
-immediately; CD/DVD is checked a little later with non-blocking readiness polls
-so booting an ISO cannot stall while the drive is still detecting the disc.
-Subfolders are supported (up to four levels), and the resulting index is cached:
+Drop one or more tracks in any of these folders. Memory-card and mass-storage
+folders are indexed immediately; enabled MMCE/HDD sources are checked once
+through their own device probes. CD/DVD is checked a little later with
+non-blocking readiness polls so booting an ISO cannot stall while the drive is
+still detecting the disc. Subfolders are supported (up to four levels), and
+the resulting index is cached:
 
 - the `BGM_PATH` folder (if you built with one — see below)
 - `mc0:/SNESticle/bgm`, `mc1:/SNESticle/bgm`
+- `mmce0:/SNESticle/bgm`, `mmce0:/bgm`
+- `mmce1:/SNESticle/bgm`, `mmce1:/bgm`
 - `mass:/SNESticle/bgm`, `mass:/bgm`
+- the first enabled internal-HDD APA/PFS partition containing
+  `SNESticle/bgm` or `bgm` (for example `hdd0:/+OPL/SNESticle/bgm`)
 - `cdfs:/BGM` (inside the ISO)
+
+MMCE folders are scanned only while **MMCE Cards** is enabled and only on
+ports which answer the hardware PING. Enabling MMCE in Video Config triggers a
+one-time scan during the current session, so reopening the homebrew is not
+required to discover its tracks.
+
+Internal-HDD folders are scanned only while **HDD Support** is enabled. The
+driver remains off by default; once enabled, the player enumerates the main PFS
+partitions and stops at the first one containing tracks. Playlist entries keep
+their full `hdd0:/PARTITION/...` identity, so opening another HDD partition in
+the browser does not break the next track.
 
 A **random track** is picked at boot, and a **different one each time you leave
 a game** and return to the menu (when more than one track is present).
@@ -302,6 +319,7 @@ To bake a default tracks folder or synth rate into the build:
 
 ```bash
 make BGM_PATH=mass:/snes/bgm    # where to look for .mod/.xm first
+make BGM_PATH=hdd0:/+OPL/SNESticle/bgm
 make BGM_RATE=24000             # 16000/22050/24000/32000/38000/44100/48000
 ```
 

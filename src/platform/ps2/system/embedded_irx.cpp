@@ -352,8 +352,9 @@ extern "C" int UsbBdmLoadEmbeddedIrx(void)
      * waitUntilDeviceIsReady() do ps2_drivers.
      *
      * O USB (usbd/bdm/bdmfs_fatfs/usbmass_bd, acima) continua intacto.
-     * Suporte a hdd0: vai voltar depois como carga PREGUICOSA -- so' ao
-     * entrar em hdd0: no browser -- para nunca tocar o boot.
+     * Suporte a hdd0: vai voltar depois como carga PREGUICOSA -- so' no
+     * primeiro uso pelo browser/BGM e com HDD Support ligado -- para nunca
+     * tocar o boot padrao.
      *
      *   ret = EmbeddedIrxLoad(ps2dev9_irx, sizeof(ps2dev9_irx), 0, NULL);
      *   ret = EmbeddedIrxLoad(ps2atad_irx, sizeof(ps2atad_irx), 0, NULL);
@@ -369,10 +370,10 @@ extern "C" int UsbBdmLoadEmbeddedIrx(void)
  * Por que separado do UsbBdm: a init do ps2dev9/ps2hdd e' SINCRONA e,
  * em consoles sem HD (ou com DEV9 problematico), NAO retorna -> travava
  * o boot inteiro (tela preta).  Aqui isso so' roda quando o usuario
- * ESCOLHE entrar em hdd0: no browser, e so' se o toggle estiver ligado.
- * No pior caso, trava apenas a entrada no hdd0: (e so' de quem ligou a
- * opcao), nunca o boot.  Mesma filosofia do "HDD device start mode" do
- * OPL: padrao DESLIGADO, quem tem HD liga. */
+ * ESCOLHE usar hdd0: no browser/BGM, e so' se o toggle estiver ligado. No
+ * pior caso, afeta apenas o primeiro acesso ao hdd0: de quem ligou a opcao,
+ * nunca o boot padrao. Mesma filosofia do "HDD device start mode" do OPL:
+ * padrao DESLIGADO, quem tem HD liga. */
 static int s_hdd_enabled = 0;   /* toggle (persistido no video.cfg) */
 static int s_hdd_loaded  = 0;   /* modulos ja carregados nesta sessao */
 static char s_hdd_mounted[128] = { 0 };

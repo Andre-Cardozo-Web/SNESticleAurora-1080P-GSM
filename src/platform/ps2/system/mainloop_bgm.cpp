@@ -27,6 +27,11 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <libcdvd.h>
+#define NEWLIB_PORT_AWARE
+#include <fileXio.h>
+#include <fileXio_rpc.h>
+#include <libhdd.h>
+#undef NEWLIB_PORT_AWARE
 
 #include "types.h"
 
@@ -39,11 +44,7 @@ extern "C" {
 }
 
 #include "mainloop_bgm.h"
-
-
-/* Diagnostico de boot/menu: DLog escreve no EE SIO (visivel no log do
-   NetherSX2/PCSX2), definido em modules/sjpcm/sjpcm_rpc.c. */
-extern "C" void DLog(const char *fmt, ...);
+#include "embedded_irx.h"
 
 
 /* ---- configuracao ---------------------------------------------------- */
@@ -114,6 +115,11 @@ extern "C" void DLog(const char *fmt, ...);
    permitir recursao ilimitada em dispositivos arbitrarios. */
 #define BGM_SCAN_MAX_DEPTH 4
 
+/* Limite de particoes APA/PFS lembradas durante a descoberta do HDD. A
+   playlist continua limitada por BGM_INDEX_MAX; esta tabela existe apenas
+   para fechar o descritor hdd0: antes de comecar a montar pfs0:. */
+#define BGM_HDD_PART_MAX 32
+
 /* Pastas tentadas, em ordem.  BGM_PATH (se definido pelo Makefile) vem
    primeiro.  A primeira faixa .mod/.xm encontrada e' tocada. */
 static const char *s_dirs[] = {
@@ -122,6 +128,10 @@ static const char *s_dirs[] = {
 #endif
     "mc0:/SNESticle/bgm",
     "mc1:/SNESticle/bgm",
+    "mmce0:/SNESticle/bgm",
+    "mmce0:/bgm",
+    "mmce1:/SNESticle/bgm",
+    "mmce1:/bgm",
     "mass:/SNESticle/bgm",
     "mass:/bgm",
     "cdfs:/BGM",
@@ -171,6 +181,10 @@ static int          s_discScanState   = BGM_DISC_PENDING;
 static unsigned int s_discScanFrames  = 0;
 static int          s_discStablePolls = 0;
 static char         s_bootBgm[256];
+static Bool         s_mmceWasEnabled  = FALSE;
+static Bool         s_mmceScanDone    = FALSE;
+static Bool         s_hddWasEnabled   = FALSE;
+static Bool         s_hddScanDone     = FALSE;
 
 /* Buffer-fonte na taxa do tracker e estado do reamostrador CONTINUO.
    O codigo antigo reiniciava a fase em zero e descartava 1-2 amostras a
@@ -218,6 +232,24 @@ static Bool _IsDiscPath(const char *p)
     if (!p) return FALSE;
     return (strncmp(p, "cdfs",  4) == 0 ||
             strncmp(p, "cdrom", 5) == 0) ? TRUE : FALSE;
+}
+
+/* Retorna o slot fisico de um caminho MMCE, ou -1 para outro device.
+   Separar esses caminhos impede opendir("mmceN:") antes de mmceman estar
+   residente e antes de o cartao real ter respondido ao PING. */
+static int _MmcePathSlot(const char *p)
+{
+    if (!p ||
+        p[0] != 'm' || p[1] != 'm' || p[2] != 'c' || p[3] != 'e')
+        return -1;
+    if ((p[4] != '0' && p[4] != '1') || p[5] != ':')
+        return -1;
+    return p[4] - '0';
+}
+
+static Bool _IsHddPath(const char *p)
+{
+    return (p && strncmp(p, "hdd0:", 5) == 0) ? TRUE : FALSE;
 }
 
 /* Tipos que o cdfs.irx do PS2SDK reconhece como discos com filesystem. */
@@ -311,10 +343,7 @@ static void _IndexAdd(const char *path, int kind)
 
     len = strlen(path);
     if (len >= sizeof(s_index[s_indexCount].path))
-    {
-        DLog("[bgm] skip overlong path (%u byte(s))", (unsigned int)len);
         return;
-    }
     memcpy(s_index[s_indexCount].path, path, len + 1);
     s_index[s_indexCount].kind = kind;
     s_indexCount++;
@@ -335,42 +364,53 @@ static void _IndexRemove(int index)
         s_trackIdx = 0;
 }
 
-/* Retorna 1 se a pasta abriu. A recursao e' limitada e so faz stat()
-   quando d_type nao informa se a entrada e' diretorio (caso do cdfs). */
-static int _ScanDir(const char *scanDir, int depth)
+/* Retorna 1 se a pasta abriu. scanDir e' o caminho fisico usado pelo I/O;
+   indexDir e' o caminho persistido na playlist. Eles normalmente sao iguais,
+   mas no HDD scanDir usa pfs0: enquanto indexDir conserva
+   hdd0:/PARTICAO/... para que a particao correta possa ser remontada quando
+   a faixa for carregada. A recursao e' limitada e so faz stat() quando
+   d_type nao informa se a entrada e' diretorio (caso do cdfs). */
+static int _ScanDirAs(const char *scanDir, const char *indexDir, int depth)
 {
     DIR *pDir;
     struct dirent *pEnt;
 
-    DLog("[bgm] scan opendir('%s')...", scanDir);
     pDir = opendir(scanDir);
-    DLog("[bgm] scan opendir('%s') -> %p", scanDir, (void *)pDir);
     if (!pDir) return 0;
 
     while ((pEnt = readdir(pDir)) != NULL &&
            s_indexCount < BGM_INDEX_MAX)
     {
         char child[256];
-        const char *sep;
+        char indexChild[256];
+        const char *scanSep;
+        const char *indexSep;
         int kind = 0;
-        int written;
+        int scanWritten;
+        int indexWritten;
 
         if (!strcmp(pEnt->d_name, ".") || !strcmp(pEnt->d_name, ".."))
             continue;
 
-        sep = (scanDir[0] &&
-               (scanDir[strlen(scanDir) - 1] == '/' ||
-                scanDir[strlen(scanDir) - 1] == '\\')) ? "" : "/";
-        written = snprintf(child, sizeof(child), "%s%s%s",
-                           scanDir, sep, pEnt->d_name);
-        if (written < 0 || written >= (int)sizeof(child))
+        scanSep = (scanDir[0] &&
+                   (scanDir[strlen(scanDir) - 1] == '/' ||
+                    scanDir[strlen(scanDir) - 1] == '\\')) ? "" : "/";
+        indexSep = (indexDir[0] &&
+                    (indexDir[strlen(indexDir) - 1] == '/' ||
+                     indexDir[strlen(indexDir) - 1] == '\\')) ? "" : "/";
+        scanWritten = snprintf(child, sizeof(child), "%s%s%s",
+                               scanDir, scanSep, pEnt->d_name);
+        indexWritten = snprintf(indexChild, sizeof(indexChild), "%s%s%s",
+                                indexDir, indexSep, pEnt->d_name);
+        if (scanWritten < 0 || scanWritten >= (int)sizeof(child) ||
+            indexWritten < 0 || indexWritten >= (int)sizeof(indexChild))
             continue;
 
         if (_HasExt(pEnt->d_name, ".mod")) kind = 1;
         else if (_HasExt(pEnt->d_name, ".xm")) kind = 2;
         if (kind)
         {
-            _IndexAdd(child, kind);
+            _IndexAdd(indexChild, kind);
             continue;
         }
 
@@ -396,11 +436,190 @@ static int _ScanDir(const char *scanDir, int depth)
                     isDir = S_ISDIR(st.st_mode) ? TRUE : FALSE;
             }
             if (isDir)
-                _ScanDir(child, depth + 1);
+                _ScanDirAs(child, indexChild, depth + 1);
         }
     }
     closedir(pDir);
     return 1;
+}
+
+static int _ScanDir(const char *scanDir, int depth)
+{
+    return _ScanDirAs(scanDir, scanDir, depth);
+}
+
+static void _WakeAfterNewSource(int before)
+{
+    if (before == 0 && s_indexCount > 0)
+    {
+        unsigned int seed = (unsigned int)clock();
+        s_trackIdx = (int)(seed % (unsigned int)s_indexCount);
+        if (s_state == BGM_FAILED)
+            s_state = BGM_UNTRIED;
+    }
+}
+
+/* MMCE e' carregado sob demanda e, ao contrario de mc:/mass:/, pode ser
+   ativado depois que o indice inicial do BGM ja existe. Faz uma unica
+   sondagem por ativacao, escaneia somente portas que responderam ao PING e
+   reanima o player se ele estava em "No Track". */
+static void _MmceScanStep(void)
+{
+    int enabled = MmceSupportIsEnabled();
+    int before;
+    int slots;
+    int slot;
+    size_t d;
+
+    if (!enabled)
+    {
+        /* Permite uma nova sondagem se o usuario ligar MMCE mais tarde. */
+        s_mmceWasEnabled = FALSE;
+        s_mmceScanDone = FALSE;
+        return;
+    }
+
+    if (!s_mmceWasEnabled)
+    {
+        s_mmceWasEnabled = TRUE;
+        s_mmceScanDone = FALSE;
+    }
+    if (s_mmceScanDone) return;
+
+    /* Se MX4SIO ja possui o SIO2 nesta sessao, a troca so pode acontecer
+       apos reiniciar. Nao tente tocar o device oposto enquanto isso. */
+    if (MmceNeedsRestart())
+    {
+        s_mmceScanDone = TRUE;
+        return;
+    }
+
+    slots = MmceProbeAvailableSlots();
+    before = s_indexCount;
+
+    slot = _MmcePathSlot(s_bootBgm);
+    if (slot >= 0 && (slots & (1 << slot)))
+        _ScanDir(s_bootBgm, 0);
+
+    for (d = 0; d < BGM_NUM_DIRS && s_indexCount < BGM_INDEX_MAX; d++)
+    {
+        slot = _MmcePathSlot(s_dirs[d]);
+        if (slot >= 0 && (slots & (1 << slot)))
+            _ScanDir(s_dirs[d], 0);
+    }
+
+    s_mmceScanDone = TRUE;
+    _WakeAfterNewSource(before);
+}
+
+static void _ScanHddLogicalDir(const char *logicalDir)
+{
+    char mapped[256];
+
+    if (!_IsHddPath(logicalDir)) return;
+    if (HddMapPath(logicalDir, mapped, sizeof(mapped)) == 1)
+        _ScanDirAs(mapped, logicalDir, 0);
+}
+
+/* O HDD interno nao possui uma raiz de arquivos unica: hdd0: enumera
+   particoes APA e cada particao PFS precisa ser montada em pfs0:. Quando o
+   usuario habilita HDD Support, procura a primeira particao que contenha
+   SNESticle/bgm ou bgm. Os nomes guardados no indice continuam no formato
+   hdd0:/PARTICAO/..., portanto abrir outra particao no browser nao quebra a
+   playlist: _LoadFileAlloc remonta a particao correta antes de cada carga. */
+static void _HddScanStep(void)
+{
+    int enabled = HddSupportIsEnabled();
+    int before;
+    int hfd;
+    int partCount = 0;
+    int i;
+    size_t d;
+    char parts[BGM_HDD_PART_MAX][128];
+
+    if (!enabled)
+    {
+        s_hddWasEnabled = FALSE;
+        s_hddScanDone = FALSE;
+        return;
+    }
+
+    if (!s_hddWasEnabled)
+    {
+        s_hddWasEnabled = TRUE;
+        s_hddScanDone = FALSE;
+    }
+    if (s_hddScanDone) return;
+
+    if (s_indexCount >= BGM_INDEX_MAX || HddLoadEmbeddedIrx() < 0)
+    {
+        s_hddScanDone = TRUE;
+        return;
+    }
+
+    before = s_indexCount;
+
+    /* Respeita primeiro um caminho explicito vindo do ELF ou BGM_PATH. */
+    if (_IsHddPath(s_bootBgm))
+        _ScanHddLogicalDir(s_bootBgm);
+    for (d = 0; d < BGM_NUM_DIRS && s_indexCount < BGM_INDEX_MAX; d++)
+        if (_IsHddPath(s_dirs[d]))
+            _ScanHddLogicalDir(s_dirs[d]);
+
+    /* Sem caminho explicito encontrado: coleta as particoes PFS principais.
+       Fecha hdd0: antes de montar pfs0:, evitando manter dois comandos APA
+       concorrentes durante a varredura. */
+    if (s_indexCount == before)
+    {
+        hfd = fileXioDopen("hdd0:");
+        if (hfd >= 0)
+        {
+            iox_dirent_t entry;
+            while (partCount < BGM_HDD_PART_MAX &&
+                   fileXioDread(hfd, &entry) > 0)
+            {
+                if (!entry.name[0] ||
+                    entry.stat.attr != ATTR_MAIN_PARTITION ||
+                    entry.stat.mode != FS_TYPE_PFS)
+                    continue;
+
+                size_t nameLen = strlen(entry.name);
+                if (nameLen >= sizeof(parts[partCount]))
+                    continue;
+                memcpy(parts[partCount], entry.name, nameLen + 1);
+                partCount++;
+            }
+            fileXioDclose(hfd);
+        }
+
+        for (i = 0; i < partCount && s_indexCount < BGM_INDEX_MAX; i++)
+        {
+            char logical[256];
+            int beforePart = s_indexCount;
+            int written;
+
+            written = snprintf(logical, sizeof(logical),
+                               "hdd0:/%s/SNESticle/bgm", parts[i]);
+            if (written >= 0 && written < (int)sizeof(logical))
+                _ScanHddLogicalDir(logical);
+
+            if (s_indexCount == beforePart)
+            {
+                written = snprintf(logical, sizeof(logical),
+                                   "hdd0:/%s/bgm", parts[i]);
+                if (written >= 0 && written < (int)sizeof(logical))
+                    _ScanHddLogicalDir(logical);
+            }
+
+            /* A primeira particao com tracks vira a fonte HDD desta sessao.
+               Isso evita montar e varrer dezenas de particoes sem necessidade. */
+            if (s_indexCount > beforePart)
+                break;
+        }
+    }
+
+    s_hddScanDone = TRUE;
+    _WakeAfterNewSource(before);
 }
 
 static void _BuildIndex(void)
@@ -411,15 +630,27 @@ static void _BuildIndex(void)
     s_discScanState = BGM_DISC_PENDING;
     s_discScanFrames = 0;
     s_discStablePolls = 0;
+    s_mmceWasEnabled = FALSE;
+    s_mmceScanDone = FALSE;
+    s_hddWasEnabled = FALSE;
+    s_hddScanDone = FALSE;
     _BuildBootBgm();
 
-    /* Primeiro escaneia somente caminhos que nunca tocam o CD/DVD. */
-    if (s_bootBgm[0] && !_IsDiscPath(s_bootBgm))
+    /* Primeiro escaneia caminhos que nao dependem de CD/DVD, MMCE ou HDD.
+       Os dispositivos especiais possuem etapas proprias abaixo. */
+    if (s_bootBgm[0] && !_IsDiscPath(s_bootBgm) &&
+        _MmcePathSlot(s_bootBgm) < 0 && !_IsHddPath(s_bootBgm))
         _ScanDir(s_bootBgm, 0);
 
     for (d = 0; d < BGM_NUM_DIRS && s_indexCount < BGM_INDEX_MAX; d++)
-        if (!_IsDiscPath(s_dirs[d]))
+        if (!_IsDiscPath(s_dirs[d]) && _MmcePathSlot(s_dirs[d]) < 0 &&
+            !_IsHddPath(s_dirs[d]))
             _ScanDir(s_dirs[d], 0);
+
+    /* Config persistida ja pode ter habilitado MMCE no boot. Esta chamada
+       tambem fica barata quando o recurso esta desligado. */
+    _MmceScanStep();
+    _HddScanStep();
 
     /* faixa inicial pseudo-aleatoria (clock varia conforme o tempo de
        boot); se nao houver entropia, cai no indice 0 -- sem problema. */
@@ -428,7 +659,6 @@ static void _BuildIndex(void)
         unsigned int seed = (unsigned int)clock();
         s_trackIdx = (int)(seed % (unsigned int)s_indexCount);
     }
-    DLog("[bgm] local index built: %d track(s), disc pending", s_indexCount);
 }
 
 /* Um passo curto por frame. Nenhum loop de espera e nenhum acesso a cdfs:
@@ -455,10 +685,7 @@ static void _DiscScanStep(void)
     {
         s_discStablePolls = 0;
         if (s_discScanFrames >= BGM_DISC_GIVEUP_FRAMES)
-        {
             s_discScanState = BGM_DISC_DONE;
-            DLog("[bgm] disc scan timeout (type=%d)", type);
-        }
         return;
     }
 
@@ -477,7 +704,6 @@ static void _DiscScanStep(void)
     root = opendir("cdfs:/");
     if (!root)
     {
-        DLog("[bgm] disc ready, but cdfs root is not mounted yet");
         s_discStablePolls = 0;
         return;
     }
@@ -499,8 +725,6 @@ static void _DiscScanStep(void)
         if (s_state == BGM_FAILED)
             s_state = BGM_UNTRIED;
     }
-    DLog("[bgm] disc index complete: +%d, total=%d",
-         s_indexCount - before, s_indexCount);
 }
 
 /* Le um arquivo inteiro para um buffer malloc'd.  Retorna NULL em erro. */
@@ -510,8 +734,18 @@ static char *_LoadFileAlloc(const char *path, long *outLen)
     long  len;
     char *buf;
     size_t rd;
+    char mapped[256];
+    const char *openPath = path;
 
-    f = fopen(path, "rb");
+    if (_IsHddPath(path))
+    {
+        if (!HddSupportIsEnabled() || HddLoadEmbeddedIrx() < 0 ||
+            HddMapPath(path, mapped, sizeof(mapped)) != 1)
+            return NULL;
+        openPath = mapped;
+    }
+
+    f = fopen(openPath, "rb");
     if (!f) return NULL;
 
     fseek(f, 0, SEEK_END);
@@ -559,8 +793,6 @@ static void _TryLoad(void)
         if (s_trackIdx < 0 || s_trackIdx >= s_indexCount) s_trackIdx = 0;
         path = s_index[s_trackIdx].path;
         kind = s_index[s_trackIdx].kind;
-        DLog("[bgm] load track[%d] kind=%d '%s'",
-             s_trackIdx, kind, path);
 
         long len = 0;
         char *fileBuf = _LoadFileAlloc(path, &len);
@@ -576,21 +808,11 @@ static void _TryLoad(void)
                 startRet = xmp_start_player(s_xmp, s_rate, 0);
                 if (startRet == 0)
                 {
-                    struct xmp_module_info info;
-                    memset(&info, 0, sizeof(info));
-
                     /* Linear custa bem menos que spline e evita o aliasing
                        forte de nearest. O proprio loader escolhe as regras
                        ProTracker ou FastTracker de acordo com o modulo. */
                     xmp_set_player(s_xmp, XMP_PLAYER_INTERP,
                                    XMP_INTERP_LINEAR);
-                    xmp_get_module_info(s_xmp, &info);
-                    DLog("[bgm] libxmp %s: %d ch, %d pattern(s), %d Hz",
-                         (info.mod && info.mod->type[0]) ?
-                             info.mod->type : "tracker",
-                         info.mod ? info.mod->chn : 0,
-                         info.mod ? info.mod->pat : 0,
-                         s_rate);
 
                     free(fileBuf);
                     _ResetResampler();
@@ -608,8 +830,6 @@ static void _TryLoad(void)
         }
         _ResetResampler();
 
-        DLog("[bgm] rejected track '%s' (load=%d start=%d)",
-             path, loadRet, startRet);
         _IndexRemove(s_trackIdx);
     }
 
@@ -715,9 +935,11 @@ int BgmGetVolume(void)
 
 int BgmTrackCount(void)
 {
-    /* O indice local nasce imediatamente; o pedaço cdfs e' acrescentado
-       depois, sem bloquear o primeiro frame do menu. */
+    /* O indice local nasce imediatamente; MMCE entra apos PING, HDD apos
+       montar uma particao PFS e cdfs vem depois da espera do disco. */
     if (s_indexCount < 0) _BuildIndex();
+    _MmceScanStep();
+    _HddScanStep();
     return s_indexCount;
 }
 
@@ -758,11 +980,10 @@ void BgmUpdate(void)
 {
     int avail, n, j;
 
-    static Bool s_logged = FALSE;
-    if (!s_logged) { DLog("[bgm] BgmUpdate first call: vol=%d", s_volume); s_logged = TRUE; }
-
     if (s_volume <= 0)         return;   /* OFF: nem toca o drive */
     if (s_indexCount < 0)      _BuildIndex();
+    _MmceScanStep();
+    _HddScanStep();
     _DiscScanStep();
     if (!Aud_IsInitialized())  return;
 
@@ -860,7 +1081,6 @@ void BgmUpdate(void)
             }
             if (ret < 0)
             {
-                DLog("[bgm] libxmp playback ended with %d", ret);
                 if (_BgmAdvance())
                     s_gapFrames = BGM_GAP_FRAMES;
                 else

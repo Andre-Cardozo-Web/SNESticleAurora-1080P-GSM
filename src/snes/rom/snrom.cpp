@@ -300,6 +300,75 @@ static Bool _SNRomIsValidCartInfo(SNRomInfoT *pCartInfo)
 	return pCartInfo && ((pCartInfo->InverseChecksum ^ pCartInfo->Checksum) == 0xFFFF);
 }
 
+/* A type-1 interleaved image places a header which claims the opposite
+   mapper at the otherwise valid header location.  The checksum guard keeps
+   random ROM data from being mistaken for a header. */
+static Bool _SNRomHeaderSaysType1(SNRomInfoT *pCartInfo, Bool bLoHeader)
+{
+	Uint8 uMapMode;
+	Uint8 uLow;
+
+	if (!_SNRomIsValidCartInfo(pCartInfo))
+		return FALSE;
+
+	uMapMode = pCartInfo->RomMakeup;
+	if ((uMapMode & 0xF0) != 0x20 && (uMapMode & 0xF0) != 0x30)
+		return FALSE;
+
+	uLow = uMapMode & 0x0F;
+	return bLoHeader ? (uLow == 1 || uLow == 5)
+	                 : (uLow == 0 || uLow == 3);
+}
+
+/* Convert the common copier type-1 layout to linear 32 KiB blocks. */
+static Bool _SNRomDeinterleaveType1(Uint8 *pRom, Uint32 uRomBytes)
+{
+	Uint8 Blocks[256];
+	Uint8 *pTmp;
+	Uint32 nBlocks;
+	Uint32 i;
+
+	if (!pRom || uRomBytes < 0x10000 || (uRomBytes & 0xFFFF))
+		return FALSE;
+
+	nBlocks = uRomBytes >> 16;
+	if (nBlocks == 0 || nBlocks > 128)
+		return FALSE;
+
+	for (i = 0; i < nBlocks; i++)
+	{
+		Blocks[i * 2]     = (Uint8)(i + nBlocks);
+		Blocks[i * 2 + 1] = (Uint8)i;
+	}
+
+	pTmp = (Uint8 *)malloc(0x8000);
+	if (!pTmp)
+		return FALSE;
+
+	for (i = 0; i < nBlocks * 2; i++)
+	{
+		Uint32 j;
+		for (j = i; j < nBlocks * 2; j++)
+		{
+			if (Blocks[j] == i)
+			{
+				Uint8 uBlock;
+				memcpy(pTmp, pRom + Blocks[j] * 0x8000, 0x8000);
+				memmove(pRom + Blocks[j] * 0x8000,
+				        pRom + Blocks[i] * 0x8000, 0x8000);
+				memcpy(pRom + Blocks[i] * 0x8000, pTmp, 0x8000);
+				uBlock = Blocks[j];
+				Blocks[j] = Blocks[i];
+				Blocks[i] = uBlock;
+				break;
+			}
+		}
+	}
+
+	free(pTmp);
+	return TRUE;
+}
+
 //
 //
 //
@@ -312,6 +381,7 @@ SnesRom::SnesRom()
 	m_pRomData	= NULL;
 	m_pCartInfo = NULL;
 	m_uRomBytes	= 0;
+	memset(m_Name, 0, sizeof(m_Name));
 }
 
 SnesRom::~SnesRom()
@@ -337,10 +407,26 @@ void SnesRom::SetCartInfo(SNRomInfoT *pCartInfo)
 {
 
 	m_pCartInfo = pCartInfo;
+	memset(m_Name, 0, sizeof(m_Name));
 	if (pCartInfo)
 	{
+		Int32 iTitle;
+		Int32 nTitle = 21;
 		SNRomLicenseT* pLicense __attribute__((unused));
 		SNRomCountryT* pCountry;
+
+		/* The cartridge title is a fixed 21-byte field, not a C string.
+		   Copy it into the owned, terminated buffer used by the UI and logs;
+		   replace control/high bytes which the PS2 font cannot render and
+		   remove padding spaces from the right. */
+		for (iTitle = 0; iTitle < 21; iTitle++)
+		{
+			Uint8 c = pCartInfo->Title[iTitle];
+			m_Name[iTitle] = (c >= 0x20 && c <= 0x7E) ? c : '?';
+		}
+		while (nTitle > 0 && (m_Name[nTitle - 1] == ' ' ||
+		                      m_Name[nTitle - 1] == '?'))
+			m_Name[--nTitle] = 0;
 
 		pCountry = _SNRomGetCountry(pCartInfo->Country);
 		pLicense = _SNRomGetLicense(pCartInfo->License);
@@ -363,11 +449,6 @@ void SnesRom::SetCartInfo(SNRomInfoT *pCartInfo)
 			m_uSRAMSize = 64;
 			break;
 		}
-#if SNDBG_LOG
-		// DLog("[snes-dsp] ROM '%.16s' makeup=%02X type=%02X size=%02X sram=%02X",
-		// 	(const char*)pCartInfo->Title,
-		// 	pCartInfo->RomMakeup, pCartInfo->RomType, pCartInfo->RomSize, pCartInfo->SRAMSize);
-#endif
 		switch (pCartInfo->RomType)
 		{
 		case 0:
@@ -540,22 +621,6 @@ void SnesRom::SetCartInfo(SNRomInfoT *pCartInfo)
 			m_Flags    = SNROM_FLAG_ROM | SNROM_FLAG_SAVERAM | SNROM_FLAG_SRTC;
 		}
 
-		// --- diagnostico de deteccao de chip (sempre; DLog -> SIO/logs.txt) ---
-		// Confirma se o cartucho esta sendo reconhecido como DSP-4 (Top Gear
-		// 3000).  Se DSP4=0 aqui, o glitch e' porque o jogo usa o DSP errado
-		// (ou nenhum) -- e por isso a captura do HLE do DSP-4 nao mostrava nada.
-		{
-			char dt[22];
-			int  dk;
-			for (dk = 0; dk < 21; dk++) dt[dk] = (char)pCartInfo->Title[dk];
-			dt[21] = 0;
-			DLog("[rom] title='%s' romtype=%02X flags=%04X DSP1=%d DSP2=%d DSP3=%d DSP4=%d",
-			     dt, (unsigned)pCartInfo->RomType, (unsigned)m_Flags,
-			     (m_Flags & SNROM_FLAG_DSP1) ? 1 : 0,
-			     (m_Flags & SNROM_FLAG_DSP2) ? 1 : 0,
-			     (m_Flags & SNROM_FLAG_DSP3) ? 1 : 0,
-			     (m_Flags & SNROM_FLAG_DSP4) ? 1 : 0);
-		}
 	} else
 	{
 		m_eVideoType = SNROM_VIDEO_NTSC;
@@ -596,11 +661,7 @@ Uint32 	SnesRom::GetRomRegionSize(Uint32 eRegion)
 
 char   *SnesRom::GetRomTitle()
 {
-    SNRomInfoT *pInfo;
-    pInfo = m_pCartInfo;
-	if (pInfo)
-		return (char *)pInfo->Title;
-	return NULL;
+	return m_pCartInfo ? (char *)m_Name : NULL;
 }
 
 
@@ -706,10 +767,27 @@ Emu::Rom::LoadErrorE SnesRom::LoadRom(CDataIO *pFileIO, Uint8 *pBuffer, Uint32 n
 		}
 	}
 
-	SNRomInfoT *pCartInfo;	
+	SNRomInfoT *pCartInfo;
+	SNRomInfoT *pLoCartInfo;
+	SNRomInfoT *pHiCartInfo;
+
+	/* Look at both header positions before choosing a mapper.  If a valid
+	   header claims the opposite location, normalize a copier type-1 image
+	   and then rescan the now-linear ROM. */
+	pLoCartInfo = GetCartInfo(32704);
+	pHiCartInfo = GetCartInfo(65472);
+	if (_SNRomHeaderSaysType1(pLoCartInfo, TRUE) ||
+	    _SNRomHeaderSaysType1(pHiCartInfo, FALSE))
+	{
+		if (_SNRomDeinterleaveType1(m_pRomData, m_uRomBytes))
+		{
+			pLoCartInfo = GetCartInfo(32704);
+			pHiCartInfo = GetCartInfo(65472);
+		}
+	}
 
 	// get cart info for rom
-	pCartInfo = GetCartInfo(32704);
+	pCartInfo = pLoCartInfo;
 	if (_SNRomIsValidCartInfo(pCartInfo))
 	{
 		// cart mapping found in lo-rom
@@ -717,7 +795,7 @@ Emu::Rom::LoadErrorE SnesRom::LoadRom(CDataIO *pFileIO, Uint8 *pBuffer, Uint32 n
 	} else
 	{
 		// try to get cart info for hi-rom
-		pCartInfo = GetCartInfo(65472);
+		pCartInfo = pHiCartInfo;
 		if (_SNRomIsValidCartInfo(pCartInfo))
 		{
 			// cart mapping found in hi-rom
@@ -781,6 +859,7 @@ void SnesRom::Unload()
 	m_pRomData = NULL;
 	m_uRomBytes = 0;
 	m_bLoaded   = false;
+	memset(m_Name, 0, sizeof(m_Name));
 }
 
 

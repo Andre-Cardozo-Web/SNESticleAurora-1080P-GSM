@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <errno.h>
 #define NEWLIB_PORT_AWARE          /* libera fileXio no port newlib (igual main.cpp) */
 #include <fileXio.h>
 #include <fileXio_rpc.h>   /* HDD APA: fileXioDopen/Dread (listar particoes) */
@@ -24,8 +23,6 @@
 #include "poly.h"
 #include "uiBrowser.h"
 #include "uiCover.h"
-
-extern "C" void DLog(const char *fmt, ...);
 
 extern "C" {
 #include "mcsave_ee.h"
@@ -1233,8 +1230,6 @@ void CBrowserScreen::SetDir(const Char *pDir)
     int hddKind = 0;
     int mmceUnavailable = 0;
 
-    DLog("[ui] SetDir enter: '%s'", pDir);
-
 	/* Carga PREGUICOSA do HD interno: ao entrar em hdd0: (ou qualquer
 	   subpasta dele), carrega dev9/ps2atad/ps2hdd/ps2fs AGORA -- nunca no
 	   boot.  Depois traduz o caminho da UI ("hdd0:/PART/...") para o PFS
@@ -1268,10 +1263,7 @@ void CBrowserScreen::SetDir(const Char *pDir)
 	ForceDraw();
 
 	if (mmceUnavailable)
-	{
-		DLog("[ui] MMCE path unavailable: '%s'", pDir);
 		return;
-	}
 
 	if (hddKind == 2)
 	{
@@ -1303,7 +1295,6 @@ void CBrowserScreen::SetDir(const Char *pDir)
 	else if (strlen(openPath) > 0)
 	{
 		dir = opendir(openPath);
-		DLog("[ui] opendir('%s') -> %p (errno=%d)", openPath, (void *)dir, dir ? 0 : errno);
 		if (dir != NULL)
 		{
 			struct dirent *de;
@@ -1416,7 +1407,6 @@ void CBrowserScreen::SetDir(const Char *pDir)
 
 	SortEntries();
 
-    DLog("[ui] SetDir done: %d entries (dir='%s')", m_nEntries, m_Dir);
 }
 
 void CBrowserScreen::Chdir(const Char *pSubDir)

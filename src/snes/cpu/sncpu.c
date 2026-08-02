@@ -99,8 +99,15 @@ void SNCPUReset(SNCpuT *pCpu, Bool bHardReset)
 	pCpu->Regs.rE  = 1;
 	// reset pc
 	pCpu->Regs.rPC = SNCPURead16(pCpu, SNCPU_VECTOR_RESET);
-	// reset stack
-	pCpu->Regs.rS.b.h = 0x01;
+	// A hardware reset starts in emulation mode with S=$01FF.  Keeping the
+	// low byte left by SNCPUResetRegs ($00) made the first pushes land one
+	// page position too early and breaks games which inspect the reset stack.
+	// A soft reset keeps the low byte, as on the 65C816, and only restores
+	// the emulation-mode page.
+	if (bHardReset)
+		pCpu->Regs.rS.w = 0x01FF;
+	else
+		pCpu->Regs.rS.b.h = 0x01;
 }
 
 void SNCPUDelete(SNCpuT *pCpu)
@@ -790,4 +797,3 @@ void SNCPUSignalDMA(SNCpuT *pCpu, Uint32 bEnable)
         pCpu->uSignal &= ~SNCPU_SIGNAL_DMA;
     }
 }
-

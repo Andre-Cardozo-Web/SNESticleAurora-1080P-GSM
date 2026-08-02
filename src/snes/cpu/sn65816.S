@@ -1975,7 +1975,11 @@ _WAI_SkipIRQ:
 //
 
 	SNCPU_OP_ALL(42);
-		// WDM
+		// WDM is a two-byte reserved instruction.  Its signature byte is
+		// ignored, but still has to be consumed so execution resumes at the
+		// following opcode instead of falling through into STP.
+		SNCPU_FETCH8(R_t0)
+	SNCPU_ENDOP(2)
 
 
 	SNCPU_OP_ALL(db);
@@ -1989,7 +1993,6 @@ _WAI_SkipIRQ:
 
 
 #include "op65816_mips.h"
-
 
 
 

@@ -158,10 +158,15 @@ CXXFLAGS += $(COVERS_DEF)
 
 # ---- Trilha de fundo do menu (BGM) -----------------------------------
 # BGM_PATH e' VAZIO por padrao: o emulador procura a 1a faixa .mod/.xm em
-# pastas padrao (mc0:/SNESticle/bgm, mass:/SNESticle/bgm, mass:/bgm,
-# cdfs:/BGM).  Passe um caminho absoluto para uma pasta unica de musicas:
+# pastas padrao (mc0:/SNESticle/bgm, mmce0:/SNESticle/bgm,
+# mmce1:/SNESticle/bgm, mass:/SNESticle/bgm, mass:/bgm, cdfs:/BGM).
+# Passe um caminho absoluto para uma pasta unica de musicas:
 #     make BGM_PATH=mass:/snes/bgm
 #     make BGM_PATH=mc0:/SNESticle/bgm
+#     make BGM_PATH=mmce0:/SNESticle/bgm
+#     make BGM_PATH=hdd0:/+OPL/SNESticle/bgm
+# Sem BGM_PATH, o HDD habilitado procura essas pastas dinamicamente na
+# primeira particao APA/PFS que contenha SNESticle/bgm ou bgm.
 # Esse caminho e' tentado PRIMEIRO; os padrao ficam de fallback.
 BGM_PATH ?=
 ifneq ($(strip $(BGM_PATH)),)

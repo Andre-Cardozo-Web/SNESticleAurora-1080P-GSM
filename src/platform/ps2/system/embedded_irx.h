@@ -67,8 +67,9 @@ int  UsbBdmLoadEmbeddedIrx(void);
 /* HD INTERNO (APA): dev9 + ps2atad + ps2hdd.  Carga PREGUICOSA -- NUNCA
    no boot (a init desses modulos e' sincrona e pode travar consoles sem
    HD, dando tela preta).  Chamada so' quando o usuario entra em hdd0:
-   no browser, e somente se HddSupportIsEnabled() (opcao liga/desliga,
-   padrao DESLIGADO, igual ao "HDD device start mode" do OPL).
+   no browser ou quando o BGM procura tracks no HDD, e somente se
+   HddSupportIsEnabled() (opcao liga/desliga, padrao DESLIGADO, igual ao
+   "HDD device start mode" do OPL).
 
    HddSupportIsEnabled / SetEnabled: estado do toggle (persistido no
    video.cfg).  HddLoadEmbeddedIrx: faz a carga (no-op se desligado ou

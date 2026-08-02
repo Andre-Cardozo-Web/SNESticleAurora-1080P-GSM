@@ -1294,8 +1294,6 @@ void SNSpcDspMixFull::FilterEcho(Int16 *pLeftEcho, Int16 *pRightEcho, Int32 nSam
 }
 
 
-extern "C" void DLog(const char *fmt, ...);
-
 void SNSpcDspMixFull::Mix(CMixBuffer *pMixBuf)
 {
 	static Int16 OutLeftData[SNSPCDSP_BUFFERSIZE] _ALIGN(16);
@@ -1623,5 +1621,4 @@ void SNSpcDspMixSilent::Mix(CMixBuffer *pMixBuf)
 		}
 	}
 }
-
 

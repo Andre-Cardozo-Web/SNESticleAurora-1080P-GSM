@@ -42,13 +42,6 @@ extern "C" {
 #include "audio.h"
 };
 
-/* DLog is defined in sjpcm_rpc.c. It writes to the EE SIO TX FIFO so
-   each line lands in PCSX2/NetherSX2's emulator log alongside the IOP
-   loadmodule lines. We use it here to trace whether the SNES audio
-   path is even being entered every frame. */
-extern "C" void DLog(const char *fmt, ...);
-
-
 static Uint32 _iframetex=0;
 
 

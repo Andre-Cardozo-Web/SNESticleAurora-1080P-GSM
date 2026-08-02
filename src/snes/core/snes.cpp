@@ -161,6 +161,16 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read2000(SNCpuT *pCpu, Uint32 uAddr)
 			SNCPUSignalIRQ(&pSnes->m_Cpu, 0);
 		return v;
 	}
+
+	// The four CPU/APU communication ports repeat throughout $2140-$217F
+	// on real SNES hardware.  Some games deliberately use those mirrors;
+	// treating $2144+ as open bus can turn a 16-bit port read into a value
+	// which never matches and leave the game in an infinite wait loop.
+	if (uAddr >= 0x2140 && uAddr <= 0x217F)
+	{
+		pSnes->SyncSPC();
+		return pSnes->m_SpcIO.m_Regs.apu_r[uAddr & 3];
+	}
 /*	if (uAddr < 0x2140)
 	{
 		// ppu read
@@ -228,13 +238,6 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read2000(SNCpuT *pCpu, Uint32 uAddr)
 		#endif
 		return pSnes->m_PPU.ReadCGDATA();
 
-	case 0x2140: // apui00
-	case 0x2141: // apui01
-	case 0x2142: // apui02
-	case 0x2143: // apui03
-		pSnes->SyncSPC();
-		return pSnes->m_SpcIO.m_Regs.apu_r[uAddr & 3];
-
 	case 0x2180:	// WMDATA
 		{
 			Uint8 uData;
@@ -299,6 +302,22 @@ void SNCPU_TRAPFUNC SnesSystem::Write2000(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
 		return;
 	}
 
+	// APUIO0-3 are mirrored every four bytes through $217F.  Route every
+	// mirror through the same SPC write queue and timing path as $2140-43.
+	if (uAddr >= 0x2140 && uAddr <= 0x217F)
+	{
+		#if SNSPCIO_WRITEQUEUE
+		if (!pSnes->m_SpcIO.EnqueueWrite(
+		        SNCPUGetCounter(pCpu, SNCPU_COUNTER_FRAME) + SNES_SPCWRITE_LATENCY,
+		        uAddr & 3, uData))
+		#endif
+		{
+			pSnes->SyncSPC(SNES_SPCWRITE_LATENCY);
+			pSnes->m_SpcIO.m_Regs.apu_w[uAddr & 3] = uData;
+		}
+		return;
+	}
+
 	if (uAddr < 0x2140)
 	{
 		// enqueue write to ppu, if it fails (full) then force a sync 
@@ -319,28 +338,6 @@ void SNCPU_TRAPFUNC SnesSystem::Write2000(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
 	{
 		switch(uAddr)
 		{
-			case 0x2140:	// apui00
-			case 0x2141:	// apui01
-			case 0x2142:	// apui02
-			case 0x2143:	// apui03
-				// theory:
-				// sync for an EXTRA spc cycle here because write does not happen
-				// until one cycle later
-
-				#if SNSPCIO_WRITEQUEUE
-				// enqueue write, if this fails then the queue is full!
-				if (!pSnes->m_SpcIO.EnqueueWrite(SNCPUGetCounter(pCpu, SNCPU_COUNTER_FRAME) + SNES_SPCWRITE_LATENCY, uAddr & 3, uData))
-				#endif
-				{
-					// sync spc immediately, this causes it to "catch up" so we can perform the write
-					pSnes->SyncSPC(SNES_SPCWRITE_LATENCY);
-
-					// perform write to spc
-					pSnes->m_SpcIO.m_Regs.apu_w[uAddr & 3] =  uData;
-				}
-
-				break;
-
 			case 0x2180:	// WMDATA
 				// write directly to ram
 				pSnes->m_Ram[pSnes->m_IO.m_Regs.wmadd] = uData;
@@ -1479,4 +1476,3 @@ const char *SnesSystem::GetRegName(Uint32 uAddr)
 }
 
 #endif
-

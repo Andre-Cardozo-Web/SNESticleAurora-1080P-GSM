@@ -10,10 +10,6 @@ extern "C" {
 #include "audio.h"
 };
 
-/* Defined in audio_audsrv.c. Writes to EE SIO so the line shows up in
-   the emulator log alongside [snes-aud] enq#... entries. */
-extern "C" void DLog(const char *fmt, ...);
-
 /* Output gain for the emulated game audio (SNES/NES). The SPU2/audsrv
    volume is already at 100%, so to match players like Snes9x/RetroArch we
    raise the PCM amplitude here, with int16 saturation (loud games clip
@@ -333,4 +329,3 @@ void AudMixBuffer::OutputSamplesMono(Int16 *pSamples,Int32 nSamples)
 {
     OutputSamplesStereo(pSamples, pSamples, nSamples);
 }
-

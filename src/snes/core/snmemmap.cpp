@@ -131,6 +131,27 @@ static SnesMemMapT _SnesMemMap_CX4[]={
     {0,0,0,0,SNESMEM_TYPE_NONE}
 };
 
+/* SNES ROM address lines do not mirror a non-power-of-two image with a
+   simple modulo.  A 12-Mbit (1.5 MiB) cart, for example, mirrors its final
+   4 Mbit into the next 4-Mbit window.  This is the recursive mirror used by
+   real cartridge decoders (and by bsnes/snes9x). */
+static Uint32 _SnesMirrorRomOffset(Uint32 uSize, Uint32 uPos)
+{
+	Uint32 uMask;
+
+	if (uSize == 0 || uPos < uSize)
+		return (uSize == 0) ? 0 : uPos;
+
+	uMask = 0x80000000u;
+	while (!(uPos & uMask))
+		uMask >>= 1;
+
+	if (uSize <= (uPos & uMask))
+		return _SnesMirrorRomOffset(uSize, uPos - uMask);
+
+	return uMask + _SnesMirrorRomOffset(uSize - uMask, uPos - uMask);
+}
+
 void SnesSystem::MapMem(SnesMemMapT *pMemMap)
 {
 	SNCpuT *pCpu = &m_Cpu;
@@ -183,16 +204,18 @@ void SnesSystem::MapMem(SnesMemMapT *pMemMap)
 
 			//ConDebug("Mapping %06X -> %06X %06X %d\n", uStartAddr, uEndAddr, uOffset, pMemMap->eMemType);
 
-			// wrap address to size of memory
-			if (uOffset >= uSize[pMemMap->eMemType])
+			/* ROM keeps its logical offset here: each 8 KiB CPU page is
+			   mirrored below with the cartridge address-line rule.  Other
+			   memory types retain the legacy linear wrapping behavior. */
+			if (pMemMap->eMemType != SNESMEM_TYPE_ROM)
 			{
-				uOffset = 0; // wrap address
-			}
+				// wrap address to size of memory
+				if (uOffset >= uSize[pMemMap->eMemType])
+					uOffset = 0;
 
-			// wrap byte count to size of memory
-			if (nBytes >= uSize[pMemMap->eMemType]) 
-			{
-				nBytes = uSize[pMemMap->eMemType];
+				// wrap byte count to size of memory
+				if (nBytes >= uSize[pMemMap->eMemType])
+					nBytes = uSize[pMemMap->eMemType];
 			}
 
 			if (nBytes > 0)
@@ -202,11 +225,22 @@ void SnesSystem::MapMem(SnesMemMapT *pMemMap)
 				// set memory speed for region
 				SNCPUSetMemSpeed(pCpu, uStartAddr, uAlignedBytes, pMemMap->uSpeed);
 
-				switch (pMemMap->eMemType)
-				{
-				case SNESMEM_TYPE_ROM:
-					SNCPUSetBank(pCpu, uStartAddr, nBytes, pRom->GetData() + uOffset, FALSE);
-					break;
+					switch (pMemMap->eMemType)
+					{
+					case SNESMEM_TYPE_ROM:
+						{
+							Uint32 uPage;
+							Uint32 uRomBytes = pRom->GetBytes();
+							for (uPage = 0; uPage < nBytes; uPage += SNCPU_BANK_SIZE)
+							{
+								Uint32 uRomOffset = _SnesMirrorRomOffset(
+									uRomBytes, uOffset + uPage);
+								SNCPUSetBank(pCpu, uStartAddr + uPage,
+								              SNCPU_BANK_SIZE,
+								              pRom->GetData() + uRomOffset, FALSE);
+							}
+						}
+						break;
 				case SNESMEM_TYPE_SRAM:
 					if (nBytes & (SNCPU_BANK_SIZE - 1))
 					{
@@ -316,7 +350,7 @@ static void _MapExLoRomRegion(SNCpuT *pCpu, Uint8 *pRom, Uint32 romBytes,
 		Uint32 chunk = baseOffset + ((c - bankS) * 0x8000);
 		Uint8 *pMem;
 		Uint32 bankAddr;
-		if (chunk >= romBytes) chunk %= romBytes;   // espelha dentro da ROM
+		chunk = _SnesMirrorRomOffset(romBytes, chunk);
 		pMem     = pRom + chunk;
 		bankAddr = c << 16;
 
@@ -354,13 +388,6 @@ void SnesSystem::MapMemExLoRom(void)
 
 void SnesSystem::MapMem(SNRomMappingE eRomMapping, Uint32 uFlags)
 {
-#if SNDBG_LOG
-	// DLog("[snes-dsp] MapMem mode=%d flags=%02X DSP1=%d DSP2=%d",
-	// 	(int)eRomMapping, (unsigned)uFlags,
-	// 	(uFlags & SNROM_FLAG_DSP1) ? 1 : 0,
-	// 	(uFlags & SNROM_FLAG_DSP2) ? 1 : 0);
-#endif
-
 	// set default traps
 	SNCPUSetTrap(&m_Cpu,     0, SNCPU_MEM_SIZE, ReadMem, WriteMem);
 	SNCPUSetMemSpeed(&m_Cpu, 0, SNCPU_MEM_SIZE, SNCPU_CYCLE_SLOW);
@@ -738,4 +765,3 @@ void SnesSystem::MapHiRom()
 
 }
 #endif
-
