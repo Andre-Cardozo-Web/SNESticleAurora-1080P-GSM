@@ -19,6 +19,14 @@ static Uint32 g_TmgWinSumCyc  = 0;   // soma de ciclos/frame na janela
 static Uint32 g_TmgWinMaxCyc  = 0;   // pior frame (ciclos) na janela
 static Uint32 g_TmgWinSumM7   = 0;   // soma de ciclos do Mode-7 na janela
 static Uint32 g_TmgWinSumObj  = 0;   // soma de ciclos de sprites na janela
+static Uint32 g_TmgWinSumPPU  = 0;
+static Uint32 g_TmgWinSumCPU  = 0;
+static Uint32 g_TmgWinSumGSU  = 0;
+static Uint32 g_TmgWinSumMDMA = 0;
+static Uint32 g_TmgWinSumHDMA = 0;
+static Uint32 g_TmgWinSumAPU  = 0;
+static Uint32 g_TmgWinSumMix  = 0;
+static Uint32 g_TmgWinSumBlend = 0;
 static Int32  g_TmgIrqLineMin = 9999;
 static Int32  g_TmgIrqLineMax = -1;
 static Uint32 g_TmgIrqCount   = 0;   // total de H-IRQs na janela
@@ -26,9 +34,60 @@ static Uint32 g_TmgFrameNo    = 0;
 // acumuladores por frame (externados, alimentados em snppurender8.cpp)
 Uint32 g_TmgCycM7  = 0;
 Uint32 g_TmgCycObj = 0;
+Uint32 g_TmgCycPPU = 0;
+Uint32 g_TmgCycCPU = 0;
+Uint32 g_TmgCycGSU = 0;
+Uint32 g_TmgCycMDMA = 0;
+Uint32 g_TmgCycHDMA = 0;
+Uint32 g_TmgCycAPU = 0;
+Uint32 g_TmgCycMix = 0;
+Uint32 g_TmgCycBlend = 0;
+
+Uint32 g_DbgOAMWrites = 0;
+Uint32 g_DbgVRAMWrites = 0;
+Uint32 g_DbgCGRAMWrites = 0;
+Uint32 g_DbgObjEnabledLines = 0;
+Uint32 g_DbgObjOamRefs = 0;
+Uint32 g_DbgObjTiles = 0;
+Uint32 g_DbgObjOpaqueTiles = 0;
+Uint32 g_DbgObjCandidatePixels = 0;
+Uint32 g_DbgObjDrawnPixels = 0;
+Uint32 g_DbgObjEmptyLines = 0;
+Uint32 g_DbgObjRangeLimitLines = 0;
+Uint32 g_DbgObjLimitLines = 0;
+Uint8  g_DbgObjOBSEL = 0;
+Uint8  g_DbgObjTM = 0;
+Uint8  g_DbgObjTS = 0;
+Uint16 g_DbgObjPriority = 0;
 // contagem de acessos ao DSP por janela (diagnostico de carga)
 static Uint32 g_TmgDspRd = 0;
 static Uint32 g_TmgDspWr = 0;
+
+// Bases por frame para detectar o instante em que os sprites colapsam sem
+// despejar uma linha de log a cada frame.
+static Uint32 g_DbgFrameBaseOAM = 0;
+static Uint32 g_DbgFrameBaseVRAM = 0;
+static Uint32 g_DbgFrameBaseCGRAM = 0;
+static Uint32 g_DbgFrameBaseEnabled = 0;
+static Uint32 g_DbgFrameBaseRefs = 0;
+static Uint32 g_DbgFrameBaseTiles = 0;
+static Uint32 g_DbgFrameBaseOpaque = 0;
+static Uint32 g_DbgFrameBaseCandidate = 0;
+static Uint32 g_DbgFrameBaseDrawn = 0;
+static Uint32 g_DbgPrevObjDrawn = 0;
+static Uint32 g_DbgObjEventCooldown = 0;
+
+static Uint32 SnesDbgHash32(const void *pData, Uint32 nBytes)
+{
+	const Uint8 *p = (const Uint8 *)pData;
+	Uint32 h = 2166136261u;
+	while (nBytes--)
+	{
+		h ^= *p++;
+		h *= 16777619u;
+	}
+	return h;
+}
 #endif
 
 
@@ -61,7 +120,13 @@ void SnesSystem::SyncSPC(Int32 uExtra)
         //SnesDebug("SNSPCExec: %d\n", nCycles);
         // execute SPC
         PROF_ENTER("SNSpcExecute");
+#if SNDBG_LOG
+        Uint32 _tAPU = ProfCtrGetCycle();
+#endif
         SNSPCExecute(&m_Spc, nCycles);
+#if SNDBG_LOG
+        g_TmgCycAPU += ProfCtrGetCycle() - _tAPU;
+#endif
         PROF_LEAVE("SNSpcExecute");
 
 #if SNSPCIO_WRITEQUEUE
@@ -151,8 +216,8 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read2000(SNCpuT *pCpu, Uint32 uAddr)
 	// SuperFX/GSU: registradores em $3000-34FF.  Roteados aqui (dentro do
 	// handler do PPU0) porque a granularidade de trap e' 8KB e a pagina
 	// $2000-3FFF e' compartilhada com o PPU -- um trap proprio em $3000
-	// atropelaria o PPU.  Como o GSU roda ate' o STOP na escrita, o GO ja
-	// esta limpo na leitura.
+	// atropelaria o PPU. O GSU avanca em fatias por scanline, em paralelo
+	// aproximado com a CPU principal.
 	if (pSnes->m_bSuperFX && uAddr >= 0x3000 && uAddr <= 0x34FF)
 	{
 		Uint8 v = pSnes->m_GSU.ReadReg((Uint16)uAddr);
@@ -285,20 +350,12 @@ void SNCPU_TRAPFUNC SnesSystem::Write2000(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
 		return;
 	}
 
-	// SuperFX/GSU: registradores em $3000-34FF (ver Read2000).  Escrever
-	// R15.MSB ($301F) liga o GO; rodamos o GSU ate' o STOP aqui mesmo (igual
-	// o CX4 faz seu trabalho dentro do Write), limitado pelo watchdog.
+	// SuperFX/GSU: registradores em $3000-34FF (ver Read2000). Escrever
+	// R15.MSB ($301F) liga GO; a execucao acontece em fatias no fim de cada
+	// scanline, evitando bloquear a EE por uma rotina inteira do coprocessador.
 	if (pSnes->m_bSuperFX && uAddr >= 0x3000 && uAddr <= 0x34FF)
 	{
 		pSnes->m_GSU.WriteReg((Uint16)uAddr, uData);
-		if (pSnes->m_GSU.IsRunning())
-			pSnes->m_GSU.Run(0x7FFFFFFF);
-		// GSU terminou (STOP) -> levanta o IRQ do SNES se o GSU pediu (so'
-		// acontece quando CFGR.irq==0, tratado no core).  Muitos jogos
-		// SuperFX (Star Fox) esperam esse IRQ para processar/exibir o frame.
-		// A leitura do SFR em $3031 baixa a linha (ver Read2000).
-		if (pSnes->m_GSU.IrqPending())
-			SNCPUSignalIRQ(&pSnes->m_Cpu, 1);
 		return;
 	}
 
@@ -785,21 +842,13 @@ void SNCPU_TRAPFUNC SnesSystem::WriteDSP1(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
 Uint8 SNCPU_TRAPFUNC SnesSystem::ReadGSU(SNCpuT *pCpu, Uint32 uAddr)
 {
 	SnesSystem *pSnes = (SnesSystem *)pCpu->pUserData;
-	// Mesmo padrao do CX4: o Read so' devolve o registrador.  Como o GSU ja
-	// roda ate' o STOP dentro do WriteGSU (quando o GO e' ligado), na hora
-	// que o jogo le o SFR o GO ja esta limpo.
 	return pSnes->m_GSU.ReadReg((Uint16)(uAddr & 0xFFFF));
 }
 
 void SNCPU_TRAPFUNC SnesSystem::WriteGSU(SNCpuT *pCpu, Uint32 uAddr, Uint8 uData)
 {
 	SnesSystem *pSnes = (SnesSystem *)pCpu->pUserData;
-	// Mesmo padrao do CX4: o trabalho acontece dentro do Write.  Escrever
-	// R15.MSB ($301F) liga o GO; entao rodamos o GSU ate' o STOP (o watchdog
-	// no core limita, caso o programa nao termine).
 	pSnes->m_GSU.WriteReg((Uint16)(uAddr & 0xFFFF), uData);
-	if (pSnes->m_GSU.IsRunning())
-		pSnes->m_GSU.Run(0x7FFFFFFF);   // roda ate' STOP (watchdog bounded)
 }
 
 
@@ -1010,6 +1059,9 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
                 SyncPPU();
 
                 PROF_ENTER("ProcessMDMA");
+#if SNDBG_LOG
+				Uint32 _tMDMA = ProfCtrGetCycle();
+#endif
                 // so, execute DMA for remainder of CPU time
                 // this function automatically subtracts from the CPU cycle count as it transfers each byte
 #if 1
@@ -1021,6 +1073,9 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
                     m_DMAC.ProcessMDMA();
                     m_Cpu.Cycles += n - 100000;
                 }
+#endif
+#if SNDBG_LOG
+				g_TmgCycMDMA += ProfCtrGetCycle() - _tMDMA;
 #endif
                 PROF_LEAVE("ProcessMDMA");
 
@@ -1154,7 +1209,13 @@ void SnesSystem::ExecuteLine()
 	SNCPUConsumeCycles(&m_Cpu, SNES_LINECYCLEDELAY);
 
     // execute CPU during scanline
+#if SNDBG_LOG
+	Uint32 _tCPU = ProfCtrGetCycle();
+#endif
     ExecuteWithIRQ(SNES_CYCLESPERLINE - SNES_HBLANKCYCLES, nHIRQCycles);
+#if SNDBG_LOG
+	g_TmgCycCPU += ProfCtrGetCycle() - _tCPU;
+#endif
 
 	// set h-blank enable flag
 	m_IO.m_Regs.hvbjoy|= 0x40;
@@ -1163,11 +1224,39 @@ void SnesSystem::ExecuteLine()
     if ( !(m_IO.m_Regs.hvbjoy & 0x80) )
     {
         // perform HDMA
+#if SNDBG_LOG
+		Uint32 _tHDMA = ProfCtrGetCycle();
+#endif
         m_DMAC.ProcessHDMA();
+#if SNDBG_LOG
+		g_TmgCycHDMA += ProfCtrGetCycle() - _tHDMA;
+#endif
     }
 
     // execute CPU during h-blank
+#if SNDBG_LOG
+	_tCPU = ProfCtrGetCycle();
+#endif
     ExecuteWithIRQ(SNES_HBLANKCYCLES, nHIRQCycles);
+#if SNDBG_LOG
+	g_TmgCycCPU += ProfCtrGetCycle() - _tCPU;
+#endif
+
+	// O hardware GSU roda em paralelo com o 65816. Este emulador sincroniza
+	// os dois uma vez por scanline, como uma aproximacao de baixo custo para
+	// o PS2: ~370 instrucoes em 10,7 MHz e ~925 em 21,4 MHz.
+	if (m_bSuperFX && m_GSU.IsRunning())
+	{
+#if SNDBG_LOG
+		Uint32 _tGSU = ProfCtrGetCycle();
+#endif
+		m_GSU.Run(m_GSU.GetLineInstructionBudget());
+#if SNDBG_LOG
+		g_TmgCycGSU += ProfCtrGetCycle() - _tGSU;
+#endif
+	}
+	if (m_bSuperFX && m_GSU.IrqPending())
+		SNCPUSignalIRQ(&m_Cpu, 1);
 
 	// clear h-blank enable flag
 	m_IO.m_Regs.hvbjoy&= ~0x40;
@@ -1186,6 +1275,23 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 	g_TmgFrameStart  = ProfCtrGetCycle();
 	g_TmgCycM7  = 0;
 	g_TmgCycObj = 0;
+	g_TmgCycPPU = 0;
+	g_TmgCycCPU = 0;
+	g_TmgCycGSU = 0;
+	g_TmgCycMDMA = 0;
+	g_TmgCycHDMA = 0;
+	g_TmgCycAPU = 0;
+	g_TmgCycMix = 0;
+	g_TmgCycBlend = 0;
+	g_DbgFrameBaseOAM = g_DbgOAMWrites;
+	g_DbgFrameBaseVRAM = g_DbgVRAMWrites;
+	g_DbgFrameBaseCGRAM = g_DbgCGRAMWrites;
+	g_DbgFrameBaseEnabled = g_DbgObjEnabledLines;
+	g_DbgFrameBaseRefs = g_DbgObjOamRefs;
+	g_DbgFrameBaseTiles = g_DbgObjTiles;
+	g_DbgFrameBaseOpaque = g_DbgObjOpaqueTiles;
+	g_DbgFrameBaseCandidate = g_DbgObjCandidatePixels;
+	g_DbgFrameBaseDrawn = g_DbgObjDrawnPixels;
 #endif
 
 	m_IO.LatchInput(pInput);
@@ -1277,7 +1383,13 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 
 	// mix non-deterministic mixer
 	PROF_ENTER("SNSpcDspUpdate");
+#if SNDBG_LOG
+	Uint32 _tMix = ProfCtrGetCycle();
+#endif
 	m_SpcDspMixer.Mix(pSound);
+#if SNDBG_LOG
+	g_TmgCycMix += ProfCtrGetCycle() - _tMix;
+#endif
 	PROF_LEAVE("SNSpcDspUpdate");
 
 	// ensure that all queued registers have been committed 
@@ -1295,7 +1407,13 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 		case MODE_ACCURATEDETERMINISTIC:
 			// mix silent mixer
 			PROF_ENTER("SNSpcDspUpdateSilent");
+#if SNDBG_LOG
+			_tMix = ProfCtrGetCycle();
+#endif
 			m_SpcDspSilentMixer.Mix(NULL);
+#if SNDBG_LOG
+			g_TmgCycMix += ProfCtrGetCycle() - _tMix;
+#endif
 			PROF_LEAVE("SNSpcDspUpdateSilent");
 
 			// update spc flags based on deterministic mixer
@@ -1310,9 +1428,60 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 		g_TmgWinSumCyc += cyc;
 		g_TmgWinSumM7  += g_TmgCycM7;
 		g_TmgWinSumObj += g_TmgCycObj;
+		g_TmgWinSumPPU += g_TmgCycPPU;
+		g_TmgWinSumCPU += g_TmgCycCPU;
+		g_TmgWinSumGSU += g_TmgCycGSU;
+		g_TmgWinSumMDMA += g_TmgCycMDMA;
+		g_TmgWinSumHDMA += g_TmgCycHDMA;
+		g_TmgWinSumAPU += g_TmgCycAPU;
+		g_TmgWinSumMix += g_TmgCycMix;
+		g_TmgWinSumBlend += g_TmgCycBlend;
 		if (cyc > g_TmgWinMaxCyc) g_TmgWinMaxCyc = cyc;
 		g_TmgWinFrames++;
 		g_TmgFrameNo++;
+
+		// Captura pontual quando pixels OBJ caem bruscamente apesar de ainda
+		// haver sprites selecionados. Os hashes distinguem OAM/VRAM corrompida
+		// de um erro posterior de mascara/prioridade no compositor.
+		{
+			Uint32 fOAM = g_DbgOAMWrites - g_DbgFrameBaseOAM;
+			Uint32 fVRAM = g_DbgVRAMWrites - g_DbgFrameBaseVRAM;
+			Uint32 fCGRAM = g_DbgCGRAMWrites - g_DbgFrameBaseCGRAM;
+			Uint32 fEnabled = g_DbgObjEnabledLines - g_DbgFrameBaseEnabled;
+			Uint32 fRefs = g_DbgObjOamRefs - g_DbgFrameBaseRefs;
+			Uint32 fTiles = g_DbgObjTiles - g_DbgFrameBaseTiles;
+			Uint32 fOpaque = g_DbgObjOpaqueTiles - g_DbgFrameBaseOpaque;
+			Uint32 fCandidate = g_DbgObjCandidatePixels - g_DbgFrameBaseCandidate;
+			Uint32 fDrawn = g_DbgObjDrawnPixels - g_DbgFrameBaseDrawn;
+			Bool bCollapse = g_DbgPrevObjDrawn >= 512 &&
+				fDrawn * 4u < g_DbgPrevObjDrawn && fEnabled && fRefs;
+			Bool bEmpty = fEnabled && fRefs >= 64 && fTiles && !fOpaque;
+
+			if (g_DbgObjEventCooldown) g_DbgObjEventCooldown--;
+			if ((bCollapse || bEmpty) && !g_DbgObjEventCooldown)
+			{
+				const SnesPPURegsT *pr = m_PPU.GetRegs();
+				Uint32 hOAM = SnesDbgHash32(m_PPU.GetOAM(), sizeof(SnesOAMT));
+				Uint32 hVRAM = SnesDbgHash32(m_PPU.GetVramPtr(0), 0x10000);
+				Uint32 hCGRAM = SnesDbgHash32(m_PPU.GetCGData(), 512);
+				DLog("[snes-obj-event] f=%u reason=%s drawn=%u->%u candidate=%u refs/tiles/opaque=%u/%u/%u writes=%u/%u/%u",
+					(unsigned)g_TmgFrameNo, bEmpty ? "empty" : "drop",
+					(unsigned)g_DbgPrevObjDrawn, (unsigned)fDrawn,
+					(unsigned)fCandidate, (unsigned)fRefs,
+					(unsigned)fTiles, (unsigned)fOpaque,
+					(unsigned)fOAM, (unsigned)fVRAM, (unsigned)fCGRAM);
+				DLog("[snes-state] hash oam/vram/cgram=%08X/%08X/%08X regs mode/obsel/tm/ts=%02X/%02X/%02X/%02X cg=%02X/%02X first=%u bgsc=%02X/%02X/%02X/%02X",
+					(unsigned)hOAM, (unsigned)hVRAM, (unsigned)hCGRAM,
+					(unsigned)pr->bgmode, (unsigned)pr->obsel,
+					(unsigned)pr->tm, (unsigned)pr->ts,
+					(unsigned)pr->cgwsel, (unsigned)pr->cgadsub,
+					(unsigned)pr->oampri.w, (unsigned)pr->bg1sc,
+					(unsigned)pr->bg2sc, (unsigned)pr->bg3sc,
+					(unsigned)pr->bg4sc);
+				g_DbgObjEventCooldown = 30;
+			}
+			g_DbgPrevObjDrawn = fDrawn;
+		}
 		if (g_TmgWinFrames >= SNDBG_FRAME_PERIOD)
 		{
 			Uint32 sum   = g_TmgWinSumCyc ? g_TmgWinSumCyc : 1;
@@ -1320,26 +1489,87 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 			Uint32 ratio = avg ? (g_TmgWinMaxCyc * 100u / avg) : 0;
 			Uint32 pM7   = (Uint32)(((Uint64)g_TmgWinSumM7  * 100u) / sum);
 			Uint32 pObj  = (Uint32)(((Uint64)g_TmgWinSumObj * 100u) / sum);
-			Uint32 pOth  = (pM7 + pObj < 100u) ? (100u - pM7 - pObj) : 0u;
-			// M7%/OBJ%/other% = fatia do tempo de emulacao gasto em Mode-7 /
-			// sprites / resto (CPU+SPC+BG+composite). ratio>150 = picos.
-			// DLog("[snes-tmg] f%u emu avg=%u max=%u%% | Mode7=%u%% OBJ=%u%% other=%u%% | dspRd=%u dspWr=%u | splitIRQ=%d..%d irq=%u",
-			// 	(unsigned)g_TmgFrameNo,
-			// 	(unsigned)avg, (unsigned)ratio,
-			// 	(unsigned)pM7, (unsigned)pObj, (unsigned)pOth,
-			// 	(unsigned)g_TmgDspRd, (unsigned)g_TmgDspWr,
-			// 	(int)g_TmgIrqLineMin, (int)g_TmgIrqLineMax,
-			// 	(unsigned)g_TmgIrqCount);
+			Uint32 pPPU  = (Uint32)(((Uint64)g_TmgWinSumPPU * 100u) / sum);
+			Uint32 pCPU  = (Uint32)(((Uint64)g_TmgWinSumCPU * 100u) / sum);
+			Uint32 pGSU  = (Uint32)(((Uint64)g_TmgWinSumGSU * 100u) / sum);
+			Uint32 pMDMA = (Uint32)(((Uint64)g_TmgWinSumMDMA * 100u) / sum);
+			Uint32 pHDMA = (Uint32)(((Uint64)g_TmgWinSumHDMA * 100u) / sum);
+			Uint32 pAPU  = (Uint32)(((Uint64)g_TmgWinSumAPU * 100u) / sum);
+			Uint32 pMix  = (Uint32)(((Uint64)g_TmgWinSumMix * 100u) / sum);
+			Uint32 pBlend = (Uint32)(((Uint64)g_TmgWinSumBlend * 100u) / sum);
+			Uint64 uPPUOther = g_TmgWinSumPPU;
+			if (uPPUOther > (Uint64)g_TmgWinSumObj + g_TmgWinSumBlend)
+				uPPUOther -= (Uint64)g_TmgWinSumObj + g_TmgWinSumBlend;
+			else
+				uPPUOther = 0;
+			Uint32 pPPUOther = (Uint32)((uPPUOther * 100u) / sum);
+			const SNGSUDiagT &gd = m_GSU.GetDiag();
+
+			// CPU/APU/PPU sao medidas inclusivas (podem se sobrepor quando um
+			// acesso do 65816 sincroniza outro bloco). Ainda assim identificam
+			// diretamente qual rotina esta consumindo o tempo da EE.
+			DLog("[snes-perf] f=%u avg=%u peak=%u%% cpu=%u%% ppu=%u%% gsu=%u%% apu=%u%% mix=%u%% mdma=%u%% hdma=%u%%",
+				(unsigned)g_TmgFrameNo, (unsigned)avg, (unsigned)ratio,
+				(unsigned)pCPU, (unsigned)pPPU, (unsigned)pGSU,
+				(unsigned)pAPU, (unsigned)pMix, (unsigned)pMDMA,
+				(unsigned)pHDMA);
+			DLog("[snes-render] bg+compose=%u%% mode7=%u%% obj=%u%% blend=%u%% dsp=%u/%u hirq=%d..%d n=%u",
+				(unsigned)pPPUOther, (unsigned)pM7, (unsigned)pObj,
+				(unsigned)pBlend,
+				(unsigned)g_TmgDspRd, (unsigned)g_TmgDspWr,
+				(int)g_TmgIrqLineMin, (int)g_TmgIrqLineMax,
+				(unsigned)g_TmgIrqCount);
+			DLog("[snes-obj] ports oam=%u vram=%u cgram=%u | lines=%u refs=%u tiles=%u opaque=%u empty=%u range/time=%u/%u",
+				(unsigned)g_DbgOAMWrites, (unsigned)g_DbgVRAMWrites,
+				(unsigned)g_DbgCGRAMWrites, (unsigned)g_DbgObjEnabledLines,
+				(unsigned)g_DbgObjOamRefs, (unsigned)g_DbgObjTiles,
+				(unsigned)g_DbgObjOpaqueTiles, (unsigned)g_DbgObjEmptyLines,
+				(unsigned)g_DbgObjRangeLimitLines, (unsigned)g_DbgObjLimitLines);
+			DLog("[snes-obj] pixels candidate/drawn=%u/%u | regs obsel=%02X tm=%02X ts=%02X first=%u",
+				(unsigned)g_DbgObjCandidatePixels, (unsigned)g_DbgObjDrawnPixels,
+				(unsigned)g_DbgObjOBSEL, (unsigned)g_DbgObjTM,
+				(unsigned)g_DbgObjTS, (unsigned)g_DbgObjPriority);
+			DLog("[snes-gsu] ins=%u start/stop/abort/wd=%u/%u/%u/%u max=%u cur=%u plot/rpix=%u/%u ramw=%u",
+				(unsigned)gd.Instructions, (unsigned)gd.Starts,
+				(unsigned)gd.Stops, (unsigned)gd.Aborts,
+				(unsigned)gd.Watchdogs, (unsigned)gd.MaxJobInstructions,
+				(unsigned)gd.CurrentJobInstructions, (unsigned)gd.Plots,
+				(unsigned)gd.Rpix, (unsigned)gd.RamWrites);
+			DLog("[snes-gsu] cache hit/miss=%u/%u branch=%u/%u jump=%u go=%u",
+				(unsigned)gd.CacheHits, (unsigned)gd.CacheMisses,
+				(unsigned)gd.BranchesTaken, (unsigned)gd.Branches,
+				(unsigned)gd.Jumps, (unsigned)(m_GSU.IsRunning() ? 1 : 0));
 			g_TmgWinFrames  = 0;
 			g_TmgWinSumCyc  = 0;
 			g_TmgWinMaxCyc  = 0;
 			g_TmgWinSumM7   = 0;
 			g_TmgWinSumObj  = 0;
+			g_TmgWinSumPPU  = 0;
+			g_TmgWinSumCPU  = 0;
+			g_TmgWinSumGSU  = 0;
+			g_TmgWinSumMDMA = 0;
+			g_TmgWinSumHDMA = 0;
+			g_TmgWinSumAPU  = 0;
+			g_TmgWinSumMix  = 0;
+			g_TmgWinSumBlend = 0;
 			g_TmgDspRd      = 0;
 			g_TmgDspWr      = 0;
 			g_TmgIrqCount   = 0;
 			g_TmgIrqLineMin = 9999;
 			g_TmgIrqLineMax = -1;
+			g_DbgOAMWrites = 0;
+			g_DbgVRAMWrites = 0;
+			g_DbgCGRAMWrites = 0;
+			g_DbgObjEnabledLines = 0;
+			g_DbgObjOamRefs = 0;
+			g_DbgObjTiles = 0;
+			g_DbgObjOpaqueTiles = 0;
+			g_DbgObjCandidatePixels = 0;
+			g_DbgObjDrawnPixels = 0;
+			g_DbgObjEmptyLines = 0;
+			g_DbgObjRangeLimitLines = 0;
+			g_DbgObjLimitLines = 0;
+			m_GSU.ClearDiagWindow();
 		}
 	}
 #endif

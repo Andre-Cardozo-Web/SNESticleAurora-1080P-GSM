@@ -1164,6 +1164,10 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 {
 	Int32 nObjLine = 0;
 
+	// A busca reversa e' intencional: o PPU primeiro seleciona ate' 32 OBJ
+	// na ordem iniciada por OAMPRI e depois busca ate' 34 tiles na ordem
+	// inversa. _RenderOBJ8 percorre o resultado de volta para preservar a
+	// prioridade. Nao inverter este laco como "correcao" de time-over.
 	while (--nObjList >= 0)
 	{
 		SnesRenderObjT *pObj;
@@ -1183,31 +1187,6 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 		ObjY = iLine - pObj->uPosY;
 		ObjY^= pObj->uVXOR;
 		ObjY&= pObj->uSize - 1;
-
-#if SNDBG_LOG
-		{
-			// loga em rajadas periodicas (nao so' no comeco), pulando sprites
-			// estacionados, pra capturar os personagens/inimigos. Inclui o
-			// conteudo do VRAM no tile-base: se vier lixo, e' bug de DMA/VRAM.
-			static Uint32 _objc = 0;
-			_objc++;
-			if ((_objc % 200000) < 32 && pObj->uTile != 0 && ObjX > -32 && ObjX < 256)
-			{
-				Uint32 _tn = pObj->uTile;
-				Uint32 _ta = (uBaseAddr + _tn * 16 + ((_tn & 0x100) ? uNameSelect : 0)) & 0x7FFF;
-				Uint32 _or = 0;
-				Int32  _k;
-				// OR de ~0x200 words (regiao do tile do sprite): se der 0, os
-				// dados do sprite NAO estao na VRAM (bug de upload/DMA); se der
-				// != 0, os dados existem e o bug e' no render/arranjo.
-				for (_k = 0; _k < 0x200; _k++)
-					_or |= pVram[(_ta + _k) & 0x7FFF];
-				// DLog("[snes-obj] sz=%d tile=%03X x=%d y=%d | ta=%04X first=%04X regionOR=%04X",
-				// 	(int)uSize, (int)_tn, (int)ObjX, (int)pObj->uPosY,
-				// 	(unsigned)_ta, (unsigned)pVram[_ta], (unsigned)_or);
-			}
-		}
-#endif
 
 		SnesPPUTile4T *pTile4;
 		Uint32 uTileAddr;
@@ -1305,6 +1284,16 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 	return nObjLine;
 }
 
+#if SNDBG_LOG
+static Uint32 _ObjCountBits8(Uint32 v)
+{
+	v &= 0xFF;
+	v = v - ((v >> 1) & 0x55);
+	v = (v & 0x33) + ((v >> 2) & 0x33);
+	return (v + (v >> 4)) & 0x0F;
+}
+#endif
+
 #define OBJPIXEL(_x)	\
 	if (uMask0 & (0x1<<_x)) {pDest8[_x] = pObj->uData[_x]; }
 
@@ -1372,6 +1361,10 @@ static void _RenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,  const SnesRenderObj8T *p
 			uShift    = iPosX & 0x1F;
 			uInvShift = 32 - uShift;
 
+#if SNDBG_LOG
+			g_DbgObjCandidatePixels += _ObjCountBits8(pObj->uData[SNPPU_BGPLANE_OPAQUE]);
+#endif
+
 			// get opacity bits from obj
 			if (!uShift)
 			{
@@ -1434,6 +1427,10 @@ static void _RenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,  const SnesRenderObj8T *p
 			uMask0>>=uShift;
 			uMask1<<=uInvShift;
 			uMask0|=uMask1;
+
+#if SNDBG_LOG
+			g_DbgObjDrawnPixels += _ObjCountBits8(uMask0);
+#endif
 
 			OBJPIXEL(0);
 			OBJPIXEL(1);
@@ -1499,6 +1496,25 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	nObjLine = _FetchOBJ(m_Objs, m_ObjLine[iLine], m_nObjLine[iLine], ObjLine, SNPPU_MAXOBJCHR, iLine, (pRegs->obsel & 3) << 13, ((pRegs->obsel>>3) & 3) << 12, m_pPPU->GetVramPtr(0));
 #if SNDBG_LOG
 	g_TmgCycObj += ProfCtrGetCycle() - _tObjA;
+	{
+		Int32 _i;
+		Uint32 _opaque = 0;
+		Bool _objEnabled = ((tm | ts) & SNESPPU_MASK_OBJ) != 0;
+		for (_i = 0; _i < nObjLine; _i++)
+			if (ObjLine[_i].uData[SNPPU_BGPLANE_OPAQUE] != 0) _opaque++;
+
+		if (_objEnabled) g_DbgObjEnabledLines++;
+		g_DbgObjOamRefs += m_nObjLine[iLine];
+		g_DbgObjTiles += nObjLine;
+		g_DbgObjOpaqueTiles += _opaque;
+		if (_objEnabled && nObjLine > 0 && _opaque == 0) g_DbgObjEmptyLines++;
+		if (m_nObjLine[iLine] >= SNPPU_MAXOBJ) g_DbgObjRangeLimitLines++;
+		if (nObjLine >= SNPPU_MAXOBJCHR) g_DbgObjLimitLines++;
+		g_DbgObjOBSEL = pRegs->obsel;
+		g_DbgObjTM = pRegs->tm;
+		g_DbgObjTS = pRegs->ts;
+		g_DbgObjPriority = pRegs->oampri.w;
+	}
 #endif
 	PROF_LEAVE("FetchOBJ");
 
@@ -2063,4 +2079,3 @@ static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPrio
 	// no transparency?
 	_FetchMode7Opaque(pOpaque->uMask8, pLine, 256);
 }
-

@@ -11,6 +11,7 @@
 #include "snmask.h"
 #include "snmaskop.h"
 #include "prof.h"
+#include "sndbglog.h"
 #if CODE_PLATFORM == CODE_PS2
 #include "ps2mem.h"
 #include "ps2dma.h"
@@ -220,11 +221,17 @@ static Bool bPrint = TRUE;
 
 		if (m_UpdateFlags & SNESPPURENDER_UPDATE_OBJ)
 		{
+#if SNDBG_LOG
+			Uint32 _tObjUpdate = ProfCtrGetCycle();
+#endif
 			UpdateOBJ(pRenderInfo->uObjY, pRenderInfo->uObjSize);
 
             PROF_ENTER("UpdateOBJVisibility");
             UpdateOBJVisibility(pRenderInfo->uObjY, pRenderInfo->uObjSize, pRegs->oampri.w, SNESPPU_OBJ_NUM);
             PROF_LEAVE("UpdateOBJVisibility");
+#if SNDBG_LOG
+			g_TmgCycObj += ProfCtrGetCycle() - _tObjUpdate;
+#endif
 
 			m_UpdateFlags &= ~SNESPPURENDER_UPDATE_OBJ;
 		}
@@ -307,6 +314,9 @@ static Bool bPrint = TRUE;
 		}
 
         // perform color blending of main+sub
+#if SNDBG_LOG
+		Uint32 _tBlend = ProfCtrGetCycle();
+#endif
         m_pBlend->Exec(
             pBlendInfo,
             iLine,
@@ -315,6 +325,9 @@ static Bool bPrint = TRUE;
             (pRegs->cgadsub & 0x80),
             m_pPPU->GetIntensity()
             );
+#if SNDBG_LOG
+		g_TmgCycBlend += ProfCtrGetCycle() - _tBlend;
+#endif
 	}
 }
 
@@ -404,6 +417,5 @@ void SnesPPURender::EndRender()
 void SnesPPURender::UpdateVRAM(Uint32 uVramAddr)
 {
 }
-
 
 

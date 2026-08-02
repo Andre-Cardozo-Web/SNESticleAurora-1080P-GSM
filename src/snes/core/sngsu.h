@@ -6,11 +6,10 @@
  * (nocash fullsnes, sneslab, nesdev) -- nenhum codigo de emulador foi
  * copiado.  Projeto sob GPLv2 (veja LICENSE).
  *
- * ETAPA 1 (este arquivo): estado + registradores + SFR + mapa de memoria +
- * MMIO ($3000-$34FF) + controle GO/STOP + loop fetch/execute com um
- * subconjunto minimo de opcodes (STOP, NOP, CACHE, prefixos TO/FROM/WITH/
- * ALT, IWT, ADD/ADC, SUB/SBC).  O set completo e os graficos (PLOT/pixel
- * cache) vem nas etapas seguintes.
+ * O core cobre o conjunto de opcodes, registradores, cache de codigo,
+ * prefetch de ROM e o caminho grafico PLOT/RPIX. A temporizacao ainda e'
+ * aproximada no scheduler do SNES, mas a semantica funcional e' mantida
+ * separada para poder ser validada pela bancada host-side.
  *
  * Referencia de registradores (fullsnes):
  *   $3000-$301F  R0-R15 (16-bit; R15=PC; escrever $301F dispara GO)
@@ -24,6 +23,28 @@
 #define _SNGSU_H
 
 #include "types.h"
+#include "sndbglog.h"
+
+#if SNDBG_LOG
+struct SNGSUDiagT
+{
+    Uint32 Instructions;
+    Uint32 Starts;
+    Uint32 Stops;
+    Uint32 Aborts;
+    Uint32 Watchdogs;
+    Uint32 CurrentJobInstructions;
+    Uint32 MaxJobInstructions;
+    Uint32 Plots;
+    Uint32 Rpix;
+    Uint32 CacheHits;
+    Uint32 CacheMisses;
+    Uint32 RamWrites;
+    Uint32 Branches;
+    Uint32 BranchesTaken;
+    Uint32 Jumps;
+};
+#endif
 
 class SNGSU
 {
@@ -32,6 +53,10 @@ public:
 
     // Conecta os buffers de Game Pak ROM/RAM (propriedade do SnesSystem).
     void  SetMemory(Uint8 *pRom, Uint32 uRomSize, Uint8 *pRam, Uint32 uRamSize);
+
+    // Configura a revisao exposta em VCR. O valor sobrevive a Reset():
+    // 01h = Mario Chip 1 (Star Fox/Starwing), 04h = GSU2.
+    void  SetVersion(Uint8 uVersion);
 
     void  Reset();
 
@@ -50,6 +75,10 @@ public:
     // Executa o GSU por ~nClocks ciclos enquanto GO=1.
     void  Run(Int32 nClocks);
 
+    // Orcamento aproximado por scanline usado pelo scheduler do SNES.
+    // O core ainda conta instrucoes (nao clocks individuais).
+    Int32 GetLineInstructionBudget() const { return (m_CLSR & 1) ? 960 : 384; }
+
     Bool  IsRunning() const { return m_bGo; }
     // IRQ pendente para o SNES (set on STOP, a menos que mascarado em CFGR).
     Bool  IrqPending() const { return m_bIrq; }
@@ -57,6 +86,11 @@ public:
     // --- helpers expostos para o harness de teste host-side ---
     Uint16 GetReg(Int32 i) const { return m_R[i & 15]; }
     void   SetReg(Int32 i, Uint16 v) { m_R[i & 15] = v; }
+
+#if SNDBG_LOG
+    const SNGSUDiagT &GetDiag() const { return m_Diag; }
+    void ClearDiagWindow();
+#endif
 
 private:
     // ---- estado de CPU ----
@@ -84,6 +118,7 @@ private:
     Uint8  m_CLSR;           // clock select
     Uint8  m_SCMR;           // screen mode (RON bit4, RAN bit3, height, md)
     Uint8  m_VCR;            // version code register (read-only)
+    Uint8  m_ConfigVCR;      // revisao escolhida pelo cartucho; persiste Reset
     Uint16 m_CBR;            // cache base register
 
     // buffers de prefetch/IO
@@ -94,13 +129,19 @@ private:
     // incompletos durante o desenvolvimento), forca a parada e devolve o
     // controle ao SNES, evitando travar a EE.
     Uint32 m_Runaway;
+    Bool   m_WatchdogReported; // uma unica captura por Reset, somente em erro
 
-    // delay-slot dos saltos: o GSU executa SEMPRE a instrucao seguinte ao
-    // branch/JMP/LOOP antes do salto tomar efeito (1 delay slot).
-    Bool   m_BranchPending;
-    Uint16 m_BranchTarget;
-    Bool   m_BranchSetPBR;
-    Uint8  m_BranchPBR;
+#if SNDBG_LOG
+    SNGSUDiagT m_Diag;
+#endif
+
+    // Pipeline real de 1 byte do GSU. R15 aponta para o proximo byte a ser
+    // prebuscado; m_Pipeline guarda o byte que sera executado agora. Escrever
+    // R15 marca o PC como modificado para impedir o incremento automatico ao
+    // fim da instrucao. Este modelo reproduz inclusive delay slots partidos
+    // (opcode na origem e operandos no destino do salto).
+    Uint8  m_Pipeline;
+    Bool   m_PCModified;
 
     // ultimo endereco de RAM acessado (para SBK)
     Uint16 m_LastRamAddr;
@@ -110,14 +151,15 @@ private:
     Uint8  m_POR;              // Plot Option Register (via CMODE): bit0 transp,
                                // bit1 dither, bit2 high-nibble, bit3 freeze-high,
                                // bit4 obj-mode
-    Uint8  m_PixColor[8];      // cache primario: cor de cada um dos 8 pixels
-    Uint8  m_PixFlags;         // 1 bit por pixel plotado (nao-transparente)
-    Uint8  m_PixXBase;         // X & 0xF8 do bloco em cache
-    Uint8  m_PixY;             // Y do bloco em cache
-    Bool   m_PixValid;
+    // O silicio possui dois buffers de uma linha de 8 pixels. O primario
+    // recebe PLOT e o secundario guarda o bloco anterior ate chegar a RAM.
+    Uint8  m_PixColor[2][8];
+    Uint8  m_PixFlags[2];
+    Uint16 m_PixOffset[2];     // (Y << 5) + (X >> 3); FFFFh = vazio
 
     // cache de codigo (512 bytes) em $3100-$32FF
     Uint8  m_Cache[512];
+    Uint32 m_CacheValid;       // uma flag por linha de 16 bytes
 
     // memoria do cartucho (nao e' nossa)
     Uint8 *m_pRom;  Uint32 m_uRomSize;  Uint32 m_uRomMask;
@@ -129,7 +171,9 @@ private:
     void   SfrWriteLow(Uint8 v);
 
     Uint32 RomOffset(Uint8 uBank, Uint16 uAddr) const;  // GSU addr -> offset linear
-    Uint8  CodeFetch();                                 // le opcode em PBR:R15++
+    Uint8  RawCodeRead(Uint16 uAddr) const;             // sem passar pelo code-cache
+    Uint8  CodeRead(Uint16 uAddr);                       // le opcode/cache sem mover R15
+    Uint8  Pipe();                                       // consome byte do pipeline
     Uint8  RomReadByte(Uint8 uBank, Uint16 uAddr) const;
     Uint8  RamReadByte(Uint32 uAddr) const;
     void   RamWriteByte(Uint32 uAddr, Uint8 v);
@@ -139,22 +183,17 @@ private:
 
     void   ResetPrefix();    // Sreg=Dreg=0, alt1=alt2=b=0 (apos op normal)
     void   SetZSfromWord(Uint16 v);   // atualiza Z e S a partir de um resultado
-
-    // Escreve val em Rn; se n==15 (escrita no PC) vira um SALTO com DELAY
-    // SLOT (pipeline do GSU: a instrucao seguinte executa antes do salto
-    // valer), igual aos branches.  Sem isso, IWT/IBT/LM R15 saltavam na hora
-    // e a instrucao do delay slot era pulada -> decode do descompressor lia
-    // errado.  inline no header pra ser barato no laco principal.
-    inline void WriteR15Maybe(Uint8 n, Uint16 val) {
-        if (n == 15) { m_BranchTarget = val; m_BranchPending = TRUE; }
-        else         { m_R[n] = val; }
-    }
+    void   WriteRegister(Uint8 n, Uint16 val); // trata R14 prefetch e R15 pipeline
+    void   UpdateRomBuffer();
+    void   FlushCodeCache();
 
     // graficos
     Int32  ScreenBpp() const;                 // 2, 4 ou 8 (de SCMR.MD)
     Uint32 PixelTileNo(Uint8 x, Uint8 y) const;
     Uint32 PixelRowAddr(Uint8 x, Uint8 y) const;
-    void   PixFlush();                        // descarrega o cache para a RAM
+    void   PixFlush(Int32 nCache);            // descarrega um cache para a RAM
+    void   PixFlushAll();                     // RPIX espera os dois caches
+    void   PixMovePrimaryToSecondary();
     void   Plot();                            // PLOT: desenha COLOR em (R1,R2)
     Uint16 Rpix();                            // RPIX: flush + le pixel (R1,R2)
     void   ColorWrite(Uint8 src);             // pipeline COLOR/GETC (POR.2/.3)

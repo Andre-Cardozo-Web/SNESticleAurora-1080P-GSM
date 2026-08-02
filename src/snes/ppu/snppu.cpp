@@ -14,6 +14,9 @@
 
 void SnesPPU::WriteCGDATA(Uint8 uData)
 {
+#if SNDBG_LOG
+	g_DbgCGRAMWrites++;
+#endif
 	Uint32 uCGAddr;
 
 	uCGAddr = m_Regs.cgadd.w >> 1;
@@ -89,6 +92,9 @@ static Uint32 _SwizzleVramAddr(Uint32 uVramAddr, Uint32 uFullGraphic)
 
 void SnesPPU::WriteVMDATAL(Uint8 uData)
 {
+#if SNDBG_LOG
+	g_DbgVRAMWrites++;
+#endif
 	SnesReg16T *pVram = (SnesReg16T *)m_VRAM;
 	Uint32 uVramAddr;
 
@@ -109,6 +115,9 @@ void SnesPPU::WriteVMDATAL(Uint8 uData)
 
 void SnesPPU::WriteVMDATAH(Uint8 uData)
 {
+#if SNDBG_LOG
+	g_DbgVRAMWrites++;
+#endif
 	SnesReg16T *pVram = (SnesReg16T *)m_VRAM;
 	Uint32 uVramAddr;
 
@@ -131,6 +140,9 @@ void SnesPPU::WriteVMDATAH(Uint8 uData)
 
 void SnesPPU::WriteVMDATALH(Uint8 uDataL, Uint8 uDataH)
 {
+#if SNDBG_LOG
+	g_DbgVRAMWrites += 2;
+#endif
 	SnesReg16T *pVram = (SnesReg16T *)m_VRAM;
 	Uint32 uVramAddr;
 
@@ -211,6 +223,9 @@ Uint8 SnesPPU::ReadVMDATAH()
 
 void SnesPPU::WriteOAMDATA(Uint8 uData)
 {
+#if SNDBG_LOG
+	g_DbgOAMWrites++;
+#endif
 	Uint8	*pOamData = (Uint8 *)&m_OAM;
 	Uint32 oamaddr;
 
@@ -300,24 +315,38 @@ void SnesPPU::Write8(Uint32 uAddr, Uint8 uData)
 		break;
 
 	case 0x2102:	// oamaddl (oam address low)
+	{
+		Uint16 uOldPri = m_Regs.oampri.w;
 		m_Regs.oamaddr.w &= 0x8000; 
 		m_Regs.oamaddr.w |= (uData &0xFF) << 1;  
 
-		if (m_Regs.oamaddr.w & 0x8000)	
-			m_Regs.oampri.w   = (m_Regs.oamaddr.w & 0x1FF) >> 2;
+		// Com priority rotation desligado o primeiro OBJ volta a ser o 0.
+		// O codigo antigo mantinha o indice anterior e nao invalidava a lista
+		// por scanline, fazendo jogos continuarem desenhando a OAM a partir de
+		// um sprite obsoleto depois de escrever em $2102/$2103.
+		m_Regs.oampri.w = (m_Regs.oamaddr.w & 0x8000)
+			? ((m_Regs.oamaddr.w & 0x1FF) >> 2) : 0;
+		if (m_Regs.oampri.w != uOldPri)
+			m_pRender->SetUpdateFlags(SNESPPURENDER_UPDATE_OBJ);
 
 		m_Regs.oamaddrlatch.w = m_Regs.oamaddr.w;
 		break;
+	}
 	case 0x2103:	// oamaddh (oam address high)
+	{
+		Uint16 uOldPri = m_Regs.oampri.w;
 		m_Regs.oamaddr.w &= 0x1FF; 
 		m_Regs.oamaddr.w |= (uData&0x01) << 9; 
 		m_Regs.oamaddr.w |= (uData&0x80) << 8; 
 
-		if (m_Regs.oamaddr.w & 0x8000)	
-			m_Regs.oampri.w   = (m_Regs.oamaddr.w & 0x1FF) >> 2;
+		m_Regs.oampri.w = (m_Regs.oamaddr.w & 0x8000)
+			? ((m_Regs.oamaddr.w & 0x1FF) >> 2) : 0;
+		if (m_Regs.oampri.w != uOldPri)
+			m_pRender->SetUpdateFlags(SNESPPURENDER_UPDATE_OBJ);
 
 		m_Regs.oamaddrlatch.w = m_Regs.oamaddr.w;
 		break;
+	}
 
 	case 0x2104:	// oamdata (oam data)
 		WriteOAMDATA(uData);
@@ -660,11 +689,17 @@ void SnesPPU::Sync(Uint32 uLine)
 			}
 
             // are we within a frame?
-			if (m_uLine > 0 && m_uLine < (224 + 1))
-			{
+            if (m_uLine > 0 && m_uLine < (224 + 1))
+            {
                 // render a line
 				PROF_ENTER("PPURender");
+#if SNDBG_LOG
+				Uint32 _tPPU = ProfCtrGetCycle();
+#endif
 				m_pRender->RenderLine(m_uLine);;
+#if SNDBG_LOG
+				g_TmgCycPPU += ProfCtrGetCycle() - _tPPU;
+#endif
 				PROF_LEAVE("PPURender");
 			}
 

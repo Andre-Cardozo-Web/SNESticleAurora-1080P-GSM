@@ -133,8 +133,8 @@ static void fuzz()
             { Res g=runOp(AND,1,a,b,false); uint16_t r=a&b; cmp("AND",a,b,g,r,r==0,0,(r>>15)&1,0,false); }
             { Res g=runOp(OR ,1,a,b,false); uint16_t r=a|b; cmp("OR" ,a,b,g,r,r==0,0,(r>>15)&1,0,false); }
             { Res g=runOp(XOR,(int)sizeof(XOR),a,b,false); uint16_t r=a^b; cmp("XOR",a,b,g,r,r==0,0,(r>>15)&1,0,false); }
-            { Res g=runOp(MUL,(int)sizeof(MUL),a,b,false); uint16_t r=(uint16_t)((int16_t)a*(int16_t)b); cmp("MULT",a,b,g,r,r==0,0,(r>>15)&1,0,false); }
-            { Res g=runOp(UMUL,(int)sizeof(UMUL),a,b,false);uint16_t r=(uint16_t)((uint32_t)a*(uint32_t)b); cmp("UMULT",a,b,g,r,r==0,0,(r>>15)&1,0,false); }
+            { Res g=runOp(MUL,(int)sizeof(MUL),a,b,false); uint16_t r=(uint16_t)((int8_t)a*(int8_t)b); cmp("MULT",a,b,g,r,r==0,0,(r>>15)&1,0,false); }
+            { Res g=runOp(UMUL,(int)sizeof(UMUL),a,b,false);uint16_t r=(uint16_t)((uint8_t)a*(uint8_t)b); cmp("UMULT",a,b,g,r,r==0,0,(r>>15)&1,0,false); }
 
             for (int cy=0; cy<2; cy++) {
                 { Res g=runOp(ADC,(int)sizeof(ADC),a,b,cy!=0); uint32_t t=(uint32_t)a+b+cy; uint16_t r=(uint16_t)t;
@@ -169,6 +169,15 @@ int main()
         CHECK("R4 = 100-3", g.GetReg(4), 97);
         CHECK("R8 = FFFF+1", g.GetReg(8), 0x0000);
         CHECK("IRQ no STOP", g.ReadReg(0x3031)&0x80, 0x80);
+    }
+    {
+        // A revisao e' configuracao do cartucho e deve sobreviver ao reset.
+        SNGSU g;
+        g.SetMemory(g_rom,sizeof(g_rom),g_ram,sizeof(g_ram));
+        g.SetVersion(0x01); g.Reset();
+        CHECK("VCR Mario Chip 1 persiste", g.ReadReg(0x303B), 0x01);
+        g.SetVersion(0x04); g.Reset();
+        CHECK("VCR GSU2 persiste", g.ReadReg(0x303B), 0x04);
     }
 
     // ===== Parte C: controle de fluxo + memoria =====
@@ -251,6 +260,185 @@ int main()
         SNGSU g = runProgram(p6, sizeof(p6));
         CHECK("FMULT R2 (alto)", g.GetReg(2), 0xF51C);
     }
+    {
+        // Prefixos sobrevivem ao proprio branch. O byte no delay slot usa
+        // FROM R1 / TO R3 que foram selecionados antes do BRA.
+        static const uint8_t p7[] = {
+            0xF1,0x05,0x00,       // IWT R1,#5
+            0xF2,0x07,0x00,       // IWT R2,#7
+            0xB1,0x13,            // FROM R1 ; TO R3
+            0x05,0x01,            // BRA +1 -> STOP
+            0x52,                 // delay slot: ADD R2 -> R3=12
+            0x00 };
+        SNGSU g = runProgram(p7, sizeof(p7));
+        CHECK("branch preserva prefixos", g.GetReg(3), 12);
+    }
+    {
+        // A tabela de despacho real e' 06=BGE e 07=BLT (os nomes de duas
+        // funcoes/comentarios em referencias antigas aparecem trocados).
+        // Estes testes validam a condicao executada, nao apenas o rotulo.
+        static const uint8_t pbge[] = {
+            0xF1,0xFF,0xFF,       // R1=-1
+            0xF2,0x01,0x00,       // R2=+1
+            0xF3,0x11,0x11,       // marcador preservado se BGE saltar
+            0xB2,0x3F,0x61,       // FROM R2; ALT3; CMP R1 -> +1 >= -1
+            0x06,0x04,0x01,       // BGE +4; delay NOP; alvo=STOP
+            0xF3,0xAD,0xDE,       // executado somente se 06 estiver errado
+            0x00 };
+        SNGSU bge = runProgram(pbge, sizeof(pbge));
+        CHECK("opcode 06 = BGE", bge.GetReg(3), 0x1111);
+
+        static const uint8_t pblt[] = {
+            0xF1,0xFF,0xFF,       // R1=-1
+            0xF2,0x01,0x00,       // R2=+1
+            0xF4,0x22,0x22,       // marcador preservado se BLT saltar
+            0xB1,0x3F,0x62,       // FROM R1; ALT3; CMP R2 -> -1 < +1
+            0x07,0x04,0x01,       // BLT +4; delay NOP; alvo=STOP
+            0xF4,0xAD,0xDE,       // executado somente se 07 estiver errado
+            0x00 };
+        SNGSU blt = runProgram(pblt, sizeof(pblt));
+        CHECK("opcode 07 = BLT", blt.GetReg(4), 0x2222);
+    }
+    {
+        // Qualquer opcode que escreve no destino R15 conserva o byte ja
+        // buscado no pipeline. Ele e' executado antes do novo PC.
+        static const uint8_t p8[] = {
+            0xF1,0x08,0x80,       // IWT R1,#$8008 (alvo)
+            0xB1,0x1F,            // FROM R1 ; TO R15
+            0x50,                 // ADD R0 -> escreve o alvo em R15
+            0xD3,                 // delay slot: INC R3
+            0x01,                 // padding
+            0x00 };               // $8008: STOP
+        SNGSU g = runProgram(p8, sizeof(p8));
+        CHECK("destino R15 tem pipeline", g.GetReg(3), 1);
+    }
+    {
+        // Em um delay slot multi-byte, so o OPCODE vem da origem. Depois
+        // desse primeiro byte o PC ja aponta ao destino, de onde saem os
+        // operandos imediatos (comportamento usado pelo Doom).
+        static const uint8_t p9[] = {
+            0xF8,0x10,0x80,       // R8=$8010
+            0x98,                 // JMP R8
+            0xF3,                 // delay: IWT R3,#imm16 (so este byte aqui)
+            0xAA,0xBB,            // NAO podem virar o imediato
+            0x01,0x01,0x01,0x01,0x01,0x01,0x01,0x01,0x01,
+            0x34,0x12,            // $8010: imediato no destino
+            0x00 };               // $8012: STOP
+        SNGSU g = runProgram(p9, sizeof(p9));
+        CHECK("pipeline divide opcode imediato", g.GetReg(3), 0x1234);
+    }
+    {
+        // LJMP tambem so pode trocar PBR/CBR depois de buscar o opcode do
+        // delay slot. Se o cache for realinhado cedo, ele e' preenchido com
+        // o banco antigo e os operandos no destino saem do lugar errado.
+        memset(g_rom, 0x01, sizeof(g_rom));
+        memset(g_ram, 0x00, sizeof(g_ram));
+        static const uint8_t origin[] = {
+            0xF1,0x00,0x80,       // R1=$8000 (PC alvo)
+            0xFA,0x01,0x00,       // R10=$0001 (PBR alvo)
+            0xB1,0x3D,0x9A,       // FROM R1; ALT1; LJMP R10
+            0xF3,                 // delay: IWT R3 (opcode no banco 0)
+            0xAA,0xBB };
+        memcpy(g_rom, origin, sizeof(origin));
+        g_rom[0x8000] = 0x34;      // operandos/STOP no banco 1:$8000
+        g_rom[0x8001] = 0x12;
+        g_rom[0x8002] = 0x00;
+        SNGSU g; g.SetMemory(g_rom,sizeof(g_rom),g_ram,sizeof(g_ram)); g.Reset();
+        g.WriteReg(0x3034,0); g.WriteReg(0x301E,0); g.WriteReg(0x301F,0x80);
+        g.Run(100000);
+        CHECK("LJMP troca cache apos delay", g.GetReg(3), 0x1234);
+        CHECK("LJMP troca PBR", g.ReadReg(0x3034), 0x01);
+    }
+    {
+        // ALT1/2/3 cancelam o B de WITH. Assim, o FROM seguinte volta a ser
+        // prefixo em vez de ser interpretado como MOVES.
+        static const uint8_t p10[] = {
+            0xF1,0x34,0x12,       // R1=$1234
+            0xF2,0x01,0x00,       // R2=1
+            0x21,0x3D,            // WITH R1 ; ALT1 (deve limpar B)
+            0xB2,0x13,0x4F,       // FROM R2 ; TO R3 ; NOT
+            0x00 };
+        SNGSU g = runProgram(p10, sizeof(p10));
+        CHECK("ALT limpa B (R1 intacto)", g.GetReg(1), 0x1234);
+        CHECK("ALT limpa B (FROM ativo)", g.GetReg(3), 0xFFFE);
+    }
+    {
+        // GETBH/GETBL preservam a metade do registrador SOURCE, nao o valor
+        // antigo do destino.
+        static const uint8_t getbh[] = {
+            0xF1,0x34,0x12, 0xF2,0xCD,0xAB, 0xFE,0x00,0x90,
+            0xB1,0x12,0x3D,0xEF,0x00 };
+        memset(g_rom, 0x01, sizeof(g_rom));
+        memset(g_ram, 0x00, sizeof(g_ram));
+        memcpy(g_rom, getbh, sizeof(getbh));
+        g_rom[0x1000] = 0x5A;     // ROMBR=0, R14=$9000
+        SNGSU g; g.SetMemory(g_rom,sizeof(g_rom),g_ram,sizeof(g_ram)); g.Reset();
+        g.WriteReg(0x3034,0); g.WriteReg(0x301E,0); g.WriteReg(0x301F,0x80);
+        g.Run(100000);
+        CHECK("GETBH preserva source low", g.GetReg(2), 0x5A34);
+
+        static const uint8_t getbl[] = {
+            0xF1,0x34,0x12, 0xF2,0xCD,0xAB, 0xFE,0x00,0x90,
+            0xB1,0x12,0x3E,0xEF,0x00 };
+        memset(g_rom, 0x01, sizeof(g_rom)); memcpy(g_rom, getbl, sizeof(getbl));
+        g_rom[0x1000] = 0x5A;
+        g.Reset(); g.WriteReg(0x3034,0); g.WriteReg(0x301E,0); g.WriteReg(0x301F,0x80);
+        g.Run(100000);
+        CHECK("GETBL preserva source high", g.GetReg(2), 0x125A);
+    }
+    {
+        // MERGE tem flags especiais, baseadas em mascaras de ambos os bytes.
+        static const uint8_t pm[] = {
+            0xF7,0x00,0xA5, 0xF8,0x00,0x5A, 0x13,0x70,0x00 };
+        SNGSU g = runProgram(pm, sizeof(pm));
+        CHECK("MERGE resultado", g.GetReg(3), 0xA55A);
+        uint8_t sfr = g.ReadReg(0x3030);
+        CHECK("MERGE flag Z",  sfr & 0x02, 0x02);
+        CHECK("MERGE flag CY", sfr & 0x04, 0x04);
+        CHECK("MERGE flag S",  sfr & 0x08, 0x08);
+        CHECK("MERGE flag OV", sfr & 0x10, 0x10);
+    }
+    {
+        // Uma linha escrita por completo em $3100-$310F fica valida e deve
+        // sobrepor ROM/RAM quando PC estiver na janela CBR..CBR+511.
+        memset(g_rom, 0x00, sizeof(g_rom));
+        memset(g_ram, 0x00, sizeof(g_ram));
+        uint8_t cacheLine[16]; memset(cacheLine, 0x01, sizeof(cacheLine));
+        cacheLine[0]=0xF3; cacheLine[1]=0x34; cacheLine[2]=0x12; cacheLine[3]=0x00;
+        SNGSU g; g.SetMemory(g_rom,sizeof(g_rom),g_ram,sizeof(g_ram)); g.Reset();
+        g.WriteReg(0x3034,0);
+        for (int i=0; i<16; i++) g.WriteReg((uint16_t)(0x3100+i),cacheLine[i]);
+        g.WriteReg(0x301E,0); g.WriteReg(0x301F,0);
+        g.Run(100000);
+        CHECK("fetch usa code cache", g.GetReg(3), 0x1234);
+    }
+    {
+        // Com CBR=$C3A0, o inicio logico do cache aparece para a CPU em
+        // $32A0 (3100h + (CBR & 1FFh)). STOP preserva CBR; uma escrita
+        // explicita de GO=0 no SFR deve finalmente zerar CBR/cache.
+        memset(g_rom, 0x01, sizeof(g_rom));
+        memset(g_ram, 0x00, sizeof(g_ram));
+        g_rom[0x43A4] = 0x02;                 // CACHE em PBR=0:$C3A4
+        SNGSU g; g.SetMemory(g_rom,sizeof(g_rom),g_ram,sizeof(g_ram)); g.Reset();
+        g.WriteReg(0x3034,0);
+        g.WriteReg(0x301E,0xA4); g.WriteReg(0x301F,0xC3);
+        // O pipeline do GSU inicia com um NOP: primeiro ciclo prebusca CACHE,
+        // segundo ciclo efetivamente o executa.
+        g.Run(2);
+        CHECK("CACHE define CBR low",  g.ReadReg(0x303E), 0xA0);
+        CHECK("CACHE define CBR high", g.ReadReg(0x303F), 0xC3);
+
+        uint8_t line[16]; memset(line, 0x01, sizeof(line));
+        line[0]=0xF3; line[1]=0xEF; line[2]=0xBE; line[3]=0x00;
+        for (int i=0; i<16; i++) g.WriteReg((uint16_t)(0x32A0+i),line[i]);
+        g.WriteReg(0x301E,0xA0); g.WriteReg(0x301F,0xC3);
+        g.Run(100000);
+        CHECK("cache rotacionado pelo CBR", g.GetReg(3), 0xBEEF);
+        CHECK("STOP preserva CBR", g.ReadReg(0x303E), 0xA0);
+        g.WriteReg(0x3030,0x00);
+        CHECK("SFR GO=0 limpa CBR low",  g.ReadReg(0x303E), 0x00);
+        CHECK("SFR GO=0 limpa CBR high", g.ReadReg(0x303F), 0x00);
+    }
 
     // ===== Parte D: graficos (PLOT / pixel cache / RPIX) =====
     printf("\n--- graficos (PLOT/RPIX/bitplanes) ---\n");
@@ -286,6 +474,46 @@ int main()
         CHECK("bitplane1 byte[1]",  g_ram[1],  0x00);
         CHECK("bitplane2 byte[16]", g_ram[16], 0x80);
         CHECK("bitplane3 byte[17]", g_ram[17], 0x00);
+    }
+    {
+        // POR.OBJ força layout 256x256 mesmo quando SCMR.HT seleciona 128.
+        // Em 4bpp, pixel (0,128) pertence ao tile $200 -> offset $4000.
+        static const uint8_t pobj[] = {
+            0xF5,0x10,0x00, 0xB5,0x3D,0x4E, // CMODE OBJ
+            0xF5,0x01,0x00, 0xB5,0x4E,      // COLOR=1
+            0xF1,0x00,0x00, 0xF2,0x80,0x00,
+            0x4C,                            // PLOT (0,128)
+            0xF1,0x00,0x00, 0x3D,0x4C,      // RPIX: flush
+            0x00 };
+        memset(g_rom, 0x01, sizeof(g_rom)); memset(g_ram,0,sizeof(g_ram));
+        memcpy(g_rom,pobj,sizeof(pobj));
+        SNGSU g; g.SetMemory(g_rom,sizeof(g_rom),g_ram,sizeof(g_ram)); g.Reset();
+        g.WriteReg(0x303A,0x19); g.WriteReg(0x3034,0);
+        g.WriteReg(0x301E,0); g.WriteReg(0x301F,0x80); g.Run(100000);
+        CHECK("CMODE OBJ endereco tile", g_ram[0x4000], 0x80);
+        CHECK("CMODE OBJ nao usa 128px", g_ram[0x0200], 0x00);
+    }
+    {
+        // Alterna A->B->A para exercitar os dois buffers reais. O secundario
+        // precisa preservar B enquanto o primario volta a receber A.
+        static const uint8_t ptwo[] = {
+            0xF5,0x01,0x00, 0xB5,0x4E,      // COLOR=1
+            0xF1,0x00,0x00, 0xF2,0x00,0x00,0x4C, // A: (0,0)=1
+            0xF5,0x02,0x00, 0xB5,0x4E,      // COLOR=2
+            0xF1,0x08,0x00, 0x4C,           // B: (8,0)=2
+            0xF5,0x03,0x00, 0xB5,0x4E,      // COLOR=3
+            0xF1,0x01,0x00, 0x4C,           // A: (1,0)=3
+            0xF1,0x00,0x00, 0x3D,0x4C,      // RPIX força ambos
+            0x00 };
+        memset(g_rom,0x01,sizeof(g_rom)); memset(g_ram,0,sizeof(g_ram));
+        memcpy(g_rom,ptwo,sizeof(ptwo));
+        SNGSU g; g.SetMemory(g_rom,sizeof(g_rom),g_ram,sizeof(g_ram)); g.Reset();
+        g.WriteReg(0x303A,0x19); g.WriteReg(0x3034,0);
+        g.WriteReg(0x301E,0); g.WriteReg(0x301F,0x80); g.Run(100000);
+        CHECK("pixel cache A plano 0", g_ram[0], 0xC0);
+        CHECK("pixel cache A plano 1", g_ram[1], 0x40);
+        CHECK("pixel cache B plano 0", g_ram[0x200], 0x00);
+        CHECK("pixel cache B plano 1", g_ram[0x201], 0x80);
     }
 
     // ===== Parte B: fuzz oracle =====

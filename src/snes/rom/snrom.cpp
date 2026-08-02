@@ -381,6 +381,11 @@ SnesRom::SnesRom()
 	m_pRomData	= NULL;
 	m_pCartInfo = NULL;
 	m_uRomBytes	= 0;
+	m_Flags      = SNROM_FLAG_ROM;
+	m_eMapping   = SNROM_MAPPING_LOROM;
+	m_eVideoType = SNROM_VIDEO_NTSC;
+	m_uROMSize   = 0;
+	m_uSRAMSize  = 0;
 	memset(m_Name, 0, sizeof(m_Name));
 }
 
@@ -408,6 +413,12 @@ void SnesRom::SetCartInfo(SNRomInfoT *pCartInfo)
 
 	m_pCartInfo = pCartInfo;
 	memset(m_Name, 0, sizeof(m_Name));
+	/* Keep cartridge classification deterministic even for an unknown or
+	   newly-added type.  Previously m_Flags retained uninitialised heap data
+	   whenever RomType was not listed in the switch below.  SuperFX games
+	   commonly use 14h/15h/1Ah, so the same ROM could accidentally enable the
+	   GSU on a PC build and leave it disabled on a real PS2. */
+	m_Flags = SNROM_FLAG_ROM;
 	if (pCartInfo)
 	{
 		Int32 iTitle;
@@ -470,8 +481,18 @@ void SnesRom::SetCartInfo(SNRomInfoT *pCartInfo)
 		case 5:
 			m_Flags		 = SNROM_FLAG_ROM | SNROM_FLAG_SAVERAM | SNROM_FLAG_DSP1;
 			break;
-		case 19:
-			m_Flags		 = SNROM_FLAG_ROM | SNROM_FLAG_SUPERFX;
+		/* SuperFX/GSU cartridge types.  The low nibble follows the normal
+		   ROM/chip/RAM/battery convention; 1Ah is the additional type used by
+		   a small group of commercial SuperFX cartridges. */
+		case 0x13:
+			m_Flags = SNROM_FLAG_ROM | SNROM_FLAG_SUPERFX;
+			break;
+		case 0x14:
+		case 0x1A:
+			m_Flags = SNROM_FLAG_ROM | SNROM_FLAG_RAM | SNROM_FLAG_SUPERFX;
+			break;
+		case 0x15:
+			m_Flags = SNROM_FLAG_ROM | SNROM_FLAG_SAVERAM | SNROM_FLAG_SUPERFX;
 			break;
 		case 227:
 			m_Flags		 = SNROM_FLAG_ROM | SNROM_FLAG_RAM | SNROM_FLAG_GAMEBOY;
@@ -579,6 +600,20 @@ void SnesRom::SetCartInfo(SNRomInfoT *pCartInfo)
 			{
 				m_Flags = SNROM_FLAG_ROM | SNROM_FLAG_SAVERAM | SNROM_FLAG_CX4;
 			}
+		}
+
+		/* SuperFX stores the size of its Game Pak RAM in the extended
+		   header byte at $7FBD when the new-license marker is present.
+		   The ordinary SRAMSize field is commonly zero even though this RAM
+		   is the framebuffer (Yoshi's Island is 05h = 32 KiB).  Older
+		   headers have no extended value; those cartridges conventionally
+		   contain 32 KiB, matching the hardware/reference-emulator fallback. */
+		if (m_Flags & SNROM_FLAG_SUPERFX)
+		{
+			const Uint8 *pHeader = (const Uint8 *)pCartInfo;
+			Uint8 uRamCode = (pCartInfo->License == 0x33) ? pHeader[-3] : 5;
+			if (uRamCode == 0 || uRamCode > 7) uRamCode = 5;
+			m_uSRAMSize = (Uint32)8 << uRamCode;  // kilobits
 		}
 
 		// S-DD1 (Star Ocean, Street Fighter Alpha 2 / Zero 2): detectado pelo

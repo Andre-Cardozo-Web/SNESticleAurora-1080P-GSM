@@ -1,6 +1,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include "types.h"
 #include "snes.h"
 #include "console.h"
@@ -131,6 +132,75 @@ static SnesMemMapT _SnesMemMap_CX4[]={
     {0,0,0,0,SNESMEM_TYPE_NONE}
 };
 
+// SuperFX Game Pak RAM. Diferente da SRAM LoROM comum, os bancos $70-$71
+// inteiros sao RAM; o tamanho fisico (normalmente 32/64 KiB) espelha dentro
+// destes 128 KiB de espaco.
+static SnesMemMapT _SnesMemMap_SuperFXRAM[]={
+    {0x70,0x71,0x0000,0xFFFF,SNCPU_CYCLE_SLOW,SNESMEM_TYPE_SRAM},
+    {0,0,0,0,SNESMEM_TYPE_NONE}
+};
+
+// GSU1 acrescenta espelhos altos de Game Pak RAM em $F0-$F1.
+static SnesMemMapT _SnesMemMap_SuperFXGSU1RAM[]={
+    {0x70,0x71,0x0000,0xFFFF,SNCPU_CYCLE_SLOW,SNESMEM_TYPE_SRAM},
+    {0xF0,0xF1,0x0000,0xFFFF,SNCPU_CYCLE_SLOW,SNESMEM_TYPE_SRAM},
+    {0,0,0,0,SNESMEM_TYPE_NONE}
+};
+
+// O Mario Chip 1 do Star Fox usa uma decodificacao anterior: os 32 KiB de
+// Game Pak RAM aparecem, espelhados, em todos os bancos $60-$7D/$E0-$FF.
+// Sem este mapa o 65816 le ROM/open-bus no lugar do framebuffer/work RAM e o
+// jogo para logo no boot. Os GSU1/GSU2 posteriores usam $70-$71.
+static SnesMemMapT _SnesMemMap_SuperFXMC1RAM[]={
+    {0x60,0x7D,0x0000,0xFFFF,SNCPU_CYCLE_SLOW,SNESMEM_TYPE_SRAM},
+    {0xE0,0xFF,0x0000,0xFFFF,SNCPU_CYCLE_SLOW,SNESMEM_TYPE_SRAM},
+    {0,0,0,0,SNESMEM_TYPE_NONE}
+};
+
+enum
+{
+    SNES_SUPERFX_BOARD_MC1 = 1,
+    SNES_SUPERFX_BOARD_GSU1,
+    SNES_SUPERFX_BOARD_GSU2
+};
+
+/* Os headers nao identificam a revisao do GSU. A lista de cartuchos e' fixa,
+   entao o titulo interno distingue MC1/GSU1/GSU2 sem depender do nome do ZIP.
+   Desconhecidos/homebrews usam o mapa GSU2, que e' o mais novo. */
+static Int32 _SnesSuperFXBoardType(const Char *pTitle)
+{
+    Char compact[22];
+    Int32 n = 0;
+    if (!pTitle) return SNES_SUPERFX_BOARD_GSU2;
+
+    while (*pTitle && n < 21)
+    {
+        Char c = *pTitle++;
+        if (c >= 'a' && c <= 'z') c = (Char)(c - ('a' - 'A'));
+        if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+            compact[n++] = c;
+    }
+    compact[n] = 0;
+
+    // Star Fox 2 e' a excecao de 1 MiB que ja usa GSU2.
+    if (n >= 8 && !memcmp(compact, "STARFOX2", 8))
+        return SNES_SUPERFX_BOARD_GSU2;
+
+    if ((n >= 7 && !memcmp(compact, "STARFOX", 7)) ||
+        (n >= 8 && !memcmp(compact, "STARWING", 8)))
+        return SNES_SUPERFX_BOARD_MC1;
+
+    if ((n >= 9  && !memcmp(compact, "DIRTRACER", 9)) ||
+        (n >= 10 && !memcmp(compact, "DIRTTRAXFX", 10)) ||
+        (n >= 10 && !memcmp(compact, "POWERSLIDE", 10)) ||
+        (n >= 11 && !memcmp(compact, "STUNTRACEFX", 11)) ||
+        (n >= 8  && !memcmp(compact, "WILDTRAX", 8)) ||
+        (n >= 6  && !memcmp(compact, "VORTEX", 6)))
+        return SNES_SUPERFX_BOARD_GSU1;
+
+    return SNES_SUPERFX_BOARD_GSU2;
+}
+
 /* SNES ROM address lines do not mirror a non-power-of-two image with a
    simple modulo.  A 12-Mbit (1.5 MiB) cart, for example, mirrors its final
    4 Mbit into the next 4-Mbit window.  This is the recursive mirror used by
@@ -152,6 +222,46 @@ static Uint32 _SnesMirrorRomOffset(Uint32 uSize, Uint32 uPos)
 	return uMask + _SnesMirrorRomOffset(uSize - uMask, uPos - uMask);
 }
 
+/* Sobrepoe o mapa generico LoROM com as duas visoes do Program ROM usadas
+   pelo GSU: 32 KiB/banco em $00-$3F e 64 KiB/banco em $40-$5F. Os espelhos
+   altos sao mantidos porque os jogos comerciais tambem os enxergam. */
+static void _MapSuperFXRom(SNCpuT *pCpu, Uint8 *pRom, Uint32 uRomBytes)
+{
+	Uint32 uBank, uPage;
+	if (!pRom || !uRomBytes) return;
+
+	for (uBank = 0; uBank <= 0x3F; uBank++)
+	{
+		Uint32 uOffset = _SnesMirrorRomOffset(uRomBytes, uBank * 0x8000);
+		Uint32 uAddr = uBank << 16;
+		SNCPUSetMemSpeed(pCpu, uAddr | 0x8000, 0x8000, SNCPU_CYCLE_SLOW);
+		SNCPUSetBank(pCpu, uAddr | 0x8000, 0x8000, pRom + uOffset, FALSE);
+		SNCPUSetMemSpeed(pCpu, (uAddr | 0x800000) | 0x8000,
+		                  0x8000, SNCPU_CYCLE_SLOW);
+		SNCPUSetBank(pCpu, (uAddr | 0x800000) | 0x8000,
+		             0x8000, pRom + uOffset, FALSE);
+	}
+
+	for (uBank = 0; uBank <= 0x1F; uBank++)
+	{
+		Uint32 uAddr = (0x40 + uBank) << 16;
+		Uint32 uMirrorAddr = (0xC0 + uBank) << 16;
+		for (uPage = 0; uPage < 0x10000; uPage += SNCPU_BANK_SIZE)
+		{
+			Uint32 uOffset = _SnesMirrorRomOffset(
+				uRomBytes, uBank * 0x10000 + uPage);
+			SNCPUSetMemSpeed(pCpu, uAddr + uPage,
+			                  SNCPU_BANK_SIZE, SNCPU_CYCLE_SLOW);
+			SNCPUSetBank(pCpu, uAddr + uPage,
+			             SNCPU_BANK_SIZE, pRom + uOffset, FALSE);
+			SNCPUSetMemSpeed(pCpu, uMirrorAddr + uPage,
+			                  SNCPU_BANK_SIZE, SNCPU_CYCLE_SLOW);
+			SNCPUSetBank(pCpu, uMirrorAddr + uPage,
+			             SNCPU_BANK_SIZE, pRom + uOffset, FALSE);
+		}
+	}
+}
+
 void SnesSystem::MapMem(SnesMemMapT *pMemMap)
 {
 	SNCpuT *pCpu = &m_Cpu;
@@ -161,12 +271,6 @@ void SnesSystem::MapMem(SnesMemMapT *pMemMap)
 	// determine size of SRAM in bytes 
 	m_uSramSize = pRom->GetSRAMBytes();
 	if (m_uSramSize > SNES_SRAMSIZE) m_uSramSize = SNES_SRAMSIZE; 
-	// SuperFX usa a Game Pak RAM ($70-71 + espelhos $6000-7FFF) como
-	// framebuffer mesmo sem SRAM com bateria (header reporta 0).  Forca 128K
-	// (potencia de 2) para o mapa base instalar essas regioes em m_SRam; a
-	// mascara (size-1=0x1FFFF) casa com o RamLinear do GSU.
-	if ((m_pRom->m_Flags & SNROM_FLAG_SUPERFX) && m_uSramSize < 0x20000)
-		m_uSramSize = 0x20000;
 	//uSRAMBytes = (uSRAMBytes + SNCPU_BANK_SIZE - 1)  & ~(SNCPU_BANK_MASK);
 
 	// calculate size of each map type
@@ -437,14 +541,38 @@ void SnesSystem::MapMem(SNRomMappingE eRomMapping, Uint32 uFlags)
 			// SuperFX ficam 100% intactos.
 			if (uFlags & SNROM_FLAG_SUPERFX)
 			{
-				// A Game Pak RAM ($70-71 + espelhos $6000-7FFF) ja foi
-				// mapeada pelo mapa base (tamanho forcado acima).  A MMIO do
-				// GSU ($3000-34FF) NAO usa trap proprio: a pagina $2000-3FFF
-				// e' do PPU e a granularidade de trap e' 8KB, entao um trap em
-				// $3000 atropelaria o PPU -> e' roteada em Read2000/Write2000
-				// via m_bSuperFX.  Aqui so' conectamos os buffers ao GSU.
+				Uint32 uBank;
+				Int32 nBoard = _SnesSuperFXBoardType(m_pRom->GetRomTitle());
+				Bool bMarioChip1 = (nBoard == SNES_SUPERFX_BOARD_MC1);
+
+				_MapSuperFXRom(&m_Cpu, m_pRom->GetData(), m_pRom->GetBytes());
+				if (bMarioChip1)
+					MapMem(_SnesMemMap_SuperFXMC1RAM);
+				else if (nBoard == SNES_SUPERFX_BOARD_GSU1)
+					MapMem(_SnesMemMap_SuperFXGSU1RAM);
+				else
+					MapMem(_SnesMemMap_SuperFXRAM);
+
+				// GSU1/2: $00-$3F/$80-$BF:6000-$7FFF espelha os primeiros
+				// 8 KiB de $70:0000. O Mario Chip 1 nao possui esta janela.
+				if (!bMarioChip1)
+				{
+					for (uBank = 0; uBank <= 0x3F; uBank++)
+					{
+						Uint32 uAddr = (uBank << 16) | 0x6000;
+						SNCPUSetMemSpeed(&m_Cpu, uAddr, 0x2000, SNCPU_CYCLE_SLOW);
+						SNCPUSetBank(&m_Cpu, uAddr, 0x2000, m_SRam, TRUE);
+						uAddr |= 0x800000;
+						SNCPUSetMemSpeed(&m_Cpu, uAddr, 0x2000, SNCPU_CYCLE_SLOW);
+						SNCPUSetBank(&m_Cpu, uAddr, 0x2000, m_SRam, TRUE);
+					}
+				}
+
+				// A MMIO do GSU ($3000-$34FF) compartilha a pagina do PPU e
+				// continua roteada por Read2000/Write2000.
+				m_GSU.SetVersion(bMarioChip1 ? 0x01 : 0x04);
 				m_GSU.SetMemory(m_pRom->GetData(), m_pRom->GetBytes(),
-				                m_SRam, 0x20000);
+				                m_SRam, m_uSramSize);
 			}
 			if (uFlags & SNROM_FLAG_SDD1)
 			{

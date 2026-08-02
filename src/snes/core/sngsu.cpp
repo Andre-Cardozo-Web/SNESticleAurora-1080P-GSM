@@ -1,14 +1,12 @@
 /*
- * sngsu.cpp - SuperFX / GSU core (Etapa 1: infra + control + opcodes minimos)
+ * sngsu.cpp - SuperFX / GSU core
  *
  * Clean-room a partir da documentacao publica (fullsnes/sneslab/nesdev).
  * Nenhum codigo de emulador foi copiado.  GPLv2 (veja LICENSE).
  *
- * Escopo desta etapa: estado, SFR, mapa de memoria, MMIO ($3000-$34FF),
- * controle GO/STOP/IRQ, e um loop fetch/execute com:
- *   STOP(00) NOP(01) CACHE(02) TO(10-1F) WITH(20-2F) ALT1/2/3(3D-3F)
- *   ADD/ADC(50-5F) SUB/SBC/CMP(60-6F) FROM(B0-BF) IWT(F0-FF)
- * O set completo (~90 opcodes) e os graficos (PLOT/pixel cache) vem depois.
+ * Implementacao funcional do conjunto de opcodes, MMIO, code-cache,
+ * prefetch de ROM e PLOT/RPIX. A temporizacao e' aproximada pelo scheduler
+ * por scanline; detalhes de wait-state continuam isolados para evolucao.
  */
 
 #include "types.h"
@@ -16,10 +14,13 @@
 
 #include <string.h>
 
+extern "C" void DLog(const char *fmt, ...);
+
 SNGSU::SNGSU()
 {
     m_pRom = NULL; m_uRomSize = 0; m_uRomMask = 0;
     m_pRam = NULL; m_uRamSize = 0; m_uRamMask = 0;
+    m_ConfigVCR = 0x04;
     Reset();
 }
 
@@ -27,6 +28,13 @@ void SNGSU::SetMemory(Uint8 *pRom, Uint32 uRomSize, Uint8 *pRam, Uint32 uRamSize
 {
     m_pRom = pRom; m_uRomSize = uRomSize; m_uRomMask = uRomSize ? uRomSize - 1 : 0;
     m_pRam = pRam; m_uRamSize = uRamSize; m_uRamMask = uRamSize ? uRamSize - 1 : 0;
+    UpdateRomBuffer();
+}
+
+void SNGSU::SetVersion(Uint8 uVersion)
+{
+    m_ConfigVCR = (uVersion == 0x01) ? 0x01 : 0x04;
+    m_VCR = m_ConfigVCR;
 }
 
 void SNGSU::Reset()
@@ -43,17 +51,23 @@ void SNGSU::Reset()
     m_Sreg = 0; m_Dreg = 0;
     m_PBR = 0; m_ROMBR = 0; m_RAMBR = 0;
     m_CFGR = 0; m_SCBR = 0; m_CLSR = 0; m_SCMR = 0;
-    m_VCR = 0x04;            // GSU2 por padrao (01h = MC1/Star Fox)
+    m_VCR = m_ConfigVCR;
     m_CBR = 0;
     m_RomBuffer = 0; m_RomBufValid = FALSE;
     m_Runaway = 0;
-    m_BranchPending = FALSE; m_BranchTarget = 0;
-    m_BranchSetPBR = FALSE; m_BranchPBR = 0;
+    m_WatchdogReported = FALSE;
+#if SNDBG_LOG
+    memset(&m_Diag, 0, sizeof(m_Diag));
+#endif
+    m_Pipeline = 0x01;                 // o primeiro byte executado e' um NOP
+    m_PCModified = FALSE;
     m_LastRamAddr = 0;
     m_Color = 0; m_POR = 0;
     memset(m_PixColor, 0, sizeof(m_PixColor));
-    m_PixFlags = 0; m_PixXBase = 0; m_PixY = 0; m_PixValid = FALSE;
+    m_PixFlags[0] = m_PixFlags[1] = 0;
+    m_PixOffset[0] = m_PixOffset[1] = 0xFFFF;
     memset(m_Cache, 0, sizeof(m_Cache));
+    m_CacheValid = 0;
 }
 
 //==========================================================================
@@ -108,19 +122,64 @@ Uint8 SNGSU::RomReadByte(Uint8 uBank, Uint16 uAddr) const
 {
     if (!m_pRom || !m_uRomSize) return 0xFF;
     Uint32 off = RomOffset(uBank, uAddr);
+    // Todos os cartuchos SuperFX comerciais tem ROM com tamanho potencia de
+    // dois. Evitar a divisao de 32 bits aqui reduz bastante o custo na EE do
+    // PS2; imagens homebrew de tamanho irregular conservam o fallback.
+    if ((m_uRomSize & m_uRomMask) == 0)
+        return m_pRom[off & m_uRomMask];
     return m_pRom[off % m_uRomSize];
 }
+
+Uint8 SNGSU::RawCodeRead(Uint16 uAddr) const
+{
+    if (m_PBR >= 0x70 && m_PBR <= 0x71)
+        return RamReadByte(((Uint32)(m_PBR & 1) << 16) | uAddr);
+    return RomReadByte(m_PBR, uAddr);
+}
+
+void SNGSU::UpdateRomBuffer()
+{
+    if (!m_pRom || !m_uRomSize) { m_RomBuffer = 0xFF; m_RomBufValid = FALSE; return; }
+    m_RomBuffer = RomReadByte(m_ROMBR, m_R[14]);
+    m_RomBufValid = TRUE;
+    m_bRomRead = FALSE; // o modelo funcional completa o prefetch imediatamente
+}
+
+void SNGSU::FlushCodeCache()
+{
+    m_CacheValid = 0;
+}
+
+#if SNDBG_LOG
+void SNGSU::ClearDiagWindow()
+{
+    // Um comando pode atravessar a fronteira da janela de 60 frames. Mantem
+    // seu tamanho corrente para que o maximo continue significativo.
+    Uint32 current = m_Diag.CurrentJobInstructions;
+    memset(&m_Diag, 0, sizeof(m_Diag));
+    m_Diag.CurrentJobInstructions = current;
+    m_Diag.MaxJobInstructions = current;
+}
+#endif
 
 Uint8 SNGSU::RamReadByte(Uint32 uAddr) const
 {
     if (!m_pRam || !m_uRamSize) return 0xFF;
+    if ((m_uRamSize & m_uRamMask) == 0)
+        return m_pRam[uAddr & m_uRamMask];
     return m_pRam[uAddr % m_uRamSize];
 }
 
 void SNGSU::RamWriteByte(Uint32 uAddr, Uint8 v)
 {
     if (!m_pRam || !m_uRamSize) return;
-    m_pRam[uAddr % m_uRamSize] = v;
+#if SNDBG_LOG
+    m_Diag.RamWrites++;
+#endif
+    if ((m_uRamSize & m_uRamMask) == 0)
+        m_pRam[uAddr & m_uRamMask] = v;
+    else
+        m_pRam[uAddr % m_uRamSize] = v;
 }
 
 // RAMBR(0x70/0x71):addr -> offset linear na Game Pak RAM
@@ -152,20 +211,49 @@ void SNGSU::RamWriteWord(Uint16 uAddr, Uint16 v)
     }
 }
 
-Uint8 SNGSU::CodeFetch()
+Uint8 SNGSU::CodeRead(Uint16 pc)
 {
+    Uint16 cacheOffset = (Uint16)(pc - m_CBR);
     Uint8 b;
-    if (m_PBR >= 0x70)
+
+    if (cacheOffset < 512)
     {
-        // codigo em Game Pak RAM ($70/$71)
-        Uint32 off = ((Uint32)(m_PBR & 1) << 16) | m_R[15];
-        b = RamReadByte(off);
+        Uint32 line = cacheOffset >> 4;
+        if (!(m_CacheValid & ((Uint32)1 << line)))
+        {
+#if SNDBG_LOG
+            m_Diag.CacheMisses++;
+#endif
+            Uint16 base = (Uint16)(m_CBR + (line << 4));
+            Uint32 i;
+            for (i = 0; i < 16; i++)
+                m_Cache[(line << 4) + i] = RawCodeRead((Uint16)(base + i));
+            m_CacheValid |= (Uint32)1 << line;
+        }
+#if SNDBG_LOG
+        else
+        {
+            m_Diag.CacheHits++;
+        }
+#endif
+        b = m_Cache[cacheOffset];
     }
     else
     {
-        b = RomReadByte(m_PBR, m_R[15]);
+        b = RawCodeRead(pc);
     }
+    return b;
+}
+
+// Retorna o byte ja prebuscado e coloca no pipeline o byte seguinte. O
+// incremento feito aqui e' parte do mecanismo interno de prefetch, nao uma
+// escrita de R15 pela instrucao em execucao.
+Uint8 SNGSU::Pipe()
+{
+    Uint8 b = m_Pipeline;
     m_R[15]++;
+    m_Pipeline = CodeRead(m_R[15]);
+    m_PCModified = FALSE;
     return b;
 }
 
@@ -182,9 +270,18 @@ Uint8 SNGSU::ReadReg(Uint16 uAddrLow)
 {
     Uint16 a = uAddrLow & 0xFFFF;
 
-    // cache RAM
+    // A janela da CPU ($3100-$32FF) enxerga o cache rotacionado pelo CBR.
+    // Internamente guardamos o byte zero como o inicio logico CBR, portanto
+    // convertemos o indice fisico documentado para um deslocamento relativo.
     if (a >= 0x3100 && a <= 0x32FF)
-        return m_Cache[a - 0x3100];
+    {
+        Uint16 off = (Uint16)(((a - 0x3100) - (m_CBR & 0x01FF)) & 0x01FF);
+        return m_Cache[off];
+    }
+
+    // GSU2 espelha os 64 bytes de registradores nestas janelas.
+    if (a >= 0x3040 && a <= 0x30FF) a = (Uint16)(0x3000 | (a & 0x3F));
+    else if (a >= 0x3300 && a <= 0x34FF) a = (Uint16)(0x3000 | (a & 0x3F));
 
     // R0-R15
     if (a >= 0x3000 && a <= 0x301F)
@@ -215,7 +312,16 @@ void SNGSU::WriteReg(Uint16 uAddrLow, Uint8 uData)
 {
     Uint16 a = uAddrLow & 0xFFFF;
 
-    if (a >= 0x3100 && a <= 0x32FF) { m_Cache[a - 0x3100] = uData; return; }
+    if (a >= 0x3100 && a <= 0x32FF)
+    {
+        Uint32 off = ((a - 0x3100) - (m_CBR & 0x01FF)) & 0x01FF;
+        m_Cache[off] = uData;
+        if ((off & 15) == 15) m_CacheValid |= (Uint32)1 << (off >> 4);
+        return;
+    }
+
+    if (a >= 0x3040 && a <= 0x30FF) a = (Uint16)(0x3000 | (a & 0x3F));
+    else if (a >= 0x3300 && a <= 0x34FF) a = (Uint16)(0x3000 | (a & 0x3F));
 
     // R0-R15: par = LATCH; impar = aplica (MSB=data, LSB=latch)
     if (a >= 0x3000 && a <= 0x301F)
@@ -223,23 +329,47 @@ void SNGSU::WriteReg(Uint16 uAddrLow, Uint8 uData)
         if ((a & 1) == 0) { m_RegLatch = uData; return; }
         Int32 idx = (a - 0x3000) >> 1;
         m_R[idx] = (Uint16)(((Uint16)uData << 8) | m_RegLatch);
+        if (idx == 14) UpdateRomBuffer();
         if (a == 0x301F)        // escrita em R15.MSB dispara GO
         {
             m_bGo = TRUE;
             m_Runaway = 0;      // reinicia o watchdog a cada novo START
+#if SNDBG_LOG
+            m_Diag.Starts++;
+            m_Diag.CurrentJobInstructions = 0;
+#endif
         }
         return;
     }
 
     switch (a)
     {
-    case 0x3030: SfrWriteLow(uData); break;
+    case 0x3030:
+        {
+            Bool wasGo = m_bGo;
+            SfrWriteLow(uData);
+            // Uma escrita explicita de GO=0 limpa CBR/cache. STOP tambem
+            // baixa GO, mas preserva o cache ate a CPU escrever o SFR.
+            if (!m_bGo) { m_CBR = 0; FlushCodeCache(); }
+            if (!wasGo && m_bGo)
+            {
+                m_Runaway = 0;
+#if SNDBG_LOG
+                m_Diag.Starts++;
+                m_Diag.CurrentJobInstructions = 0;
+#endif
+            }
+#if SNDBG_LOG
+            if (wasGo && !m_bGo) m_Diag.Aborts++;
+#endif
+        }
+        break;
     case 0x3031: /* high: normalmente nao escrito pelo SNES */ break;
     case 0x3033: /* BRAMR (backup ram enable) - ignorado por enquanto */ break;
-    case 0x3034: m_PBR  = uData & 0x7F; break;
+    case 0x3034: m_PBR  = uData & 0x7F; FlushCodeCache(); break;
     case 0x3037: m_CFGR = uData; break;
     case 0x3038: m_SCBR = uData; break;
-    case 0x3039: m_CLSR = uData; break;
+    case 0x3039: m_CLSR = uData & 1; break;
     case 0x303A: m_SCMR = uData; break;
     default: break;
     }
@@ -260,6 +390,22 @@ void SNGSU::SetZSfromWord(Uint16 v)
     m_bS = (v & 0x8000) != 0;
 }
 
+void SNGSU::WriteRegister(Uint8 n, Uint16 val)
+{
+    n &= 15;
+    if (n == 15)
+    {
+        // O byte seguinte ja esta no pipeline e sera executado no proximo
+        // Step; somente o endereco da proxima prebusca muda agora.
+        m_R[15] = val;
+        m_PCModified = TRUE;
+        return;
+    }
+
+    m_R[n] = val;
+    if (n == 14) UpdateRomBuffer();
+}
+
 //==========================================================================
 //  Graficos (PLOT / pixel cache)
 //==========================================================================
@@ -277,7 +423,9 @@ Int32 SNGSU::ScreenBpp() const
 Uint32 SNGSU::PixelTileNo(Uint8 x, Uint8 y) const
 {
     Uint32 cx = x >> 3, cy = y >> 3;
-    Uint32 ht = (((m_SCMR >> 5) & 1) << 1) | ((m_SCMR >> 2) & 1);
+    Uint32 ht = (m_POR & 0x10)
+              ? 3
+              : ((((m_SCMR >> 5) & 1) << 1) | ((m_SCMR >> 2) & 1));
     switch (ht) {
     case 0:  return cx * 0x10 + cy;                       // 128 pixels
     case 1:  return cx * 0x14 + cy;                       // 160 pixels
@@ -296,30 +444,56 @@ Uint32 SNGSU::PixelRowAddr(Uint8 x, Uint8 y) const
     return tile * tileSize + ((Uint32)m_SCBR << 10) + (Uint32)(y & 7) * 2;
 }
 
-// Descarrega o cache de pixels para a RAM (formato bitplane do SNES).
-void SNGSU::PixFlush()
+// Descarrega um dos dois caches de pixels para a RAM (bitplanes do SNES).
+void SNGSU::PixFlush(Int32 nCache)
 {
-    if (!m_PixValid || m_PixFlags == 0) { m_PixFlags = 0; m_PixValid = FALSE; return; }
+    nCache &= 1;
+    Uint8 flags = m_PixFlags[nCache];
+    if (flags == 0) return;
+
+    Uint16 offset = m_PixOffset[nCache];
+    Uint8 xbase = (Uint8)(offset << 3);
+    Uint8 y = (Uint8)(offset >> 5);
     Int32  bpp = ScreenBpp();
-    Uint32 rowAddr = PixelRowAddr(m_PixXBase, m_PixY);
+    Uint32 rowAddr = PixelRowAddr(xbase, y);
     for (Int32 b = 0; b < bpp; b++) {
         // plano b: par (b>>1) a offset (b>>1)*16, byte (b&1) dentro do par
         Uint32 addr = rowAddr + (Uint32)((b >> 1) * 16 + (b & 1));
-        Uint8  byte = RamReadByte(addr);
+        Uint8  byte = (flags == 0xFF) ? 0 : RamReadByte(addr);
         for (Int32 i = 0; i < 8; i++) {
-            if (m_PixFlags & (1 << i)) {
+            if (flags & (1 << i)) {
                 Uint8 mask = (Uint8)(1 << (7 - i));        // pixel 0 = bit7
-                if ((m_PixColor[i] >> b) & 1) byte |= mask;
+                if ((m_PixColor[nCache][i] >> b) & 1) byte |= mask;
                 else                          byte &= (Uint8)~mask;
             }
         }
         RamWriteByte(addr, byte);
     }
-    m_PixFlags = 0; m_PixValid = FALSE;
+    m_PixFlags[nCache] = 0;
+}
+
+void SNGSU::PixMovePrimaryToSecondary()
+{
+    // O hardware espera o secundario terminar antes de reutiliza-lo.
+    PixFlush(1);
+    memcpy(m_PixColor[1], m_PixColor[0], sizeof(m_PixColor[0]));
+    m_PixFlags[1] = m_PixFlags[0];
+    m_PixOffset[1] = m_PixOffset[0];
+    m_PixFlags[0] = 0;
+}
+
+void SNGSU::PixFlushAll()
+{
+    // O secundario e' sempre o bloco mais antigo.
+    PixFlush(1);
+    PixFlush(0);
 }
 
 void SNGSU::Plot()
 {
+#if SNDBG_LOG
+    m_Diag.Plots++;
+#endif
     Uint8 x = (Uint8)(m_R[1] & 0xFF);
     Uint8 y = (Uint8)(m_R[2] & 0xFF);
 
@@ -344,19 +518,26 @@ void SNGSU::Plot()
         color &= 0x0F;
     }
 
-    Uint8 xbase = (Uint8)(x & 0xF8);
-    if (m_PixValid && (xbase != m_PixXBase || y != m_PixY)) PixFlush();
-    m_PixXBase = xbase; m_PixY = y; m_PixValid = TRUE;
-    m_PixColor[x & 7] = color;
-    m_PixFlags |= (Uint8)(1 << (x & 7));
+    Uint16 offset = (Uint16)(((Uint16)y << 5) + (x >> 3));
+    if (offset != m_PixOffset[0])
+    {
+        PixMovePrimaryToSecondary();
+        m_PixOffset[0] = offset;
+    }
+    m_PixColor[0][x & 7] = color;
+    m_PixFlags[0] |= (Uint8)(1 << (x & 7));
     m_R[1]++;
 
-    if (m_PixFlags == 0xFF) PixFlush();
+    if (m_PixFlags[0] == 0xFF)
+        PixMovePrimaryToSecondary();
 }
 
 Uint16 SNGSU::Rpix()
 {
-    PixFlush();                       // RPIX sempre forca o flush antes de ler
+#if SNDBG_LOG
+    m_Diag.Rpix++;
+#endif
+    PixFlushAll();                    // RPIX espera ambos antes de ler a RAM
     Uint8 x = (Uint8)(m_R[1] & 0xFF);
     Uint8 y = (Uint8)(m_R[2] & 0xFF);
     Int32 bpp = ScreenBpp();
@@ -387,20 +568,50 @@ void SNGSU::Run(Int32 nClocks)
 
 void SNGSU::Step()
 {
+#if SNDBG_LOG
+    m_Diag.Instructions++;
+    m_Diag.CurrentJobInstructions++;
+    if (m_Diag.CurrentJobInstructions > m_Diag.MaxJobInstructions)
+        m_Diag.MaxJobInstructions = m_Diag.CurrentJobInstructions;
+#endif
     // watchdog: rede de seguranca contra um programa que nunca alcance STOP
     // (bug nosso ou ROM corrompida).  Apos um teto de instrucoes, forca a
     // parada (+IRQ) para nao travar a EE.  Rotinas reais do Star Fox terminam
     // bem antes disto.
     if (++m_Runaway > 2000000)
     {
+        // Desenvolvimento: uma captura curta e unica permite identificar o
+        // laço real caso algum jogo ainda alcance esta rede de seguranca.
+        // Em execucao correta nada e' impresso e nao existe custo de SIO.
+        if (!m_WatchdogReported)
+        {
+            m_WatchdogReported = TRUE;
+            DLog("[gsu-watchdog] PBR=%02X PC=%04X CBR=%04X PIPE=%02X NEXT=%02X SFR=%02X%02X",
+                 (unsigned)m_PBR, (unsigned)m_R[15], (unsigned)m_CBR,
+                 (unsigned)m_Pipeline, (unsigned)RawCodeRead(m_R[15]),
+                 (unsigned)SfrHigh(), (unsigned)SfrLow());
+            DLog("[gsu-watchdog] R0=%04X R1=%04X R2=%04X R3=%04X R4=%04X R5=%04X R6=%04X R7=%04X",
+                 (unsigned)m_R[0], (unsigned)m_R[1], (unsigned)m_R[2], (unsigned)m_R[3],
+                 (unsigned)m_R[4], (unsigned)m_R[5], (unsigned)m_R[6], (unsigned)m_R[7]);
+            DLog("[gsu-watchdog] R8=%04X R9=%04X R10=%04X R11=%04X R12=%04X R13=%04X R14=%04X R15=%04X",
+                 (unsigned)m_R[8], (unsigned)m_R[9], (unsigned)m_R[10], (unsigned)m_R[11],
+                 (unsigned)m_R[12], (unsigned)m_R[13], (unsigned)m_R[14], (unsigned)m_R[15]);
+        }
+#if SNDBG_LOG
+        m_Diag.Watchdogs++;
+#endif
         m_bGo = FALSE; m_bIrq = TRUE; m_Runaway = 0;
         return;
     }
 
-    Uint8 op = CodeFetch();
+    // Pipeline de um byte do GSU: executa o byte que ja estava prebuscado e
+    // busca o byte apontado por R15. Uma escrita posterior em R15 conserva
+    // esse byte como delay slot e muda somente a proxima origem de fetch.
+    Uint8 op = m_Pipeline;
+    m_Pipeline = CodeRead(m_R[15]);
+    m_PCModified = FALSE;
 
     Bool  bIsPrefix = FALSE;
-    Bool  doBranch  = m_BranchPending;   // delay slot do salto anterior
 
     Uint8  n   = op & 0x0F;
     Uint16 sr  = m_R[m_Sreg];               // valor source
@@ -408,7 +619,7 @@ void SNGSU::Step()
     if (op >= 0x10 && op <= 0x1F)            // TO Rn / MOVE
     {
         if (!m_bB) { m_Dreg = n; bIsPrefix = TRUE; }
-        else       { m_R[n] = m_R[m_Sreg]; } // MOVE (B): Rn = Rsreg
+        else       { WriteRegister(n, m_R[m_Sreg]); } // MOVE (B): Rn = Rsreg
     }
     else if (op >= 0x20 && op <= 0x2F)       // WITH Rn (Sreg=Dreg=n, B=1)
     {
@@ -418,11 +629,17 @@ void SNGSU::Step()
     else if (op >= 0xB0 && op <= 0xBF)       // FROM Rn / MOVES
     {
         if (!m_bB) { m_Sreg = n; bIsPrefix = TRUE; }
-        else       { m_R[m_Dreg] = m_R[n]; SetZSfromWord(m_R[n]); } // MOVES
+        else
+        {
+            Uint16 res = m_R[n];
+            WriteRegister(m_Dreg, res);
+            m_bOV = (res & 0x0080) != 0;
+            SetZSfromWord(res);
+        } // MOVES
     }
-    else if (op == 0x3D) { m_bAlt1 = TRUE; bIsPrefix = TRUE; }   // ALT1
-    else if (op == 0x3E) { m_bAlt2 = TRUE; bIsPrefix = TRUE; }   // ALT2
-    else if (op == 0x3F) { m_bAlt1 = TRUE; m_bAlt2 = TRUE; bIsPrefix = TRUE; } // ALT3
+    else if (op == 0x3D) { m_bB = FALSE; m_bAlt1 = TRUE; bIsPrefix = TRUE; }   // ALT1
+    else if (op == 0x3E) { m_bB = FALSE; m_bAlt2 = TRUE; bIsPrefix = TRUE; }   // ALT2
+    else if (op == 0x3F) { m_bB = FALSE; m_bAlt1 = TRUE; m_bAlt2 = TRUE; bIsPrefix = TRUE; } // ALT3
     else if (op >= 0x50 && op <= 0x5F)       // ADD / ADC / ADD#imm / ADC#imm
     {
         Uint32 a = sr;
@@ -431,7 +648,7 @@ void SNGSU::Step()
         Uint32 r = a + b + cin;
         m_bCY = (r > 0xFFFF);
         m_bOV = ((~(a ^ b)) & (a ^ r) & 0x8000) != 0;
-        Uint16 res = (Uint16)r; SetZSfromWord(res); m_R[m_Dreg] = res;
+        Uint16 res = (Uint16)r; SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op >= 0x60 && op <= 0x6F)       // SUB / SBC / SUB#imm / CMP
     {
@@ -443,39 +660,43 @@ void SNGSU::Step()
         m_bCY = (r > 0xFFFF);
         m_bOV = ((a ^ b) & (a ^ r) & 0x8000) != 0;
         Uint16 res = (Uint16)r; SetZSfromWord(res);
-        if (!bCmp) m_R[m_Dreg] = res;
+        if (!bCmp) WriteRegister(m_Dreg, res);
     }
     else if (op == 0x70)                     // MERGE
     {
         Uint16 res = (Uint16)((m_R[7] & 0xFF00) | ((m_R[8] >> 8) & 0x00FF));
-        SetZSfromWord(res); m_R[m_Dreg] = res;
+        m_bOV = (res & 0xC0C0) != 0;
+        m_bS  = (res & 0x8080) != 0;
+        m_bCY = (res & 0xE0E0) != 0;
+        m_bZ  = (res & 0xF0F0) != 0;
+        WriteRegister(m_Dreg, res);
     }
     else if (op >= 0x71 && op <= 0x7F)       // AND / BIC / AND#imm / BIC#imm
     {
         Uint16 b = m_bAlt2 ? (Uint16)n : m_R[n];
         if (m_bAlt1) b = (Uint16)~b;          // ALT1 => BIC (AND NOT)
         Uint16 res = (Uint16)(sr & b);
-        SetZSfromWord(res); m_R[m_Dreg] = res;
+        SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op == 0xC0)                     // HIB (high byte -> low)
     {
         Uint16 res = (Uint16)(sr >> 8);
         m_bZ = (res == 0); m_bS = (res & 0x80) != 0;
-        m_R[m_Dreg] = res;
+        WriteRegister(m_Dreg, res);
     }
     else if (op >= 0xC1 && op <= 0xCF)       // OR / XOR / OR#imm / XOR#imm
     {
         Uint16 b = m_bAlt2 ? (Uint16)n : m_R[n];
         Uint16 res = m_bAlt1 ? (Uint16)(sr ^ b) : (Uint16)(sr | b);
-        SetZSfromWord(res); m_R[m_Dreg] = res;
+        SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op == 0x4F)                     // NOT
     {
-        Uint16 res = (Uint16)~sr; SetZSfromWord(res); m_R[m_Dreg] = res;
+        Uint16 res = (Uint16)~sr; SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op == 0x4C)                     // PLOT / RPIX (ALT1)
     {
-        if (m_bAlt1) { Uint16 px = Rpix(); SetZSfromWord(px); m_R[m_Dreg] = px; }
+        if (m_bAlt1) { Uint16 px = Rpix(); SetZSfromWord(px); WriteRegister(m_Dreg, px); }
         else         { Plot(); }
     }
     else if (op == 0x4E)                     // COLOR / CMODE (ALT1)
@@ -485,53 +706,55 @@ void SNGSU::Step()
     }
     else if (op == 0xEF)                      // GETB / GETBH / GETBL / GETBS
     {
-        Uint8 byte = RomReadByte(m_ROMBR, m_R[14]);
+        Uint8 byte;
+        if (!m_RomBufValid) UpdateRomBuffer();
+        byte = m_RomBuffer;
         if (m_bAlt1 && m_bAlt2)               // GETBS (3F): sign-expand
-            m_R[m_Dreg] = (Uint16)(Int16)(Int8)byte;
+            WriteRegister(m_Dreg, (Uint16)(Int16)(Int8)byte);
         else if (m_bAlt1)                     // GETBH (3D): hi=byte, lo unchanged
-            m_R[m_Dreg] = (Uint16)((m_R[m_Dreg] & 0x00FF) | (byte << 8));
+            WriteRegister(m_Dreg, (Uint16)((sr & 0x00FF) | (byte << 8)));
         else if (m_bAlt2)                     // GETBL (3E): lo=byte, hi unchanged
-            m_R[m_Dreg] = (Uint16)((m_R[m_Dreg] & 0xFF00) | byte);
+            WriteRegister(m_Dreg, (Uint16)((sr & 0xFF00) | byte));
         else                                  // GETB: zero-expand
-            m_R[m_Dreg] = (Uint16)byte;
+            WriteRegister(m_Dreg, (Uint16)byte);
     }
     else if (op == 0x03)                     // LSR
     {
         m_bCY = (sr & 1) != 0;
-        Uint16 res = (Uint16)(sr >> 1); SetZSfromWord(res); m_R[m_Dreg] = res;
+        Uint16 res = (Uint16)(sr >> 1); SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op == 0x04)                     // ROL
     {
         Uint16 res = (Uint16)((sr << 1) | (m_bCY ? 1 : 0));
-        m_bCY = (sr & 0x8000) != 0; SetZSfromWord(res); m_R[m_Dreg] = res;
+        m_bCY = (sr & 0x8000) != 0; SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op == 0x96)                     // ASR / DIV2 (ALT1)
     {
         m_bCY = (sr & 1) != 0;
         Uint16 res = (Uint16)(((Int16)sr) >> 1);
         if (m_bAlt1 && sr == 0xFFFF) res = 0;  // DIV2 arredonda p/ zero
-        SetZSfromWord(res); m_R[m_Dreg] = res;
+        SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op == 0x97)                     // ROR
     {
         Uint16 res = (Uint16)((m_bCY ? 0x8000 : 0) | (sr >> 1));
-        m_bCY = (sr & 1) != 0; SetZSfromWord(res); m_R[m_Dreg] = res;
+        m_bCY = (sr & 1) != 0; SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op == 0x4D)                     // SWAP (troca bytes)
     {
         Uint16 res = (Uint16)((sr >> 8) | (sr << 8));
-        SetZSfromWord(res); m_R[m_Dreg] = res;
+        SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op == 0x95)                     // SEX (sign-extend byte)
     {
         Uint16 res = (Uint16)(Int16)(Int8)(sr & 0xFF);
-        SetZSfromWord(res); m_R[m_Dreg] = res;
+        SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op == 0x9E)                     // LOB (low byte)
     {
         Uint16 res = (Uint16)(sr & 0x00FF);
         m_bZ = (res == 0); m_bS = (res & 0x80) != 0;
-        m_R[m_Dreg] = res;
+        WriteRegister(m_Dreg, res);
     }
     else if (op == 0x9F)                     // FMULT / LMULT (ALT1)
     {
@@ -542,7 +765,7 @@ void SNGSU::Step()
         Uint32 up = (Uint32)p;
         Uint16 hi = (Uint16)(up >> 16);
         if (m_bAlt1) m_R[4] = (Uint16)(up & 0xFFFF);   // LMULT: low 16 -> R4
-        if (m_Dreg != 4) m_R[m_Dreg] = hi;             // R4 nao pode receber o alto
+        if (m_Dreg != 4 || m_bAlt1) WriteRegister(m_Dreg, hi);
         SetZSfromWord(hi);
         m_bCY = ((up >> 15) & 1) != 0;                 // CY = bit15 do produto
     }
@@ -550,55 +773,55 @@ void SNGSU::Step()
     {
         Int32 r;
         if (m_bAlt1) {                        // UMULT (sem sinal)
-            Uint32 b = m_bAlt2 ? (Uint32)n : (Uint32)m_R[n];
-            r = (Int32)((Uint32)sr * b);
+            Uint32 b = m_bAlt2 ? (Uint32)n : (Uint32)(Uint8)m_R[n];
+            r = (Int32)((Uint32)(Uint8)sr * b);
         } else {                              // MULT (com sinal)
-            Int32 b = m_bAlt2 ? (Int32)n : (Int32)(Int16)m_R[n];
-            r = (Int32)(Int16)sr * b;
+            Int32 b = m_bAlt2 ? (Int32)n : (Int32)(Int8)m_R[n];
+            r = (Int32)(Int8)sr * b;
         }
-        Uint16 res = (Uint16)r; SetZSfromWord(res); m_R[m_Dreg] = res;
+        Uint16 res = (Uint16)r; SetZSfromWord(res); WriteRegister(m_Dreg, res);
     }
     else if (op >= 0xD0 && op <= 0xDE)       // INC Rn
     {
-        Uint16 res = (Uint16)(m_R[n] + 1); SetZSfromWord(res); m_R[n] = res;
+        Uint16 res = (Uint16)(m_R[n] + 1); SetZSfromWord(res); WriteRegister(n, res);
     }
     else if (op >= 0xE0 && op <= 0xEE)       // DEC Rn
     {
-        Uint16 res = (Uint16)(m_R[n] - 1); SetZSfromWord(res); m_R[n] = res;
+        Uint16 res = (Uint16)(m_R[n] - 1); SetZSfromWord(res); WriteRegister(n, res);
     }
     else if (op >= 0xA0 && op <= 0xAF)       // IBT Rn,#imm8 / LMS / SMS
     {
         if (m_bAlt1) {                        // LMS Rn,(yy): Rn = word[ramb:kk*2]
-            Uint16 addr = (Uint16)(CodeFetch() * 2);
+            Uint16 addr = (Uint16)(Pipe() * 2);
             Uint16 v = RamReadWord(addr); m_LastRamAddr = addr;
-            WriteR15Maybe(n, v);
+            WriteRegister(n, v);
         } else if (m_bAlt2) {                 // SMS (yy),Rn: word[ramb:kk*2] = Rn
-            Uint16 addr = (Uint16)(CodeFetch() * 2);
+            Uint16 addr = (Uint16)(Pipe() * 2);
             RamWriteWord(addr, m_R[n]); m_LastRamAddr = addr;
         } else {                              // IBT Rn,#imm8 (sign-extend)
-            Uint8 imm = CodeFetch();
-            WriteR15Maybe(n, (Uint16)(Int16)(Int8)imm);
+            Uint8 imm = Pipe();
+            WriteRegister(n, (Uint16)(Int16)(Int8)imm);
         }
     }
     else if (op >= 0xF0 && op <= 0xFF)       // IWT Rn,#imm16 / LM / SM
     {
         if (m_bAlt1) {                        // LM Rn,(hilo)
-            Uint8 lo = CodeFetch(), hi = CodeFetch();
+            Uint8 lo = Pipe(), hi = Pipe();
             Uint16 addr = (Uint16)((hi << 8) | lo);
             Uint16 v = RamReadWord(addr); m_LastRamAddr = addr;
-            WriteR15Maybe(n, v);
+            WriteRegister(n, v);
         } else if (m_bAlt2) {                 // SM (hilo),Rn
-            Uint8 lo = CodeFetch(), hi = CodeFetch();
+            Uint8 lo = Pipe(), hi = Pipe();
             Uint16 addr = (Uint16)((hi << 8) | lo);
             RamWriteWord(addr, m_R[n]); m_LastRamAddr = addr;
         } else {                              // IWT Rn,#imm16
-            Uint8 lo = CodeFetch(), hi = CodeFetch();
-            WriteR15Maybe(n, (Uint16)(((Uint16)hi << 8) | lo));
+            Uint8 lo = Pipe(), hi = Pipe();
+            WriteRegister(n, (Uint16)(((Uint16)hi << 8) | lo));
         }
     }
     else if (op >= 0x05 && op <= 0x0F)       // branches (delay slot)
     {
-        Int8 disp = (Int8)CodeFetch();
+        Int8 disp = (Int8)Pipe();
         Bool take = FALSE;
         switch (op) {
         case 0x05: take = TRUE;               break;   // BRA
@@ -613,13 +836,22 @@ void SNGSU::Step()
         case 0x0E: take = !m_bOV;             break;   // BVC
         case 0x0F: take =  m_bOV;             break;   // BVS
         }
-        if (take) { m_BranchTarget = (Uint16)(m_R[15] + disp); m_BranchPending = TRUE; }
+#if SNDBG_LOG
+        m_Diag.Branches++;
+        if (take) m_Diag.BranchesTaken++;
+#endif
+        if (take) { m_R[15] = (Uint16)(m_R[15] + disp); m_PCModified = TRUE; }
+        bIsPrefix = TRUE;                    // Bxx nao limpa ALT/TO/FROM/WITH
     }
     else if (op == 0x3C)                      // LOOP (delay slot)
     {
         m_R[12] = (Uint16)(m_R[12] - 1);
         SetZSfromWord(m_R[12]);
-        if (m_R[12] != 0) { m_BranchTarget = m_R[13]; m_BranchPending = TRUE; }
+        if (m_R[12] != 0) { m_R[15] = m_R[13]; m_PCModified = TRUE; }
+#if SNDBG_LOG
+        m_Diag.Branches++;
+        if (m_R[12] != 0) m_Diag.BranchesTaken++;
+#endif
     }
     else if (op >= 0x30 && op <= 0x3B)        // STW (Rn) / STB (Rn) [ALT1]
     {
@@ -631,8 +863,8 @@ void SNGSU::Step()
     else if (op >= 0x40 && op <= 0x4B)        // LDW (Rn) / LDB (Rn) [ALT1]
     {
         Uint16 addr = m_R[n];
-        if (m_bAlt1) m_R[m_Dreg] = (Uint16)RamReadByte(RamLinear(addr)); // LDB (zero-ext)
-        else         m_R[m_Dreg] = RamReadWord(addr);                    // LDW
+        if (m_bAlt1) WriteRegister(m_Dreg, (Uint16)RamReadByte(RamLinear(addr))); // LDB
+        else         WriteRegister(m_Dreg, RamReadWord(addr));                    // LDW
         m_LastRamAddr = addr;
     }
     else if (op == 0x90)                      // SBK (escreve no ultimo end. RAM)
@@ -645,33 +877,47 @@ void SNGSU::Step()
     }
     else if (op >= 0x98 && op <= 0x9D)        // JMP Rn / LJMP Rn (delay slot)
     {
+#if SNDBG_LOG
+        m_Diag.Jumps++;
+#endif
         if (m_bAlt1) {                         // LJMP: R15=Rsreg, PBR=Rn
-            m_BranchTarget = m_R[m_Sreg];
-            m_BranchPBR    = (Uint8)(m_R[n] & 0x7F);
-            m_BranchSetPBR = TRUE;
-            m_CBR = (Uint16)(m_BranchTarget & 0xFFF0);
+            m_PBR = (Uint8)(m_R[n] & 0x7F);
+            m_R[15] = m_R[m_Sreg];
+            m_CBR = (Uint16)(m_R[15] & 0xFFF0);
+            FlushCodeCache();
         } else {                               // JMP: R15=Rn
-            m_BranchTarget = m_R[n];
+            m_R[15] = m_R[n];
         }
-        m_BranchPending = TRUE;
+        m_PCModified = TRUE;
     }
     else if (op == 0xDF)                       // GETC / RAMB / ROMB
     {
-        if (m_bAlt1 && m_bAlt2)  m_ROMBR = (Uint8)(m_R[m_Sreg] & 0xFF);  // ROMB (3F DF)
+        if (m_bAlt1 && m_bAlt2)  m_ROMBR = (Uint8)(m_R[m_Sreg] & 0x7F);  // ROMB (3F DF)
         else if (m_bAlt2)        m_RAMBR = (Uint8)(m_R[m_Sreg] & 0x01);  // RAMB (3E DF)
-        else                     ColorWrite(RomReadByte(m_ROMBR, m_R[14])); // GETC
+        else
+        {
+            if (!m_RomBufValid) UpdateRomBuffer();
+            ColorWrite(m_RomBuffer);                                    // GETC
+        }
     }
     else if (op == 0x02)                     // CACHE
     {
-        m_CBR = m_R[15] & 0xFFF0;
+        Uint16 next = (Uint16)(m_R[15] & 0xFFF0);
+        if (next != m_CBR) { m_CBR = next; FlushCodeCache(); }
     }
     else if (op == 0x00)                     // STOP
     {
+#if SNDBG_LOG
+        m_Diag.Stops++;
+#endif
         m_bGo = FALSE;
         // IRQ ao SNES so' se NAO mascarado em CFGR.irq (bit7).  Igual hardware
         // /bsnes: instructionSTOP so' levanta irq quando cfgr.irq==0.  Setar
         // incondicionalmente (versao antiga) era espurio e quebrava o boot.
         if (!(m_CFGR & 0x80)) m_bIrq = TRUE;
+        m_POR = 0;
+        m_Pipeline = 0x01;                    // proxima partida inicia por NOP
+        ResetPrefix();
         bIsPrefix = TRUE;
     }
     else if (op == 0x01)                     // NOP
@@ -680,21 +926,19 @@ void SNGSU::Step()
     }
     else
     {
-        // Opcodes ainda nao implementados nesta etapa (branches, LOOP, JMP,
-        // memoria LDW/STW/LM/SM/SBK, LINK, e graficos PLOT/RPIX/COLOR/CMODE).
-        // Tratados como NOP para nao travar; vem nas proximas etapas.
+        // Todos os 256 bytes possuem rota acima. Mantem este fallback como
+        // protecao caso a tabela seja alterada no futuro.
     }
 
     if (!bIsPrefix)
         ResetPrefix();
 
-    // delay slot: aplica o salto pendente DEPOIS de executar a instrucao
-    // seguinte ao branch/JMP/LOOP (1 delay slot, como no hardware).
-    if (doBranch)
-    {
-        if (m_BranchSetPBR) m_PBR = m_BranchPBR;
-        m_R[15]        = m_BranchTarget;
-        m_BranchPending = FALSE;
-        m_BranchSetPBR  = FALSE;
-    }
+    // R15 aponta para o byte que acabou de ser colocado no pipeline. Se a
+    // instrucao nao escreveu o PC, avanca para o proximo endereco. STOP usa
+    // esta mesma regra e por isso termina em $+2, como no silicio.
+    if (m_PCModified)
+        m_PCModified = FALSE;
+    else
+        m_R[15]++;
+
 }
