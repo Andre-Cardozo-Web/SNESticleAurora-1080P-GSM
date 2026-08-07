@@ -176,6 +176,13 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   sejam cortadas pelo antigo limite fixo de 2.048 nomes.
 - O cache de imagens e o índice continuam sendo liberados antes de iniciar uma
   ROM, devolvendo a memória ao core.
+- O índice em RAM agora é ordenado uma vez e consultado por busca binária, em
+  vez de comparar cada nome pedido com todas as PNGs várias vezes por frame.
+- O prefetch de capas vizinhas ganhou atraso inicial e intervalo entre
+  decodificações, evitando várias leituras/decodificações pesadas em frames
+  consecutivos.
+- As pastas `Named_Boxarts`, `Named_Titles`, `Named_Snaps`, `Named_Logos` e o
+  arquivo `COVERS.IDX` agora ficam escondidos da lista de jogos.
 
 ### Download automático pelo Makefile
 
@@ -192,6 +199,10 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   o nome interno de uma ROM única em ZIP.
 - Capas válidas que já existem são preservadas. Ausências, nomes não
   reconhecidos e falhas de rede são resumidos sem impedir a criação da ISO.
+- O downloader gera um `COVERS.IDX` compacto em cada pasta de ROMs. Em CDFS e
+  outros dispositivos lentos, o emulador lê esse arquivo sequencial uma vez e
+  evita enumerar separadamente os quatro diretórios `Named_*`; layouts manuais
+  sem índice continuam usando o fallback compatível.
 - Adicionado `make covers ROMS=/pasta`, que cria o mesmo layout `Named_*`
   diretamente em uma pasta destinada a USB, MX4SIO, MMCE, HDD, memory card ou
   `host:` sem precisar gerar ISO.
@@ -200,8 +211,8 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 ### Documentação
 
-- A seção de capas do README foi reescrita em português com exemplos completos
-  de nomes para `.sfc`, `.nes` e `.zip`.
+- A seção de capas do README foi reescrita em inglês com exemplos completos de
+  nomes para `.sfc`, `.nes` e `.zip`.
 - Adicionados os links separados das coleções Libretro de SNES e NES, uma
   tabela explicando cada `Named_*`, exemplos de várias imagens para a mesma ROM
   e instruções para CDFS e todos os demais dispositivos.
@@ -285,7 +296,8 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 ### Validação realizada neste ambiente
 
-- Compilação completa com o toolchain PS2DEV: **153 arquivos compilados**.
+- Compilação limpa da source extraída do ZIP com o toolchain PS2DEV: **153
+  arquivos compilados**.
 - Resultado: **0 erros** e **2 avisos antigos** de possível truncamento de texto
   em caminhos, sem novos avisos causados por estas mudanças.
 - O downloader foi validado com uma coleção local: uma ROM SNES no formato
@@ -293,6 +305,12 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   correspondentes e produziram **8/8 imagens** nas quatro categorias.
 - Uma segunda execução de `make covers` reconheceu as oito PNGs existentes e
   não sobrescreveu nenhuma delas.
+- O novo índice foi validado com quatro tipos para uma ROM GoodTools: gerou um
+  `COVERS.IDX` de quatro entradas, e uma segunda execução preservou todas as
+  PNGs existentes enquanto atualizava o índice.
+- A preparação de `cdfs:/ROMS/` foi verificada com `COVER=n` sobre uma pasta já
+  preparada: ROM, quatro diretórios `Named_*` e `COVERS.IDX` foram copiados
+  integralmente para a árvore da ISO.
 - `COVER=y` e `cover=y` foram testados na preparação de `cdfs:/ROMS/`: as PNGs
   foram colocadas somente na árvore temporária da ISO e a pasta original
   permaneceu com zero PNGs.

@@ -1063,7 +1063,7 @@ iso-root: $(TARGET_STRIPPED) iso-check
 			\( -iname '*.smc' -o -iname '*.sfc' -o -iname '*.swc' \
 			   -o -iname '*.fig' -o -iname '*.nes' -o -iname '*.fds' \
 			   -o -iname 'disksys.rom' -o -iname '*.zip' -o -iname '*.gz' \
-			   -o -iname '*.png' \) \
+			   -o -iname '*.png' -o -iname 'COVERS.IDX' \) \
 			-exec cp -f --parents {} "$(ISO_ROOT_DIR)/ROMS/" \; ) ; \
 		echo "[ ISO-ROOT ] ROMs copied from $(roms)"; \
 	else \

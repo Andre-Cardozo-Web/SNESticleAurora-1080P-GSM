@@ -49,6 +49,20 @@ static Bool BrowserIsStateBankName(const Char *pName)
 	        pName[nLength - 1] == 'b');
 }
 
+/* Artwork directories and their generated index belong to the cover system,
+   not to the game hierarchy. Keep them usable by uiCover while hiding them
+   from the ROM browser on every device, including CDFS. */
+static Bool BrowserIsCoverMetadataName(const Char *pName)
+{
+	if (!pName)
+		return FALSE;
+	return (!strcasecmp(pName, "Named_Boxarts") ||
+	        !strcasecmp(pName, "Named_Titles") ||
+	        !strcasecmp(pName, "Named_Snaps") ||
+	        !strcasecmp(pName, "Named_Logos") ||
+	        !strcasecmp(pName, "COVERS.IDX")) ? TRUE : FALSE;
+}
+
 /* Resolve the rare DT_UNKNOWN equivalent without slowing down normal ROM
    folders. fileXio/iomanX guarantees FIO_S_* mode bits even for legacy ioman
    drivers (iomanX_dread converts FIO_SO_* before the result reaches the EE).
@@ -141,6 +155,12 @@ static Bool BrowserResolveDirectory(const Char *pParent, const Char *pName,
    with zero PNGs. ~12 frames (~0.2s @ 60Hz) means fast scrolling never
    touches the disk; the cover only loads once you pause on an entry. */
 #define BROWSER_COVER_LOAD_DELAY (12)
+
+/* PNG decode and optical-disc reads are synchronous. Prefetch only after the
+   current selection has been stable for a while, then leave breathing room
+   between neighbours instead of decoding on consecutive frames. */
+#define BROWSER_COVER_PREFETCH_START_DELAY (24)
+#define BROWSER_COVER_PREFETCH_INTERVAL    (8)
 
 /* Marquee tuning (frame counts at the browser's 60 Hz draw rate):
      - DELAY_FRAMES: how long the name sits with a static ellipsis on
@@ -1066,14 +1086,21 @@ void CBrowserScreen::Draw()
 		static Char   s_cov_dir[sizeof(m_Dir)] = "";
 		static Uint32 s_cov_settle = 0;
 		static Bool   s_cov_done   = FALSE;
+		static Uint32 s_cov_prefetch_wait = 0;
+		static Bool   s_cov_prefetch_done = FALSE;
 
-		if (m_iSelect != s_cov_sel || strcmp(m_Dir, s_cov_dir) != 0)
+		if (m_iSelect != s_cov_sel || strcmp(m_Dir, s_cov_dir) != 0 ||
+		    (curIsRom && s_cov_done &&
+		     !CoverHasImage() && !CoverNoImage()))
 		{
-			/* selection / directory changed: restart the settle timer */
+			/* Selection/directory changed, or the cache was freed while this
+			   row stayed selected: restart the settle timer. */
 			s_cov_sel = m_iSelect;
 			snprintf(s_cov_dir, sizeof(s_cov_dir), "%s", m_Dir);
 			s_cov_settle = 0;
 			s_cov_done   = FALSE;
+			s_cov_prefetch_wait = 0;
+			s_cov_prefetch_done = FALSE;
 		}
 		else if (!s_cov_done)
 		{
@@ -1084,26 +1111,44 @@ void CBrowserScreen::Draw()
 			{
 				CoverShow(curIsRom ? curPath : (const char *)0);
 				s_cov_done = TRUE;
+				s_cov_prefetch_wait = BROWSER_COVER_PREFETCH_START_DELAY;
+				s_cov_prefetch_done = curIsRom ? FALSE : TRUE;
 			}
 		}
-		else
+		else if (!s_cov_prefetch_done)
 		{
-			/* settled: warm one un-cached neighbour per frame (at most
-			   one disk load/frame) so the next d-pad step is instant. */
-			static const int offs[8] = { 1, -1, 2, -2, 3, -3, 4, -4 };
-			unsigned k;
-			for (k = 0; k < 8; k++)
+			if (s_cov_prefetch_wait > 0)
 			{
-				Int32 ni = m_iSelect + offs[k];
-				if (ni < 0 || ni >= m_nEntries)
-					continue;
-				if (m_pDirEntries[ni].eType != BROWSER_ENTRYTYPE_EXECUTABLE)
-					continue;
+				s_cov_prefetch_wait--;
+			}
+			else
+			{
+				/* Warm at most one neighbour now. Once a complete pass finds
+				   nothing cold, stop polling until the selection changes. */
+				static const int offs[8] = { 1, -1, 2, -2, 3, -3, 4, -4 };
+				Bool loaded = FALSE;
+				unsigned k;
+				for (k = 0; k < 8; k++)
+				{
+					Int32 ni = m_iSelect + offs[k];
+					if (ni < 0 || ni >= m_nEntries)
+						continue;
+					if (m_pDirEntries[ni].eType != BROWSER_ENTRYTYPE_EXECUTABLE)
+						continue;
 
-				char npath[1024];
-				snprintf(npath, sizeof(npath), "%s%s", m_Dir, m_pDirEntries[ni].name);
-				if (CoverPrefetch(npath))
-					break;   /* performed one disk load this frame */
+					char npath[1024];
+					snprintf(npath, sizeof(npath), "%s%s", m_Dir,
+					         m_pDirEntries[ni].name);
+					if (CoverPrefetch(npath))
+					{
+						loaded = TRUE;
+						break;
+					}
+				}
+				if (loaded)
+					s_cov_prefetch_wait = BROWSER_COVER_PREFETCH_INTERVAL;
+				else
+					s_cov_prefetch_done = TRUE;
 			}
 		}
 	}
@@ -1480,6 +1525,8 @@ void CBrowserScreen::SetDir(const Char *pDir)
 				   256 bytes without writing a final NUL. */
 				de.name[sizeof(de.name) - 1] = '\0';
 				if (!de.name[0] || !strcmp(de.name, ".") || !strcmp(de.name, ".."))
+					continue;
+				if (BrowserIsCoverMetadataName(de.name))
 					continue;
 
 				/* Hide cover-art PNGs from the browser list - they are

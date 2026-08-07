@@ -43,6 +43,16 @@ CATEGORIES = (
     "Named_Logos",
 )
 
+INDEX_FILE_NAME = "COVERS.IDX"
+INDEX_HEADER = "SNESTICLE-COVERS-1"
+INDEX_CODES = {
+    None: "R",
+    "Named_Boxarts": "B",
+    "Named_Titles": "T",
+    "Named_Snaps": "S",
+    "Named_Logos": "L",
+}
+
 ROM_SYSTEM_BY_SUFFIX = {
     ".smc": "snes",
     ".sfc": "snes",
@@ -237,6 +247,73 @@ def _find_roms(root):
     )
 
 
+def _write_cover_indexes(rom_root, output_root, roms):
+    """Write one compact runtime index beside the ROMs in each directory.
+
+    CDFS can read this small sequential file instead of enumerating all four
+    Named_* directories. The emulator still supports manual layouts without an
+    index by falling back to its normal directory scan.
+    """
+    parents = {
+        output_root / rom.relative_to(rom_root).parent
+        for rom in roms
+    }
+    index_count = 0
+    entry_count = 0
+
+    for parent in sorted(parents, key=lambda item: str(item).casefold()):
+        records = []
+        locations = [(None, parent)] + [
+            (category, parent / category) for category in CATEGORIES
+        ]
+        for category, directory in locations:
+            if not directory.is_dir():
+                continue
+            for artwork in sorted(
+                directory.iterdir(), key=lambda item: item.name.casefold()
+            ):
+                if not artwork.is_file() or artwork.suffix.lower() != ".png":
+                    continue
+                name = artwork.name
+                encoded_name = name.encode("utf-8")
+                if (len(encoded_name) >= 256 or "\t" in name or "\r" in name
+                        or "\n" in name or not _valid_png_file(artwork)):
+                    continue
+                records.append((INDEX_CODES[category], name))
+
+        index_path = parent / INDEX_FILE_NAME
+        if not records:
+            # Remove only our generated metadata; artwork and ROMs are never
+            # touched. This prevents a stale index after all art was removed.
+            try:
+                index_path.unlink()
+            except FileNotFoundError:
+                pass
+            continue
+
+        payload = INDEX_HEADER + "\n" + "".join(
+            "%s\t%s\n" % record for record in records
+        )
+        parent.mkdir(parents=True, exist_ok=True)
+        temporary_name = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                prefix=".covers-index-", suffix=".tmp", dir=str(parent),
+                delete=False
+            ) as temporary:
+                temporary.write(payload.encode("utf-8"))
+                temporary_name = temporary.name
+            os.replace(temporary_name, str(index_path))
+        finally:
+            if temporary_name and os.path.exists(temporary_name):
+                os.unlink(temporary_name)
+
+        index_count += 1
+        entry_count += len(records)
+
+    return index_count, entry_count
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Download Libretro SNES/NES artwork matching ROM filenames"
@@ -315,6 +392,15 @@ def main(argv=None):
                 print("[ COVER ] + %s%s" % (destination, suffix))
             elif status == "error":
                 print("[ COVER ] ! %s/%s: %s" % (rom_key, category, detail))
+
+    if not args.dry_run:
+        index_count, index_entries = _write_cover_indexes(
+            rom_root, output_root, roms
+        )
+        print(
+            "[ COVER ] index: %d COVERS.IDX file(s), %d artwork entries"
+            % (index_count, index_entries)
+        )
 
     verb = "would download" if args.dry_run else "downloaded"
     print(

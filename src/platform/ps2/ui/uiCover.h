@@ -4,8 +4,8 @@
  * PNG decoding via upng (src/third_party/upng, zlib license). Decoded +
  * scaled covers are kept in a small, bounded RAM cache (LRU) so moving
  * between already-seen / prefetched entries is instant. The browser
- * prefetches the current selection's neighbours one-per-frame while idle
- * so single d-pad steps land on a warm cache. A single fixed 128x128 GS
+ * prefetches the current selection's neighbours at a paced interval while
+ * idle so single d-pad steps land on a warm cache. A single fixed 256x256 GS
  * texture slot is reused for whatever cover is currently on screen.
  *
  * Memory: the cache is malloc'd lazily on first use and freed
@@ -44,7 +44,9 @@ void CoverToggle(void);
    current selection is not a ROM.
 
    Candidate PNG paths are indexed under COVERS_PATH, beside the ROM and in
-   the ELF's covers/ folder. Each base can contain a plain <base>.png plus
+   the ELF's covers/ folder. A generated COVERS.IDX is used when available;
+   manual layouts without one are scanned once as a fallback. Each base can
+   contain a plain <base>.png plus
    the Libretro Named_Boxarts, Named_Titles, Named_Snaps and Named_Logos
    subfolders. Numbered <base>-1.png ... <base>-9.png extras are supported
    in the base folder. <base> is the ROM file name without extension. */
