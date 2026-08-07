@@ -632,7 +632,8 @@ The cumulative notes for the current test version are available in
   attribution. Incorporating that GPLv2 code is why the project was relicensed
   from MIT to **GPLv2**.
 - **NES (InfoNES) integration**: full PS2 platform layer (render, input, audio,
-  one‑frame stepper), with the InfoNES core kept 1:1 with upstream.
+  one‑frame stepper), with selected correctness fixes synchronized from modern
+  InfoNES work and PS2-specific mixer/resampler code.
 - **Video**: gsKit migration, the Video Config screen, multiple modes, and a
   **safe 480i default** (native 256x240 stays available for CRT users).
 - **Cover art**: the ROM browser shows custom images plus Libretro boxart,
@@ -703,7 +704,9 @@ The cumulative notes for the current test version are available in
   effects out of sync. (Use `PROFILE=1` + R3 to locate hotspots.)
 - **Super Mario Bros 3** — the MMC3 status‑bar split can glitch when scrolling
   (InfoNES uses a scanline‑approximated MMC3 IRQ, not A12‑accurate).
-- Audio timing can be off until the game settles (related to the 30 fps issue).
+- The five base 2A03 channels are implemented. Expansion audio used by some
+  Japanese/mapper-specific releases (VRC6, VRC7, MMC5, FDS and Sunsoft 5B) is
+  not yet connected, so those releases can still miss instruments.
 
 **Video**
 - **240p is not a standard HDMI/DTV mode** — passive PS2→HDMI adapters and most

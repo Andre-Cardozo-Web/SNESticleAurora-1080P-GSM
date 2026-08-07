@@ -56,6 +56,10 @@ void K6502_Reset();
 void K6502_Set_Int_Wiring( BYTE byNMI_Wiring, BYTE byIRQ_Wiring );
 void K6502_Step( WORD wClocks );
 
+/* Monotonic (16-bit wrapping) NES CPU clock used to timestamp pAPU
+   register writes inside the current video frame. */
+WORD K6502_GetPassedClocks( void );
+
 /* Opaque, versioned snapshot helpers used by the PS2 save-state layer.
    Keeping the actual register layout private to K6502.cpp prevents a
    persistent state file from ever containing host pointers. */

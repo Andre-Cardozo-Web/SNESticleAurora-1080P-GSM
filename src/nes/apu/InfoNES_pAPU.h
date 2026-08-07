@@ -199,6 +199,12 @@ extern DWORD ApuC3Llc;                             /* Linear Length Counter */
 
 extern BYTE  ApuC4Atl;
 
+/*-------------------------------------------------------------------*/
+/*  DPCM resources                                                   */
+/*-------------------------------------------------------------------*/
+
+extern int ApuC5DmaLength;
+
 #endif /* InfoNES_PAPU_H_INCLUDED */
 
 /*

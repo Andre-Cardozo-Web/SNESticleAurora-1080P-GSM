@@ -51,3 +51,8 @@ audio, iNES mapper dispatch, battery-backed SRAM and cartridge save states.
 NES states include the 6502, PPU, pAPU, CHR RAM, active bank references and the
 complete writable mapper-data span. Famicom Disk System execution/state support
 is still separate and incomplete.
+
+The base 2A03 audio path includes PS2-specific fixes for pulse/envelope/length
+timing, triangle and noise counters, seven-bit DPCM playback/status, nonlinear
+mixing, DC removal and continuous 44.1-to-32 kHz resampling. Mapper expansion
+audio (VRC6/VRC7/MMC5/FDS/Sunsoft 5B) is not connected yet.

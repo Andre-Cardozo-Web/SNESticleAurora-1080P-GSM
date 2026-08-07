@@ -145,8 +145,10 @@ static inline BYTE K6502_Read( WORD wAddr )
       else
       if ( wAddr == 0x4015 )
       {
-        // APU control
-        byRet = APU_Reg[ 0x15 ];
+	/* APU status is not the last value written to $4015.  In particular,
+	   DPCM bit 4 must clear when playback finishes or games that poll it
+	   never start their next sound effect. */
+	byRet = 0;
 	if ( ApuC1Atl > 0 ) byRet |= (1<<0);
 	if ( ApuC2Atl > 0 ) byRet |= (1<<1);
 	if (  !ApuC3Holdnote ) {
@@ -155,8 +157,10 @@ static inline BYTE K6502_Read( WORD wAddr )
 	  if ( ApuC3Llc > 0 ) byRet |= (1<<2);
 	}
 	if ( ApuC4Atl > 0 ) byRet |= (1<<3);
+	if ( ApuC5DmaLength > 0 ) byRet |= (1<<4);
 
 	// FrameIRQ
+	if ( APU_Reg[ 0x15 ] & 0x40 ) byRet |= 0x40;
         APU_Reg[ 0x15 ] &= ~0x40;
         return byRet;
       }

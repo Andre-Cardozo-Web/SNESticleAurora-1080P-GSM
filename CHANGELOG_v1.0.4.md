@@ -39,6 +39,11 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   `SNESticle/NES/`, mantendo leitura e migração segura dos saves antigos.
 - Finalizados a SRAM de bateria e os **save states de cartuchos NES**, incluindo
   CPU, PPU, áudio, CHR RAM e estado privado dos mappers.
+- Refeito o caminho de áudio base do **NES/2A03**: DPCM na velocidade correta,
+  cinco canais audíveis, envelopes/contadores no ritmo certo, mistura não
+  linear e resampling contínuo sem emendar um bloco quebrado por quadro.
+- Removido trabalho incorreto de envelopes e contadores que era repetido 735
+  vezes por quadro, reduzindo o custo do pAPU no PS2.
 
 ---
 
@@ -173,6 +178,83 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - O perfil selecionado é salvo no cartão de memória.
 - Configurações v16 são migradas para v17 sem perder modo de vídeo, offsets,
   widescreen, volumes ou dispositivos; na migração, o perfil fica em Original.
+
+---
+
+## Áudio e desempenho do NES (InfoNES)
+
+### Canais e temporização do pAPU
+
+- O divisor 16.16 usado pelo DPCM em 44,1 kHz foi corrigido de `265664` para
+  `2659741` (`1789773 / 44100 * 65536`). O valor anterior não era uma simples
+  aproximação: faltava um dígito e samples/efeitos DPCM tocavam cerca de dez
+  vezes mais devagar, alterando tom e duração.
+- O DAC direto de `$4011` agora mantém sua saída mesmo com o DMA de `$4015`
+  desligado, como no 2A03 real.
+- O último bit de cada byte DPCM deixou de ser descartado; os deltas usam os
+  passos corretos de dois níveis dentro da faixa de sete bits.
+- A leitura de status em `$4015` foi separada do último valor escrito. O bit 4
+  agora indica o tamanho DPCM realmente restante e volta a zero no fim do
+  sample, permitindo que jogos que fazem polling iniciem o próximo efeito.
+- Corrigido o caso conhecido de nota dos pulsos 1/2 permanecer tocando depois
+  do contador de duração acabar quando a flag `halt/loop` estava ativa.
+- Escritas no período baixo dos pulsos e do ruído não recarregam mais, por
+  engano, seus contadores de duração; somente o registrador alto dispara a
+  nova nota.
+- Os divisores dos pulsos e do triângulo passaram a usar `timer + 1`, removendo
+  o pequeno desvio sistemático de afinação do caminho antigo.
+- Envelopes dos pulsos e do ruído agora distinguem corretamente volume
+  constante de envelope, começam em 15 ao disparar uma nota e decaem a 240 Hz.
+  Antes a lógica estava invertida e os acumuladores sem sinal impediam o
+  decaimento correto.
+- Sweep dos dois pulsos foi movido para 120 Hz e corrigido para a diferença de
+  negação entre pulse 1 e pulse 2.
+- O contador linear do triângulo deixou de diminuir uma vez por sample PCM.
+  Agora é recarregado/contado pelo sequenciador de quadro; isso recupera linhas
+  de baixo e outros instrumentos que desapareciam em poucos milissegundos.
+- O ruído usa novamente um LFSR de 15 bits com seed não nulo, taps longo/curto
+  corretos e volume/envelope correto.
+- Quando um canal é silenciado ou recebe período inválido, todas as amostras
+  restantes do quadro são escritas com zero. O código anterior saía do laço e
+  deixava dados do quadro anterior, uma causa direta de nota presa e estalo.
+- Escritas nos registradores do pAPU recebem timestamp do relógio acumulado do
+  6502. O valor de overshoot de `K6502_Step()` não é mais confundido com tempo
+  de quadro, evitando deslocar ataques e cortes de nota para o começo do bloco.
+- A fila de eventos ganhou limite defensivo para impedir sobrescrita de memória
+  em ROMs que escrevam nos registradores de áudio em excesso.
+
+### Mixer e saída do PS2
+
+- Os cinco canais base deixaram de ser somados com o mesmo peso e um centro DC
+  fixo. O frontend usa duas tabelas pré-calculadas com as curvas não lineares
+  de **pulse** e **triangle/noise/DPCM** do 2A03.
+- Um bloqueador DC simples remove o offset do DAC sem o salto artificial que
+  causava estouros em entradas/saídas de som.
+- O conversor 44,1 kHz → taxa do mixer mantém posição 32.32 e a última amostra
+  entre quadros. Ele não repete mais a borda nem reinicia a interpolação a cada
+  VSync.
+- A razão fracionária 44.100 → 32.000 produz a cadência correta de 533/534
+  samples por quadro (média exata de 32 kHz), em vez de truncar sempre para
+  533 e tocar lentamente com pequenas descontinuidades.
+- A entrega ao `AudMixBuffer` usa lotes múltiplos de quatro, compatíveis com o
+  conversor 32 → 48 kHz e sem perder a amostra ímpar em `Flush()`.
+- Histórico do filtro/resampler é zerado ao resetar ROM ou carregar state. A
+  imagem do pAPU passou à versão 2, mas states NES v1 desta pré-release ainda
+  são aceitos e têm o DAC antigo convertido.
+- Todas essas mudanças ficam no core/caminho do **NES**; mixer SPC700 e áudio
+  do SNES não foram alterados.
+
+### Custo e limites desta rodada
+
+- Envelope, sweep e contadores deixaram os laços de 735 amostras e passam a
+  rodar apenas nas quatro/duas batidas necessárias por quadro. A mistura usa
+  LUTs e não faz divisões no caminho normal por sample.
+- Cenas pesadas ainda podem ultrapassar 16,6 ms por causa de CPU/PPU/mappers e
+  precisam de perfil/teste em PS2 real; esta rodada remove desperdício do
+  áudio, mas não promete 60 fps em toda ROM.
+- Foram corrigidos os cinco canais **base** do 2A03. Áudio de expansão VRC6,
+  VRC7, MMC5, FDS e Sunsoft 5B continua sendo uma etapa separada; portanto uma
+  ROM japonesa que dependa desses chips ainda pode ter instrumentos ausentes.
 
 ---
 
@@ -370,6 +452,12 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - Compilação limpa da source extraída do ZIP com o toolchain PS2DEV: **153
   arquivos compilados**.
 - Resultado desta source: **153/153 arquivos**, **0 erros** e **0 avisos**.
+- O relógio DPCM foi conferido contra `1789773 / 44100`: o passo corrigido
+  resulta em `40,5844269` ciclos/sample, contra `40,5844218` exatos; o antigo
+  resultava em apenas `4,0537109`.
+- Uma simulação de 600 quadros do resampler contínuo gerou **320.000 samples**
+  em 10 segundos (32.000 Hz exatos), sem lote fora de múltiplo de quatro e sem
+  acumular amostras pendentes.
 - O downloader foi validado com uma coleção local: uma ROM SNES no formato
   GoodTools `(U) [!]` e uma ROM NES dentro de ZIP encontraram os nomes Libretro
   correspondentes e produziram **8/8 imagens** nas quatro categorias.
@@ -405,6 +493,12 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   partições HDD/PFS.
 - Comparar os perfis Original e Composite em jogos com gradientes, transparência
   e tons de pele; a preferência visual continua sendo subjetiva.
+- Comparar em PS2 real músicas e efeitos dos cinco canais base, incluindo
+  **Double Dragon** (nota presa), **Battletoads & Double Dragon** (DPCM) e
+  **Castlevania III US** (polling de `$4015`). A edição japonesa de Castlevania
+  III usa VRC6 e continua fora do áudio base desta rodada.
+- Deixar um jogo NES tocando por vários minutos e testar pause/reset/load state
+  para confirmar ausência de estalo, deriva de tom e amostra ímpar perdida.
 - Validar jogos SuperFX de placas diferentes, incluindo Star Fox/Starwing,
   títulos GSU1 e títulos GSU2. O core recebeu testes unitários, mas compatibilidade
   jogo a jogo ainda depende de testes reais.
@@ -417,6 +511,11 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - PS2SDK: iomanX/fileXio e base do driver CDFS.
 - PicoDrive PS2 de irixxxx: referência para resolução defensiva de entradas de
   diretório sem tipo conhecido.
+- `fhoedemakers/pico-infonesPlus`: referência moderna do InfoNES para as
+  correções de nota presa nos pulsos, DAC/status DPCM e efeitos ausentes
+  (incluindo a Issue #111 daquele projeto).
+- `jay-kumogata/InfoNES`: origem do pAPU integrado e base usada para comparar
+  as mudanças locais do frontend PS2.
 - InfinityStation: referência anterior para limpeza de bandas e comportamento
   visual do navegador.
 - Relatos das Issues #19 e #26 e testes enviados pela comunidade.

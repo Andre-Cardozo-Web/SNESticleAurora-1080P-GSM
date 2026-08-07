@@ -29,7 +29,8 @@ WORD entertime;
 #define APU_WRITEFUNC(name, evtype) \
 void ApuWrite##name(WORD addr, BYTE value) \
 { \
-  ApuEventQueue[cur_event].time = entertime - g_wPassedClocks; \
+  if ( cur_event >= APU_EVENT_MAX ) return; \
+  ApuEventQueue[cur_event].time = (WORD)( K6502_GetPassedClocks() - entertime ); \
   ApuEventQueue[cur_event].type = APUET_W_##evtype; \
   ApuEventQueue[cur_event].data = value; \
   cur_event++; \
@@ -121,7 +122,9 @@ struct ApuQualityData_t
 } ApuQual[] = {
   { 0xa2567000, 0xa2567000, 0xa2567000, 183, 164, 11025, 1062658 },
   { 0x512b3800, 0x512b3800, 0x512b3800, 367,  82, 22050, 531329 },
-  { 0x289d9c00, 0x289d9c00, 0x289d9c00, 735,  41, 44100, 265664 },
+  /* 1789773 NTSC CPU clocks / 44100 Hz, in 16.16 fixed point.  The
+     previous value missed one decimal digit and made DPCM ~10x slow. */
+  { 0x289d9c00, 0x289d9c00, 0x289d9c00, 735,  41, 44100, 2659741 },
 };
 
 /*-------------------------------------------------------------------*/
@@ -132,10 +135,10 @@ BYTE ApuC1a, ApuC1b, ApuC1c, ApuC1d;
 BYTE* ApuC1Wave;
 DWORD ApuC1Skip;
 DWORD ApuC1Index;
-DWORD ApuC1EnvPhase;
+int   ApuC1EnvPhase;
 BYTE  ApuC1EnvVol;
 BYTE  ApuC1Atl;
-DWORD ApuC1SweepPhase;
+int   ApuC1SweepPhase;
 DWORD ApuC1Freq;   
 
 /*-------------------------------------------------------------------*/
@@ -146,10 +149,10 @@ BYTE ApuC2a, ApuC2b, ApuC2c, ApuC2d;
 BYTE* ApuC2Wave;
 DWORD ApuC2Skip;
 DWORD ApuC2Index;
-DWORD ApuC2EnvPhase;
+int   ApuC2EnvPhase;
 BYTE  ApuC2EnvVol;
 BYTE  ApuC2Atl;   
-DWORD ApuC2SweepPhase;
+int   ApuC2SweepPhase;
 DWORD ApuC2Freq;   
 
 /*-------------------------------------------------------------------*/
@@ -161,8 +164,7 @@ DWORD ApuC3Skip;
 DWORD ApuC3Index;
 BYTE  ApuC3Atl;
 DWORD ApuC3Llc;                             /* Linear Length Counter */
-BYTE  ApuC3WriteLatency;
-BYTE  ApuC3CounterStarted;
+BYTE  ApuC3ReloadFlag;
 
 /*-------------------------------------------------------------------*/
 /*  Noise resources                                                  */
@@ -175,7 +177,7 @@ DWORD ApuC4Skip;
 DWORD ApuC4Index;
 BYTE  ApuC4Atl;
 BYTE  ApuC4EnvVol;
-DWORD ApuC4EnvPhase;
+int   ApuC4EnvPhase;
 
 /*-------------------------------------------------------------------*/
 /*  DPCM resources                                                   */
@@ -320,11 +322,10 @@ int ApuWriteWave1( int cycles, int event )
 	case 2:
 	  ApuC1c = ApuEventQueue[event].data;
 	  ApuC1Freq = ( ( ( (WORD)ApuC1d & 0x07 ) << 8 ) + ApuC1c );
-	  ApuC1Atl = ApuAtl[ ( ApuC1d & 0xf8 ) >> 3 ];
 	  
 	  if ( ApuC1Freq ) 
           {
-	    ApuC1Skip = ( ApuPulseMagic << 1 ) / ApuC1Freq;
+	    ApuC1Skip = ( ApuPulseMagic << 1 ) / ( ApuC1Freq + 1 );
 	  } else {
 	    ApuC1Skip = 0;
 	  }
@@ -334,10 +335,11 @@ int ApuWriteWave1( int cycles, int event )
 	  ApuC1d = ApuEventQueue[event].data;
 	  ApuC1Freq = ( ( ( (WORD)ApuC1d & 0x07 ) << 8 ) + ApuC1c );
 	  ApuC1Atl = ApuAtl[ ( ApuC1d & 0xf8 ) >> 3 ];
+	  ApuC1EnvVol = 15;
 	  
 	  if ( ApuC1Freq ) 
           {
-	    ApuC1Skip = ( ApuPulseMagic << 1 ) / ApuC1Freq;
+	    ApuC1Skip = ( ApuPulseMagic << 1 ) / ( ApuC1Freq + 1 );
 	  } else {
 	    ApuC1Skip = 0;
 	  }
@@ -374,22 +376,6 @@ void ApuRenderingWave1( void )
     cycles += ApuCyclesPerSample;
     event = ApuWriteWave1( cycles, event );
 
-    /* Envelope decay at a rate of ( Envelope Delay + 1 ) / 240 secs */
-    ApuC1EnvPhase -= 4;
-    while ( ApuC1EnvPhase < 0 )
-    {
-      ApuC1EnvPhase += ApuC1EnvDelay;
-
-      if ( ApuC1Hold )
-      {
-        ApuC1EnvVol = ( ApuC1EnvVol + 1 ) & 0x0f;
-      } 
-      else if ( ApuC1EnvVol < 0x0f )
-      {
-        ApuC1EnvVol++;
-      }
-    }
-
     /*
      * TODO: using a table of max frequencies is not technically
      * clean, but it is fast and (or should be) accurate
@@ -397,48 +383,20 @@ void ApuRenderingWave1( void )
     if ( ApuC1Freq < 8 || ( !ApuC1SweepIncDec && ApuC1Freq > ApuC1FreqLimit ) )
     {
       wave_buffers[0][i] = 0;
-      break;
-    }
-
-    /* Frequency sweeping at a rate of ( Sweep Delay + 1) / 120 secs */
-    if ( ApuC1SweepOn && ApuC1SweepShifts )     
-    {
-      ApuC1SweepPhase -= 2;           /* 120/60 */
-      while ( ApuC1SweepPhase < 0 )
-      {
-        ApuC1SweepPhase += ApuC1SweepDelay;
-
-        if ( ApuC1SweepIncDec ) /* ramp up */
-        {
-          /* Rectangular #1 */
-          ApuC1Freq += ~( ApuC1Freq >> ApuC1SweepShifts );
-        } else {
-          /* ramp down */
-          ApuC1Freq +=  ( ApuC1Freq >> ApuC1SweepShifts );
-        }
-      }
-      if ( ApuC1Freq ) {
-	ApuC1Skip = ( ApuPulseMagic << 1 ) / ApuC1Freq;
-      }
+      continue;
     }
 
     /* Wave Rendering */
-    if ( ( ApuCtrlNew & 0x01 ) && ( ApuC1Atl || ApuC1Hold ) ) 
+    if ( ( ApuCtrlNew & 0x01 ) && ApuC1Atl )
     {
+      BYTE vol = ApuC1Env ? ApuC1Vol : ApuC1EnvVol;
       ApuC1Index += ApuC1Skip;
       ApuC1Index &= 0x1fffffff;
-      
-      if ( ApuC1Env )
-      {
-        wave_buffers[0][i] = ApuC1Wave[ApuC1Index >> 24] * ( ApuC1Vol + ApuC1EnvVol );
-      } else {
-        wave_buffers[0][i] = ApuC1Wave[ApuC1Index >> 24] * ApuC1Vol;
-      }
+      wave_buffers[0][i] = ApuC1Wave[ApuC1Index >> 24] ? vol : 0;
     } else {
       wave_buffers[0][i] = 0;
     }
   }
-  if ( ApuC1Atl ) { ApuC1Atl--;  }
 }
 
 /*===================================================================*/
@@ -472,11 +430,10 @@ int ApuWriteWave2( int cycles, int event )
 	case 2:
 	  ApuC2c = ApuEventQueue[event].data;
 	  ApuC2Freq = ( ( ( (WORD)ApuC2d & 0x07 ) << 8 ) + ApuC2c );
-	  ApuC2Atl = ApuAtl[ ( ApuC2d & 0xf8 ) >> 3 ];
 	  
 	  if ( ApuC2Freq ) 
           {
-	    ApuC2Skip = ( ApuPulseMagic << 1 ) / ApuC2Freq;
+	    ApuC2Skip = ( ApuPulseMagic << 1 ) / ( ApuC2Freq + 1 );
 	  } else {
 	    ApuC2Skip = 0;
 	  }
@@ -486,10 +443,11 @@ int ApuWriteWave2( int cycles, int event )
 	  ApuC2d = ApuEventQueue[event].data;
 	  ApuC2Freq = ( ( ( (WORD)ApuC2d & 0x07 ) << 8 ) + ApuC2c );
 	  ApuC2Atl = ApuAtl[ ( ApuC2d & 0xf8 ) >> 3 ];
+	  ApuC2EnvVol = 15;
 	  
 	  if ( ApuC2Freq ) 
           {
-	    ApuC2Skip = ( ApuPulseMagic << 1 ) / ApuC2Freq;
+	    ApuC2Skip = ( ApuPulseMagic << 1 ) / ( ApuC2Freq + 1 );
 	  } else {
 	    ApuC2Skip = 0;
 	  }
@@ -526,22 +484,6 @@ void ApuRenderingWave2( void )
     cycles += ApuCyclesPerSample;
     event = ApuWriteWave2( cycles, event );
 
-    /* Envelope decay at a rate of ( Envelope Delay + 1 ) / 240 secs */
-    ApuC2EnvPhase -= 4;
-    while ( ApuC2EnvPhase < 0 )
-    {
-      ApuC2EnvPhase += ApuC2EnvDelay;
-
-      if ( ApuC2Hold )
-      {
-        ApuC2EnvVol = ( ApuC2EnvVol + 1 ) & 0x0f;
-      } 
-      else if ( ApuC2EnvVol < 0x0f )
-      {
-        ApuC2EnvVol++;
-      }
-    }
-
     /*
      * TODO: using a table of max frequencies is not technically
      * clean, but it is fast and (or should be) accurate
@@ -549,48 +491,20 @@ void ApuRenderingWave2( void )
     if ( ApuC2Freq < 8 || ( !ApuC2SweepIncDec && ApuC2Freq > ApuC2FreqLimit ) )
     {
       wave_buffers[1][i] = 0;
-      break;
-    }
-
-    /* Frequency sweeping at a rate of ( Sweep Delay + 1) / 120 secs */
-    if ( ApuC2SweepOn && ApuC2SweepShifts )     
-    {
-      ApuC2SweepPhase -= 2;           /* 120/60 */
-      while ( ApuC2SweepPhase < 0)
-      {
-        ApuC2SweepPhase += ApuC2SweepDelay;
-
-        if ( ApuC2SweepIncDec ) /* ramp up */
-        {
-          /* Rectangular #2 */
-          ApuC2Freq -= ~( ApuC2Freq >> ApuC2SweepShifts );
-        } else {
-          /* ramp down */
-          ApuC2Freq +=  ( ApuC2Freq >> ApuC2SweepShifts );
-        }
-      }
-      if ( ApuC2Freq ) {
-	ApuC2Skip = ( ApuPulseMagic << 1 ) / ApuC2Freq;
-      }
+      continue;
     }
 
     /* Wave Rendering */
-    if ( ( ApuCtrlNew & 0x02 ) && ( ApuC2Atl || ApuC2Hold ) ) 
+    if ( ( ApuCtrlNew & 0x02 ) && ApuC2Atl )
     {
+      BYTE vol = ApuC2Env ? ApuC2Vol : ApuC2EnvVol;
       ApuC2Index += ApuC2Skip;
       ApuC2Index &= 0x1fffffff;
-      
-      if ( ApuC2Env )
-      {
-        wave_buffers[1][i] = ApuC2Wave[ApuC2Index >> 24] * ( ApuC2Vol + ApuC2EnvVol );
-      } else {
-        wave_buffers[1][i] = ApuC2Wave[ApuC2Index >> 24] * ApuC2Vol;
-      }
+      wave_buffers[1][i] = ApuC2Wave[ApuC2Index >> 24] ? vol : 0;
     } else {
       wave_buffers[1][i] = 0;
     }
   }
-  if ( ApuC2Atl ) { ApuC2Atl--;  }
 }
 
 /*===================================================================*/
@@ -614,7 +528,6 @@ int ApuWriteWave3( int cycles, int event )
       {
       case 0:
 	ApuC3a = ApuEventQueue[event].data;
-	ApuC3Llc = ApuC3LinearLength;
 	break;
 
       case 1:
@@ -625,7 +538,7 @@ int ApuWriteWave3( int cycles, int event )
 	ApuC3c = ApuEventQueue[event].data;
 	if ( ApuC3Freq ) 
         {
-	  ApuC3Skip = ApuTriangleMagic / ApuC3Freq;
+	  ApuC3Skip = ApuTriangleMagic / ( ApuC3Freq + 1 );
 	} else {
 	  ApuC3Skip = 0;  
 	}
@@ -634,9 +547,10 @@ int ApuWriteWave3( int cycles, int event )
       case 3:
 	ApuC3d = ApuEventQueue[event].data;
 	ApuC3Atl = ApuC3LengthCounter;
+	ApuC3ReloadFlag = 1;
 	if ( ApuC3Freq ) 
 	{
-	  ApuC3Skip = ApuTriangleMagic / ApuC3Freq;
+	  ApuC3Skip = ApuTriangleMagic / ( ApuC3Freq + 1 );
 	} else {
 	  ApuC3Skip = 0;
 	}
@@ -675,33 +589,15 @@ void ApuRenderingWave3( void )
     if ( ApuC3Freq < 8 )
     {
       wave_buffers[2][i] = 0;
-      break;
-    }
-
-    /* Counter Control */
-    if ( ApuC3CounterStarted )
-    {
-      if ( ApuC3Atl > 0 && !ApuC3Holdnote ) 
-      {
-	ApuC3Atl--;
-      }
-      if ( ApuC3Llc > 0 )
-      {
-	ApuC3Llc--;
-      }
-    } else if ( !ApuC3Holdnote && ApuC3WriteLatency > 0 ) {
-      if ( --ApuC3WriteLatency == 0 )
-      {
-	ApuC3CounterStarted = 0x01;
-      }
+      continue;
     }
 
     /* Wave Rendering */
-    if ( ( ApuCtrlNew & 0x04 ) && ( ( ApuC3Atl > 0 || ApuC3Holdnote ) && ApuC3Llc > 0 ) ) 
+    if ( ( ApuCtrlNew & 0x04 ) && ApuC3Atl > 0 && ApuC3Llc > 0 )
     {
       ApuC3Index += ApuC3Skip;
       ApuC3Index &= 0x1fffffff;
-      wave_buffers[2][i] = triangle_50[ ApuC3Index >> 24 ];
+      wave_buffers[2][i] = triangle_50[ ApuC3Index >> 24 ] >> 4;
     } else {
       wave_buffers[2][i] = 0;
     }
@@ -737,23 +633,17 @@ int ApuWriteWave4( int cycles, int event )
       case 2:
 	ApuC4c = ApuEventQueue[event].data;
 
-	if ( ApuC4Small ) {
-	  ApuC4Sr = 0x001f;
-	} else {
-	  ApuC4Sr = 0x01ff;
-	}
-
 	/* Frequency */ 
 	if ( ApuC4Freq ) {
 	  ApuC4Skip = ApuNoiseMagic / ApuC4Freq;
 	} else {
 	  ApuC4Skip = 0;
 	}
-	ApuC4Atl = ApuC4LengthCounter;
 	break;
 
       case 3:
 	ApuC4d = ApuEventQueue[event].data;
+	ApuC4EnvVol = 15;
 
 	/* Frequency */ 
 	if ( ApuC4Freq ) {
@@ -791,56 +681,27 @@ void ApuRenderingWave4(void)
     cycles += ApuCyclesPerSample;
     event = ApuWriteWave4( cycles, event );
 
-    /* Envelope decay at a rate of ( Envelope Delay + 1 ) / 240 secs */
-    ApuC4EnvPhase -= 4;
-    while ( ApuC4EnvPhase < 0 )
-    {
-      ApuC4EnvPhase += ApuC4EnvDelay;
-
-      if ( ApuC4Hold )
-      {
-        ApuC4EnvVol = ( ApuC4EnvVol + 1 ) & 0x0f;
-      } 
-      else if ( ApuC4EnvVol < 0x0f )
-      {
-        ApuC4EnvVol++;
-      }
-    }
-
     /* Wave Rendering */
-    if ( ApuCtrlNew & 0x08 ) 
+    if ( ( ApuCtrlNew & 0x08 ) && ApuC4Atl )
     {
+      int shift = ApuC4Small ? 6 : 1;
       ApuC4Index += ApuC4Skip;
-      if ( ApuC4Index > 0x1fffffff ) 
+      while ( ApuC4Index >= 0x01000000 )
       {
-	if ( ApuC4Small )            /* FIXME: may be wrong */
-	{ 
-	  ApuC4Sr |= ((!(ApuC4Sr & 1)) ^ (!(ApuC4Sr & 4))) << 5;
-        } else {
-	  ApuC4Sr |= ((!(ApuC4Sr & 1)) ^ (!(ApuC4Sr & 16))) << 9;
-	}
-	ApuC4Sr >>= 1;
+	DWORD feedback = ( ApuC4Sr ^ ( ApuC4Sr >> shift ) ) & 1;
+	ApuC4Sr = ( ApuC4Sr >> 1 ) | ( feedback << 14 );
+	ApuC4Index -= 0x01000000;
       }
-      ApuC4Index &= 0x1fffffff;
 
-      if ( ApuC4Atl && ( ApuC4Sr & 1 ) ) 
+      if ( !( ApuC4Sr & 1 ) )
       {
-        if ( !ApuC4Env )
-        {
-	  wave_buffers[3][i] = ApuC4Vol;
-        } else {
-          wave_buffers[3][i] = ApuC4EnvVol ^ 0x0f;
-        }
+        wave_buffers[3][i] = ApuC4Env ? ApuC4Vol : ApuC4EnvVol;
       } else {
 	wave_buffers[3][i] = 0;
       }
     } else {
       wave_buffers[3][i] = 0;
     }
-  }
-  if ( ApuC4Atl && !ApuC4Hold ) 
-  {
-	   ApuC4Atl--;
   }
 }
 
@@ -869,7 +730,8 @@ int ApuWriteWave5( int cycles, int event )
 	ApuC5Looping = ApuEventQueue[event].data & 0x40;
 	break;
       case 1:
-	ApuC5DpcmValue = ( ApuEventQueue[event].data & 0x7F ) >> 1;
+	/* $4011 is a seven-bit direct DAC. */
+	ApuC5DpcmValue = ApuEventQueue[event].data & 0x7F;
 	break;
       case 2:
 	ApuC5CacheAddr = 0xC000 + (WORD)( ApuEventQueue[event].data << 6 );
@@ -913,7 +775,7 @@ void ApuRenderingWave5(void)
     cycles += ApuCyclesPerSample;
     event = ApuWriteWave5( cycles, event );
 
-    if( ApuC5DmaLength ) {
+    if( ( ApuCtrlNew & 0x10 ) && ApuC5DmaLength && ApuC5Freq > 0 ) {
       ApuC5Phaseacc -= ApuCycleRate;
 
       while( ApuC5Phaseacc < 0 ) {
@@ -925,7 +787,20 @@ void ApuRenderingWave5(void)
 	  else
 	    ApuC5Address++;
 	}
-	if( !(--ApuC5DmaLength) ) {
+	--ApuC5DmaLength;
+
+	/* DPCM changes the seven-bit DAC by two.  Apply the last bit before
+	   deciding whether the sample ends; the old order silently dropped
+	   every eighth bit. */
+	if( ApuC5CurByte & ( 1 << ((ApuC5DmaLength&7)^7)) ) {
+	  if( ApuC5DpcmValue <= 125 )
+	    ApuC5DpcmValue += 2;
+	} else {
+	  if( ApuC5DpcmValue >= 2 )
+	    ApuC5DpcmValue -= 2;
+	}
+
+	if( !ApuC5DmaLength ) {
 	  if( ApuC5Looping ) {
 	    ApuC5Address = ApuC5CacheAddr;
 	    ApuC5DmaLength = ApuC5CacheDmaLength;
@@ -934,23 +809,11 @@ void ApuRenderingWave5(void)
 	    break;
 	  }
 	}
-
-	// positive delta
-	if( ApuC5CurByte & ( 1 << ((ApuC5DmaLength&7)^7)) ) {
-	  if( ApuC5DpcmValue < 0x3F )
-	    ApuC5DpcmValue += 1;
-	} else {
-	  // negative delta
-	  if( ApuC5DpcmValue > 1 )
-	    ApuC5DpcmValue -= 1;
-	}
       }
     }
 
-    /* Wave Rendering */
-    if ( ApuCtrlNew & 0x10 ) {
-      wave_buffers[4][i] = ( ApuC5Reg[1]&0x01 ) + ( ApuC5DpcmValue << 1 );
-    }
+    /* $4011 direct DAC output remains audible even when DMA is disabled. */
+    wave_buffers[4][i] = ApuC5DpcmValue;
   }
 }
 
@@ -960,6 +823,105 @@ void ApuRenderingWave5(void)
 /*     InfoNES_pApuVsync() : Callback Function per Vsync             */
 /*                                                                   */
 /*===================================================================*/
+
+/* The legacy renderer clocked envelopes, sweeps and the triangle linear
+   counter once for every PCM sample (735 times per frame).  Apart from being
+   needlessly expensive, that makes instruments vanish almost instantly.
+   InfoNES models the 240/120 Hz frame sequencer in four/two ticks per Vsync. */
+static void ApuClockFrameSequencer( void )
+{
+  DWORD delta;
+
+  if ( ApuC1Atl && !ApuC1Hold )
+    ApuC1Atl--;
+
+  ApuC1EnvPhase -= 4;
+  while ( ApuC1EnvPhase < 0 )
+  {
+    ApuC1EnvPhase += ApuC1EnvDelay;
+    if ( ApuC1Hold )
+      ApuC1EnvVol = ( ApuC1EnvVol - 1 ) & 0x0f;
+    else if ( ApuC1EnvVol > 0 )
+      ApuC1EnvVol--;
+  }
+
+  if ( ApuC1SweepOn && ApuC1SweepShifts )
+  {
+    ApuC1SweepPhase -= 2;
+    while ( ApuC1SweepPhase < 0 )
+    {
+      ApuC1SweepPhase += ApuC1SweepDelay;
+      delta = ApuC1Freq >> ApuC1SweepShifts;
+      if ( ApuC1SweepIncDec )
+      {
+        /* Pulse 1 uses one's-complement negation (one extra subtraction). */
+        ApuC1Freq = ( ApuC1Freq > delta ) ? ApuC1Freq - delta - 1 : 0;
+      }
+      else
+      {
+        if ( ApuC1Freq + delta <= 0x7ff )
+          ApuC1Freq += delta;
+      }
+    }
+    ApuC1Skip = ApuC1Freq
+        ? ( ApuPulseMagic << 1 ) / ( ApuC1Freq + 1 ) : 0;
+  }
+
+  if ( ApuC2Atl && !ApuC2Hold )
+    ApuC2Atl--;
+
+  ApuC2EnvPhase -= 4;
+  while ( ApuC2EnvPhase < 0 )
+  {
+    ApuC2EnvPhase += ApuC2EnvDelay;
+    if ( ApuC2Hold )
+      ApuC2EnvVol = ( ApuC2EnvVol - 1 ) & 0x0f;
+    else if ( ApuC2EnvVol > 0 )
+      ApuC2EnvVol--;
+  }
+
+  if ( ApuC2SweepOn && ApuC2SweepShifts )
+  {
+    ApuC2SweepPhase -= 2;
+    while ( ApuC2SweepPhase < 0 )
+    {
+      ApuC2SweepPhase += ApuC2SweepDelay;
+      delta = ApuC2Freq >> ApuC2SweepShifts;
+      if ( ApuC2SweepIncDec )
+        ApuC2Freq = ( ApuC2Freq >= delta ) ? ApuC2Freq - delta : 0;
+      else if ( ApuC2Freq + delta <= 0x7ff )
+        ApuC2Freq += delta;
+    }
+    ApuC2Skip = ApuC2Freq
+        ? ( ApuPulseMagic << 1 ) / ( ApuC2Freq + 1 ) : 0;
+  }
+
+  if ( ApuC3ReloadFlag )
+  {
+    ApuC3Llc = ApuC3LinearLength;
+  }
+  else if ( ApuC3Llc > 0 )
+  {
+    ApuC3Llc = ( ApuC3Llc > 4 * 64 ) ? ApuC3Llc - 4 * 64 : 0;
+  }
+  if ( !ApuC3Holdnote )
+    ApuC3ReloadFlag = 0;
+  if ( ApuC3Atl > 0 && !ApuC3Holdnote )
+    ApuC3Atl--;
+
+  if ( ApuC4Atl && !ApuC4Hold )
+    ApuC4Atl--;
+
+  ApuC4EnvPhase -= 4;
+  while ( ApuC4EnvPhase < 0 )
+  {
+    ApuC4EnvPhase += ApuC4EnvDelay;
+    if ( ApuC4Hold )
+      ApuC4EnvVol = ( ApuC4EnvVol - 1 ) & 0x0f;
+    else if ( ApuC4EnvVol > 0 )
+      ApuC4EnvVol--;
+  }
+}
 
 void InfoNES_pAPUVsync(void)
 {
@@ -972,10 +934,12 @@ void InfoNES_pAPUVsync(void)
   ApuCtrl = ApuCtrlNew;
     
   InfoNES_SoundOutput(ApuSamplesPerSync, 
-		      wave_buffers[0], wave_buffers[1], wave_buffers[2], 
-		      wave_buffers[3], wave_buffers[4]);
+			      wave_buffers[0], wave_buffers[1], wave_buffers[2],
+			      wave_buffers[3], wave_buffers[4]);
 
-  entertime = g_wPassedClocks;
+  ApuClockFrameSequencer();
+
+  entertime = K6502_GetPassedClocks();
   cur_event = 0;
 }
 
@@ -984,7 +948,7 @@ void InfoNES_pAPUVsync(void)
 /*===================================================================*/
 
 #define INFONES_APU_STATE_MAGIC   0x41505553UL /* "APUS" */
-#define INFONES_APU_STATE_VERSION 1
+#define INFONES_APU_STATE_VERSION 2
 
 struct InfoNESApuStateImageT
 {
@@ -993,14 +957,18 @@ struct InfoNESApuStateImageT
   BYTE Ctrl, CtrlNew;
 
   BYTE C1[4];
-  DWORD C1Skip, C1Index, C1EnvPhase;
+  DWORD C1Skip, C1Index;
+  int C1EnvPhase;
   BYTE C1EnvVol, C1Atl;
-  DWORD C1SweepPhase, C1Freq;
+  int C1SweepPhase;
+  DWORD C1Freq;
 
   BYTE C2[4];
-  DWORD C2Skip, C2Index, C2EnvPhase;
+  DWORD C2Skip, C2Index;
+  int C2EnvPhase;
   BYTE C2EnvVol, C2Atl;
-  DWORD C2SweepPhase, C2Freq;
+  int C2SweepPhase;
+  DWORD C2Freq;
 
   BYTE C3[4];
   DWORD C3Skip, C3Index;
@@ -1011,7 +979,7 @@ struct InfoNESApuStateImageT
   BYTE C4[4];
   DWORD C4Sr, C4Fdc, C4Skip, C4Index;
   BYTE C4Atl, C4EnvVol;
-  DWORD C4EnvPhase;
+  int C4EnvPhase;
 
   BYTE C5Reg[4];
   BYTE C5Enable, C5Looping, C5CurByte, C5DpcmValue;
@@ -1062,8 +1030,8 @@ int InfoNES_pAPUSaveState(void *pState, int nStateBytes)
   APU_SAVE_REGS(3);
   State.C3Skip = ApuC3Skip; State.C3Index = ApuC3Index;
   State.C3Atl = ApuC3Atl; State.C3Llc = ApuC3Llc;
-  State.C3WriteLatency = ApuC3WriteLatency;
-  State.C3CounterStarted = ApuC3CounterStarted;
+  State.C3WriteLatency = 0;
+  State.C3CounterStarted = ApuC3ReloadFlag;
 
   APU_SAVE_REGS(4);
   State.C4Sr = ApuC4Sr; State.C4Fdc = ApuC4Fdc;
@@ -1102,7 +1070,8 @@ int InfoNES_pAPULoadState(const void *pState, int nStateBytes)
 
   if (!pImage || nStateBytes != (int)sizeof(*pImage) ||
       pImage->uMagic != INFONES_APU_STATE_MAGIC ||
-      pImage->uVersion != INFONES_APU_STATE_VERSION ||
+      ( pImage->uVersion != 1 &&
+        pImage->uVersion != INFONES_APU_STATE_VERSION ) ||
       pImage->nEvents < 0 ||
       pImage->nEvents > INFONES_APU_STATE_EVENT_MAX)
     return 0;
@@ -1130,11 +1099,12 @@ int InfoNES_pAPULoadState(const void *pState, int nStateBytes)
   APU_LOAD_REGS(3);
   ApuC3Skip = pImage->C3Skip; ApuC3Index = pImage->C3Index;
   ApuC3Atl = pImage->C3Atl; ApuC3Llc = pImage->C3Llc;
-  ApuC3WriteLatency = pImage->C3WriteLatency;
-  ApuC3CounterStarted = pImage->C3CounterStarted;
+  ApuC3ReloadFlag = ( pImage->uVersion >= 2 )
+      ? ( pImage->C3CounterStarted ? 1 : 0 ) : 0;
 
   APU_LOAD_REGS(4);
   ApuC4Sr = pImage->C4Sr; ApuC4Fdc = pImage->C4Fdc;
+  if ( !ApuC4Sr ) ApuC4Sr = 1;
   ApuC4Skip = pImage->C4Skip; ApuC4Index = pImage->C4Index;
   ApuC4Atl = pImage->C4Atl; ApuC4EnvVol = pImage->C4EnvVol;
   ApuC4EnvPhase = pImage->C4EnvPhase;
@@ -1143,7 +1113,9 @@ int InfoNES_pAPULoadState(const void *pState, int nStateBytes)
   InfoNES_MemoryCopy(ApuC5Reg, pImage->C5Reg, sizeof(ApuC5Reg));
   ApuC5Enable = pImage->C5Enable; ApuC5Looping = pImage->C5Looping;
   ApuC5CurByte = pImage->C5CurByte;
-  ApuC5DpcmValue = pImage->C5DpcmValue;
+  ApuC5DpcmValue = ( pImage->uVersion >= 2 )
+      ? ( pImage->C5DpcmValue & 0x7f )
+      : ( ( pImage->C5Reg[1] & 1 ) + ( pImage->C5DpcmValue << 1 ) );
   ApuC5Freq = pImage->C5Freq; ApuC5Phaseacc = pImage->C5Phaseacc;
   ApuC5Address = pImage->C5Address;
   ApuC5CacheAddr = pImage->C5CacheAddr;
@@ -1154,9 +1126,18 @@ int InfoNES_pAPULoadState(const void *pState, int nStateBytes)
      cycle; the frontend clears its mixer after a state load. */
   ApuC1Wave = pulse_waves[(ApuC1a & 0xc0) >> 6];
   ApuC2Wave = pulse_waves[(ApuC2a & 0xc0) >> 6];
+  ApuC1Skip = ApuC1Freq
+      ? ( ApuPulseMagic << 1 ) / ( ApuC1Freq + 1 ) : 0;
+  ApuC2Skip = ApuC2Freq
+      ? ( ApuPulseMagic << 1 ) / ( ApuC2Freq + 1 ) : 0;
+  ApuC3Skip = ApuC3Freq
+      ? ApuTriangleMagic / ( ApuC3Freq + 1 ) : 0;
+  ApuC4Skip = ApuC4Freq ? ApuNoiseMagic / ApuC4Freq : 0;
   InfoNES_MemorySet(wave_buffers, 0, sizeof(wave_buffers));
   cur_event = pImage->nEvents;
-  entertime = pImage->EnterTime;
+  /* Event timestamps are relative to the frame baseline.  The CPU snapshot
+     starts a fresh wrapping clock, so establish the matching baseline here. */
+  entertime = K6502_GetPassedClocks();
   if (cur_event > 0)
   {
     InfoNES_MemoryCopy(
@@ -1165,6 +1146,7 @@ int InfoNES_pAPULoadState(const void *pState, int nStateBytes)
       cur_event * sizeof(ApuEvent_t)
     );
   }
+  InfoNES_SoundReset();
   return 1;
 }
 
@@ -1209,22 +1191,23 @@ void InfoNES_pAPUInit(void)
   ApuC1Atl = ApuC2Atl = ApuC4Atl = 0;
   ApuC1SweepPhase = ApuC2SweepPhase = 0;
   ApuC1Freq = ApuC2Freq = ApuC4Freq = 0;
-  ApuC4Sr = ApuC4Fdc = 0;
+  ApuC4Sr = 1;
+  ApuC4Fdc = 0;
 
   /*-------------------------------------------------------------------*/
   /*   Initialize Triangle Wave's Regs                                 */
   /*-------------------------------------------------------------------*/
   ApuC3a = ApuC3b = ApuC3c = ApuC3d = 0;
   ApuC3Atl = ApuC3Llc = 0;
-  ApuC3WriteLatency = 3;                           /* Magic Number */
-  ApuC3CounterStarted = 0x00;
+  ApuC3ReloadFlag = 0;
 
   /*-------------------------------------------------------------------*/
   /*   Initialize DPCM's Regs                                          */
   /*-------------------------------------------------------------------*/
   ApuC5Reg[0] = ApuC5Reg[1] = ApuC5Reg[2] = ApuC5Reg[3] = 0;
   ApuC5Enable = ApuC5Looping = ApuC5CurByte = ApuC5DpcmValue = 0;
-  ApuC5Freq = ApuC5Phaseacc;
+  ApuC5Freq = ApuDpcmCycles[0] << 16;
+  ApuC5Phaseacc = ApuC5Freq;
   ApuC5Address = ApuC5CacheAddr = 0;
   ApuC5DmaLength = ApuC5CacheDmaLength = 0;
 
@@ -1237,7 +1220,8 @@ void InfoNES_pAPUInit(void)
   InfoNES_MemorySet( (void *)wave_buffers[3], 0, 735 );  
   InfoNES_MemorySet( (void *)wave_buffers[4], 0, 735 );  
 
-  entertime = g_wPassedClocks;
+  /* InfoNES_Reset resets the 6502 immediately after pAPU initialization. */
+  entertime = 0;
   cur_event = 0;
 }
 

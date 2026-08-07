@@ -179,6 +179,28 @@ BYTE NMI_State;
 // Wiring of the NMI pin
 BYTE NMI_Wiring;
 
+// The number of clocks carried between step calls.
+WORD g_wPassedClocks;
+
+/* g_wPassedClocks is only the instruction overshoot carried between
+   K6502_Step calls.  The old pAPU mistook it for a frame clock, which
+   collapsed almost every sound-register write onto the beginning of the
+   audio block.  Keep a separate wrapping timeline and expose the time of
+   the instruction currently being executed. */
+static WORD g_wCurrentClocks;
+static WORD g_wStepStartPassedClocks;
+static BYTE g_bInsideStep;
+
+WORD K6502_GetPassedClocks( void )
+{
+  if ( g_bInsideStep )
+  {
+    return (WORD)( g_wCurrentClocks +
+                   (WORD)( g_wPassedClocks - g_wStepStartPassedClocks ) );
+  }
+  return g_wCurrentClocks;
+}
+
 /* ------------------------------------------------------------------
    Save state
 
@@ -257,11 +279,12 @@ int K6502_LoadState( const void *pState, int nStateBytes )
   NMI_State        = pImage->byNMIState;
   NMI_Wiring       = pImage->byNMIWiring;
   g_wPassedClocks  = pImage->wPassedClocks;
+  /* InfoNES_pAPULoadState establishes the matching pAPU baseline next. */
+  g_wCurrentClocks = 0;
+  g_wStepStartPassedClocks = g_wPassedClocks;
+  g_bInsideStep = 0;
   return 1;
 }
-
-// The number of the clocks that it passed
-WORD g_wPassedClocks;
 
 // A table for the test
 BYTE g_byTestTable[ 256 ];
@@ -424,6 +447,9 @@ void K6502_Reset()
 
   // Reset Passed Clocks
   g_wPassedClocks = 0;
+  g_wCurrentClocks = 0;
+  g_wStepStartPassedClocks = 0;
+  g_bInsideStep = 0;
 }
 
 /*===================================================================*/
@@ -489,6 +515,9 @@ void K6502_Step( WORD wClocks )
   BYTE byD0;
   BYTE byD1;
   WORD wD0;
+
+  g_wStepStartPassedClocks = g_wPassedClocks;
+  g_bInsideStep = 1;
 
   // Dispose of it if there is an interrupt requirement
   if ( NMI_State != NMI_Wiring )
@@ -1212,6 +1241,12 @@ void K6502_Step( WORD wClocks )
     }  /* end of switch ( byCode ) */
 
   }  /* end of while ... */
+
+  /* Count cycles actually executed by this call.  The residual carried in
+     g_wPassedClocks is instruction overshoot and must not be counted twice. */
+  g_wCurrentClocks = (WORD)( g_wCurrentClocks +
+      (WORD)( g_wPassedClocks - g_wStepStartPassedClocks ) );
+  g_bInsideStep = 0;
 
   // Correct the number of the clocks
   g_wPassedClocks -= wClocks;

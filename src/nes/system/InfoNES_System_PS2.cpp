@@ -324,119 +324,189 @@ void InfoNES_Wait( void )
 {
 }
 
-/* NES APU output sample rate, captured by InfoNES_SoundOpen (44100 by
-   default in this build).  Used to resample at a constant ratio to the
-   mix buffer's input rate so the pitch is correct. */
-static int s_NesSampleRate = 44100;
+/* NES-only mixer state.  The SNES still reaches CMixBuffer through its own
+   SPC700 path; none of these filters or resampler variables are shared. */
+#define NES_MIX_PEAK       16000
+#define NES_DC_BLOCK_Q15   32604  /* 0.995 in Q15 */
+
+static int    s_NesSampleRate = 44100;
+static Uint32 s_NesOutputRate;
+static Int16  s_NesPulseLut[31];
+static Int16  s_NesTndLut[203];
+static BYTE   s_NesLutsReady;
+static Int32  s_NesDcPrevInput;
+static Int32  s_NesDcPrevOutput;
+static Int64  s_NesResamplePos;
+static Int16  s_NesResamplePrev;
+static BYTE   s_NesHaveResamplePrev;
+static Int16  s_NesPending[4];
+static int    s_NesPendingCount;
+
+static void InfoNES_BuildMixerLuts( void )
+{
+    int i;
+    if (s_NesLutsReady)
+        return;
+
+    /* NESdev's nonlinear 2A03 mixer approximations, precomputed once so the
+       PS2 executes only two table lookups per PCM sample. */
+    for (i = 0; i <= 30; i++)
+    {
+        Int64 numerator = (Int64)9588 * i * NES_MIX_PEAK;
+        Int64 denominator = (Int64)100 * (8128 + 100 * i);
+        s_NesPulseLut[i] = denominator ? (Int16)(numerator / denominator) : 0;
+    }
+    for (i = 0; i <= 202; i++)
+    {
+        Int64 numerator = (Int64)16367 * i * NES_MIX_PEAK;
+        Int64 denominator = (Int64)100 * (24329 + 100 * i);
+        s_NesTndLut[i] = denominator ? (Int16)(numerator / denominator) : 0;
+    }
+    s_NesLutsReady = 1;
+}
+
+void InfoNES_SoundReset( void )
+{
+    InfoNES_BuildMixerLuts();
+    s_NesOutputRate = 0;
+    s_NesDcPrevInput = 0;
+    s_NesDcPrevOutput = 0;
+    s_NesResamplePos = 0;
+    s_NesResamplePrev = 0;
+    s_NesHaveResamplePrev = 0;
+    s_NesPendingCount = 0;
+}
 
 void InfoNES_SoundInit( void )
 {
+    InfoNES_SoundReset();
 }
 
 int InfoNES_SoundOpen( int samples_per_sync, int sample_rate )
 {
-    /* The audsrv/SPU2 stream is brought up by the platform at boot
-       (Aud_Init in mainloop_iop.cpp) and handed to us per-frame as
-       g_pNesMixBuffer, so there is nothing to open here.  We DO keep
-       the NES sample rate: InfoNES_SoundOutput needs it to resample at
-       a constant ratio (NES rate -> mix-buffer rate) so the pitch is
-       correct. */
+    /* The audsrv/SPU2 stream is already open.  Keep the native pAPU rate and
+       reset interpolation history whenever a ROM resets. */
     (void)samples_per_sync;
     s_NesSampleRate = (sample_rate > 0) ? sample_rate : 44100;
+    InfoNES_SoundReset();
     return 1;
 }
 
 void InfoNES_SoundClose( void )
 {
+    InfoNES_SoundReset();
 }
 
-/* Channel-mix tuning.  Per-sample byte ranges produced by this InfoNES
-   build: square1/2 0..255, triangle 0..255, noise 0..15, dpcm 0..127
-   (summed ~0..900, unsigned).  We subtract a DC centre and scale into
-   signed 16-bit with clamping.  Adjust if the mix is too quiet / loud
-   or clips. */
-#define NES_MIX_CENTER  280
-#define NES_MIX_SCALE   36
-
-/* InfoNES hands us the five APU channels as separate byte buffers once
-   per frame (from InfoNES_pAPUVsync).  Mix them down to signed 16-bit
-   mono and push them into the SAME CMixBuffer the SNES uses (audsrv
-   backend).  Only one system runs at a time, so the SNES audio path is
-   untouched.  InfoNES emits a fixed 1/60 s block (samples @ 44100) per
-   frame, so we resample at a CONSTANT ratio to the mix buffer's input
-   rate (32000) to keep the pitch correct; the audsrv backend drops any
-   overflow best-effort, so we don't chase its fill level here. */
+/* InfoNES supplies the five base 2A03 channels once per video frame.  Mix
+   with the NES nonlinear response, remove DAC DC with a cheap one-pole
+   blocker, then continuously resample to CMixBuffer's rate.  The old code
+   restarted interpolation at every frame and always emitted floor(533.33)
+   samples, causing a boundary discontinuity and a small pitch error. */
 void InfoNES_SoundOutput( int samples, BYTE *wave1, BYTE *wave2,
                           BYTE *wave3, BYTE *wave4, BYTE *wave5 )
 {
-    CMixBuffer  *pMix = g_pNesMixBuffer;
-    Int32        nOut;
-    int          i;
+    CMixBuffer *pMix = g_pNesMixBuffer;
     static Int16 s_NesMix[1024];
     static Int16 s_NesOut[2048];
-    const int    capMix = (int)(sizeof(s_NesMix) / sizeof(s_NesMix[0]));
-    const int    capOut = (int)(sizeof(s_NesOut) / sizeof(s_NesOut[0]));
+    const int capMix = (int)(sizeof(s_NesMix) / sizeof(s_NesMix[0]));
+    const int capOut = (int)(sizeof(s_NesOut) / sizeof(s_NesOut[0]));
+    Uint32 mixRate = 32000, mixBits = 16, mixCh = 2;
+    int nesRate = (s_NesSampleRate > 0) ? s_NesSampleRate : 44100;
+    Uint64 step;
+    Int64 limit;
+    int nOut = 0;
+    int i;
 
-    if (!pMix || samples <= 0)
+    if (!pMix || samples <= 1)
         return;
-
     if (samples > capMix)
         samples = capMix;
 
-    /* 1) Mix the five channels -> signed 16-bit mono at the NES rate. */
+    /* 1) Nonlinear channel mix at the native 44.1 kHz pAPU rate. */
     for (i = 0; i < samples; i++)
     {
-        int s = (int)wave1[i] + (int)wave2[i] + (int)wave3[i]
-              + (int)wave4[i] + (int)wave5[i];
-        s = (s - NES_MIX_CENTER) * NES_MIX_SCALE;
-        if (s >  32767) s =  32767;
-        if (s < -32768) s = -32768;
-        s_NesMix[i] = (Int16)s;
+        int pulse = (int)wave1[i] + (int)wave2[i];
+        int tnd = 3 * (int)wave3[i] + 2 * (int)wave4[i] + (int)wave5[i];
+        Int32 input, output;
+
+        if (pulse > 30) pulse = 30;
+        if (tnd > 202) tnd = 202;
+        input = (Int32)s_NesPulseLut[pulse] + (Int32)s_NesTndLut[tnd];
+
+        output = input - s_NesDcPrevInput +
+            (Int32)(((Int64)s_NesDcPrevOutput * NES_DC_BLOCK_Q15) >> 15);
+        s_NesDcPrevInput = input;
+        if (output > 32767) output = 32767;
+        if (output < -32768) output = -32768;
+        s_NesDcPrevOutput = output;
+        s_NesMix[i] = (Int16)output;
     }
 
-    /* 2) Resample at a CONSTANT ratio (NES rate -> mix-buffer input
-          rate) so the pitch is correct and stable.
-          NOTE: do NOT use the mix buffer's GetOutputSamples() here.
-          That returns a buffer-fill-driven, per-frame-varying count;
-          the SNES path can satisfy it because its SPC engine renders
-          an arbitrary number of samples on demand, but InfoNES emits a
-          fixed 1/60 s (samples) per frame.  Resampling that fixed block
-          to a varying count stretches/compresses it every frame and
-          warbles the pitch -- exactly the reported symptom. */
+    /* 2) Continuous 32.32 resampler.  A negative position denotes the one
+          interval joining the previous block to this block, so no sample is
+          repeated and no frame-edge click is introduced. */
+    pMix->GetFormat(&mixRate, &mixBits, &mixCh);
+    if (mixRate == 0)
+        mixRate = 32000;
+    if (mixRate != s_NesOutputRate)
     {
-        Uint32 mixRate = 32000, mixBits = 16, mixCh = 2;
-        int    nesRate = (s_NesSampleRate > 0) ? s_NesSampleRate : 44100;
-        pMix->GetFormat(&mixRate, &mixBits, &mixCh);
-        if (mixRate == 0) mixRate = 32000;
-        nOut = (Int32)(((long long)samples * (long long)mixRate) / (long long)nesRate);
+        s_NesOutputRate = mixRate;
+        s_NesResamplePos = 0;
+        s_NesHaveResamplePrev = 0;
+        s_NesPendingCount = 0;
     }
-    if (nOut <= 0)
-        nOut = samples;
-    if (nOut > capOut)
-        nOut = capOut;
 
-    if (nOut == samples)
+    for (i = 0; i < s_NesPendingCount; i++)
+        s_NesOut[nOut++] = s_NesPending[i];
+
+    step = ((Uint64)(unsigned int)nesRate << 32) / mixRate;
+    if (!step)
+        step = 1;
+    limit = (Int64)(samples - 1) << 32;
+
+    while (s_NesResamplePos < limit && nOut < capOut)
     {
-        pMix->OutputSamplesMono(s_NesMix, nOut);
-    }
-    else
-    {
-        /* 16.16 fixed-point linear interpolation. */
-        unsigned int step = ((unsigned int)samples << 16) / (unsigned int)nOut;
-        unsigned int pos  = 0;
-        int j;
-        for (j = 0; j < nOut; j++)
+        Int32 a, b;
+        Uint32 frac;
+
+        if (s_NesResamplePos < 0 && s_NesHaveResamplePrev)
         {
-            int idx  = (int)(pos >> 16);
-            int frac = (int)(pos & 0xFFFF);
-            int a, b;
-            if (idx >= samples) idx = samples - 1;
-            a = s_NesMix[idx];
-            b = (idx + 1 < samples) ? s_NesMix[idx + 1] : a;
-            s_NesOut[j] = (Int16)(a + (((b - a) * frac) >> 16));
-            pos += step;
+            Uint64 rel = (Uint64)(s_NesResamplePos + ((Int64)1 << 32));
+            a = s_NesResamplePrev;
+            b = s_NesMix[0];
+            frac = (Uint32)(rel >> 16) & 0xffff;
         }
-        pMix->OutputSamplesMono(s_NesOut, nOut);
+        else
+        {
+            int index = (int)(s_NesResamplePos >> 32);
+            Uint64 rel;
+            if (index < 0) index = 0;
+            if (index >= samples - 1) index = samples - 2;
+            rel = (Uint64)(s_NesResamplePos - ((Int64)index << 32));
+            a = s_NesMix[index];
+            b = s_NesMix[index + 1];
+            frac = (Uint32)(rel >> 16) & 0xffff;
+        }
+
+        s_NesOut[nOut++] = (Int16)(a +
+            (Int32)(((Int64)(b - a) * frac) >> 16));
+        s_NesResamplePos += (Int64)step;
+    }
+
+    s_NesResamplePrev = s_NesMix[samples - 1];
+    s_NesHaveResamplePrev = 1;
+    s_NesResamplePos -= (Int64)samples << 32;
+
+    /* AudMixBuffer's 32->48 kHz converter consumes input pairs and Flush
+       requires an even output count.  Four-sample batches satisfy both;
+       retain at most three samples for the following frame. */
+    {
+        int nFlush = nOut & ~3;
+        s_NesPendingCount = nOut - nFlush;
+        for (i = 0; i < s_NesPendingCount; i++)
+            s_NesPending[i] = s_NesOut[nFlush + i];
+        if (nFlush > 0)
+            pMix->OutputSamplesMono(s_NesOut, nFlush);
     }
 
     pMix->Flush();
