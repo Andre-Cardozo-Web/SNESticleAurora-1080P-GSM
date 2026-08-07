@@ -19,7 +19,7 @@ mainloop have full integration scaffolding for NES support, gated behind
 
 InfoNES was chosen as the NES core because:
 
-- Apache 2.0 license is compatible with this project's MIT license
+- Apache 2.0 license is compatible with this GPLv2 project
 - The codebase is small (~5500 LoC) and self-contained
 - It already targets multiple platforms including embedded ones (GBA, PSP)
   so porting to PS2 bare-metal is straightforward
@@ -42,6 +42,8 @@ src/nes/
 ├── state/   versioned, pointer-free NesStateT snapshot
 └── system/  PS2 platform layer + NesSystem / NesRom / NesDisk
               wrappers around InfoNES (added in later phases)
+src/third_party/nes_snd_emu/
+              cycle-timed base 2A03 synthesis + Blip_Buffer (LGPL-2.1+)
 ```
 
 ## Status
@@ -52,7 +54,8 @@ NES states include the 6502, PPU, pAPU, CHR RAM, active bank references and the
 complete writable mapper-data span. Famicom Disk System execution/state support
 is still separate and incomplete.
 
-The base 2A03 audio path includes PS2-specific fixes for pulse/envelope/length
-timing, triangle and noise counters, seven-bit DPCM playback/status, nonlinear
-mixing, DC removal and continuous 44.1-to-32 kHz resampling. Mapper expansion
-audio (VRC6/VRC7/MMC5/FDS/Sunsoft 5B) is not connected yet.
+The five base 2A03 channels are synthesized by Shay Green's cycle-timed
+Nes_Snd_Emu and Blip_Buffer directly at the frontend's 32 kHz rate. Register
+writes retain their 6502-cycle position, and pulse/envelope/length, triangle,
+noise, DPCM and frame-counter state are preserved in cartridge save states.
+Mapper expansion audio (VRC6/VRC7/MMC5/FDS/Sunsoft 5B) is not connected yet.

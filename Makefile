@@ -457,6 +457,9 @@ SRCS := \
 	src/platform/ps2/system/mainloop_bgm.cpp \
 	src/platform/ps2/system/global_alloc.cpp \
 	src/platform/ps2/system/embedded_irx.cpp \
+	src/third_party/nes_snd_emu/Blip_Buffer.cpp \
+	src/third_party/nes_snd_emu/Nes_Apu.cpp \
+	src/third_party/nes_snd_emu/Nes_Oscs.cpp \
 	src/nes/core/InfoNES.cpp \
 	src/nes/cpu/K6502.cpp \
 	src/nes/apu/InfoNES_pAPU.cpp \

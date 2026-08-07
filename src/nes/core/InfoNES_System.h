@@ -18,7 +18,8 @@
 /*-------------------------------------------------------------------*/
 /*  Palette data                                                     */
 /*-------------------------------------------------------------------*/
-extern WORD NesPalette[];
+/* Exact RGBA8 colors for the NTSC 2C02 PPU (little-endian R,G,B,A). */
+extern unsigned int NesPalette[];
 
 /*-------------------------------------------------------------------*/
 /*  Function prototypes                                              */
@@ -60,11 +61,11 @@ int InfoNES_SoundOpen( int samples_per_sync, int sample_rate );
 /* Sound Close */
 void InfoNES_SoundClose( void );
 
-/* Reset PS2-side NES mixer/resampler history (ROM reset/state load). */
+/* Reset PS2-side NES output alignment history (ROM reset/state load). */
 void InfoNES_SoundReset( void );
 
-/* Sound Output 5 Waves - 2 Pulse, 1 Triangle, 1 Noise, 1 DPCM */
-void InfoNES_SoundOutput(int samples, BYTE *wave1, BYTE *wave2, BYTE *wave3, BYTE *wave4, BYTE *wave5);
+/* Cycle-timed APU output, already band-limited and sampled at 32 kHz. */
+void InfoNES_SoundOutputSamples( const short *samples, int count );
 
 /* Print system message */
 void InfoNES_MessageBox( const char *pszMsg, ... );

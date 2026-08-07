@@ -39,11 +39,66 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   `SNESticle/NES/`, mantendo leitura e migração segura dos saves antigos.
 - Finalizados a SRAM de bateria e os **save states de cartuchos NES**, incluindo
   CPU, PPU, áudio, CHR RAM e estado privado dos mappers.
-- Refeito o caminho de áudio base do **NES/2A03**: DPCM na velocidade correta,
-  cinco canais audíveis, envelopes/contadores no ritmo certo, mistura não
-  linear e resampling contínuo sem emendar um bloco quebrado por quadro.
-- Removido trabalho incorreto de envelopes e contadores que era repetido 735
-  vezes por quadro, reduzindo o custo do pAPU no PS2.
+- Substituído o sintetizador base do **NES/2A03** por
+  **Nes_Snd_Emu + Blip_Buffer**: os cinco canais recebem cada escrita no ciclo
+  correto, sem perder ataques/notas curtas entre quadros.
+- A saída do NES agora nasce diretamente em 32 kHz, eliminando o antigo bloco
+  PCM de 44,1 kHz e a segunda reamostragem que podia segurar ou estourar notas.
+- Reset e load state calculam também a scanline inclusiva até o próximo VSync,
+  evitando encurtar o primeiro bloco de áudio depois da retomada.
+- A paleta antiga e excessivamente saturada do InfoNES foi substituída pela
+  paleta NTSC 2C02 padrão do **Mesen2**, preservada em RGBA8.
+
+---
+
+## Revisão NES r7: áudio por ciclo e paleta 2C02
+
+Esta revisão substitui o primeiro conserto incremental do pAPU descrito mais
+abaixo. Os itens antigos permanecem no changelog como histórico da pré-release,
+mas o renderer PCM antigo, suas LUTs e o conversor 44,1 → 32 kHz não fazem mais
+parte do caminho executado.
+
+### Cinco canais base sem notas perdidas
+
+- Integrado o `Nes_Apu`/`Blip_Buffer` de Shay Green, usado como referência
+  consolidada por emuladores e pelo projeto Game Music Emu.
+- Escritas em `$4000-$4013`, `$4015` e `$4017` são aplicadas na posição de ciclo
+  acumulada do 6502. Ataques e cortes que ocorram dentro do mesmo quadro não
+  são mais reduzidos a uma única fotografia de registradores no VSync.
+- Pulsos 1/2, triângulo, ruído e DPCM mantêm seus próprios timers, fases,
+  envelopes, length counters, sweep, contador linear e sequenciador de quadro.
+- A leitura de `$4015` consulta o APU já avançado até o ciclo da instrução,
+  incluindo o término real do DPCM e os IRQs do frame counter.
+- O DPCM lê diretamente o espaço do cartucho pelo callback do 6502; assim o
+  endereço, loop, tamanho e último bit do sample seguem o estado real do core.
+- `Blip_Buffer` gera áudio band-limited diretamente em **32.000 Hz**. A razão
+  CPU/áudio mantém a cadência alternada de 533/534 samples por quadro e a saída
+  continua chegando ao conversor 32 → 48 kHz do PS2 em lotes de quatro.
+- O snapshot do APU foi refeito sem ponteiros: preserva canais, envelopes,
+  fases, ruído, DPCM, frame counter e IRQs. States r5/r6 ainda são aceitos;
+  nesses arquivos antigos os registradores são reaplicados e o áudio retoma
+  com uma nova fase, pois o formato PCM anterior não possui tradução exata.
+- Esta alteração é exclusiva do NES. O SPC700, mixer e áudio do SNES não foram
+  modificados.
+
+### Cores menos saturadas
+
+- Trocada a antiga tabela FCEUX/InfoNES reduzida a RGB555 pela paleta padrão
+  **NTSC 2C02 do Mesen2**, com componentes completas de 8 bits em RGBA8.
+- Índices escritos na palette RAM agora são sempre mascarados para os seis bits
+  existentes no hardware (`0x00-0x3F`), evitando leitura fora da tabela.
+- O verde excessivamente neon observado em jogos como **Side Pocket** passa a
+  usar os mesmos valores-base do Mesen2. Um único bit vermelho continua
+  reservado internamente pelo InfoNES como marcador de prioridade do fundo;
+  isso altera no máximo um nível de 0-255 e não muda visualmente a cor.
+
+### Escopo ainda separado
+
+- O núcleo novo cobre os cinco canais **base** do 2A03. VRC6, VRC7, MMC5, FDS
+  e Sunsoft 5B continuam sem ligação ao mixer; jogos que realmente dependem de
+  expansão podem continuar sem esses instrumentos.
+- O resultado foi compilado e validado estruturalmente, mas tom, carga da EE e
+  comportamento do SPU2 ainda precisam de confirmação em PS2 real/NetherSX2.
 
 ---
 
@@ -181,7 +236,10 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 ---
 
-## Áudio e desempenho do NES (InfoNES)
+## Áudio e desempenho do NES (InfoNES) — primeira revisão, substituída pela r7
+
+> Histórico da primeira tentativa desta pré-release. O caminho ativo atual é
+> o `Nes_Snd_Emu + Blip_Buffer` documentado na seção r7 acima.
 
 ### Canais e temporização do pAPU
 
@@ -516,6 +574,10 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   (incluindo a Issue #111 daquele projeto).
 - `jay-kumogata/InfoNES`: origem do pAPU integrado e base usada para comparar
   as mudanças locais do frontend PS2.
+- `libgme/game-music-emu`: origem de `Nes_Snd_Emu` e `Blip_Buffer` (Shay
+  Green, LGPL-2.1+), usados pela revisão r7 para os cinco canais base do 2A03.
+- `SourMesen/Mesen2`: referência da paleta padrão NTSC 2C02 usada pela revisão
+  r7 para remover a saturação excessiva do InfoNES.
 - InfinityStation: referência anterior para limpeza de bandas e comportamento
   visual do navegador.
 - Relatos das Issues #19 e #26 e testes enviados pela comunidade.

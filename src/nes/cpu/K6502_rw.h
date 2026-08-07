@@ -23,21 +23,13 @@
 /*            K6502_ReadZp() : Reading from the zero page            */
 /*                                                                   */
 /*===================================================================*/
-/* RGB555 (NesPalette) -> RGBA8 [R][G][B][A], A=0xFF. Bit 0 (LSB do R) e'
-   reservado como flag de transparencia de BG (setado nas entradas de
-   backdrop), entao e' forcado a 0 aqui. Substitui o esquema antigo de
-   RGB555 16-bit + 0x8000: agora WorkFrame/PalTable sao 32-bit e o
-   InfoNES_DrawLine escreve RGBA8 direto na surface (sem passada de
-   conversao). */
-static inline unsigned int _NesRGBA8( WORD rgb555 )
+/* NesPalette is already RGBA8 in the surface's little-endian byte order.
+   Bit 0 (the red-channel LSB) remains reserved as InfoNES's background
+   transparency/backdrop marker, so normal colors clear only that invisible
+   one-bit distinction and backdrop entries set it below. */
+static inline unsigned int _NesRGBA8( unsigned int rgba8 )
 {
-  unsigned int r5 = ( rgb555 >> 10 ) & 0x1F;
-  unsigned int g5 = ( rgb555 >>  5 ) & 0x1F;
-  unsigned int b5 =   rgb555         & 0x1F;
-  unsigned int r8 = ( r5 << 3 ) | ( r5 >> 2 );
-  unsigned int g8 = ( g5 << 3 ) | ( g5 >> 2 );
-  unsigned int b8 = ( b5 << 3 ) | ( b5 >> 2 );
-  return 0xFF000000u | ( b8 << 16 ) | ( g8 << 8 ) | ( r8 & 0xFEu );
+  return rgba8 & 0xFFFFFFFEu;
 }
 
 static inline BYTE K6502_ReadZp( BYTE byAddr )
@@ -145,22 +137,10 @@ static inline BYTE K6502_Read( WORD wAddr )
       else
       if ( wAddr == 0x4015 )
       {
-	/* APU status is not the last value written to $4015.  In particular,
-	   DPCM bit 4 must clear when playback finishes or games that poll it
-	   never start their next sound effect. */
-	byRet = 0;
-	if ( ApuC1Atl > 0 ) byRet |= (1<<0);
-	if ( ApuC2Atl > 0 ) byRet |= (1<<1);
-	if (  !ApuC3Holdnote ) {
-	  if ( ApuC3Atl > 0 ) byRet |= (1<<2);
-	} else {
-	  if ( ApuC3Llc > 0 ) byRet |= (1<<2);
-	}
-	if ( ApuC4Atl > 0 ) byRet |= (1<<3);
-	if ( ApuC5DmaLength > 0 ) byRet |= (1<<4);
-
-	// FrameIRQ
-	if ( APU_Reg[ 0x15 ] & 0x40 ) byRet |= 0x40;
+        /* Run the cycle-timed APU to this exact CPU position before
+           constructing status.  This fixes stale length/DMC flags that made
+           games skip a following note or sound effect. */
+	byRet = InfoNES_pAPUReadStatus();
         APU_Reg[ 0x15 ] &= ~0x40;
         return byRet;
       }
@@ -362,16 +342,16 @@ static inline void K6502_Write( WORD wAddr, BYTE byData )
             {
               // Palette mirror
               PPURAM[ 0x3f10 ] = PPURAM[ 0x3f14 ] = PPURAM[ 0x3f18 ] = PPURAM[ 0x3f1c ] = 
-              PPURAM[ 0x3f00 ] = PPURAM[ 0x3f04 ] = PPURAM[ 0x3f08 ] = PPURAM[ 0x3f0c ] = byData;
+              PPURAM[ 0x3f00 ] = PPURAM[ 0x3f04 ] = PPURAM[ 0x3f08 ] = PPURAM[ 0x3f0c ] = byData & 0x3f;
               PalTable[ 0x00 ] = PalTable[ 0x04 ] = PalTable[ 0x08 ] = PalTable[ 0x0c ] =
-              PalTable[ 0x10 ] = PalTable[ 0x14 ] = PalTable[ 0x18 ] = PalTable[ 0x1c ] = _NesRGBA8( NesPalette[ byData ] ) | 1;
+              PalTable[ 0x10 ] = PalTable[ 0x14 ] = PalTable[ 0x18 ] = PalTable[ 0x1c ] = _NesRGBA8( NesPalette[ byData & 0x3f ] ) | 1;
             }
             else
 	    if ( addr & 3 )
             {
               // Palette
-              PPURAM[ addr ] = byData;
-              PalTable[ addr & 0x1f ] = _NesRGBA8( NesPalette[ byData ] );
+              PPURAM[ addr ] = byData & 0x3f;
+              PalTable[ addr & 0x1f ] = _NesRGBA8( NesPalette[ byData & 0x3f ] );
             }
           }
           break;
@@ -459,6 +439,7 @@ static inline void K6502_Write( WORD wAddr, BYTE byData )
           break;
 
         case 0x17:  /* 0x4017 */
+          InfoNES_pAPUWriteFrameCounter( wAddr, byData );
           // Frame IRQ
           FrameStep = 0;
           if ( !( byData & 0xc0 ) )

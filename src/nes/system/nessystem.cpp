@@ -3,9 +3,9 @@
  * SetRom() feeds the iNES image into InfoNES (NesHeader, ROM, VROM
  * globals + optional CHR RAM) and runs InfoNES_Init/Reset.
  *
- * ExecuteFrame() drives InfoNES for exactly one NES frame and converts
- * WorkFrame[256*240] (RGB555) into the 256x256 RGBA8 render surface
- * that mainloop_process.cpp uploads to _OutTex via TextureUpload.
+ * ExecuteFrame() drives InfoNES for exactly one NES frame. WorkFrame points
+ * directly into the 256x256 RGBA8 render surface that mainloop_process.cpp
+ * uploads to _OutTex via TextureUpload.
  *
  * When no ROM is bound (defensive: should never happen given the
  * mainloop dispatch logic) we still paint a diagnostic so that "NES
@@ -15,8 +15,9 @@
  * Input mapping (NES has 8 buttons; PS2 user is pressing SNES-shaped
  * bits because _MainLoopInput is still routed through _MainLoopSnesInput)
  * is done in InfoNES_System_PS2.cpp::InfoNES_PadState, reading the
- * SysInputT pointer that this file stashes per frame. InfoNES_SoundOutput
- * sends the mixed pAPU channels through the shared PS2 audio buffer.
+ * SysInputT pointer that this file stashes per frame. The cycle-timed NES
+ * sample sink sends the five base 2A03 channels through the shared PS2
+ * audio buffer.
  */
 
 #include <stdio.h>
@@ -49,8 +50,8 @@
    impossible (single-threaded EE side). */
 CRenderSurface       *g_pNesTargetSurface = NULL;
 Emu::SysInputT       *g_pNesInputState    = NULL;
-/* Per-frame audio sink, stashed by ExecuteFrame so the InfoNES sound
-   callback (InfoNES_SoundOutput) can reach it.  Points at the SAME
+/* Per-frame audio sink, stashed by ExecuteFrame so the NES sample callback
+   can reach it. Points at the SAME
    CMixBuffer the SNES uses (audsrv backend); only one system runs at a
    time, so this never collides with the SNES audio path. */
 CMixBuffer           *g_pNesMixBuffer     = NULL;
@@ -773,22 +774,9 @@ const char *NesSystem::GetString(StringE eString)
 
 Uint32 NesSystem::GetSampleRate()
 {
-    /* IMPORTANTE: este valor configura a TAXA DE ENTRADA do
-       AudMixBuffer (via _MainLoopSetSampleRate -> SetSampleRate).
-       O backend audsrv/SPU2 toca SEMPRE a 48000 Hz, e o mix buffer so'
-       sabe converter de {48000 (passthrough), 32000 (upsample cubico
-       2:3), 24000 (1:2)} para 48000.  Qualquer outra taxa cai no
-       'default' do switch em OutputSamplesStereo() e as amostras sao
-       copiadas COMO SE fossem 48000 (sem resample) -> tocam ~2.2x mais
-       rapido (pitch alto, "chipmunk") e o buffer esvazia (estalos).
-
-       Por isso devolvemos 32000 -- a MESMA taxa que o SNES usa, que
-       passa pelo resampler cubico ja' testado.  O InfoNES roda o pAPU
-       a 44100 Hz (pAPU_QUALITY=3, 735 amostras/frame) e o
-       InfoNES_SoundOutput reamostra 44100->32000 (=533 amostras) a uma
-       razao constante; o mix buffer faz 32000->48000 (=800 amostras =
-       1/60 s).  Resultado: pitch e duracao corretos.
-
-       NAO devolver 44100 aqui: 44100 tambem nao esta no switch. */
+    /* Nes_Snd_Emu/Blip_Buffer synthesizes the five base 2A03 channels
+       directly at 32 kHz. AudMixBuffer already has the PS2-tested cubic
+       32->48-kHz path, so the NES path no longer relies on an unsupported
+       44.1-kHz passthrough or a second frame-local resampler. */
     return 32000;
 }

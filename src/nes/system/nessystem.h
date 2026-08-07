@@ -8,11 +8,10 @@
  * Current cartridge support:
  *   - SetRom() seeds InfoNES globals (NesHeader, ROM, VROM, optional CHR
  *     RAM) and runs InfoNES_Init() / InfoNES_Reset() for the cartridge.
- *   - ExecuteFrame() steps the InfoNES core for exactly one NES frame and
- *     converts WorkFrame[256*240] (RGB555) into the RGBA8 render surface
- *     uploaded by mainloop_process.cpp.
- *   - Input is wired through InfoNES_PadState and pAPU audio is routed to
- *     the same PS2 mix buffer used by the SNES core.
+ *   - ExecuteFrame() steps the InfoNES core for exactly one NES frame; its
+ *     RGBA8 WorkFrame points directly into the uploaded render surface.
+ *   - Input is wired through InfoNES_PadState and the cycle-timed base 2A03
+ *     audio stream is routed to the same PS2 mix buffer used by the SNES core.
  *   - Battery-backed 8 KiB SRAM and versioned save states are wired.
  *     States include CPU, PPU, pAPU, CHR RAM and mapper-private data.
  *

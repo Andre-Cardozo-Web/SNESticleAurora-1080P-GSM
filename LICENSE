@@ -24,6 +24,13 @@ Those portions retain the copyright of their original authors:
     Adapted for SNESticleRevive (alignment-safe buffer access, bus glue, and
     the 0x14 "ROM version" command); the math is unchanged.
 
+  NES 2A03 audio synthesis - src/third_party/nes_snd_emu/
+    Copyright (C) 2003-2006 Shay Green.
+    Nes_Snd_Emu and Blip_Buffer, licensed under GNU LGPL version 2.1 or later.
+    Imported from https://github.com/libgme/game-music-emu and integrated with
+    InfoNES register timing and pointer-free save states. The complete LGPL
+    version 2.1 text is retained in src/third_party/nes_snd_emu/LICENSE.txt.
+
 
 ----------------------------------------------------------------------------
 RELICENSING NOTE

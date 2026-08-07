@@ -632,8 +632,9 @@ The cumulative notes for the current test version are available in
   attribution. Incorporating that GPLv2 code is why the project was relicensed
   from MIT to **GPLv2**.
 - **NES (InfoNES) integration**: full PS2 platform layer (render, input, audio,
-  one‑frame stepper), with selected correctness fixes synchronized from modern
-  InfoNES work and PS2-specific mixer/resampler code.
+  one‑frame stepper). The five base 2A03 channels now use Shay Green's
+  cycle-timed **Nes_Snd_Emu + Blip_Buffer** at 32 kHz, and video uses Mesen2's
+  default NTSC 2C02 palette instead of the old saturated RGB555 table.
 - **Video**: gsKit migration, the Video Config screen, multiple modes, and a
   **safe 480i default** (native 256x240 stays available for CRT users).
 - **Cover art**: the ROM browser shows custom images plus Libretro boxart,
@@ -751,6 +752,8 @@ tools/         host‑side test harnesses (chip + OBJ verification)
 - **[Wolf3s/SNESticle](https://github.com/Wolf3s/SNESticle)** — fork used as one of the bases for this repository.
 - **Sardu** — for releasing the recovered source under the MIT license (2022).
 - **[jay-kumogata/InfoNES](https://github.com/jay-kumogata/InfoNES)** — the NES core integrated here.
+- **[game-music-emu](https://github.com/libgme/game-music-emu)** — Shay Green's Nes_Snd_Emu and Blip_Buffer used for the five cycle-timed base NES audio channels (LGPL-2.1+).
+- **[Mesen2](https://github.com/SourMesen/Mesen2)** — reference/default NTSC 2C02 palette used by the NES renderer.
 - **[upng](https://github.com/elanthis/upng)** — Sean Middleditch & Lode Vandevenne; the bundled single‑file PNG decoder used for cover art (zlib license). Extended in this repo with palette/indexed support.
 - **[libxmp-lite](https://github.com/tatokis/libxmp-lite-ps2)** — Claudio Matsuoka, Hipolito Carraro Jr and PS2 porter tatokis; the embedded MOD/XM replay engine used for accurate tracker effects, timing and loops (MIT).
 - **[hugorsgarcia/PS2SNESticle](https://github.com/hugorsgarcia/PS2SNESticle)** — **Hugo Garcia**, whose PS2 work was the reference for the controller / memory‑card / IRX bring‑up and the netplay module.

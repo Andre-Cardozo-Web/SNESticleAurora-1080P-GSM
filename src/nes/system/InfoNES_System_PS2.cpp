@@ -8,17 +8,18 @@
  * Current status:
  *   - InfoNES_PadState  - reads g_pNesInputState (SNES bit layout) and
  *                         remaps to NES PAD1_Latch / PAD2_Latch.
- *   - InfoNES_LoadFrame - converts WorkFrame[256*240] (RGB555) into
- *                         g_pNesTargetSurface (RGBA8 256x256).
+ *   - InfoNES_LoadFrame - presents WorkFrame[256*240], which is drawn
+ *                         directly into the RGBA8 target surface.
  *   - InfoNES_RunOneFrame - inlined InfoNES_Cycle body, bounded to a
  *                         single NES frame (262 scanlines).  Called by
  *                         NesSystem::ExecuteFrame.
  *   - InfoNES_MemoryCopy / MemorySet - libc trampolines.
  *   - InfoNES_DebugPrint / MessageBox - printf.
- *   - InfoNES_Sound*    - mixes and resamples pAPU into CMixBuffer.
+ *   - InfoNES_Sound*    - forwards the cycle-timed 32-kHz NES stream
+ *                         to CMixBuffer in converter-safe blocks.
  *
- * The NesPalette[] table is the 64-entry NES master palette in RGB555
- * form that InfoNES uses internally. Values from upstream InfoNES.
+ * NesPalette[] is Mesen2's 64-entry default NTSC 2C02 palette, stored
+ * directly in the PS2 RGBA8 surface byte order.
  */
 
 #include <stdio.h>
@@ -61,30 +62,25 @@ extern CMixBuffer           *g_pNesMixBuffer;
 extern int SpriteJustHit;
 
 
-/* ---- NES master palette, RGB555 (standard NES palette, R high bits) -
+/* ---- NTSC NES 2C02 master palette, exact RGBA8 --------------------
  *
- * Upstream InfoNES ships an idiosyncratic palette (NesPalette[0]=0x39ce
- * for the universal backdrop, which decodes to a magenta/pink instead
- * of the black/dark-grey every other NES emulator uses).  That was the
- * cause of the bright-pink sky in Super Mario Bros 3 vs. the black sky
- * shown by RetroArch / FCEUX / Mesen.
- *
- * The values below are the standard FCEUX-style master palette
- * (8-bit RGB triples documented at https://emudev.de and
- * https://www.nesdev.org/nespal.txt) converted to RGB555 with R in the
- * top 5 bits, G in the middle 5, B in the bottom 5 -- the same bit
- * order InfoNES's WorkFrame[] uses.
+ * The previous table was the old high-saturation FCEUX palette reduced to
+ * RGB555.  Greens in games such as Side Pocket consequently clipped toward
+ * neon green, and every component lost three low bits before reaching the
+ * RGBA8 render target.  These are Mesen2's default 2C02 colors stored in the
+ * PS2 surface's little-endian [R,G,B,A] byte order.  K6502_rw masks palette
+ * writes to the hardware's six-bit color index before looking them up.
  */
-WORD NesPalette[ 64 ] =
+unsigned int NesPalette[ 64 ] =
 {
-  0x3def, 0x001f, 0x0017, 0x20b7, 0x4810, 0x5404, 0x5440, 0x4440,
-  0x28c0, 0x01e0, 0x01a0, 0x0160, 0x010b, 0x0000, 0x0000, 0x0000,
-  0x5ef7, 0x01ff, 0x017f, 0x351f, 0x6c19, 0x700b, 0x7ce0, 0x7162,
-  0x55e0, 0x02e0, 0x02a0, 0x02a8, 0x0231, 0x0000, 0x0000, 0x0000,
-  0x7fff, 0x1eff, 0x363f, 0x4dff, 0x7dff, 0x7d73, 0x7deb, 0x7e88,
-  0x7ee0, 0x5fe3, 0x2f6a, 0x2ff3, 0x03bb, 0x3def, 0x0000, 0x0000,
-  0x7fff, 0x539f, 0x5eff, 0x6eff, 0x7eff, 0x7e98, 0x7b56, 0x7f95,
-  0x7f6f, 0x6fef, 0x5ff7, 0x5ffb, 0x03ff, 0x7f7f, 0x0000, 0x0000
+  0xff666666u, 0xff882a00u, 0xffa71214u, 0xffa4003bu, 0xff7e005cu, 0xff40006eu, 0xff00066cu, 0xff001d56u,
+  0xff003533u, 0xff00480bu, 0xff005200u, 0xff084f00u, 0xff4d4000u, 0xff000000u, 0xff000000u, 0xff000000u,
+  0xffadadadu, 0xffd95f15u, 0xffff4042u, 0xfffe2775u, 0xffcc1aa0u, 0xff7b1eb7u, 0xff2031b5u, 0xff004e99u,
+  0xff006d6bu, 0xff008738u, 0xff00930cu, 0xff328f00u, 0xff8d7c00u, 0xff000000u, 0xff000000u, 0xff000000u,
+  0xfffffeffu, 0xffffb064u, 0xffff9092u, 0xffff76c6u, 0xffff6af3u, 0xffcc6efeu, 0xff7081feu, 0xff229eeau,
+  0xff00bebcu, 0xff00d888u, 0xff30e45cu, 0xff82e045u, 0xffdecd48u, 0xff4f4f4fu, 0xff000000u, 0xff000000u,
+  0xfffffeffu, 0xffffdfc0u, 0xffffd2d3u, 0xffffc8e8u, 0xffffc2fbu, 0xffeac4feu, 0xffc5ccfeu, 0xffa5d8f7u,
+  0xff94e5e4u, 0xff96efcfu, 0xffabf4bdu, 0xffccf3b3u, 0xfff2ebb5u, 0xffb8b8b8u, 0xff000000u, 0xff000000u
 };
 
 
@@ -176,18 +172,15 @@ void InfoNES_RunOneFrame(void)
  * ------------------------------------------------------------------ *
  * Called once per visible NES frame from inside InfoNES_HSync (at
  * SCAN_UNKNOWN_START, after every scanline 0..239 has been rendered
- * by InfoNES_DrawLine).  WorkFrame[256*240] is in RGB555 (5 bits per
- * channel, LSB = blue, MSB = unused) thanks to NesPalette being in
- * that format and PalTable[] mirroring it.
+ * by InfoNES_DrawLine). WorkFrame points directly at the RGBA8 target;
+ * NesPalette and PalTable therefore preserve the full 8-bit components.
  *
  * Target is a 256x256 RGBA8 surface (mainloop_init.cpp:274 allocates
  * _fbTexture[] as PIXELFORMAT_RGBA8).  We write the NES visible 240
  * lines and leave 16 padding lines below as black (they're outside
  * the on-screen quad in mainloop_render.cpp anyway).
  *
- * Bit layout:
- *   RGB555: 0 RRRRR GGGGG BBBBB
- *   RGBA8:  RR GG BB AA (little-endian: R is first byte at offset 0).
+ * Surface byte layout: RR GG BB AA (little-endian: R at byte offset 0).
  */
 void InfoNES_LoadFrame(void)
 {
@@ -324,56 +317,16 @@ void InfoNES_Wait( void )
 {
 }
 
-/* NES-only mixer state.  The SNES still reaches CMixBuffer through its own
-   SPC700 path; none of these filters or resampler variables are shared. */
-#define NES_MIX_PEAK       16000
-#define NES_DC_BLOCK_Q15   32604  /* 0.995 in Q15 */
-
-static int    s_NesSampleRate = 44100;
-static Uint32 s_NesOutputRate;
-static Int16  s_NesPulseLut[31];
-static Int16  s_NesTndLut[203];
-static BYTE   s_NesLutsReady;
-static Int32  s_NesDcPrevInput;
-static Int32  s_NesDcPrevOutput;
-static Int64  s_NesResamplePos;
-static Int16  s_NesResamplePrev;
-static BYTE   s_NesHaveResamplePrev;
+/* Nes_Snd_Emu/Blip_Buffer now performs cycle-timed synthesis, band limiting
+   and 2A03 channel weighting directly at the frontend's 32-kHz input rate.
+   This PS2 layer only keeps up to three samples so AudMixBuffer always gets
+   multiples of four (required by its 32->48-kHz 2:3 converter). */
 static Int16  s_NesPending[4];
 static int    s_NesPendingCount;
 
-static void InfoNES_BuildMixerLuts( void )
-{
-    int i;
-    if (s_NesLutsReady)
-        return;
-
-    /* NESdev's nonlinear 2A03 mixer approximations, precomputed once so the
-       PS2 executes only two table lookups per PCM sample. */
-    for (i = 0; i <= 30; i++)
-    {
-        Int64 numerator = (Int64)9588 * i * NES_MIX_PEAK;
-        Int64 denominator = (Int64)100 * (8128 + 100 * i);
-        s_NesPulseLut[i] = denominator ? (Int16)(numerator / denominator) : 0;
-    }
-    for (i = 0; i <= 202; i++)
-    {
-        Int64 numerator = (Int64)16367 * i * NES_MIX_PEAK;
-        Int64 denominator = (Int64)100 * (24329 + 100 * i);
-        s_NesTndLut[i] = denominator ? (Int16)(numerator / denominator) : 0;
-    }
-    s_NesLutsReady = 1;
-}
-
 void InfoNES_SoundReset( void )
 {
-    InfoNES_BuildMixerLuts();
-    s_NesOutputRate = 0;
-    s_NesDcPrevInput = 0;
-    s_NesDcPrevOutput = 0;
-    s_NesResamplePos = 0;
-    s_NesResamplePrev = 0;
-    s_NesHaveResamplePrev = 0;
+    memset(s_NesPending, 0, sizeof(s_NesPending));
     s_NesPendingCount = 0;
 }
 
@@ -384,10 +337,9 @@ void InfoNES_SoundInit( void )
 
 int InfoNES_SoundOpen( int samples_per_sync, int sample_rate )
 {
-    /* The audsrv/SPU2 stream is already open.  Keep the native pAPU rate and
-       reset interpolation history whenever a ROM resets. */
+    /* audsrv/SPU2 and CMixBuffer are owned by the shared frontend. */
     (void)samples_per_sync;
-    s_NesSampleRate = (sample_rate > 0) ? sample_rate : 44100;
+    (void)sample_rate;
     InfoNES_SoundReset();
     return 1;
 }
@@ -397,117 +349,35 @@ void InfoNES_SoundClose( void )
     InfoNES_SoundReset();
 }
 
-/* InfoNES supplies the five base 2A03 channels once per video frame.  Mix
-   with the NES nonlinear response, remove DAC DC with a cheap one-pole
-   blocker, then continuously resample to CMixBuffer's rate.  The old code
-   restarted interpolation at every frame and always emitted floor(533.33)
-   samples, causing a boundary discontinuity and a small pitch error. */
-void InfoNES_SoundOutput( int samples, BYTE *wave1, BYTE *wave2,
-                          BYTE *wave3, BYTE *wave4, BYTE *wave5 )
+void InfoNES_SoundOutputSamples( const short *samples, int count )
 {
     CMixBuffer *pMix = g_pNesMixBuffer;
-    static Int16 s_NesMix[1024];
-    static Int16 s_NesOut[2048];
-    const int capMix = (int)(sizeof(s_NesMix) / sizeof(s_NesMix[0]));
-    const int capOut = (int)(sizeof(s_NesOut) / sizeof(s_NesOut[0]));
-    Uint32 mixRate = 32000, mixBits = 16, mixCh = 2;
-    int nesRate = (s_NesSampleRate > 0) ? s_NesSampleRate : 44100;
-    Uint64 step;
-    Int64 limit;
-    int nOut = 0;
+    static Int16 s_NesOut[1028];
+    int nOut = s_NesPendingCount;
+    int nFlush;
     int i;
 
-    if (!pMix || samples <= 1)
+    if (!samples || count <= 0)
         return;
-    if (samples > capMix)
-        samples = capMix;
-
-    /* 1) Nonlinear channel mix at the native 44.1 kHz pAPU rate. */
-    for (i = 0; i < samples; i++)
+    if (count > 1024)
+        count = 1024;
+    if (!pMix)
     {
-        int pulse = (int)wave1[i] + (int)wave2[i];
-        int tnd = 3 * (int)wave3[i] + 2 * (int)wave4[i] + (int)wave5[i];
-        Int32 input, output;
-
-        if (pulse > 30) pulse = 30;
-        if (tnd > 202) tnd = 202;
-        input = (Int32)s_NesPulseLut[pulse] + (Int32)s_NesTndLut[tnd];
-
-        output = input - s_NesDcPrevInput +
-            (Int32)(((Int64)s_NesDcPrevOutput * NES_DC_BLOCK_Q15) >> 15);
-        s_NesDcPrevInput = input;
-        if (output > 32767) output = 32767;
-        if (output < -32768) output = -32768;
-        s_NesDcPrevOutput = output;
-        s_NesMix[i] = (Int16)output;
-    }
-
-    /* 2) Continuous 32.32 resampler.  A negative position denotes the one
-          interval joining the previous block to this block, so no sample is
-          repeated and no frame-edge click is introduced. */
-    pMix->GetFormat(&mixRate, &mixBits, &mixCh);
-    if (mixRate == 0)
-        mixRate = 32000;
-    if (mixRate != s_NesOutputRate)
-    {
-        s_NesOutputRate = mixRate;
-        s_NesResamplePos = 0;
-        s_NesHaveResamplePrev = 0;
         s_NesPendingCount = 0;
+        return;
     }
 
     for (i = 0; i < s_NesPendingCount; i++)
-        s_NesOut[nOut++] = s_NesPending[i];
+        s_NesOut[i] = s_NesPending[i];
+    for (i = 0; i < count; i++)
+        s_NesOut[nOut++] = (Int16)samples[i];
 
-    step = ((Uint64)(unsigned int)nesRate << 32) / mixRate;
-    if (!step)
-        step = 1;
-    limit = (Int64)(samples - 1) << 32;
-
-    while (s_NesResamplePos < limit && nOut < capOut)
-    {
-        Int32 a, b;
-        Uint32 frac;
-
-        if (s_NesResamplePos < 0 && s_NesHaveResamplePrev)
-        {
-            Uint64 rel = (Uint64)(s_NesResamplePos + ((Int64)1 << 32));
-            a = s_NesResamplePrev;
-            b = s_NesMix[0];
-            frac = (Uint32)(rel >> 16) & 0xffff;
-        }
-        else
-        {
-            int index = (int)(s_NesResamplePos >> 32);
-            Uint64 rel;
-            if (index < 0) index = 0;
-            if (index >= samples - 1) index = samples - 2;
-            rel = (Uint64)(s_NesResamplePos - ((Int64)index << 32));
-            a = s_NesMix[index];
-            b = s_NesMix[index + 1];
-            frac = (Uint32)(rel >> 16) & 0xffff;
-        }
-
-        s_NesOut[nOut++] = (Int16)(a +
-            (Int32)(((Int64)(b - a) * frac) >> 16));
-        s_NesResamplePos += (Int64)step;
-    }
-
-    s_NesResamplePrev = s_NesMix[samples - 1];
-    s_NesHaveResamplePrev = 1;
-    s_NesResamplePos -= (Int64)samples << 32;
-
-    /* AudMixBuffer's 32->48 kHz converter consumes input pairs and Flush
-       requires an even output count.  Four-sample batches satisfy both;
-       retain at most three samples for the following frame. */
-    {
-        int nFlush = nOut & ~3;
-        s_NesPendingCount = nOut - nFlush;
-        for (i = 0; i < s_NesPendingCount; i++)
-            s_NesPending[i] = s_NesOut[nFlush + i];
-        if (nFlush > 0)
-            pMix->OutputSamplesMono(s_NesOut, nFlush);
-    }
+    nFlush = nOut & ~3;
+    s_NesPendingCount = nOut - nFlush;
+    for (i = 0; i < s_NesPendingCount; i++)
+        s_NesPending[i] = s_NesOut[nFlush + i];
+    if (nFlush > 0)
+        pMix->OutputSamplesMono(s_NesOut, nFlush);
 
     pMix->Flush();
 }
