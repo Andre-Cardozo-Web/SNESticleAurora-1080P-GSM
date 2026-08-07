@@ -43,12 +43,11 @@ void CoverToggle(void);
    to call every frame for instant response. Pass NULL / "" when the
    current selection is not a ROM.
 
-   Candidate PNG paths tried (first hit wins):
-       $(COVERS_PATH)/<base>.png   (only if built with -DCOVERS_PATH)
-       <dir>/<base>.png
-       <dir>/covers/<base>.png
-       <dir>/Named_Boxarts/<base>.png
-   where <base> is the ROM file name without extension. */
+   Candidate PNG paths are indexed under COVERS_PATH, beside the ROM and in
+   the ELF's covers/ folder. Each base can contain a plain <base>.png plus
+   the Libretro Named_Boxarts, Named_Titles, Named_Snaps and Named_Logos
+   subfolders. Numbered <base>-1.png ... <base>-9.png extras are supported
+   in the base folder. <base> is the ROM file name without extension. */
 void CoverShow(const char *romPath);
 void CoverShowCached(const char *romPath);
 
@@ -58,8 +57,8 @@ void CoverShowCached(const char *romPath);
 Bool CoverPrefetch(const char *romPath);
 
 /* Cycle to the next artwork variant that exists for the current ROM
-   (Game.png -> Game-1.png -> Game-2.png -> ... -> wrap). Bound to Square
-   in the browser. No-op if the ROM has only one image. */
+   (custom -> boxart -> title -> snap -> logo -> Game-1 ... -> wrap).
+   Bound to Square in the browser. No-op if the ROM has only one image. */
 void CoverCycleVariant(void);
 
 /* Display-state queries for the browser's right-side panel. */

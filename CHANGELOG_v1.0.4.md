@@ -31,6 +31,8 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   evitando uma consulta `stat` separada para cada ROM.
 - Corrigida a regressão em que pastas CDFS apareciam na lista, mas não abriam.
 - Pastas agora aparecem como **`> NOME/`**, com marcador e barra sempre visíveis.
+- Capas Libretro agora incluem **boxart, título, snap e logo**, com download
+  automático opcional por `COVER=y` na criação da ISO.
 
 ---
 
@@ -159,6 +161,55 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 ---
 
+## Capas de SNES e NES
+
+### Formatos, tipos e navegação
+
+- Mantido o suporte à PNG simples com o mesmo nome base da ROM e aos extras
+  manuais `Game-1.png` até `Game-9.png`.
+- O layout Libretro passa a reconhecer os quatro diretórios disponíveis para
+  SNES e NES: `Named_Boxarts`, `Named_Titles`, `Named_Snaps` e `Named_Logos`.
+- O botão □ alterna apenas as imagens existentes, nesta ordem: imagem simples,
+  boxart, título, snap, logo e extras numerados.
+- A lista de nomes de PNG agora cresce sob demanda, começando em 256 entradas e
+  podendo chegar a 16.384. Isso evita que coleções com vários tipos por ROM
+  sejam cortadas pelo antigo limite fixo de 2.048 nomes.
+- O cache de imagens e o índice continuam sendo liberados antes de iniciar uma
+  ROM, devolvendo a memória ao core.
+
+### Download automático pelo Makefile
+
+- Adicionado `COVER=y` e seu equivalente minúsculo `cover=y` ao alvo `make
+  iso`. `COVER=n` permanece como padrão e não acessa a internet.
+- Quando ativado, o build consulta as coleções Libretro oficiais de SNES e NES
+  e adiciona os quatro tipos de PNG apenas à árvore temporária `cdfs:/ROMS/`.
+  A ROM e sua pasta original não são modificadas.
+- O sistema é detectado pelas extensões SNES/NES. Arquivos ZIP são inspecionados
+  quando possível; `COVER_SYSTEM=snes` ou `COVER_SYSTEM=nes` permite resolver
+  arquivos compactados ambíguos.
+- A correspondência tenta o nome exato, a substituição Libretro de caracteres
+  inválidos por `_`, remoção de tags GoodTools, abreviações `(U)/(E)/(J)/(W)` e
+  o nome interno de uma ROM única em ZIP.
+- Capas válidas que já existem são preservadas. Ausências, nomes não
+  reconhecidos e falhas de rede são resumidos sem impedir a criação da ISO.
+- Adicionado `make covers ROMS=/pasta`, que cria o mesmo layout `Named_*`
+  diretamente em uma pasta destinada a USB, MX4SIO, MMCE, HDD, memory card ou
+  `host:` sem precisar gerar ISO.
+- `COVER_JOBS` controla o paralelismo e `COVER_BASE_URL` permite espelho ou
+  teste local do downloader.
+
+### Documentação
+
+- A seção de capas do README foi reescrita em português com exemplos completos
+  de nomes para `.sfc`, `.nes` e `.zip`.
+- Adicionados os links separados das coleções Libretro de SNES e NES, uma
+  tabela explicando cada `Named_*`, exemplos de várias imagens para a mesma ROM
+  e instruções para CDFS e todos os demais dispositivos.
+- Documentado explicitamente que a automação adiciona PNGs, mas nunca injeta
+  arquivos dentro da ROM, renomeia o jogo ou altera seus bytes.
+
+---
+
 ## Navegador, dispositivos e CDFS
 
 ### Velocidade e compatibilidade entre dispositivos
@@ -223,6 +274,8 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 - `cdfs_stream.irx`, seu código-fonte e licença estão incluídos na árvore.
 - O Makefile verifica e embute o novo IRX automaticamente.
+- `tools/fetch_libretro_covers.py` implementa a preparação opcional de capas
+  sem dependências Python externas.
 - As regiões de vídeo deixaram de depender de constantes de endereço entre
   modos.
 - O pacote ZIP preserva a pasta raiz `SNESticleRevive/` e exclui `.git`,
@@ -235,6 +288,17 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - Compilação completa com o toolchain PS2DEV: **153 arquivos compilados**.
 - Resultado: **0 erros** e **2 avisos antigos** de possível truncamento de texto
   em caminhos, sem novos avisos causados por estas mudanças.
+- O downloader foi validado com uma coleção local: uma ROM SNES no formato
+  GoodTools `(U) [!]` e uma ROM NES dentro de ZIP encontraram os nomes Libretro
+  correspondentes e produziram **8/8 imagens** nas quatro categorias.
+- Uma segunda execução de `make covers` reconheceu as oito PNGs existentes e
+  não sobrescreveu nenhuma delas.
+- `COVER=y` e `cover=y` foram testados na preparação de `cdfs:/ROMS/`: as PNGs
+  foram colocadas somente na árvore temporária da ISO e a pasta original
+  permaneceu com zero PNGs.
+- A imagem ISO final não foi produzida neste ambiente porque não há
+  `mkisofs`/`genisoimage`/`xorriso`; a etapa completa anterior ao gerador de
+  ISO, incluindo `SYSTEM.CNF`, ROMs e capas CDFS, foi validada.
 - O ZIP da source é testado com `unzip -t`.
 - O pacote é extraído em uma pasta temporária e recompilado para confirmar que
   não depende do diretório de trabalho original.
@@ -269,4 +333,3 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   visual do navegador.
 - Relatos das Issues #19 e #26 e testes enviados pela comunidade.
 - Observações de jsr sobre escala 240p/480i/480p e amostragem horizontal.
-

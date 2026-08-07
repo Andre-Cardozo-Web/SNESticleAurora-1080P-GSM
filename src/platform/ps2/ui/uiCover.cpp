@@ -20,6 +20,7 @@
  *      <dir>/Named_Boxarts/<rom>.png        (libretro box art)
  *      <dir>/Named_Titles/<rom>.png         (libretro title screen)
  *      <dir>/Named_Snaps/<rom>.png          (libretro gameplay snap)
+ *      <dir>/Named_Logos/<rom>.png          (libretro game logo)
  *      <dir>/<rom>-1.png, <rom>-2.png ...   (extra images)
  * Square cycles through whichever of these exist for the selected ROM.
  *
@@ -68,17 +69,18 @@ extern "C" void GSK_InvalidateTextureCache(void);
 #define COVER_CACHE_SLOTS 16
 #define COVER_KEY_MAX     1024
 
-#define COVER_INDEX_MAX   2048
-#define COVER_NAME_MAX    208
-/* up to three bases (COVERS_PATH + ROM dir + ELF dir) x 4 kinds */
-#define COVER_DIRS_MAX    12
-/* max distinct artwork images we list per ROM (boxart/title/snap + -N) */
-#define COVER_FOUND_MAX   12
+#define COVER_INDEX_INITIAL 256
+#define COVER_INDEX_MAX     16384
+#define COVER_NAME_MAX      256
+/* up to three bases (COVERS_PATH + ROM dir + ELF dir) x 5 kinds */
+#define COVER_DIRS_MAX      15
+/* root + boxart/title/snap/logo + nine numbered extras */
+#define COVER_FOUND_MAX     16
 /* highest "-N" suffix variant we look for */
 #define COVER_SUFFIX_MAX  9
 
 /* Directory "kinds" - which thumbnail role a scanned folder plays. */
-enum { DK_ROOT = 0, DK_BOX, DK_TITLE, DK_SNAP };
+enum { DK_ROOT = 0, DK_BOX, DK_TITLE, DK_SNAP, DK_LOGO };
 
 typedef struct
 {
@@ -104,6 +106,7 @@ static Uint32     s_lruClock = 0;
 
 static CoverIdxT *s_index    = 0;
 static Int32      s_indexCount = 0;
+static Int32      s_indexCapacity = 0;
 static char       s_indexDir[COVER_KEY_MAX] = "";
 static char       s_dirs[COVER_DIRS_MAX][COVER_KEY_MAX];
 static Uint8      s_dirKind[COVER_DIRS_MAX];
@@ -242,12 +245,28 @@ static Bool _DecodeFileInto(const char *path, Uint8 *dst, Int32 *pW, Int32 *pH)
 
 /* ---- directory index ----------------------------------------------- */
 
-static Bool _IndexAlloc(void)
+static Bool _IndexEnsureCapacity(Int32 needed)
 {
-	if (s_index)
+	CoverIdxT *grown;
+	Int32 next;
+
+	if (needed <= s_indexCapacity)
 		return TRUE;
-	s_index = (CoverIdxT *)malloc(sizeof(CoverIdxT) * COVER_INDEX_MAX);
-	return s_index ? TRUE : FALSE;
+	if (needed > COVER_INDEX_MAX)
+		return FALSE;
+
+	next = s_indexCapacity ? s_indexCapacity * 2 : COVER_INDEX_INITIAL;
+	while (next < needed && next < COVER_INDEX_MAX)
+		next *= 2;
+	if (next > COVER_INDEX_MAX)
+		next = COVER_INDEX_MAX;
+
+	grown = (CoverIdxT *)realloc(s_index, sizeof(CoverIdxT) * next);
+	if (!grown)
+		return FALSE;
+	s_index = grown;
+	s_indexCapacity = next;
+	return TRUE;
 }
 
 static void _ScanDir(int dirIdx, const char *path)
@@ -258,13 +277,18 @@ static void _ScanDir(int dirIdx, const char *path)
 	dir = opendir(path);
 	if (!dir)
 		return;
-	while ((de = readdir(dir)) != NULL && s_indexCount < COVER_INDEX_MAX) {
+	while ((de = readdir(dir)) != NULL) {
 		const char *n = de->d_name;
 		size_t L = strlen(n);
 		if (L < 5 || L >= COVER_NAME_MAX)
 			continue;
 		if (strcasecmp(n + L - 4, ".png") != 0)
 			continue;
+		if (!_IndexEnsureCapacity(s_indexCount + 1)) {
+			printf("Cover index full at %d PNG files; remaining files skipped\n",
+			       s_indexCount);
+			break;
+		}
 		s_index[s_indexCount].dir = (Uint8)dirIdx;
 		snprintf(s_index[s_indexCount].name, COVER_NAME_MAX, "%s", n);
 		s_indexCount++;
@@ -290,13 +314,14 @@ static void _AddBase(const char *base)
 	snprintf(sub, sizeof(sub), "%sNamed_Boxarts/", base); _AddDir(sub, DK_BOX);
 	snprintf(sub, sizeof(sub), "%sNamed_Titles/",  base); _AddDir(sub, DK_TITLE);
 	snprintf(sub, sizeof(sub), "%sNamed_Snaps/",   base); _AddDir(sub, DK_SNAP);
+	snprintf(sub, sizeof(sub), "%sNamed_Logos/",   base); _AddDir(sub, DK_LOGO);
 }
 
 static void _EnsureIndex(const char *romDir)
 {
 	if (s_index && strcmp(s_indexDir, romDir) == 0)
 		return;
-	if (!_IndexAlloc())
+	if (!_IndexEnsureCapacity(COVER_INDEX_INITIAL))
 		return;
 
 	s_indexCount = 0;
@@ -387,12 +412,13 @@ static void _RebuildFound(const char *romPath)
 	_SplitRomPath(romPath, dir, sizeof(dir), base, sizeof(base));
 	s_foundCount = 0;
 
-	/* Order = cycle order: boxart, title, snap, then extra -N images. */
+	/* Order = custom/root, boxart, title, snap, logo, then extra -N images. */
 	snprintf(want, sizeof(want), "%s.png", base);
 	if (_ResolveKind(want, DK_ROOT,  path, sizeof(path))) _FoundAdd(path);
 	if (_ResolveKind(want, DK_BOX,   path, sizeof(path))) _FoundAdd(path);
 	if (_ResolveKind(want, DK_TITLE, path, sizeof(path))) _FoundAdd(path);
 	if (_ResolveKind(want, DK_SNAP,  path, sizeof(path))) _FoundAdd(path);
+	if (_ResolveKind(want, DK_LOGO,  path, sizeof(path))) _FoundAdd(path);
 
 	for (n = 1; n <= COVER_SUFFIX_MAX; n++) {
 		snprintf(want, sizeof(want), "%s-%d.png", base, n);
@@ -522,6 +548,7 @@ void CoverFreeCache(void)
 	if (s_cache) { free(s_cache); s_cache = 0; }
 	if (s_index) { free(s_index); s_index = 0; }
 	s_indexCount = 0;
+	s_indexCapacity = 0;
 	s_indexDir[0] = '\0';
 	s_nDirs = 0;
 	s_state = COVER_PENDING;
@@ -616,7 +643,8 @@ Bool CoverPrefetch(const char *romPath)
 		found = _ResolveKind(want, DK_ROOT,  path, sizeof(path))
 		     || _ResolveKind(want, DK_BOX,   path, sizeof(path))
 		     || _ResolveKind(want, DK_TITLE, path, sizeof(path))
-		     || _ResolveKind(want, DK_SNAP,  path, sizeof(path));
+		     || _ResolveKind(want, DK_SNAP,  path, sizeof(path))
+		     || _ResolveKind(want, DK_LOGO,  path, sizeof(path));
 		if (!found)
 			return FALSE;
 		if (_CacheFind(path))

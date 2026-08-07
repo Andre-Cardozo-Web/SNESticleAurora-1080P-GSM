@@ -156,6 +156,19 @@ endif
 CFLAGS   += $(COVERS_DEF)
 CXXFLAGS += $(COVERS_DEF)
 
+# Download automatico de thumbnails Libretro. COVER=n (padrao) nunca usa
+# rede. COVER=y/cover=y, usado com `make iso ROMS=...`, baixa boxart, title,
+# snap e logo para a arvore temporaria da ISO sem modificar as ROMs originais.
+# `make covers ROMS=...` e' o modo explicito para gravar as mesmas pastas no
+# dispositivo/pasta de ROMs (USB, HDD, MMCE, host etc.).
+COVER ?= n
+cover ?= $(COVER)
+COVER_SYSTEM ?= auto
+COVER_JOBS ?= 6
+COVER_BASE_URL ?= https://thumbnails.libretro.com
+COVER_FETCH_TOOL ?= $(CURDIR)/tools/fetch_libretro_covers.py
+PYTHON ?= python3
+
 # ---- Trilha de fundo do menu (BGM) -----------------------------------
 # BGM_PATH e' VAZIO por padrao: o emulador procura a 1a faixa .mod/.xm em
 # pastas padrao (mc0:/SNESticle/bgm, mmce0:/SNESticle/bgm,
@@ -563,7 +576,7 @@ PS2ATAD_IRX_PATH     ?= $(PS2SDK)/iop/irx/ps2atad.irx
 PS2HDD_IRX_PATH      ?= $(PS2SDK)/iop/irx/ps2hdd.irx
 # PS2FS_IRX_PATH definido acima (bloco opcional HAVE_PS2FS).
 
-.PHONY: all clean strip list count package package-irx check-env packed elf fix-packer fast serial turbo rebuild-fast help ensure-ps2sdk install-ps2sdk ps2sdk-env ensure-ps2dev install-ps2dev-tar ps2dev-env build-begin build-summary copy-output iso-build-image ensure-ps2-packer install-ps2-packer ensure-iso-tool install-iso-tool ensure-local-ps2-packer
+.PHONY: all clean strip list count package package-irx check-env packed elf fix-packer fast serial turbo rebuild-fast help covers ensure-ps2sdk install-ps2sdk ps2sdk-env ensure-ps2dev install-ps2dev-tar ps2dev-env build-begin build-summary copy-output iso-build-image ensure-ps2-packer install-ps2-packer ensure-iso-tool install-iso-tool ensure-local-ps2-packer
 
 all: check-env $(TARGET)
 
@@ -955,6 +968,30 @@ bgm ?= $(BGM)
 
 .PHONY: iso-check iso-root iso
 
+# Baixa capas diretamente para uma pasta de ROMs. Diferente de COVER=y no
+# alvo `iso`, este alvo altera apenas a pasta indicada adicionando Named_*;
+# os arquivos das ROMs nunca sao abertos para escrita.
+covers:
+	@set -e; \
+	if [ -z "$(strip $(roms))" ]; then \
+		echo "ERRO: informe a pasta: make covers ROMS=/caminho/das/roms"; \
+		exit 1; \
+	fi; \
+	if [ ! -d "$(roms)" ]; then \
+		echo "ERRO: pasta de ROMs nao existe: $(roms)"; \
+		exit 1; \
+	fi; \
+	if ! command -v "$(PYTHON)" >/dev/null 2>&1; then \
+		echo "ERRO: Python 3 nao encontrado (PYTHON=$(PYTHON))"; \
+		exit 1; \
+	fi; \
+	"$(PYTHON)" "$(COVER_FETCH_TOOL)" \
+		--roms "$(roms)" \
+		--output "$(roms)" \
+		--system "$(COVER_SYSTEM)" \
+		--jobs "$(COVER_JOBS)" \
+		--base-url "$(COVER_BASE_URL)"
+
 iso-check:
 	@set -e; \
 	if command -v mkisofs >/dev/null 2>&1 || command -v genisoimage >/dev/null 2>&1 || command -v xorriso >/dev/null 2>&1; then \
@@ -1032,6 +1069,25 @@ iso-root: $(TARGET_STRIPPED) iso-check
 	else \
 		echo "[ ISO-ROOT ] Sem ROMs (use roms=<pasta> para incluir)"; \
 	fi
+	@set -e; \
+	case "$(strip $(cover))" in \
+		y|Y|yes|YES|1|s|S|sim|SIM) \
+			if [ -z "$(strip $(roms))" ]; then \
+				echo "[ COVER ] COVER=y ignorado: nenhuma pasta ROMS= foi informada"; \
+			elif ! command -v "$(PYTHON)" >/dev/null 2>&1; then \
+				echo "ERRO: COVER=y precisa de Python 3 (PYTHON=$(PYTHON))"; \
+				exit 1; \
+			else \
+				"$(PYTHON)" "$(COVER_FETCH_TOOL)" \
+					--roms "$(roms)" \
+					--output "$(ISO_ROOT_DIR)/ROMS" \
+					--system "$(COVER_SYSTEM)" \
+					--jobs "$(COVER_JOBS)" \
+					--base-url "$(COVER_BASE_URL)"; \
+			fi ;; \
+		""|n|N|no|NO|0|nao|NAO) : ;; \
+		*) echo "ERRO: COVER/cover aceita somente y ou n (recebido: $(cover))"; exit 1 ;; \
+	esac
 	@# Soundtracks do menu: copia .mod/.xm de bgm=<pasta> para BGM/ no
 	@# ISO, que vira cdfs:/BGM no disco -- uma das pastas que o player
 	@# de BGM (mainloop_bgm.cpp) varre por padrao.
@@ -1197,6 +1253,8 @@ help:
 	printf "  make iso ROMS=/path OUT=/out Build ISO with ROM folder and copy to OUT\n"; \
 	printf "  make iso roms=/path out=/out Same as uppercase variables\n"; \
 	printf "  make iso ROMS=/p OUT=/o JOBS=3  Parallel ISO build (now honors JOBS)\n"; \
+	printf "  make iso ROMS=/p COVER=y       Fetch all Libretro art into the ISO\n"; \
+	printf "  make covers ROMS=/path         Fetch art beside ROMs for any device\n"; \
 	printf "  make iso PACK=0              Build ISO using unpacked ELF\n"; \
 	printf "\n"; \
 	printf "$${green}Info commands:$${reset}\n"; \
@@ -1219,6 +1277,10 @@ help:
 	printf "  out=/path                    Same as OUT=/path\n"; \
 	printf "  ROMS=/path                   ROM folder for ISO build\n"; \
 	printf "  roms=/path                   Same as ROMS=/path\n"; \
+	printf "  COVER=n                      No network/downloads (default)\n"; \
+	printf "  COVER=y / cover=y            Auto-fetch box/title/snap/logo for ISO\n"; \
+	printf "  COVER_SYSTEM=auto            Detect SNES/NES; accepts snes or nes\n"; \
+	printf "  COVER_JOBS=6                 Parallel thumbnail downloads\n"; \
 	printf "  PACK=1                       Use packed ELF when possible\n"; \
 	printf "  PS2DEV=/path                 Override PS2DEV install path\n"; \
 	printf "  AUTO_INSTALL=ask             Ask before installing missing tools\n"; \
@@ -1229,7 +1291,8 @@ help:
 	printf "  make\n"; \
 	printf "  make JOBS=2\n"; \
 	printf "  make OUT=/sdcard\n"; \
-	printf "  make iso ROMS=/sdcard/roms_snes OUT=/sdcard/ps2\n"
+	printf "  make iso ROMS=/sdcard/roms_snes OUT=/sdcard/ps2 COVER=y\n"; \
+	printf "  make covers ROMS=/sdcard/roms_snes\n"
 
 ensure-ps2dev:
 	@set -e; \

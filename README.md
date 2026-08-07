@@ -84,9 +84,9 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
   overflowing the PS2 DISPLAY/MAGH timing window.
 - Switchable SNES colour profiles: **Original** (default) and the emulator's
   restored **Composite** YIQ calibration; the choice can be previewed live.
-- **Cover art** in the ROM browser — box art / screenshots from PNG files,
-  decoded by **upng** (a bundled single‑file decoder, no external libs). See
-  [Cover art](#cover-art-capas).
+- **Cover art** in the ROM browser — box art, title screens, gameplay snaps,
+  logos and manual extras from PNG files, decoded by **upng**. Libretro art can
+  be fetched automatically with `COVER=y`. See [Cover art](#cover-art-capas).
 - The ROM browser consumes each driver's directory records directly, avoids a
   separate `stat`/disc seek per CDFS entry, and grows its list dynamically.
   Directory types are read in the normalized `FIO_S_*` format returned by
@@ -244,31 +244,163 @@ states are not available yet.
 <summary>Show details</summary>
 
 
-The ROM browser can show box art / screenshots beside the game list.
+O navegador pode mostrar capa, tela de título, screenshot e logo ao lado da
+lista. Ative em **Video Config → Cover Art** e pressione ✕ para salvar.
 
-- Enable it in **Video Config → Cover Art** (press ✕ to save — it persists
-  across boots).
-- Put a PNG with the **same name as the ROM** anywhere the browser looks:
-  - **next to the ROM** — e.g. `Super Mario Kart (USA).png`
-  - in the **libretro thumbnail folders** (beside the ROMs, or inside a
-    `COVERS_PATH` folder): `Named_Boxarts/`, `Named_Titles/`, `Named_Snaps/`
-  - with a **numeric suffix** for extra images: `Game-1.png`, `Game-2.png`, …
-- Press **□** in the browser to cycle through whatever a game has, in order:
-  box art → title screen → gameplay snap → extra `-N` images.
-- To keep every cover in **one shared folder** instead of next to each ROM,
-  build with `COVERS_PATH`:
-  ```bash
-  make COVERS_PATH=mass:/snes/covers
-  ```
-  Covers are then looked up under `mass:/snes/covers/` (including its
-  `Named_Boxarts/` etc.), with the ROM's own folder as a fallback.
-- When you build an ISO with `ROMS=`, PNGs in the ROM folder are bundled
-  automatically.
+### 1. Regra mais importante: o mesmo nome da ROM
 
-**Supported PNG formats:** RGB / RGBA (8‑ or 16‑bit), grayscale, and
-palette/indexed (1/2/4/8‑bit). **Interlaced (Adam7) PNGs are not supported** —
-re‑save those as non‑interlaced. Keep covers small (≈256 px) to save memory and
-decode time; they are cached in RAM and prefetched so browsing stays smooth.
+O nome da PNG precisa ser igual ao nome do arquivo da ROM, retirando somente a
+última extensão:
+
+| ROM | Nome que a capa deve ter |
+|-----|---------------------------|
+| `Super Mario World (USA).sfc` | `Super Mario World (USA).png` |
+| `Super Mario World (USA).zip` | `Super Mario World (USA).png` |
+| `Super Mario Bros. (World).nes` | `Super Mario Bros. (World).png` |
+
+Maiúsculas e minúsculas não fazem diferença, mas o restante do nome faz. Por
+exemplo, uma PNG chamada `Super Mario World (USA).png` não corresponde a uma
+ROM chamada `Super Mario World (U) [!].smc` quando a organização é feita
+manualmente.
+
+As coleções usadas pelo projeto são:
+
+- [Libretro — Super Nintendo / SNES](https://thumbnails.libretro.com/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System/)
+- [Libretro — Nintendo Entertainment System / NES](https://thumbnails.libretro.com/Nintendo%20-%20Nintendo%20Entertainment%20System/)
+
+Dentro de cada link há quatro tipos reconhecidos pelo SNESticle Revive:
+
+| Pasta | Imagem |
+|-------|--------|
+| `Named_Boxarts/` | Capa/caixa do jogo |
+| `Named_Titles/` | Tela de título |
+| `Named_Snaps/` | Screenshot durante o jogo |
+| `Named_Logos/` | Logo transparente ou ícone do jogo |
+
+### 2. Duas formas corretas de organizar
+
+Para usar apenas uma imagem, coloque-a junto da ROM:
+
+```text
+ROMS/
+├── Super Mario World (USA).sfc
+└── Super Mario World (USA).png
+```
+
+Para usar todos os tipos ao mesmo tempo, repita o mesmo nome dentro das quatro
+pastas:
+
+```text
+ROMS/
+├── Super Mario World (USA).sfc
+├── Named_Boxarts/
+│   └── Super Mario World (USA).png
+├── Named_Titles/
+│   └── Super Mario World (USA).png
+├── Named_Snaps/
+│   └── Super Mario World (USA).png
+└── Named_Logos/
+    └── Super Mario World (USA).png
+```
+
+Também podem existir imagens manuais extras na raiz da pasta da ROM:
+
+```text
+Super Mario World (USA)-1.png
+Super Mario World (USA)-2.png
+...
+Super Mario World (USA)-9.png
+```
+
+No navegador, pressione **□** para alternar nesta ordem: PNG simples junto da
+ROM → boxart → título → snap → logo → extras `-1` até `-9`. Só entram no ciclo
+os arquivos que realmente existem.
+
+> O servidor Libretro substitui os caracteres ``&*/:`<>?"\|`` por `_` nos
+> nomes das thumbnails. Ao organizar manualmente, renomeie a PNG baixada para
+> o nome base exato da sua ROM. A automação descrita abaixo já faz essa
+> adaptação.
+
+### 3. USB, MX4SIO, MMCE, HDD, memory card, host e CDFS
+
+A estrutura acima é igual em todos os dispositivos; muda somente o prefixo do
+caminho:
+
+| Dispositivo | Exemplo da pasta de ROMs |
+|-------------|---------------------------|
+| USB, HDD/SSD USB ou MX4SIO | `mass0:/ROMS/` ou `mass1:/ROMS/` |
+| Memory card comum | `mc0:/ROMS/` ou `mc1:/ROMS/` |
+| MemCard PRO 2 / SD2PSX (MMCE) | `mmce0:/ROMS/` ou `mmce1:/ROMS/` |
+| HDD interno APA/PFS | `hdd0:/PARTICAO/ROMS/` |
+| PC pelo ps2link | `host:/ROMS/` |
+| Disco ou ISO | `cdfs:/ROMS/` |
+
+Para USB, HDD, MMCE, memory card ou `host:`, copie a ROM e as pastas
+`Named_*` para o dispositivo seguindo o exemplo anterior. O navegador cria um
+índice das PNGs ao entrar na pasta, então não faz uma busca lenta no disco a
+cada movimento da seleção.
+
+Para **CDFS**, organize primeiro uma pasta normal no computador e passe-a para
+o Makefile. Todas as PNGs e subpastas existentes serão preservadas dentro de
+`cdfs:/ROMS/`:
+
+```bash
+make iso ROMS=/caminho/ROMS OUT=/caminho/saida
+```
+
+Outra opção compartilhada é criar uma pasta `covers/` ao lado do ELF. Ela pode
+conter uma PNG simples e/ou as quatro pastas `Named_*`. Para fixar um caminho
+compartilhado diferente durante a compilação, use:
+
+```bash
+make clean
+make COVERS_PATH=mass:/SNESticle/covers
+```
+
+O caminho compartilhado é procurado primeiro; a pasta da própria ROM e
+`covers/` ao lado do ELF continuam funcionando como alternativas.
+
+### 4. Download automático com `COVER=y`
+
+Durante a criação de uma ISO, `COVER=y` (ou `cover=y`) identifica SNES/NES pela
+extensão da ROM, inspeciona o conteúdo de `.zip` quando possível e procura os
+quatro tipos no servidor Libretro:
+
+```bash
+make iso \
+  ROMS=/caminho/ROMS \
+  OUT=/caminho/saida \
+  COVER=y
+```
+
+- `COVER=n` é o padrão: não acessa a internet.
+- O download tenta o nome exato, a regra de caracteres `_`, nomes sem tags
+  finais e abreviações comuns como `(U)` → `(USA)`.
+- Uma imagem válida que já existe nunca é baixada novamente nem sobrescrita.
+- ROMs não identificadas ou sem correspondência são informadas e ignoradas; a
+  criação da ISO continua.
+- As PNGs são adicionadas somente à pasta temporária da ISO. Nenhum byte da ROM
+  original é alterado.
+- Use `COVER_SYSTEM=snes` ou `COVER_SYSTEM=nes` para forçar o sistema quando um
+  `.zip` não puder ser identificado automaticamente; `COVER_JOBS=6` controla a
+  quantidade de downloads paralelos.
+
+Para preparar diretamente uma pasta destinada a qualquer outro dispositivo,
+sem gerar ISO:
+
+```bash
+make covers ROMS=/caminho/ROMS
+```
+
+Esse comando cria `Named_Boxarts`, `Named_Titles`, `Named_Snaps` e
+`Named_Logos` dentro de cada pasta que contém ROMs. Ele adiciona somente PNGs;
+as ROMs não são renomeadas, abertas para escrita ou modificadas.
+
+**Formatos suportados:** PNG RGB/RGBA de 8 ou 16 bits, grayscale e
+palette/indexed de 1/2/4/8 bits. PNG interlaçada **Adam7 não é suportada**. O
+downloader rejeita esse formato automaticamente. Para capas manuais, salve sem
+interlace e prefira imagens próximas de 256 px para reduzir memória e tempo de
+decodificação.
 
 </details>
 
@@ -433,6 +565,9 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
 | `PROFILE=1` | Compile the on‑screen profiler in — press **R3** in‑game to capture one frame's per‑section timing. |
 | `OUT=/path` | Copy the final ELF/ISO to this folder. |
 | `ROMS=/path` | ROM folder to embed when building an ISO. |
+| `COVER=y` / `cover=y` | Download matching Libretro boxart/title/snap/logo into the ISO; `n` is the offline default. |
+| `COVER_SYSTEM=auto` | Detect SNES/NES automatically; use `snes` or `nes` to override ambiguous archives. |
+| `COVER_JOBS=6` | Number of parallel thumbnail downloads. |
 | `PACK=0` | Build the ISO using the unpacked ELF. |
 | `COVERS_PATH=path` | Shared cover‑art folder baked into the build (e.g. `mass:/snes/covers`). See [Cover art](#cover-art-capas). |
 | `BGM_PATH=path` | Folder scanned first for menu‑music `.mod`/`.xm` files. See [Menu music & audio](#menu-music--audio). |
@@ -467,11 +602,12 @@ The cumulative notes for the current test version are available in
   one‑frame stepper), with the InfoNES core kept 1:1 with upstream.
 - **Video**: gsKit migration, the Video Config screen, multiple modes, and a
   **safe 480i default** (native 256x240 stays available for CRT users).
-- **Cover art**: the ROM browser shows box art / screenshots from PNG files,
-  via a bundled single‑file decoder (RGB/RGBA, grayscale, and palette/indexed).
-  Decoded covers are kept in a small RAM cache and neighbours are prefetched, so
-  browsing stays smooth even from a CD; toggle it in Video Config, point it at a
-  shared folder with `COVERS_PATH`, and cycle box/title/gameplay with □.
+- **Cover art**: the ROM browser shows custom images plus Libretro boxart,
+  title screens, gameplay snaps and logos from PNG files, with `-1` through
+  `-9` manual extras. Decoded covers are cached and neighbours prefetched, so
+  browsing stays smooth even from a CD. `make iso ... COVER=y` fetches all
+  matching art into CDFS without touching the source ROMs; `make covers
+  ROMS=...` prepares the same `Named_*` layout for any other device.
 - **ROM browser**: switched CDFS, USB, memory cards, host, MMCE and PFS/HDD to
   direct directory records, eliminating the per-file `stat` round trip that
   made large CDFS folders especially slow. iomanX-normalized `FIO_S_*` mode
