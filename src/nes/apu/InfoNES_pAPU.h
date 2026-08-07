@@ -153,6 +153,12 @@ void InfoNES_pAPUInit(void);
 void InfoNES_pAPUDone(void);
 void InfoNES_pAPUVsync(void);
 
+/* Opaque pAPU snapshot used by the NES save-state layer. */
+#define INFONES_APU_STATE_MAX       (16 * 1024)
+#define INFONES_APU_STATE_EVENT_MAX 1024
+int InfoNES_pAPUSaveState(void *pState, int nStateBytes);
+int InfoNES_pAPULoadState(const void *pState, int nStateBytes);
+
 /*-------------------------------------------------------------------*/
 /*  pAPU Quality resources                                           */
 /*-------------------------------------------------------------------*/

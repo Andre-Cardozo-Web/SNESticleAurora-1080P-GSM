@@ -148,14 +148,22 @@ static void _SplitRomPath(const char *romPath, char *dir, size_t dirSz,
 	const char *slash = strrchr(romPath, '/');
 	const char *fname = slash ? slash + 1 : romPath;
 	size_t dlen = slash ? (size_t)(fname - romPath) : 0;
+	size_t blen;
 	char *dot;
+
+	if (!dir || dirSz == 0 || !base || baseSz == 0)
+		return;
 
 	if (dlen >= dirSz)
 		dlen = dirSz - 1;
 	memcpy(dir, romPath, dlen);
 	dir[dlen] = '\0';
 
-	snprintf(base, baseSz, "%s", fname);
+	blen = strlen(fname);
+	if (blen >= baseSz)
+		blen = baseSz - 1;
+	memcpy(base, fname, blen);
+	base[blen] = '\0';
 	dot = strrchr(base, '.');
 	if (dot)
 		*dot = '\0';

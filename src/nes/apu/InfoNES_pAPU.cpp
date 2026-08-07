@@ -980,6 +980,195 @@ void InfoNES_pAPUVsync(void)
 }
 
 /*===================================================================*/
+/*  Versioned pAPU snapshot                                           */
+/*===================================================================*/
+
+#define INFONES_APU_STATE_MAGIC   0x41505553UL /* "APUS" */
+#define INFONES_APU_STATE_VERSION 1
+
+struct InfoNESApuStateImageT
+{
+  DWORD uMagic;
+  DWORD uVersion;
+  BYTE Ctrl, CtrlNew;
+
+  BYTE C1[4];
+  DWORD C1Skip, C1Index, C1EnvPhase;
+  BYTE C1EnvVol, C1Atl;
+  DWORD C1SweepPhase, C1Freq;
+
+  BYTE C2[4];
+  DWORD C2Skip, C2Index, C2EnvPhase;
+  BYTE C2EnvVol, C2Atl;
+  DWORD C2SweepPhase, C2Freq;
+
+  BYTE C3[4];
+  DWORD C3Skip, C3Index;
+  BYTE C3Atl;
+  DWORD C3Llc;
+  BYTE C3WriteLatency, C3CounterStarted;
+
+  BYTE C4[4];
+  DWORD C4Sr, C4Fdc, C4Skip, C4Index;
+  BYTE C4Atl, C4EnvVol;
+  DWORD C4EnvPhase;
+
+  BYTE C5Reg[4];
+  BYTE C5Enable, C5Looping, C5CurByte, C5DpcmValue;
+  int C5Freq, C5Phaseacc;
+  WORD C5Address, C5CacheAddr;
+  int C5DmaLength, C5CacheDmaLength;
+
+  int nEvents;
+  WORD EnterTime;
+  ApuEvent_t Events[INFONES_APU_STATE_EVENT_MAX];
+};
+
+typedef char InfoNESApuStateFits[
+  sizeof(InfoNESApuStateImageT) <= INFONES_APU_STATE_MAX ? 1 : -1
+];
+
+int InfoNES_pAPUSaveState(void *pState, int nStateBytes)
+{
+  InfoNESApuStateImageT State;
+
+  if (!pState || nStateBytes < (int)sizeof(State) ||
+      cur_event < 0 || cur_event > INFONES_APU_STATE_EVENT_MAX)
+    return 0;
+
+  InfoNES_MemorySet(&State, 0, sizeof(State));
+  State.uMagic = INFONES_APU_STATE_MAGIC;
+  State.uVersion = INFONES_APU_STATE_VERSION;
+  State.Ctrl = ApuCtrl;
+  State.CtrlNew = ApuCtrlNew;
+
+#define APU_SAVE_REGS(N) \
+  State.C##N[0] = ApuC##N##a; \
+  State.C##N[1] = ApuC##N##b; \
+  State.C##N[2] = ApuC##N##c; \
+  State.C##N[3] = ApuC##N##d
+  APU_SAVE_REGS(1);
+  State.C1Skip = ApuC1Skip; State.C1Index = ApuC1Index;
+  State.C1EnvPhase = ApuC1EnvPhase; State.C1EnvVol = ApuC1EnvVol;
+  State.C1Atl = ApuC1Atl; State.C1SweepPhase = ApuC1SweepPhase;
+  State.C1Freq = ApuC1Freq;
+
+  APU_SAVE_REGS(2);
+  State.C2Skip = ApuC2Skip; State.C2Index = ApuC2Index;
+  State.C2EnvPhase = ApuC2EnvPhase; State.C2EnvVol = ApuC2EnvVol;
+  State.C2Atl = ApuC2Atl; State.C2SweepPhase = ApuC2SweepPhase;
+  State.C2Freq = ApuC2Freq;
+
+  APU_SAVE_REGS(3);
+  State.C3Skip = ApuC3Skip; State.C3Index = ApuC3Index;
+  State.C3Atl = ApuC3Atl; State.C3Llc = ApuC3Llc;
+  State.C3WriteLatency = ApuC3WriteLatency;
+  State.C3CounterStarted = ApuC3CounterStarted;
+
+  APU_SAVE_REGS(4);
+  State.C4Sr = ApuC4Sr; State.C4Fdc = ApuC4Fdc;
+  State.C4Skip = ApuC4Skip; State.C4Index = ApuC4Index;
+  State.C4Atl = ApuC4Atl; State.C4EnvVol = ApuC4EnvVol;
+  State.C4EnvPhase = ApuC4EnvPhase;
+#undef APU_SAVE_REGS
+
+  InfoNES_MemoryCopy(State.C5Reg, ApuC5Reg, sizeof(State.C5Reg));
+  State.C5Enable = ApuC5Enable; State.C5Looping = ApuC5Looping;
+  State.C5CurByte = ApuC5CurByte; State.C5DpcmValue = ApuC5DpcmValue;
+  State.C5Freq = ApuC5Freq; State.C5Phaseacc = ApuC5Phaseacc;
+  State.C5Address = ApuC5Address; State.C5CacheAddr = ApuC5CacheAddr;
+  State.C5DmaLength = ApuC5DmaLength;
+  State.C5CacheDmaLength = ApuC5CacheDmaLength;
+  State.nEvents = cur_event;
+  State.EnterTime = entertime;
+  if (cur_event > 0)
+  {
+    InfoNES_MemoryCopy(
+      State.Events,
+      ApuEventQueue,
+      cur_event * sizeof(ApuEvent_t)
+    );
+  }
+
+  InfoNES_MemorySet(pState, 0, nStateBytes);
+  InfoNES_MemoryCopy(pState, &State, sizeof(State));
+  return (int)sizeof(State);
+}
+
+int InfoNES_pAPULoadState(const void *pState, int nStateBytes)
+{
+  const InfoNESApuStateImageT *pImage =
+    (const InfoNESApuStateImageT *)pState;
+
+  if (!pImage || nStateBytes != (int)sizeof(*pImage) ||
+      pImage->uMagic != INFONES_APU_STATE_MAGIC ||
+      pImage->uVersion != INFONES_APU_STATE_VERSION ||
+      pImage->nEvents < 0 ||
+      pImage->nEvents > INFONES_APU_STATE_EVENT_MAX)
+    return 0;
+
+  ApuCtrl = pImage->Ctrl;
+  ApuCtrlNew = pImage->CtrlNew;
+
+#define APU_LOAD_REGS(N) \
+  ApuC##N##a = pImage->C##N[0]; \
+  ApuC##N##b = pImage->C##N[1]; \
+  ApuC##N##c = pImage->C##N[2]; \
+  ApuC##N##d = pImage->C##N[3]
+  APU_LOAD_REGS(1);
+  ApuC1Skip = pImage->C1Skip; ApuC1Index = pImage->C1Index;
+  ApuC1EnvPhase = pImage->C1EnvPhase; ApuC1EnvVol = pImage->C1EnvVol;
+  ApuC1Atl = pImage->C1Atl; ApuC1SweepPhase = pImage->C1SweepPhase;
+  ApuC1Freq = pImage->C1Freq;
+
+  APU_LOAD_REGS(2);
+  ApuC2Skip = pImage->C2Skip; ApuC2Index = pImage->C2Index;
+  ApuC2EnvPhase = pImage->C2EnvPhase; ApuC2EnvVol = pImage->C2EnvVol;
+  ApuC2Atl = pImage->C2Atl; ApuC2SweepPhase = pImage->C2SweepPhase;
+  ApuC2Freq = pImage->C2Freq;
+
+  APU_LOAD_REGS(3);
+  ApuC3Skip = pImage->C3Skip; ApuC3Index = pImage->C3Index;
+  ApuC3Atl = pImage->C3Atl; ApuC3Llc = pImage->C3Llc;
+  ApuC3WriteLatency = pImage->C3WriteLatency;
+  ApuC3CounterStarted = pImage->C3CounterStarted;
+
+  APU_LOAD_REGS(4);
+  ApuC4Sr = pImage->C4Sr; ApuC4Fdc = pImage->C4Fdc;
+  ApuC4Skip = pImage->C4Skip; ApuC4Index = pImage->C4Index;
+  ApuC4Atl = pImage->C4Atl; ApuC4EnvVol = pImage->C4EnvVol;
+  ApuC4EnvPhase = pImage->C4EnvPhase;
+#undef APU_LOAD_REGS
+
+  InfoNES_MemoryCopy(ApuC5Reg, pImage->C5Reg, sizeof(ApuC5Reg));
+  ApuC5Enable = pImage->C5Enable; ApuC5Looping = pImage->C5Looping;
+  ApuC5CurByte = pImage->C5CurByte;
+  ApuC5DpcmValue = pImage->C5DpcmValue;
+  ApuC5Freq = pImage->C5Freq; ApuC5Phaseacc = pImage->C5Phaseacc;
+  ApuC5Address = pImage->C5Address;
+  ApuC5CacheAddr = pImage->C5CacheAddr;
+  ApuC5DmaLength = pImage->C5DmaLength;
+  ApuC5CacheDmaLength = pImage->C5CacheDmaLength;
+
+  /* Never restore raw pointers. They are derived from the restored duty
+     cycle; the frontend clears its mixer after a state load. */
+  ApuC1Wave = pulse_waves[(ApuC1a & 0xc0) >> 6];
+  ApuC2Wave = pulse_waves[(ApuC2a & 0xc0) >> 6];
+  InfoNES_MemorySet(wave_buffers, 0, sizeof(wave_buffers));
+  cur_event = pImage->nEvents;
+  entertime = pImage->EnterTime;
+  if (cur_event > 0)
+  {
+    InfoNES_MemoryCopy(
+      ApuEventQueue,
+      pImage->Events,
+      cur_event * sizeof(ApuEvent_t)
+    );
+  }
+  return 1;
+}
+
+/*===================================================================*/
 /*                                                                   */
 /*            InfoNES_pApuInit() : Initialize pApu                   */
 /*                                                                   */

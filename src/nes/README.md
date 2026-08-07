@@ -39,17 +39,15 @@ src/nes/
 │                 #included into InfoNES_Mapper.cpp as a single TU
 │                 -- matches upstream InfoNES layout)
 ├── ppu/     (reserved; PPU is currently inside core/InfoNES.cpp)
-├── rom/     (reserved; will hold NesRom wrapper - Phase 2)
-├── state/   (reserved; will hold NesStateT - Phase 5)
+├── state/   versioned, pointer-free NesStateT snapshot
 └── system/  PS2 platform layer + NesSystem / NesRom / NesDisk
               wrappers around InfoNES (added in later phases)
 ```
 
 ## Status
 
-This is **Phase 1** of the NES integration:
-- ✓ Sources copied, structure created
-- ✗ Not yet referenced by the Makefile
-- ✗ Not yet wired into mainloop (#if 0 blocks still gate NES)
-
-See `NES_INTEGRATION_PLAN.md` in repo root for the full phased plan.
+The InfoNES core is built into the PS2 frontend with video, controller input,
+audio, iNES mapper dispatch, battery-backed SRAM and cartridge save states.
+NES states include the 6502, PPU, pAPU, CHR RAM, active bank references and the
+complete writable mapper-data span. Famicom Disk System execution/state support
+is still separate and incomplete.

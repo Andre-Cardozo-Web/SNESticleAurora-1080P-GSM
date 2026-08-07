@@ -99,9 +99,12 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
   [Menu music & audio](#menu-music--audio).
 - Audio via **audsrv**, with separate **Game Volume** and **Menu Music**
   controls in the Video Config screen.
-- **SNES save states** — five slots; USB, memory-card, MMCE and internal-HDD
-  storage; ROM and CRC validation; and two-bank writes that preserve the
-  previous valid state.
+- **SNES and NES cartridge save states** — five slots; USB, memory-card, MMCE
+  and internal-HDD storage; ROM and CRC validation; and two-bank writes that
+  preserve the previous valid state.
+- **Battery SRAM** — SNES and NES saves are separated under
+  `mc0:/SNESticle/SNES/` and `mc0:/SNESticle/NES/`; old SNES saves in the
+  v1.0.3 root layout are loaded and migrated without deleting the original.
 - Controller / memory‑card / IRX bring‑up aligned to **Open‑PS2‑Loader** style.
 - **Storage**: USB (×2), external HDD/SSD and **MX4SIO** SD cards as
   `mass0:`/`mass1:`; the internal **HDD** (`hdd0:`); memory cards
@@ -161,6 +164,18 @@ opens.
 <details>
 <summary>💾 Save States</summary>
 
+**Battery SRAM**
+
+Cartridge battery saves use separate directories inside the emulator's PS2
+memory-card save: `mc0:/SNESticle/SNES/<game>.srm` and
+`mc0:/SNESticle/NES/<game>.srm`. NES SRAM is enabled only for iNES ROMs whose
+header contains the battery flag and stores the complete 8 KiB cartridge RAM.
+Opening the in-game menu with **L2 + R2** flushes changed SRAM.
+
+For backward compatibility, an SNES save missing from `SNES/` is looked up at
+the old `mc0:/SNESticle/<game>.srm` location. It is loaded normally and a copy
+is written into `SNES/` on the next SRAM save; the old file is never deleted.
+
 **First save-state destination**
 
 The first in-game **L2 + Cross** press opens a small, temporary **Save State
@@ -204,8 +219,10 @@ screens and while a game is paused:
 
 Internal-HDD management first opens its APA partition list; enter the desired
 partition and then `SNESticle/states`. Each slot has an `a` and a `b` bank;
-deleting either matching `.sNa` or `.sNb` file from the state browser removes
-both banks automatically.
+SNES uses `.sNa`/`.sNb` and NES uses `.nNa`/`.nNb`. Deleting either matching
+file from the state browser removes both banks automatically. On a PS2 memory
+card these banks remain directly in `mcN:/SNESticle/`, as before; the `SNES/`
+and `NES/` subdirectories are for SRAM only.
 
 Each slot keeps two banks. A new bank is committed only after its complete
 payload has been written, and every load checks the format version, ROM CRC,
@@ -215,10 +232,15 @@ and reuse the header scan without rereading the payload after a successful
 write, reducing slow device I/O; existing uncompressed version-1 banks remain
 loadable.
 
-Save states currently cover **base SNES hardware only**. Games using DSP,
-SuperFX, CX4, OBC1, S‑DD1, S‑RTC or Super Game Boy hardware are rejected with
-an explicit message until those coprocessor states are serialized. NES save
-states are not available yet.
+Save states cover **base SNES hardware** and **iNES cartridge games**. NES
+states preserve CPU, RAM, PPU, CHR RAM, pAPU, cartridge SRAM, active bank
+mappings, mapper RAM, mapper registers/latches and IRQ counters; bank mappings
+are stored as region/offset references instead of process pointers, so a state
+remains valid after restarting the emulator. FDS states are not supported.
+
+SNES games using DSP, SuperFX, CX4, OBC1, S‑DD1, S‑RTC or Super Game Boy
+hardware are still rejected with an explicit message until those coprocessor
+states are serialized.
 
 </details>
 
@@ -643,7 +665,8 @@ The cumulative notes for the current test version are available in
   omit the executable path instead of crashing before video initialization.
 - **Save states**: restored the dormant iaddis-era feature as a release menu
   with five slots, USB/memory-card selection, versioned files, ROM/CRC checks
-  and power-loss-safe two-bank writes.
+  and power-loss-safe two-bank writes; v1.0.4 also serializes the NES CPU, PPU,
+  pAPU, CHR RAM and complete mapper-private state.
 - **Build system**: parallel jobs, `VERBOSE`, `PROFILE`, friendlier `make help`,
   and ISO builds that honor `JOBS`.
 - **Bug fixes**: C++17 / build warnings cleaned up, plus three real
@@ -673,6 +696,8 @@ The cumulative notes for the current test version are available in
 - **Missing chip**: SA‑1 is not implemented.
 
 **NES (InfoNES)**
+- Save states currently cover `.nes` cartridges; FDS state serialization is
+  not available.
 - **Performance**: heavy scenes can push a frame over the 16.6 ms budget, which
   vsync then locks to **30 fps**; this also knocks audio and per‑scanline
   effects out of sync. (Use `PROFILE=1` + R3 to locate hotspots.)

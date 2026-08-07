@@ -46,7 +46,8 @@
  * mainloop_net.cpp / mainloop_exec.cpp had locally. */
 
 #ifndef MAINLOOP_MEMCARD
-/* Save SRAM to the PS2 memory card (mc0:/SNESticle/<rom>.srm).
+/* Save SRAM to the PS2 memory card in system-specific directories
+   (mc0:/SNESticle/SNES/<rom>.srm and .../NES/<rom>.srm).
    Was gated on CODE_RELEASE, which is never defined anywhere in the
    codebase -- so MAINLOOP_MEMCARD silently evaluated to 0 and the
    build used iaddis's old host0:/cygdrive/d/emu/ dev path that only

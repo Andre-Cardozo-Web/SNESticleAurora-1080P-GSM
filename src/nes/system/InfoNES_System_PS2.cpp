@@ -5,7 +5,7 @@
  * trampolines, debug print, etc. This file is the PS2 implementation
  * plus a one-frame stepper used by NesSystem::ExecuteFrame.
  *
- * Phase 3 status:
+ * Current status:
  *   - InfoNES_PadState  - reads g_pNesInputState (SNES bit layout) and
  *                         remaps to NES PAD1_Latch / PAD2_Latch.
  *   - InfoNES_LoadFrame - converts WorkFrame[256*240] (RGB555) into
@@ -15,7 +15,7 @@
  *                         NesSystem::ExecuteFrame.
  *   - InfoNES_MemoryCopy / MemorySet - libc trampolines.
  *   - InfoNES_DebugPrint / MessageBox - printf.
- *   - InfoNES_Sound*    - still no-op stubs (Phase 4).
+ *   - InfoNES_Sound*    - mixes and resamples pAPU into CMixBuffer.
  *
  * The NesPalette[] table is the 64-entry NES master palette in RGB555
  * form that InfoNES uses internally. Values from upstream InfoNES.

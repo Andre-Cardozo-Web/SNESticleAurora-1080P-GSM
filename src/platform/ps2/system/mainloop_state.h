@@ -23,7 +23,6 @@ Bool _MainLoopCheckSRAM();
 Bool _MainLoopForceCheckSRAM();
 Bool _MainLoopLoadState();
 Bool _MainLoopSaveState();
-Bool _MainLoopSaveSRAM(Bool bForce);
 
 void MainLoopStateSettingsLoad();
 Bool MainLoopStateSettingsSave();

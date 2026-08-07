@@ -33,6 +33,10 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - Pastas agora aparecem como **`> NOME/`**, com marcador e barra sempre visíveis.
 - Capas Libretro agora incluem **boxart, título, snap e logo**, com download
   automático opcional por `COVER=y` na criação da ISO.
+- SRAM de SNES e NES agora fica separada em `SNESticle/SNES/` e
+  `SNESticle/NES/`, mantendo leitura e migração segura dos saves antigos.
+- Finalizados a SRAM de bateria e os **save states de cartuchos NES**, incluindo
+  CPU, PPU, áudio, CHR RAM e estado privado dos mappers.
 
 ---
 
@@ -158,6 +162,62 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - O perfil selecionado é salvo no cartão de memória.
 - Configurações v16 são migradas para v17 sem perder modo de vídeo, offsets,
   widescreen, volumes ou dispositivos; na migração, o perfil fica em Original.
+
+---
+
+## SRAM e save states de SNES/NES
+
+### Organização e compatibilidade da SRAM
+
+- A SRAM dentro do save do cartão de memória passou a ser separada por sistema:
+  - `mc0:/SNESticle/SNES/<rom>.srm` para SNES;
+  - `mc0:/SNESticle/NES/<rom>.srm` para NES.
+- A pasta principal `mc0:/SNESticle/` continua contendo ícone, configurações e
+  bancos de save state; as subpastas `SNES` e `NES` são exclusivas para SRAM.
+- Saves antigos de SNES em `mc0:/SNESticle/<rom>.srm` continuam compatíveis. Se
+  não existir o arquivo novo, o emulador lê o antigo, marca uma migração e grava
+  uma cópia em `SNES/` na próxima abertura do menu. O original não é apagado.
+- A criação das subpastas é feita sob demanda e volta a funcionar após troca de
+  cartão, sem depender de um cache global que confundia SNES e NES.
+- O checksum da SRAM agora é inicializado também quando ainda não existe arquivo,
+  evitando herdar o estado sujo do jogo carregado anteriormente.
+
+### SRAM de bateria do NES
+
+- `NesSystem::GetSRAMBytes()` e `GetSRAMData()` foram implementados.
+- ROMs iNES com a flag de bateria expõem os 8 KiB completos da SRAM do InfoNES;
+  ROMs sem bateria não criam um `.srm` desnecessário.
+- A SRAM é zerada ao inserir outro cartucho, antes da leitura do save, impedindo
+  que bytes do jogo anterior vazem para a nova ROM.
+- Trainers iNES de 512 bytes são copiados para `$7000-$71ff`, como exige o
+  formato, sem interferir na restauração posterior da SRAM.
+
+### Save state do NES
+
+- O gerenciador existente passou a aceitar cartuchos `.nes` nos mesmos cinco
+  slots e nos destinos Auto, USB, memory card, MMCE e HDD interno.
+- Estados NES usam bancos `.n1a/.n1b` até `.n5a/.n5b`; estados SNES preservam
+  os nomes `.s1a/.s1b` existentes. No cartão, ambos permanecem diretamente em
+  `mcN:/SNESticle/`, conforme a opção de destino já existente.
+- O navegador de manutenção reconhece os bancos `.nNa/.nNb`, remove o par de
+  segurança ao apagar um slot e oculta as novas pastas de SRAM.
+- `NesStateT` deixou de ser o placeholder de 64 KiB e agora serializa:
+  - registradores, interrupções e clocks do 6502;
+  - RAM, SRAM, PPU RAM, OAM, registradores, scroll, scanline e paleta;
+  - CHR RAM e cache decodificado de padrões;
+  - estado do pAPU, incluindo envelopes, fases, contadores e DPCM;
+  - RAM, registradores, latches e contadores de IRQ privados de todos os mappers
+    compilados no InfoNES;
+  - bancos PRG/CHR/SRAM ativos e bases do renderer.
+- Nenhum endereço cru é salvo: cada ponteiro de banco vira uma referência de
+  região + offset e é validado/reconstruído ao carregar. Assim, o estado não
+  depende do endereço em que ROM e buffers foram alocados após reiniciar.
+- O container externo mantém versão, identidade/CRC da ROM, CRC do payload,
+  compressão deflate e os dois bancos resistentes a queda de energia. Um ID de
+  sistema adicionado ao campo reservado mantém compatibilidade com estados SNES
+  v1 já existentes.
+- Estados FDS continuam fora deste suporte; o menu informa que o recurso atual
+  é destinado a cartuchos iNES.
 
 ---
 

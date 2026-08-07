@@ -87,6 +87,75 @@ int PathGetMaxFileNameLength(const char *pPath)
     return 256;
 }
 
+static const Char *_MainLoopSramGetSystemDirectoryName()
+{
+    return _pSystem == _pNes ? "NES" : "SNES";
+}
+
+static Bool _MainLoopSramEnsureOneDir(const Char *pPath)
+{
+    struct stat Status;
+
+    if (mkdir(pPath, 0777) == 0 || errno == EEXIST)
+    {
+        return TRUE;
+    }
+    return stat(pPath, &Status) == 0 && S_ISDIR(Status.st_mode);
+}
+
+static void _MainLoopSramBuildPath(Char *pPath, Int32 nPathBytes,
+                                   Bool bLegacyRoot)
+{
+    Char Directory[512];
+    Char SaveName[256];
+    const Char *pExtension =
+        _pSystem->GetString(Emu::System::StringE::STRING_SRAMEXT);
+    Int32 nSuffixBytes = (Int32)strlen(pExtension) + 1; /* dot + ext */
+
+    if (bLegacyRoot)
+    {
+        snprintf(Directory, sizeof(Directory), "%s", _SramPath);
+    }
+    else
+    {
+        snprintf(Directory, sizeof(Directory), "%s/%s", _SramPath,
+                 _MainLoopSramGetSystemDirectoryName());
+    }
+
+    PathTruncFileName(
+        SaveName,
+        _RomName,
+        PathGetMaxFileNameLength(Directory) - nSuffixBytes
+    );
+    snprintf(pPath, nPathBytes, "%s/%s.%s", Directory, SaveName, pExtension);
+}
+
+static Bool _MainLoopSramEnsureSystemDirectory()
+{
+    Char Directory[512];
+
+    snprintf(Directory, sizeof(Directory), "%s/%s", _SramPath,
+             _MainLoopSramGetSystemDirectoryName());
+    if (_MainLoopSramEnsureOneDir(Directory))
+    {
+        return TRUE;
+    }
+
+    /* The application save may not exist yet on a new/replaced card. Create
+       its icon-bearing root first, then retry the normal nested directory. */
+    int nCreateResult = MemCardCreateSave(
+        _SramPath,
+        _MainLoop_SaveTitle,
+        TRUE
+    );
+    if (nCreateResult < 0)
+    {
+        printf("[SRAM] MemCardCreateSave('%s') failed: %d\n",
+               _SramPath, nCreateResult);
+    }
+    return _MainLoopSramEnsureOneDir(Directory);
+}
+
 static Uint32 _CalcChecksum(Uint32 *pData, Uint32 nWords)
 {
     Uint32 uSum = 0;
@@ -113,30 +182,15 @@ Bool _MainLoopSaveSRAM(Bool bSync)
     if (nSramBytes > 0)
     {
         Char Path[1024];
-        Char SaveName[256];
         Uint8 *pSRAM;
 
         pSRAM = _pSystem->GetSRAMData();
-
+        if (!pSRAM || !_MainLoopSramEnsureSystemDirectory())
         {
-            static Bool bDirEnsured = FALSE;
-            if (!bDirEnsured)
-            {
-                int rc = MemCardCreateSave(_SramPath, _MainLoop_SaveTitle, TRUE);
-                printf("[SRAM] lazy MemCardCreateSave('%s') -> %d\n", _SramPath, rc);
-                bDirEnsured = TRUE;
-            }
+            ML_TRACE("SRAM save failed: cannot create system directory");
+            return FALSE;
         }
-
-        PathTruncFileName(SaveName, _RomName, PathGetMaxFileNameLength(_SramPath) - 4);
-        snprintf(
-            Path,
-            sizeof(Path),
-            "%s/%s.%s",
-            _SramPath,
-            SaveName,
-            _pSystem->GetString(Emu::System::StringE::STRING_SRAMEXT)
-        );
+        _MainLoopSramBuildPath(Path, sizeof(Path), FALSE);
 
         ML_TRACE("SRAM save begin: rom='%s' bytes=%d sync=%d", _RomName, (int)nSramBytes, (int)bSync);
         ML_TRACE("SRAM save path: %s", Path);
@@ -161,6 +215,10 @@ Bool _MainLoopSaveSRAM(Bool bSync)
 
                 MCSave_WriteSync(TRUE, &result);
                 ML_TRACE("SRAM save sync result: %d", result);
+                if (result)
+                {
+                    _MainLoop_SRAMUpdated = FALSE;
+                }
                 return result ? TRUE : FALSE;
             }
 
@@ -178,6 +236,10 @@ Bool _MainLoopSaveSRAM(Bool bSync)
                all on the card then this write will reach it. */
             Bool bOk = MemCardWriteFile(Path, pSRAM, nSramBytes);
             ML_TRACE("SRAM save (memcard fallback): %d", (int)bOk);
+            if (bOk)
+            {
+                _MainLoop_SRAMUpdated = FALSE;
+            }
             return bOk;
         }
     }
@@ -196,20 +258,11 @@ void _MainLoopLoadSRAM()
     if (nSramBytes > 0)
     {
         Char Path[1024];
-        Char SaveName[256];
         Uint8 *pSRAM;
+        Bool bLegacyLoaded = FALSE;
 
         pSRAM = _pSystem->GetSRAMData();
-
-        PathTruncFileName(SaveName, _RomName, PathGetMaxFileNameLength(_SramPath) - 4);
-        snprintf(
-            Path,
-            sizeof(Path),
-            "%s/%s.%s",
-            _SramPath,
-            SaveName,
-            _pSystem->GetString(Emu::System::StringE::STRING_SRAMEXT)
-        );
+        _MainLoopSramBuildPath(Path, sizeof(Path), FALSE);
 
         printf("[SRAM] load path='%s' pSRAM=%p nBytes=%d\n",
                Path, (void *)pSRAM, (int)nSramBytes);
@@ -217,8 +270,25 @@ void _MainLoopLoadSRAM()
         ML_TRACE("SRAM load begin: rom='%s' bytes=%d", _RomName, (int)nSramBytes);
         ML_TRACE("SRAM load path: %s", Path);
 
-        Bool bOk = MemCardReadFile(Path, pSRAM, nSramBytes);
+        Bool bOk = pSRAM ? MemCardReadFile(Path, pSRAM, nSramBytes) : FALSE;
         printf("[SRAM] MemCardReadFile -> %d\n", (int)bOk);
+
+        /* v1.0.3 and early v1.0.4 builds stored SNES SRAM directly in
+           mc?:/SNESticle. Read that file only as a fallback. It is never
+           deleted; marking SRAM dirty migrates a copy to SNES/ the next
+           time the user opens the in-game menu. NES had no old SRAM. */
+        if (!bOk && _pSystem == _pSnes)
+        {
+            Char LegacyPath[1024];
+            _MainLoopSramBuildPath(LegacyPath, sizeof(LegacyPath), TRUE);
+            bOk = MemCardReadFile(LegacyPath, pSRAM, nSramBytes);
+            if (bOk)
+            {
+                bLegacyLoaded = TRUE;
+                snprintf(Path, sizeof(Path), "%s", LegacyPath);
+                printf("[SRAM] legacy SNES save loaded; migration pending\n");
+            }
+        }
 
         if (bOk)
         {
@@ -238,7 +308,17 @@ void _MainLoopLoadSRAM()
             ML_TRACE("SRAM load failed or file missing: %s", Path);
         }
 
-        _MainLoop_SRAMUpdated = FALSE;
+        /* Always initialise the checksum, including a brand-new NES save,
+           so bytes left by the previously loaded cartridge cannot affect
+           dirty detection. Legacy SNES data is copied on the next save. */
+        if (pSRAM)
+        {
+            _MainLoop_SRAMChecksum = _CalcChecksum(
+                (Uint32 *)pSRAM,
+                nSramBytes / 4
+            );
+        }
+        _MainLoop_SRAMUpdated = bLegacyLoaded;
     }
 
     _MainLoop_SaveCounter = 0;
@@ -353,7 +433,7 @@ Bool _MainLoopCheckSRAM()
     return TRUE;
 }
 
-/* ---- Versioned SNES save states ------------------------------------
+/* ---- Versioned SNES/NES save states --------------------------------
  *
  * The recovered iaddis code wrote SnesStateT directly to host0:.  Besides
  * being a development-only path, that format had no version, ROM identity
@@ -367,17 +447,24 @@ Bool _MainLoopCheckSRAM()
 
 #define MAINLOOP_STATE_SLOT_NUM       5
 #define MAINLOOP_STATE_BANK_NUM       2
-/* Bump whenever SnesStateT's layout or restore semantics become incompatible. */
+/* The outer container remains version 1 for compatibility with existing SNES
+   banks. Reserved[2] identifies the core; NesStateT has its own version. */
 #define MAINLOOP_STATE_FORMAT_VERSION 1
 #define MAINLOOP_STATE_HEADER_BYTES   64
 #define MAINLOOP_STATE_MAX_ROOTS      8
 #define MAINLOOP_STATE_MAX_CANDIDATES (MAINLOOP_STATE_MAX_ROOTS * MAINLOOP_STATE_BANK_NUM)
 #define MAINLOOP_STATE_PAYLOAD_RAW     0
 #define MAINLOOP_STATE_PAYLOAD_DEFLATE 1
+#define MAINLOOP_STATE_SYSTEM_SNES      0
+#define MAINLOOP_STATE_SYSTEM_NES       1
+#define MAINLOOP_STATE_RAW_BYTES \
+    (sizeof(SnesStateT) > sizeof(NesStateT) \
+        ? sizeof(SnesStateT) \
+        : sizeof(NesStateT))
 /* mz_compressBound() currently uses a conservative 110% + 128 bound.
    Keeping the buffer static avoids heap fragmentation on the 32 MB PS2. */
 #define MAINLOOP_STATE_COMPRESS_BYTES \
-    ((sizeof(SnesStateT) * 110) / 100 + 128)
+    ((MAINLOOP_STATE_RAW_BYTES * 110) / 100 + 128)
 
 struct MainLoopStateFileHeaderT
 {
@@ -393,7 +480,9 @@ struct MainLoopStateFileHeaderT
     Uint32 uGeneration;
     /* Reserved[0] = payload encoding (raw/deflate).
        Reserved[1] = CRC32 of the stored compressed bytes. The public
-       uPayloadCRC remains the CRC32 of the uncompressed SnesStateT. */
+       uPayloadCRC remains the CRC32 of the uncompressed core state.
+       Reserved[2] = core ID (0 SNES, 1 NES). Old SNES banks were
+       zero-initialised, so they remain valid. */
     Uint32 Reserved[5];
 };
 
@@ -450,6 +539,27 @@ static Uint8 _MainLoop_StateCompressed[MAINLOOP_STATE_COMPRESS_BYTES]
 static Int32 _MainLoop_StateUnformattedCard = -1;
 
 static Bool _MainLoopStateEnsureOneDir(const Char *pPath);
+
+static Uint32 _MainLoopStateGetSystemId()
+{
+    return _pSystem == _pNes
+        ? MAINLOOP_STATE_SYSTEM_NES
+        : MAINLOOP_STATE_SYSTEM_SNES;
+}
+
+static Uint32 _MainLoopStateGetPayloadBytes()
+{
+    return _pSystem == _pNes
+        ? (Uint32)sizeof(_NesState)
+        : (Uint32)sizeof(_SnesState);
+}
+
+static Uint8 *_MainLoopStateGetPayloadData()
+{
+    return _pSystem == _pNes
+        ? (Uint8 *)&_NesState
+        : (Uint8 *)&_SnesState;
+}
 
 static void _MainLoopStateSetMessage(const Char *pFormat, ...)
 {
@@ -705,19 +815,31 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
         return FALSE;
     }
 
-    if (_pSystem != _pSnes)
+    if (_pSystem != _pSnes && _pSystem != _pNes)
     {
-        snprintf(pReason, nReasonBytes, "NES save states are not available yet.");
+        snprintf(pReason, nReasonBytes, "This system cannot save states.");
         return FALSE;
     }
 
-    if (!_pSnesRom || !_pSnesRom->IsLoaded())
+    if (_pSystem == _pNes)
+    {
+        if (!_pNesRom || !_pNesRom->IsLoaded() ||
+            !_pNes || !_pNes->IsRomReady())
+        {
+            snprintf(pReason, nReasonBytes,
+                     "NES state unavailable for this cartridge/mapper.");
+            return FALSE;
+        }
+    }
+    else if (!_pSnesRom || !_pSnesRom->IsLoaded())
     {
         snprintf(pReason, nReasonBytes, "No SNES ROM loaded.");
         return FALSE;
     }
 
-    pChip = _MainLoopStateGetUnsupportedChip(_pSnesRom->m_Flags);
+    pChip = _pSystem == _pSnes
+        ? _MainLoopStateGetUnsupportedChip(_pSnesRom->m_Flags)
+        : NULL;
     if (pChip)
     {
         snprintf(pReason, nReasonBytes, "%s state is not serialized yet.", pChip);
@@ -740,7 +862,13 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
         return FALSE;
     }
 
-    snprintf(pReason, nReasonBytes, "Ready: base SNES hardware.");
+    snprintf(
+        pReason,
+        nReasonBytes,
+        _pSystem == _pNes
+            ? "Ready: NES cartridge and mapper state."
+            : "Ready: base SNES hardware."
+    );
     return TRUE;
 }
 
@@ -761,13 +889,24 @@ static Bool _MainLoopStateGetRomIdentity(
     Uint8 *pRomData;
     Uint32 nRomBytes;
 
-    if (!_pSnesRom || !_pSnesRom->IsLoaded())
+    if (_pSystem == _pNes)
+    {
+        if (!_pNesRom || !_pNesRom->IsLoaded())
+        {
+            return FALSE;
+        }
+        pRomData = _pNesRom->GetData();
+        nRomBytes = _pNesRom->GetBytes();
+    }
+    else if (_pSnesRom && _pSnesRom->IsLoaded())
+    {
+        pRomData = _pSnesRom->GetData();
+        nRomBytes = _pSnesRom->GetBytes();
+    }
+    else
     {
         return FALSE;
     }
-
-    pRomData = _pSnesRom->GetData();
-    nRomBytes = _pSnesRom->GetBytes();
     if (!pRomData || !nRomBytes)
     {
         return FALSE;
@@ -785,7 +924,9 @@ static Bool _MainLoopStateGetRomIdentity(
 
     *puCRC = _MainLoop_StateRomCRC;
     *pnBytes = nRomBytes;
-    *puFlags = _pSnesRom->m_Flags;
+    *puFlags = _pSystem == _pNes
+        ? _pNesRom->GetMapperNumber()
+        : _pSnesRom->m_Flags;
     return TRUE;
 }
 
@@ -1069,7 +1210,7 @@ static Bool _MainLoopStateEnsureOneDir(const Char *pPath)
 
 static Bool _MainLoopStateEnsureRoot(const MainLoopStateRootT *pRoot)
 {
-    Char Path[256];
+    Char Path[1024];
 
     /* MMCE also uses the short memory-card filename rules, hence
        bMemCard, but only real mcN: roots have PS2-card format state. */
@@ -1138,9 +1279,10 @@ static void _MainLoopStateBuildBankPath(
     snprintf(
         pPath,
         nPathBytes,
-        "%s/%s.s%d%c",
+        "%s/%s.%c%d%c",
         Directory,
         SaveName,
+        _pSystem == _pNes ? 'n' : 's',
         iSlot + 1,
         iBank ? 'b' : 'a'
     );
@@ -1159,6 +1301,8 @@ static Int32 _MainLoopStateReadHeader(
     FILE *pFile;
     size_t nRead;
     Bool bPayloadLayoutValid;
+    Uint32 nExpectedPayloadBytes = _MainLoopStateGetPayloadBytes();
+    Uint32 uExpectedSystem = _MainLoopStateGetSystemId();
 
     pFile = fopen(pPath, "rb");
     if (!pFile)
@@ -1175,7 +1319,7 @@ static Int32 _MainLoopStateReadHeader(
 
     bPayloadLayoutValid =
         (pHeader->Reserved[0] == MAINLOOP_STATE_PAYLOAD_RAW &&
-         pHeader->nPayloadBytes == sizeof(_SnesState)) ||
+         pHeader->nPayloadBytes == nExpectedPayloadBytes) ||
         (pHeader->Reserved[0] == MAINLOOP_STATE_PAYLOAD_DEFLATE &&
          pHeader->nPayloadBytes > 0 &&
          pHeader->nPayloadBytes <= sizeof(_MainLoop_StateCompressed));
@@ -1184,6 +1328,7 @@ static Int32 _MainLoopStateReadHeader(
         pHeader->uVersion != MAINLOOP_STATE_FORMAT_VERSION ||
         pHeader->nHeaderBytes != sizeof(*pHeader) ||
         !bPayloadLayoutValid ||
+        pHeader->Reserved[2] != uExpectedSystem ||
         pHeader->iSlot != (Uint32)iSlot)
     {
         return -1;
@@ -1208,6 +1353,8 @@ static Bool _MainLoopStateReadPayload(
     size_t nRead;
     Uint32 uCRC;
     Bool bDecoded = FALSE;
+    Uint8 *pStateData = _MainLoopStateGetPayloadData();
+    Uint32 nStateBytes = _MainLoopStateGetPayloadBytes();
 
     pFile = fopen(pPath, "rb");
     if (!pFile)
@@ -1225,12 +1372,12 @@ static Bool _MainLoopStateReadPayload(
 
     if (Header.Reserved[0] == MAINLOOP_STATE_PAYLOAD_RAW)
     {
-        nRead = fread(&_SnesState, 1, sizeof(_SnesState), pFile);
-        bDecoded = nRead == sizeof(_SnesState);
+        nRead = fread(pStateData, 1, nStateBytes, pFile);
+        bDecoded = nRead == nStateBytes;
     }
     else if (Header.Reserved[0] == MAINLOOP_STATE_PAYLOAD_DEFLATE)
     {
-        mz_ulong nDecodedBytes = sizeof(_SnesState);
+        mz_ulong nDecodedBytes = nStateBytes;
 
         nRead = fread(
             _MainLoop_StateCompressed,
@@ -1240,12 +1387,12 @@ static Bool _MainLoopStateReadPayload(
         );
         if (nRead == Header.nPayloadBytes &&
             mz_uncompress(
-                (Uint8 *)&_SnesState,
+                pStateData,
                 &nDecodedBytes,
                 _MainLoop_StateCompressed,
                 Header.nPayloadBytes
             ) == MZ_OK &&
-            nDecodedBytes == sizeof(_SnesState))
+            nDecodedBytes == nStateBytes)
         {
             bDecoded = TRUE;
         }
@@ -1259,8 +1406,8 @@ static Bool _MainLoopStateReadPayload(
 
     uCRC = (Uint32)mz_crc32(
         MZ_CRC32_INIT,
-        (const Uint8 *)&_SnesState,
-        sizeof(_SnesState)
+        pStateData,
+        nStateBytes
     );
     return uCRC == Header.uPayloadCRC;
 }
@@ -1436,10 +1583,19 @@ Bool _MainLoopLoadState()
         MainLoopStateCandidateT *pCandidate =
             &_MainLoop_StateCandidates[iCandidate];
 
-        if (_MainLoopStateReadPayload(
-                pCandidate->Path,
-                &pCandidate->Header) &&
-            _pSnes->RestoreState(&_SnesState))
+        Bool bPayloadOK = _MainLoopStateReadPayload(
+            pCandidate->Path,
+            &pCandidate->Header
+        );
+        Bool bRestoreOK = FALSE;
+        if (bPayloadOK)
+        {
+            bRestoreOK = _pSystem == _pNes
+                ? _pNes->RestoreState(&_NesState)
+                : _pSnes->RestoreState(&_SnesState);
+        }
+
+        if (bRestoreOK)
         {
             Int32 nSramBytes = _pSystem->GetSRAMBytes();
 
@@ -1523,6 +1679,8 @@ Bool _MainLoopSaveState()
     MainLoopStateRootT Roots[MAINLOOP_STATE_MAX_ROOTS];
     Int32 nRoots;
     Int32 iRoot;
+    Uint8 *pStateData;
+    Uint32 nStateBytes;
 
     _bStateSaved = FALSE;
     _MainLoop_StateUnformattedCard = -1;
@@ -1573,24 +1731,38 @@ Bool _MainLoopSaveState()
        ~500 KB structure. Fast deflate substantially cuts slow memory-card
        I/O while keeping the on-disk format backward compatible: version-1
        raw banks still load, and Reserved[0] advertises compressed banks. */
-    _pSnes->SaveState(&_SnesState);
+    pStateData = _MainLoopStateGetPayloadData();
+    nStateBytes = _MainLoopStateGetPayloadBytes();
+    if (_pSystem == _pNes)
+    {
+        _pNes->SaveState(&_NesState);
+        if (_NesState.uMagic != NES_STATE_MAGIC)
+        {
+            _MainLoopStateSetMessage("Could not snapshot the NES mapper state.");
+            return FALSE;
+        }
+    }
+    else
+    {
+        _pSnes->SaveState(&_SnesState);
+    }
     uPayloadCRC = (Uint32)mz_crc32(
         MZ_CRC32_INIT,
-        (const Uint8 *)&_SnesState,
-        sizeof(_SnesState)
+        pStateData,
+        nStateBytes
     );
 
-    pPayload = (const Uint8 *)&_SnesState;
-    nPayloadBytes = sizeof(_SnesState);
+    pPayload = pStateData;
+    nPayloadBytes = nStateBytes;
     ePayloadEncoding = MAINLOOP_STATE_PAYLOAD_RAW;
     nCompressedBytes = sizeof(_MainLoop_StateCompressed);
     if (mz_compress2(
             _MainLoop_StateCompressed,
             &nCompressedBytes,
-            (const Uint8 *)&_SnesState,
-            sizeof(_SnesState),
+            pStateData,
+            nStateBytes,
             MZ_BEST_SPEED) == MZ_OK &&
-        nCompressedBytes < sizeof(_SnesState))
+        nCompressedBytes < nStateBytes)
     {
         pPayload = _MainLoop_StateCompressed;
         nPayloadBytes = (Uint32)nCompressedBytes;
@@ -1604,7 +1776,7 @@ Bool _MainLoopSaveState()
 
     ML_TRACE(
         "State payload: raw=%u stored=%u encoding=%s",
-        (unsigned int)sizeof(_SnesState),
+        (unsigned int)nStateBytes,
         (unsigned int)nPayloadBytes,
         ePayloadEncoding == MAINLOOP_STATE_PAYLOAD_DEFLATE
             ? "deflate"
@@ -1695,6 +1867,7 @@ Bool _MainLoopSaveState()
             ePayloadEncoding == MAINLOOP_STATE_PAYLOAD_DEFLATE
                 ? uStoredCRC
                 : 0;
+        Header.Reserved[2] = _MainLoopStateGetSystemId();
 
         ML_TRACE("State save path: %s", Path);
         if (_MainLoopStateWriteBank(

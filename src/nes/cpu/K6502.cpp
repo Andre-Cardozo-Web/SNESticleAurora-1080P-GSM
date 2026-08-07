@@ -179,6 +179,87 @@ BYTE NMI_State;
 // Wiring of the NMI pin
 BYTE NMI_Wiring;
 
+/* ------------------------------------------------------------------
+   Save state
+
+   InfoNES historically kept the 6502 registers private to this
+   translation unit, which is why the old NES state stub could not save
+   them.  Export an opaque copy API instead of exposing writable globals.
+   The fixed-width fields make the layout stable on the EE toolchain. */
+
+#define K6502_STATE_MAGIC   0x4B363553UL /* "K65S" */
+#define K6502_STATE_VERSION 1
+
+struct K6502StateImageT
+{
+  DWORD uMagic;
+  DWORD uVersion;
+  WORD  wPC;
+  BYTE  bySP;
+  BYTE  byF;
+  BYTE  byA;
+  BYTE  byX;
+  BYTE  byY;
+  BYTE  byIRQState;
+  BYTE  byIRQWiring;
+  BYTE  byNMIState;
+  BYTE  byNMIWiring;
+  WORD  wPassedClocks;
+};
+
+typedef char K6502StateFits[
+  sizeof(K6502StateImageT) <= K6502_STATE_MAX ? 1 : -1
+];
+
+int K6502_SaveState( void *pState, int nStateBytes )
+{
+  K6502StateImageT State;
+
+  if ( !pState || nStateBytes < (int)sizeof(State) )
+    return 0;
+
+  State.uMagic        = K6502_STATE_MAGIC;
+  State.uVersion      = K6502_STATE_VERSION;
+  State.wPC           = PC;
+  State.bySP          = SP;
+  State.byF           = F;
+  State.byA           = A;
+  State.byX           = X;
+  State.byY           = Y;
+  State.byIRQState    = IRQ_State;
+  State.byIRQWiring   = IRQ_Wiring;
+  State.byNMIState    = NMI_State;
+  State.byNMIWiring   = NMI_Wiring;
+  State.wPassedClocks = g_wPassedClocks;
+
+  InfoNES_MemorySet( pState, 0, nStateBytes );
+  InfoNES_MemoryCopy( pState, &State, sizeof(State) );
+  return (int)sizeof(State);
+}
+
+int K6502_LoadState( const void *pState, int nStateBytes )
+{
+  const K6502StateImageT *pImage = (const K6502StateImageT *)pState;
+
+  if ( !pImage || nStateBytes != (int)sizeof(*pImage) ||
+       pImage->uMagic != K6502_STATE_MAGIC ||
+       pImage->uVersion != K6502_STATE_VERSION )
+    return 0;
+
+  PC               = pImage->wPC;
+  SP               = pImage->bySP;
+  F                = pImage->byF;
+  A                = pImage->byA;
+  X                = pImage->byX;
+  Y                = pImage->byY;
+  IRQ_State        = pImage->byIRQState;
+  IRQ_Wiring       = pImage->byIRQWiring;
+  NMI_State        = pImage->byNMIState;
+  NMI_Wiring       = pImage->byNMIWiring;
+  g_wPassedClocks  = pImage->wPassedClocks;
+  return 1;
+}
+
 // The number of the clocks that it passed
 WORD g_wPassedClocks;
 

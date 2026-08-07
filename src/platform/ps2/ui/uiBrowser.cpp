@@ -42,7 +42,8 @@ static Bool BrowserIsStateBankName(const Char *pName)
 
 	return nLength >= 4 &&
 	       pName[nLength - 4] == '.' &&
-	       pName[nLength - 3] == 's' &&
+	       (pName[nLength - 3] == 's' ||
+	        pName[nLength - 3] == 'n') &&
 	       pName[nLength - 2] >= '1' &&
 	       pName[nLength - 2] <= '5' &&
 	       (pName[nLength - 1] == 'a' ||
@@ -61,6 +62,12 @@ static Bool BrowserIsCoverMetadataName(const Char *pName)
 	        !strcasecmp(pName, "Named_Snaps") ||
 	        !strcasecmp(pName, "Named_Logos") ||
 	        !strcasecmp(pName, "COVERS.IDX")) ? TRUE : FALSE;
+}
+
+static Bool BrowserIsSramDirectoryName(const Char *pName)
+{
+	return pName &&
+	       (!strcasecmp(pName, "SNES") || !strcasecmp(pName, "NES"));
 }
 
 /* Resolve the rare DT_UNKNOWN equivalent without slowing down normal ROM
@@ -748,8 +755,8 @@ int CBrowserScreen::MenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
 							break;
 						default:
 							/* State Manager groups the two power-safe banks
-							   as one logical slot. Deleting either .sNa or
-							   .sNb therefore removes its partner too. */
+							   as one logical slot. This covers SNES .sNa/.sNb
+							   and NES .nNa/.nNb pairs. */
 							if (pBrowser->m_bStateManager)
 							{
 								size_t nLength = strlen(pDeletePath);
@@ -1525,6 +1532,8 @@ void CBrowserScreen::SetDir(const Char *pDir)
 				   256 bytes without writing a final NUL. */
 				de.name[sizeof(de.name) - 1] = '\0';
 				if (!de.name[0] || !strcmp(de.name, ".") || !strcmp(de.name, ".."))
+					continue;
+				if (m_bStateManager && BrowserIsSramDirectoryName(de.name))
 					continue;
 				if (BrowserIsCoverMetadataName(de.name))
 					continue;

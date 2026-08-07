@@ -312,4 +312,57 @@ struct MapperTable_tag MapperTable[] =
 #include "mapper/InfoNES_Mapper_252.cpp"
 #include "mapper/InfoNES_Mapper_255.cpp"
 
+/* ------------------------------------------------------------------
+   Mapper snapshot
+
+   Every mapper source above is deliberately included into this single
+   translation unit. On the EE build their writable globals occupy one
+   contiguous BSS span, bounded by the first declaration (DRAM) and the
+   last mapper declaration (Map255_Reg). Copying the opaque span captures
+   mapper RAM, shift registers, IRQ counters and latches for every mapper
+   without ever serialising function pointers from MapperTable. */
+
+BYTE *InfoNES_MapperStateBase(void)
+{
+  unsigned long a = (unsigned long)&DRAM[0];
+  unsigned long b = (unsigned long)&Map255_Reg[0];
+  return (BYTE *)(a < b ? a : b);
+}
+
+int InfoNES_MapperStateBytes(void)
+{
+  unsigned long a0 = (unsigned long)&DRAM[0];
+  unsigned long a1 = a0 + sizeof(DRAM);
+  unsigned long b0 = (unsigned long)&Map255_Reg[0];
+  unsigned long b1 = b0 + sizeof(Map255_Reg);
+  unsigned long lo = a0 < b0 ? a0 : b0;
+  unsigned long hi = a1 > b1 ? a1 : b1;
+  unsigned long nBytes = hi - lo;
+
+  if (nBytes == 0 || nBytes > INFONES_MAPPER_STATE_MAX)
+    return 0;
+  return (int)nBytes;
+}
+
+int InfoNES_MapperSaveState(void *pState, int nStateBytes)
+{
+  int nMapperBytes = InfoNES_MapperStateBytes();
+
+  if (!pState || !nMapperBytes || nStateBytes < nMapperBytes)
+    return 0;
+  InfoNES_MemorySet(pState, 0, nStateBytes);
+  InfoNES_MemoryCopy(pState, InfoNES_MapperStateBase(), nMapperBytes);
+  return nMapperBytes;
+}
+
+int InfoNES_MapperLoadState(const void *pState, int nStateBytes)
+{
+  int nMapperBytes = InfoNES_MapperStateBytes();
+
+  if (!pState || !nMapperBytes || nStateBytes != nMapperBytes)
+    return 0;
+  InfoNES_MemoryCopy(InfoNES_MapperStateBase(), pState, nMapperBytes);
+  return 1;
+}
+
 /* End of InfoNES_Mapper.cpp */

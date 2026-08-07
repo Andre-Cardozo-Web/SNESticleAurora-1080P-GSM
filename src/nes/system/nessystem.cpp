@@ -1,4 +1,4 @@
-/* nessystem.cpp - NesSystem implementation (Phase 3).
+/* nessystem.cpp - NesSystem implementation.
  *
  * SetRom() feeds the iNES image into InfoNES (NesHeader, ROM, VROM
  * globals + optional CHR RAM) and runs InfoNES_Init/Reset.
@@ -15,8 +15,8 @@
  * Input mapping (NES has 8 buttons; PS2 user is pressing SNES-shaped
  * bits because _MainLoopInput is still routed through _MainLoopSnesInput)
  * is done in InfoNES_System_PS2.cpp::InfoNES_PadState, reading the
- * SysInputT pointer that this file stashes per frame.  Audio output
- * arrives in Phase 4; today InfoNES_SoundOutput is a no-op stub.
+ * SysInputT pointer that this file stashes per frame. InfoNES_SoundOutput
+ * sends the mixed pAPU channels through the shared PS2 audio buffer.
  */
 
 #include <stdio.h>
@@ -35,6 +35,8 @@
 #include "InfoNES_System.h"
 #include "InfoNES_Types.h"
 #include "K6502.h"
+#include "InfoNES_pAPU.h"
+#include "InfoNES_Mapper.h"
 
 /* Per-frame state shared with the InfoNES platform callbacks
    (InfoNES_System_PS2.cpp).  We stash the surface + input pointer on
@@ -65,6 +67,23 @@ void InfoNES_RunOneFrame(void);
 extern NesRom         *_pNesRom;
 extern NesFDSBios     *_pNesFDSBios;
 extern NesDisk        *_pNesFDSDisk;
+extern int             SpriteJustHit;
+
+typedef char NesCpuStateCapacityCheck[
+    NES_STATE_CPU_BYTES >= K6502_STATE_MAX ? 1 : -1
+];
+typedef char NesApuStateCapacityCheck[
+    NES_STATE_APU_BYTES >= INFONES_APU_STATE_MAX ? 1 : -1
+];
+typedef char NesMapperStateCapacityCheck[
+    NES_STATE_MAPPER_BYTES >= INFONES_MAPPER_STATE_MAX ? 1 : -1
+];
+typedef char NesCoreArraySizeCheck[
+    NES_STATE_RAM_BYTES == RAM_SIZE &&
+    NES_STATE_SRAM_BYTES == SRAM_SIZE &&
+    NES_STATE_PPURAM_BYTES == PPURAM_SIZE &&
+    NES_STATE_SPRRAM_BYTES == SPRRAM_SIZE ? 1 : -1
+];
 
 
 /* -------------------------------------------------------------------- *
@@ -132,12 +151,12 @@ void NesSystem::SetRom(Emu::Rom *pRom)
     /* mainloop_load.cpp routes three different Emu::Rom subclasses
        through SetRom (NesRom for .nes, and NesFDSBios when pBios is
        provided for .fds). Use pointer identity against the mainloop
-       singletons since RTTI is disabled. Phase 3 only knows how to
-       run iNES carts; FDS support arrives in Phase 5. */
+       singletons since RTTI is disabled. Cartridge execution, SRAM and
+       states are implemented; FDS execution remains a separate task. */
     if (pRom != _pNesRom)
     {
-        printf("[NesSystem] SetRom: non-iNES image (Phase 3 supports "
-               ".nes only). Leaving InfoNES un-wired.\n");
+        printf("[NesSystem] SetRom: cartridge core supports .nes only "
+               "(FDS execution pending). Leaving InfoNES un-wired.\n");
         return;
     }
 
@@ -166,8 +185,12 @@ void NesSystem::SetRom(Emu::Rom *pRom)
 
     /* 2. PRG ROM pointer. */
     Uint8 *p = pData + 16;
+    Uint8 *pTrainer = NULL;
     if (NesHeader.byInfo1 & 0x04)
+    {
+        pTrainer = p;
         p += 512;                                /* skip trainer */
+    }
     ROM = p;
     Uint32 uPrgBytes = (Uint32)NesHeader.byRomSize * 16 * 1024;
     p += uPrgBytes;
@@ -193,11 +216,27 @@ void NesSystem::SetRom(Emu::Rom *pRom)
         VROM = m_pCHRRam;
     }
 
+    /* Battery RAM belongs to the newly inserted cartridge. Clear the
+       previous game's bytes before the frontend attempts to load its .srm.
+       An iNES trainer is mapped at CPU $7000-$71ff (SRAM + $1000). */
+    memset(SRAM, 0, SRAM_SIZE);
+    if (pTrainer)
+        memcpy(SRAM + 0x1000, pTrainer, 512);
+
     /* 4. One-time InfoNES init.  Sets up MapperTable, K6502 hooks, etc. */
     if (!m_bInitialized)
     {
         InfoNES_Init();
         m_bInitialized = TRUE;
+    }
+
+    /* Mapper modules share one writable span. Clear it on cartridge change
+       so a state contains only this game's mapper data (and compresses well),
+       never stale RAM left by a mapper used by the previous ROM. */
+    {
+        Int32 nMapperBytes = InfoNES_MapperStateBytes();
+        if (nMapperBytes > 0)
+            memset(InfoNES_MapperStateBase(), 0, nMapperBytes);
     }
 
     /* 5. Per-cart reset.  Walks MapperTable, calls the matching mapper
@@ -255,7 +294,7 @@ void NesSystem::SoftReset()
  *   pInput    - controller state (uPad[0..4]), SNES bit layout
  *   pTarget   - the 256x256 RGBA8 surface that will be TextureUpload'd
  *               into _OutTex right after we return
- *   pMixBuf   - audio mixer; Phase 4 will push pAPU samples here
+ *   pMixBuf   - audio mixer receiving the pAPU output
  *   eMode     - accurate vs deterministic; InfoNES ignores it
  *
  * The actual frame stepping lives in InfoNES_RunOneFrame (defined in
@@ -356,7 +395,116 @@ void NesSystem::DiagnosticPaint(CRenderSurface *pTarget)
 }
 
 
-/* ------------- State + SRAM stubs (real impl in Phase 5) -------- */
+/* -------------------------------------------------------------------- *
+ *  Save states                                                         *
+ * -------------------------------------------------------------------- */
+
+static Bool NesEncodeBankPointer(const BYTE *pPointer, NesStateBankRefT *pRef)
+{
+    struct RegionT
+    {
+        Uint32 eRegion;
+        const BYTE *pBase;
+        Uint32 nBytes;
+    };
+    RegionT Regions[8];
+    Int32 nRegions = 0;
+    Int32 i;
+    Int32 nMapperBytes = InfoNES_MapperStateBytes();
+
+    if (!pRef)
+        return FALSE;
+    pRef->eRegion = NES_STATE_REGION_NONE;
+    pRef->uOffset = 0;
+    if (!pPointer)
+        return FALSE;
+
+#define NES_ADD_REGION(ID, BASE, BYTES) \
+    do { \
+        Regions[nRegions].eRegion = (ID); \
+        Regions[nRegions].pBase = (const BYTE *)(BASE); \
+        Regions[nRegions].nBytes = (Uint32)(BYTES); \
+        nRegions++; \
+    } while (0)
+    NES_ADD_REGION(NES_STATE_REGION_ROM, ROM,
+                   (Uint32)NesHeader.byRomSize * 16 * 1024);
+    NES_ADD_REGION(NES_STATE_REGION_VROM, VROM,
+                   NesHeader.byVRomSize
+                       ? (Uint32)NesHeader.byVRomSize * 8 * 1024
+                       : NES_STATE_CHRRAM_BYTES);
+    NES_ADD_REGION(NES_STATE_REGION_RAM, RAM, RAM_SIZE);
+    NES_ADD_REGION(NES_STATE_REGION_SRAM, SRAM, SRAM_SIZE);
+    NES_ADD_REGION(NES_STATE_REGION_PPURAM, PPURAM, PPURAM_SIZE);
+    NES_ADD_REGION(NES_STATE_REGION_SPRRAM, SPRRAM, SPRRAM_SIZE);
+    NES_ADD_REGION(NES_STATE_REGION_CHRBUF, ChrBuf, NES_STATE_CHRBUF_BYTES);
+    NES_ADD_REGION(NES_STATE_REGION_MAPPER, InfoNES_MapperStateBase(),
+                   nMapperBytes > 0 ? nMapperBytes : 0);
+#undef NES_ADD_REGION
+
+    for (i = 0; i < nRegions; i++)
+    {
+        unsigned long uPointer = (unsigned long)pPointer;
+        unsigned long uBase = (unsigned long)Regions[i].pBase;
+        unsigned long uEnd = uBase + Regions[i].nBytes;
+
+        if (Regions[i].pBase && Regions[i].nBytes &&
+            uPointer >= uBase && uPointer < uEnd)
+        {
+            pRef->eRegion = Regions[i].eRegion;
+            pRef->uOffset = (Uint32)(uPointer - uBase);
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+static BYTE *NesDecodeBankPointer(const NesStateBankRefT *pRef)
+{
+    BYTE *pBase = NULL;
+    Uint32 nBytes = 0;
+    Int32 nMapperBytes;
+
+    if (!pRef)
+        return NULL;
+    if (pRef->eRegion == NES_STATE_REGION_NONE)
+        return NULL;
+
+    switch (pRef->eRegion)
+    {
+        case NES_STATE_REGION_ROM:
+            pBase = ROM;
+            nBytes = (Uint32)NesHeader.byRomSize * 16 * 1024;
+            break;
+        case NES_STATE_REGION_VROM:
+            pBase = VROM;
+            nBytes = NesHeader.byVRomSize
+                ? (Uint32)NesHeader.byVRomSize * 8 * 1024
+                : NES_STATE_CHRRAM_BYTES;
+            break;
+        case NES_STATE_REGION_RAM:
+            pBase = RAM; nBytes = RAM_SIZE; break;
+        case NES_STATE_REGION_SRAM:
+            pBase = SRAM; nBytes = SRAM_SIZE; break;
+        case NES_STATE_REGION_PPURAM:
+            pBase = PPURAM; nBytes = PPURAM_SIZE; break;
+        case NES_STATE_REGION_SPRRAM:
+            pBase = SPRRAM; nBytes = SPRRAM_SIZE; break;
+        case NES_STATE_REGION_CHRBUF:
+            pBase = ChrBuf; nBytes = NES_STATE_CHRBUF_BYTES; break;
+        case NES_STATE_REGION_MAPPER:
+            nMapperBytes = InfoNES_MapperStateBytes();
+            pBase = InfoNES_MapperStateBase();
+            nBytes = nMapperBytes > 0 ? (Uint32)nMapperBytes : 0;
+            break;
+        default:
+            return NULL;
+    }
+
+    if (!pBase || pRef->uOffset >= nBytes)
+        return NULL;
+    return pBase + pRef->uOffset;
+}
 
 Int32 NesSystem::GetStateSize()
 {
@@ -365,37 +513,250 @@ Int32 NesSystem::GetStateSize()
 
 void NesSystem::SaveState(void *pState, Int32 nStateBytes)
 {
-    if (!pState || nStateBytes <= 0) return;
-    memset(pState, 0, (size_t)nStateBytes);
+    if (!pState || nStateBytes < (Int32)sizeof(NesStateT))
+        return;
+    SaveState((NesStateT *)pState);
 }
 
 void NesSystem::RestoreState(void *pState, Int32 nStateBytes)
 {
-    (void)pState;
-    (void)nStateBytes;
+    if (!pState || nStateBytes != (Int32)sizeof(NesStateT))
+        return;
+    RestoreState((NesStateT *)pState);
 }
 
 void NesSystem::SaveState(NesStateT *pState)
 {
-    if (!pState) return;
+    Int32 i;
+
+    if (!pState)
+        return;
     memset(pState, 0, sizeof(*pState));
+
+    if (!m_bRomReady || !m_pNesRom || !m_pNesRom->IsLoaded())
+        return;
+
+    pState->uVersion = NES_STATE_VERSION;
+    pState->nStateBytes = sizeof(*pState);
+    pState->uMapper = MapperNo;
+    pState->bChrRam = NesHeader.byVRomSize == 0 ? 1 : 0;
+    pState->uFrameTick = m_uFrameTick;
+    pState->uFrame = m_uFrame;
+    pState->uLine = m_uLine;
+
+    pState->nCpuStateBytes = K6502_SaveState(
+        pState->aCpuState, sizeof(pState->aCpuState));
+    pState->nApuStateBytes = InfoNES_pAPUSaveState(
+        pState->aApuState, sizeof(pState->aApuState));
+    pState->nMapperStateBytes = InfoNES_MapperSaveState(
+        pState->aMapperState, sizeof(pState->aMapperState));
+    if (!pState->nCpuStateBytes || !pState->nApuStateBytes ||
+        !pState->nMapperStateBytes)
+    {
+        memset(pState, 0, sizeof(*pState));
+        return;
+    }
+
+    memcpy(pState->aRam, RAM, sizeof(pState->aRam));
+    memcpy(pState->aSram, SRAM, sizeof(pState->aSram));
+    memcpy(pState->aPpuRam, PPURAM, sizeof(pState->aPpuRam));
+    memcpy(pState->aSpriteRam, SPRRAM, sizeof(pState->aSpriteRam));
+    if (pState->bChrRam)
+        memcpy(pState->aChrRam, VROM, sizeof(pState->aChrRam));
+    memcpy(pState->aChrBuf, ChrBuf, sizeof(pState->aChrBuf));
+    memcpy(pState->aPalette, PalTable, sizeof(pState->aPalette));
+    memcpy(pState->aPpuScanTable, PPU_ScanTable,
+           sizeof(pState->aPpuScanTable));
+    memcpy(pState->aApuRegisters, APU_Reg,
+           sizeof(pState->aApuRegisters));
+
+    pState->PPU_R0 = PPU_R0; pState->PPU_R1 = PPU_R1;
+    pState->PPU_R2 = PPU_R2; pState->PPU_R3 = PPU_R3;
+    pState->PPU_R7 = PPU_R7;
+    pState->PPU_Scr_V = PPU_Scr_V;
+    pState->PPU_Scr_V_Next = PPU_Scr_V_Next;
+    pState->PPU_Scr_V_Byte = PPU_Scr_V_Byte;
+    pState->PPU_Scr_V_Byte_Next = PPU_Scr_V_Byte_Next;
+    pState->PPU_Scr_V_Bit = PPU_Scr_V_Bit;
+    pState->PPU_Scr_V_Bit_Next = PPU_Scr_V_Bit_Next;
+    pState->PPU_Scr_H = PPU_Scr_H;
+    pState->PPU_Scr_H_Next = PPU_Scr_H_Next;
+    pState->PPU_Scr_H_Byte = PPU_Scr_H_Byte;
+    pState->PPU_Scr_H_Byte_Next = PPU_Scr_H_Byte_Next;
+    pState->PPU_Scr_H_Bit = PPU_Scr_H_Bit;
+    pState->PPU_Scr_H_Bit_Next = PPU_Scr_H_Bit_Next;
+    pState->PPU_Latch_Flag = PPU_Latch_Flag;
+    pState->PPU_UpDown_Clip = PPU_UpDown_Clip;
+    pState->PPU_NameTableBank = PPU_NameTableBank;
+    pState->byVramWriteEnable = byVramWriteEnable;
+    pState->FrameIRQ_Enable = FrameIRQ_Enable;
+    pState->ChrBufUpdate = ChrBufUpdate;
+    pState->PPU_Addr = PPU_Addr; pState->PPU_Temp = PPU_Temp;
+    pState->PPU_Increment = PPU_Increment;
+    pState->PPU_Scanline = PPU_Scanline;
+    pState->PPU_SP_Height = PPU_SP_Height;
+    pState->FrameStep = FrameStep; pState->FrameSkip = FrameSkip;
+    pState->FrameCnt = FrameCnt;
+    pState->SpriteJustHit = SpriteJustHit;
+    pState->APU_Mute = APU_Mute;
+    pState->PAD1_Latch = (Uint32)PAD1_Latch;
+    pState->PAD2_Latch = (Uint32)PAD2_Latch;
+    pState->PAD_System = (Uint32)PAD_System;
+    pState->PAD1_Bit = (Uint32)PAD1_Bit;
+    pState->PAD2_Bit = (Uint32)PAD2_Bit;
+
+    for (i = 0; i < 4; i++)
+    {
+        BYTE *pBank = i == 0 ? ROMBANK0 : i == 1 ? ROMBANK1 :
+                      i == 2 ? ROMBANK2 : ROMBANK3;
+        if (!NesEncodeBankPointer(pBank, &pState->RomBanks[i]))
+            break;
+    }
+    if (i != 4 ||
+        !NesEncodeBankPointer(SRAMBANK, &pState->SramBank))
+    {
+        memset(pState, 0, sizeof(*pState));
+        return;
+    }
+    for (i = 0; i < NES_STATE_PPU_BANKS; i++)
+    {
+        if (!NesEncodeBankPointer(PPUBANK[i], &pState->PpuBanks[i]))
+            break;
+    }
+    if (i != NES_STATE_PPU_BANKS ||
+        !NesEncodeBankPointer(PPU_BG_Base, &pState->PpuBgBase) ||
+        !NesEncodeBankPointer(PPU_SP_Base, &pState->PpuSpriteBase))
+    {
+        memset(pState, 0, sizeof(*pState));
+        return;
+    }
+
+    /* Commit last so a failed component snapshot is unmistakably invalid. */
+    pState->uMagic = NES_STATE_MAGIC;
 }
 
 Bool NesSystem::RestoreState(NesStateT *pState)
 {
-    (void)pState;
-    return FALSE;
+    BYTE *pRomBanks[4];
+    BYTE *pPpuBanks[NES_STATE_PPU_BANKS];
+    BYTE *pSramBank;
+    BYTE *pPpuBgBase;
+    BYTE *pPpuSpriteBase;
+    Int32 i;
+
+    if (!pState || !m_bRomReady || !m_pNesRom ||
+        pState->uMagic != NES_STATE_MAGIC ||
+        pState->uVersion != NES_STATE_VERSION ||
+        pState->nStateBytes != sizeof(*pState) ||
+        pState->uMapper != MapperNo ||
+        pState->bChrRam != (NesHeader.byVRomSize == 0 ? 1U : 0U) ||
+        pState->nCpuStateBytes > sizeof(pState->aCpuState) ||
+        pState->nApuStateBytes > sizeof(pState->aApuState) ||
+        pState->nMapperStateBytes != (Uint32)InfoNES_MapperStateBytes())
+    {
+        return FALSE;
+    }
+
+    /* Resolve every pointer before mutating the running machine. A bad
+       reference then rejects the state without leaving half a restore. */
+    for (i = 0; i < 4; i++)
+    {
+        pRomBanks[i] = NesDecodeBankPointer(&pState->RomBanks[i]);
+        if (!pRomBanks[i])
+            return FALSE;
+    }
+    pSramBank = NesDecodeBankPointer(&pState->SramBank);
+    if (!pSramBank)
+        return FALSE;
+    for (i = 0; i < NES_STATE_PPU_BANKS; i++)
+    {
+        pPpuBanks[i] = NesDecodeBankPointer(&pState->PpuBanks[i]);
+        if (!pPpuBanks[i])
+            return FALSE;
+    }
+    pPpuBgBase = NesDecodeBankPointer(&pState->PpuBgBase);
+    pPpuSpriteBase = NesDecodeBankPointer(&pState->PpuSpriteBase);
+    if (!pPpuBgBase || !pPpuSpriteBase)
+        return FALSE;
+
+    memcpy(RAM, pState->aRam, sizeof(pState->aRam));
+    memcpy(SRAM, pState->aSram, sizeof(pState->aSram));
+    memcpy(PPURAM, pState->aPpuRam, sizeof(pState->aPpuRam));
+    memcpy(SPRRAM, pState->aSpriteRam, sizeof(pState->aSpriteRam));
+    if (pState->bChrRam)
+        memcpy(VROM, pState->aChrRam, sizeof(pState->aChrRam));
+    memcpy(ChrBuf, pState->aChrBuf, sizeof(pState->aChrBuf));
+    memcpy(PalTable, pState->aPalette, sizeof(pState->aPalette));
+    memcpy(PPU_ScanTable, pState->aPpuScanTable,
+           sizeof(pState->aPpuScanTable));
+    memcpy(APU_Reg, pState->aApuRegisters,
+           sizeof(pState->aApuRegisters));
+    if (!InfoNES_MapperLoadState(
+            pState->aMapperState, pState->nMapperStateBytes))
+        return FALSE;
+
+    PPU_R0 = pState->PPU_R0; PPU_R1 = pState->PPU_R1;
+    PPU_R2 = pState->PPU_R2; PPU_R3 = pState->PPU_R3;
+    PPU_R7 = pState->PPU_R7;
+    PPU_Scr_V = pState->PPU_Scr_V;
+    PPU_Scr_V_Next = pState->PPU_Scr_V_Next;
+    PPU_Scr_V_Byte = pState->PPU_Scr_V_Byte;
+    PPU_Scr_V_Byte_Next = pState->PPU_Scr_V_Byte_Next;
+    PPU_Scr_V_Bit = pState->PPU_Scr_V_Bit;
+    PPU_Scr_V_Bit_Next = pState->PPU_Scr_V_Bit_Next;
+    PPU_Scr_H = pState->PPU_Scr_H;
+    PPU_Scr_H_Next = pState->PPU_Scr_H_Next;
+    PPU_Scr_H_Byte = pState->PPU_Scr_H_Byte;
+    PPU_Scr_H_Byte_Next = pState->PPU_Scr_H_Byte_Next;
+    PPU_Scr_H_Bit = pState->PPU_Scr_H_Bit;
+    PPU_Scr_H_Bit_Next = pState->PPU_Scr_H_Bit_Next;
+    PPU_Latch_Flag = pState->PPU_Latch_Flag;
+    PPU_UpDown_Clip = pState->PPU_UpDown_Clip;
+    PPU_NameTableBank = pState->PPU_NameTableBank;
+    byVramWriteEnable = pState->byVramWriteEnable;
+    FrameIRQ_Enable = pState->FrameIRQ_Enable;
+    ChrBufUpdate = pState->ChrBufUpdate;
+    PPU_Addr = pState->PPU_Addr; PPU_Temp = pState->PPU_Temp;
+    PPU_Increment = pState->PPU_Increment;
+    PPU_Scanline = pState->PPU_Scanline;
+    PPU_SP_Height = pState->PPU_SP_Height;
+    FrameStep = pState->FrameStep; FrameSkip = pState->FrameSkip;
+    FrameCnt = pState->FrameCnt;
+    SpriteJustHit = pState->SpriteJustHit;
+    APU_Mute = pState->APU_Mute;
+    PAD1_Latch = pState->PAD1_Latch; PAD2_Latch = pState->PAD2_Latch;
+    PAD_System = pState->PAD_System;
+    PAD1_Bit = pState->PAD1_Bit; PAD2_Bit = pState->PAD2_Bit;
+
+    ROMBANK0 = pRomBanks[0]; ROMBANK1 = pRomBanks[1];
+    ROMBANK2 = pRomBanks[2]; ROMBANK3 = pRomBanks[3];
+    SRAMBANK = pSramBank;
+    for (i = 0; i < NES_STATE_PPU_BANKS; i++)
+        PPUBANK[i] = pPpuBanks[i];
+    PPU_BG_Base = pPpuBgBase;
+    PPU_SP_Base = pPpuSpriteBase;
+
+    if (!K6502_LoadState(pState->aCpuState, pState->nCpuStateBytes) ||
+        !InfoNES_pAPULoadState(
+            pState->aApuState, pState->nApuStateBytes))
+        return FALSE;
+
+    m_uFrameTick = pState->uFrameTick;
+    m_uFrame = pState->uFrame;
+    m_uLine = pState->uLine;
+    return TRUE;
 }
 
 Int32 NesSystem::GetSRAMBytes()
 {
-    /* Phase 5: probe NesRom + InfoNES_Reset to learn the real size. */
-    return 0;
+    return (m_bRomReady && m_pNesRom && m_pNesRom->HasBatterySRAM())
+        ? SRAM_SIZE
+        : 0;
 }
 
 Uint8 *NesSystem::GetSRAMData()
 {
-    return NULL;
+    return GetSRAMBytes() > 0 ? SRAM : NULL;
 }
 
 const char *NesSystem::GetString(StringE eString)

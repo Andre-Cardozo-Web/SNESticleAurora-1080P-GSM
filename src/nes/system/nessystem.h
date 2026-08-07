@@ -5,18 +5,18 @@
  * Mirrors the structure of SnesSystem (snes.h) so the mainloop's polymorphic
  * dispatch through Emu::System* works identically for NES and SNES.
  *
- * Phase 3 scope (current):
+ * Current cartridge support:
  *   - SetRom() seeds InfoNES globals (NesHeader, ROM, VROM, optional CHR
  *     RAM) and runs InfoNES_Init() / InfoNES_Reset() for the cartridge.
  *   - ExecuteFrame() steps the InfoNES core for exactly one NES frame and
  *     converts WorkFrame[256*240] (RGB555) into the RGBA8 render surface
  *     uploaded by mainloop_process.cpp.
- *   - Input is wired through InfoNES_PadState -> reads SysInputT, remaps
- *     SNES bits to NES bits.  No audio yet (Phase 4).
- *   - SaveState / RestoreState are still stubs (Phase 5).
+ *   - Input is wired through InfoNES_PadState and pAPU audio is routed to
+ *     the same PS2 mix buffer used by the SNES core.
+ *   - Battery-backed 8 KiB SRAM and versioned save states are wired.
+ *     States include CPU, PPU, pAPU, CHR RAM and mapper-private data.
  *
- * Phase 4 adds InfoNES_SoundOutput -> CMixBuffer, Phase 5 covers state +
- * SRAM + FDS disk swap.
+ * FDS disk swapping remains separate from cartridge SRAM/state support.
  */
 
 #ifndef _NESSYSTEM_H
@@ -66,10 +66,10 @@ public:
     virtual const char *GetString(StringE eString);
     virtual Uint32 GetSampleRate();
 
-    /* NES-only state hooks used by mainloop_state.cpp once it's
-       un-#if-0'd. They mirror SnesSystem::Save/RestoreState. */
+    /* NES-only typed hooks used by mainloop_state.cpp. */
     void          SaveState(NesStateT *pState);
     Bool          RestoreState(NesStateT *pState);
+    Bool          IsRomReady() const          {return m_bRomReady;}
 
     /* FDS disk swapping (Phase 5). The current build returns NULL so
        mainloop_input.cpp's FDS swap branch is a no-op even after the

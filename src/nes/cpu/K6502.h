@@ -56,6 +56,13 @@ void K6502_Reset();
 void K6502_Set_Int_Wiring( BYTE byNMI_Wiring, BYTE byIRQ_Wiring );
 void K6502_Step( WORD wClocks );
 
+/* Opaque, versioned snapshot helpers used by the PS2 save-state layer.
+   Keeping the actual register layout private to K6502.cpp prevents a
+   persistent state file from ever containing host pointers. */
+#define K6502_STATE_MAX 64
+int K6502_SaveState( void *pState, int nStateBytes );
+int K6502_LoadState( const void *pState, int nStateBytes );
+
 // I/O Operation: os prototipos das funcoes static inline de leitura/
 // escrita (K6502_Read, K6502_Write, ...) vivem agora no proprio
 // K6502.cpp, que e' quem as usa (definidas em K6502_rw.h, incluido no

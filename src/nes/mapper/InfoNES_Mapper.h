@@ -70,6 +70,16 @@ struct MapperTable_tag
 
 extern struct MapperTable_tag MapperTable[];
 
+/* All mapper modules are included into InfoNES_Mapper.cpp and therefore
+   share one private data span. Save that span as opaque bytes so MMC1/MMC3
+   IRQ counters, latches and uncommon mapper RAM survive a state load.
+   The state still stores bank pointers as region+offset references. */
+#define INFONES_MAPPER_STATE_MAX (432 * 1024)
+int   InfoNES_MapperSaveState(void *pState, int nStateBytes);
+int   InfoNES_MapperLoadState(const void *pState, int nStateBytes);
+BYTE *InfoNES_MapperStateBase(void);
+int   InfoNES_MapperStateBytes(void);
+
 /*-------------------------------------------------------------------*/
 /*  Function prototypes                                              */
 /*-------------------------------------------------------------------*/
