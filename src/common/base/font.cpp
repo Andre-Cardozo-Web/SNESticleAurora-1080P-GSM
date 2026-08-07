@@ -59,6 +59,13 @@ extern const int           _Font_ui_spacew;
 extern const int           _Font_ui_lineh;
 extern const int           _Font_ui_maxw;
 
+/* The embedded atlas is 256x32 RGBA8 today.  Keep a RAM-side upload copy
+   so native 240p can use a CRT-friendly version without changing the
+   source artwork (and without doubling every glyph draw in the GS queue).
+   If a future atlas grows, FontInit safely falls back to the original. */
+#define FONT_UI_UPLOAD_MAX_BYTES (256 * 32 * 4)
+static Uint8 _Font_UploadData[FONT_UI_UPLOAD_MAX_BYTES] _ALIGN(16);
+
 struct FontStateT
 {
     Uint32 uColor;
@@ -339,9 +346,60 @@ Uint32 FontGetVramSize()
 void FontInit(Uint32 uVramAddr)
 {
     CSurface Surface;
+    Uint8 *pAtlas = _FontData_ui;
+    Uint32 nAtlasBytes = (Uint32)_FontTex_ui_w * (Uint32)_FontTex_ui_h * 4U;
+    Bool bCrtBold = (GPPrimGetScaleY() < 1.5f) ? TRUE : FALSE;
+
+    /* A one-pixel horizontal stroke occupies a single scanline at native
+       240p.  On a real CRT that makes the upper/lower halves of the 5x9
+       font look missing, even though the framebuffer itself is complete.
+
+       Build a 240p-only atlas with every ink pixel repeated on the next
+       scanline.  The glyph map has a one-row gutter, so the extra row does
+       not bleed into its neighbour.  480i/480p/1080i already render the
+       atlas at exact 2x and therefore keep the original, undilated glyphs. */
+    if (nAtlasBytes <= sizeof(_Font_UploadData))
+    {
+        Int32 i;
+        memcpy(_Font_UploadData, _FontData_ui, nAtlasBytes);
+        pAtlas = _Font_UploadData;
+
+        if (bCrtBold)
+        {
+            for (i = 0; i < _FontMap_ui_count; i++)
+            {
+                const FontMapEntryT *pEntry = &_FontMap_ui[i];
+                Int32 y;
+
+                /* Bottom-up makes this exactly a one-row dilation: a row
+                   written here is never used as the source of a later row. */
+                for (y = (Int32)pEntry->h - 1; y >= 0; y--)
+                {
+                    Uint32 x;
+                    Uint32 srcY = (Uint32)pEntry->v + (Uint32)y;
+                    Uint32 dstY = srcY + 1U;
+
+                    if (dstY >= (Uint32)_FontTex_ui_h)
+                        continue;
+
+                    for (x = 0; x < (Uint32)pEntry->w; x++)
+                    {
+                        Uint32 src = (srcY * (Uint32)_FontTex_ui_w
+                                    + (Uint32)pEntry->u + x) * 4U;
+                        Uint32 dst = (dstY * (Uint32)_FontTex_ui_w
+                                    + (Uint32)pEntry->u + x) * 4U;
+
+                        if (_Font_UploadData[src + 3] != 0)
+                            memcpy(&_Font_UploadData[dst],
+                                   &_Font_UploadData[src], 4);
+                    }
+                }
+            }
+        }
+    }
 
     // UI font (m5x7, Daniel Linssen): embedded RGBA8 atlas + explicit map.
-    Surface.Set(_FontData_ui, _FontTex_ui_w, _FontTex_ui_h,
+    Surface.Set(pAtlas, _FontTex_ui_w, _FontTex_ui_h,
                 _FontTex_ui_w * 4, PixelFormatGetByEnum(PIXELFORMAT_RGBA8));
 
     FontMakeFromMap(&_Font_Default, &Surface, uVramAddr,
@@ -351,6 +409,20 @@ void FontInit(Uint32 uVramAddr)
     FontMakeFromMap(&_Font_Fixed, &Surface, uVramAddr,
                     _FontMap_ui, _FontMap_ui_count,
                     _Font_ui_spacew, _Font_ui_lineh);
+
+    if (bCrtBold)
+    {
+        Int32 i;
+        /* Include the newly generated gutter row in each texture rect.
+           Keep uCharY=9: menu rows already advance by 11/12 logical pixels,
+           leaving room for the ten-pixel CRT glyph without relayout. */
+        for (i = 0; i < _FontMap_ui_count; i++)
+        {
+            Uint8 c = (Uint8)_FontMap_ui[i].c;
+            _Font_Default.CharMap[c].v1++;
+            _Font_Fixed.CharMap[c].v1++;
+        }
+    }
     /* monospace cell = widest glyph so nothing overlaps in fixed mode */
     _Font_Fixed.uFixedWidth = _Font_ui_maxw;
 

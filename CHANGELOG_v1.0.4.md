@@ -22,6 +22,8 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - Refeito o dimensionamento de **240p/288p, 480i, 480p e 1080i**, com
   framebuffer adequado para cada modo.
 - Corrigida a fonte pequena/comprimida de **240p** relatada na **Issue #26**.
+- A fonte de 240p ganhou um atlas próprio para CRT, com traços verticais de
+  duas scanlines; 480i, 480p e 1080i mantêm o desenho original em 2x.
 - Corrigido o widescreen quebrado de **480p** com uma apresentação `16:9 Safe`
   que não ultrapassa a janela válida do PCRTC nem lê VRAM fora do framebuffer.
 - Adicionados perfis de cor SNES **Original** e **Composite**, selecionáveis e
@@ -137,6 +139,15 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   centralizados e colunas alinhadas.
 - O desenho dos glifos evita amostragem fracionária com `NEAREST`, reduzindo
   letras cortadas ou com largura variável.
+- Após o teste em CRT mostrar que os traços horizontais de uma única scanline
+  ainda pareciam cortados, `FontInit()` passou a gerar em RAM um atlas
+  específico para 240p: cada pixel de tinta é repetido uma linha abaixo.
+- A dilatação usa a linha vazia já existente entre os glifos e é feita uma vez
+  no upload da fonte, sem duplicar centenas de primitivas por quadro.
+- O atlas embarcado continua intacto; 480i, 480p e 1080i usam a versão normal,
+  portanto a correção não engrossa a fonte nas resoluções que já estavam boas.
+- Esta revisão visual não altera áudio, ritmo de emulação, SRAM, PPU nem lógica
+  específica de jogos.
 
 ### Widescreen, overscan e offsets
 
@@ -358,8 +369,7 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 - Compilação limpa da source extraída do ZIP com o toolchain PS2DEV: **153
   arquivos compilados**.
-- Resultado: **0 erros** e **2 avisos antigos** de possível truncamento de texto
-  em caminhos, sem novos avisos causados por estas mudanças.
+- Resultado desta source: **153/153 arquivos**, **0 erros** e **0 avisos**.
 - O downloader foi validado com uma coleção local: uma ROM SNES no formato
   GoodTools `(U) [!]` e uma ROM NES dentro de ZIP encontraram os nomes Libretro
   correspondentes e produziram **8/8 imagens** nas quatro categorias.
