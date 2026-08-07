@@ -46,8 +46,26 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   PCM de 44,1 kHz e a segunda reamostragem que podia segurar ou estourar notas.
 - Reset e load state calculam também a scanline inclusiva até o próximo VSync,
   evitando encurtar o primeiro bloco de áudio depois da retomada.
+- Corrigido o congelamento introduzido pela r7 ao abrir ROMs NES que consultam
+  o status do APU no primeiro ciclo de uma janela de áudio.
 - A paleta antiga e excessivamente saturada do InfoNES foi substituída pela
   paleta NTSC 2C02 padrão do **Mesen2**, preservada em RGBA8.
+
+---
+
+## Revisão NES r8: hotfix do congelamento ao abrir jogos
+
+- Corrigida a leitura de `$4015` exatamente no ciclo zero. Esse acesso é
+  válido no NES, mas a rotina importada tentava avançar o APU até o ciclo `-1`.
+- Como os `asserts` de consistência estão ativos na compilação do PS2, o tempo
+  negativo encerrava a execução dentro da biblioteca; no console/emulador isso
+  aparecia apenas como o homebrew congelado ao iniciar determinados jogos.
+- A leitura agora usa diretamente o estado corrente quando não existe um ciclo
+  anterior e conserva a ordem original dos eventos em todos os demais ciclos.
+- Adicionado ao processo de validação um teste específico para leituras no
+  ciclo zero, depois de escritas no mesmo ciclo e logo após `end_frame()`.
+- O conserto é restrito ao APU do NES. Vídeo e áudio do SNES, Final Fight,
+  mappers, paleta, navegador e saves não foram alterados nesta revisão.
 
 ---
 

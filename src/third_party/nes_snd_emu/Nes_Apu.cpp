@@ -369,7 +369,15 @@ void Nes_Apu::write_register( nes_time_t time, nes_addr_t addr, int data )
 
 int Nes_Apu::read_status( nes_time_t time )
 {
-	run_until_( time - 1 );
+	/* A CPU is allowed to read $4015 at the very beginning of a time
+	   frame.  The original code always ran to time - 1, which turns a
+	   perfectly valid read at cycle zero into run_until_( -1 ).  Debug
+	   assertions are enabled in the PS2 build, so that underflow aborted the
+	   whole homebrew while a NES ROM was starting.  There is no preceding
+	   cycle to emulate when time already equals last_time; sample the current
+	   status directly and keep the normal one-cycle ordering otherwise. */
+	if ( time > last_time )
+		run_until_( time - 1 );
 
 	int result = (dmc.irq_flag << 7) | (irq_flag << 6);
 
