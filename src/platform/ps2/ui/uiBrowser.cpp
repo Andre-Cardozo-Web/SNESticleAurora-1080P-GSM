@@ -5,10 +5,8 @@
 #include <libpad.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <dirent.h>
+#include <limits.h>
 #include <unistd.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #define NEWLIB_PORT_AWARE          /* libera fileXio no port newlib (igual main.cpp) */
 #include <fileXio.h>
 #include <fileXio_rpc.h>   /* HDD APA: fileXioDopen/Dread (listar particoes) */
@@ -51,6 +49,51 @@ static Bool BrowserIsStateBankName(const Char *pName)
 	        pName[nLength - 1] == 'b');
 }
 
+/* Resolve the rare DT_UNKNOWN equivalent without slowing down normal ROM
+   folders. fileXio/iomanX guarantees FIO_S_* mode bits even for legacy ioman
+   drivers (iomanX_dread converts FIO_SO_* before the result reaches the EE).
+   Some third-party drivers still return no type at all; mirror PicoDrive's
+   PS2 browser strategy for those entries by querying the complete path, then
+   fall back to a harmless dopen probe if getstat is also inconclusive. */
+static Bool BrowserResolveDirectory(const Char *pParent, const Char *pName,
+                                    unsigned int uMode)
+{
+	Char path[1024];
+	size_t nParent;
+	iox_stat_t statInfo;
+	int dfd;
+
+	if (FIO_S_ISDIR(uMode))
+		return TRUE;
+	if (FIO_S_ISREG(uMode))
+		return FALSE;
+	if (!pParent || !pName || !pName[0])
+		return FALSE;
+
+	nParent = strlen(pParent);
+	if (snprintf(path, sizeof(path), "%s%s%s", pParent,
+	             (nParent > 0 && pParent[nParent - 1] != '/' &&
+	              pParent[nParent - 1] != '\\' &&
+	              pParent[nParent - 1] != ':') ? "/" : "",
+	             pName) >= (int)sizeof(path))
+		return FALSE;
+
+	memset(&statInfo, 0, sizeof(statInfo));
+	if (fileXioGetStat(path, &statInfo) >= 0)
+	{
+		if (FIO_S_ISDIR(statInfo.mode))
+			return TRUE;
+		if (FIO_S_ISREG(statInfo.mode))
+			return FALSE;
+	}
+
+	dfd = fileXioDopen(path);
+	if (dfd < 0)
+		return FALSE;
+	fileXioDclose(dfd);
+	return TRUE;
+}
+
 /* ------------------------------------------------------------------
    Browser long-name UX: ellipsis truncation + marquee scroll.
 
@@ -68,6 +111,15 @@ static Bool BrowserIsStateBankName(const Char *pName)
    from clipping the panel edge. The size column on the right is
    currently commented out (line ~334), so this is the full column. */
 #define BROWSER_NAME_MAXPIXELS (240)
+
+/* The footer is drawn by _MenuDraw() at y=211..224. Keep the last
+   browser row completely above it. The old expression was based on
+   the original font's metrics; the current 9px UI font advances 11px
+   per row, so it allowed rows to collide with the green footer text. */
+#define BROWSER_LIST_TOP        (32)
+#define BROWSER_FOOTER_TOP      (211)
+#define BROWSER_ROW_ADVANCE     (11)
+#define BROWSER_VISIBLE_LINES   ((BROWSER_FOOTER_TOP - BROWSER_LIST_TOP) / BROWSER_ROW_ADVANCE)
 
 /* When cover art (capas) is enabled the ROM list name column shrinks to
    leave room for the cover box on the right side of the 256px-wide
@@ -107,6 +159,14 @@ static Bool BrowserIsStateBankName(const Char *pName)
 #define BROWSER_MARQUEE_STEP_FRAMES  (3)
 #define BROWSER_MARQUEE_PAUSE_END    (40)
 #define BROWSER_MARQUEE_SCROLL_PX    (1)
+
+/* Folder labels are cosmetic only: the stored dirent name remains untouched
+   for Chdir()/GetEntryPath(). Keep both markers fixed while only the middle
+   name is truncated or scrolled, so even a very long folder always reads as
+   an openable entry: "> Folder name/". Both characters are available in the
+   embedded ASCII-only m5x7 atlas. */
+#define BROWSER_DIR_PREFIX "> "
+#define BROWSER_DIR_SUFFIX "/"
 
 /* Width of a single space in the current font, used to size the
    marquee gap. We grab it lazily once per Draw() so the cost is one
@@ -275,6 +335,78 @@ static void BrowserCopyMarquee(Char *out, size_t out_size, const Char *src,
 			i++;
 		}
 	}
+}
+
+/* Pixel budget available to the part of a label that can scroll. Directory
+   markers stay outside this budget and therefore never disappear. */
+static Int32 BrowserEntryNameBudget(BrowserEntryTypeE eType, Int32 max_px)
+{
+	if (eType == BROWSER_ENTRYTYPE_DIR)
+	{
+		max_px -= FontGetStrWidth(BROWSER_DIR_PREFIX);
+		max_px -= FontGetStrWidth(BROWSER_DIR_SUFFIX);
+	}
+	return max_px > 0 ? max_px : 1;
+}
+
+static Int32 BrowserEntryMarqueeLimit(const BrowserEntryT *pEntry,
+                                      Int32 max_px)
+{
+	Int32 limit;
+
+	if (!pEntry)
+		return 0;
+	limit = FontGetStrWidth(pEntry->name) -
+	        BrowserEntryNameBudget(pEntry->eType, max_px);
+	return limit > 0 ? limit : 0;
+}
+
+static void BrowserFormatFullEntryLabel(Char *out, size_t out_size,
+                                        const BrowserEntryT *pEntry)
+{
+	if (!out || !out_size)
+		return;
+	if (!pEntry)
+	{
+		out[0] = '\0';
+		return;
+	}
+
+	if (pEntry->eType == BROWSER_ENTRYTYPE_DIR)
+		snprintf(out, out_size, BROWSER_DIR_PREFIX "%s" BROWSER_DIR_SUFFIX,
+		         pEntry->name);
+	else
+		snprintf(out, out_size, "%s", pEntry->name);
+}
+
+static void BrowserFormatVisibleEntryLabel(Char *out, size_t out_size,
+	                                        const BrowserEntryT *pEntry,
+	                                        Int32 max_px, Bool bMarquee,
+	                                        Uint32 tick)
+{
+	Char name[BROWSER_ENTRY_MAXCHARS + 1];
+	Int32 nameBudget;
+
+	if (!out || !out_size)
+		return;
+	if (!pEntry)
+	{
+		out[0] = '\0';
+		return;
+	}
+
+	nameBudget = BrowserEntryNameBudget(pEntry->eType, max_px);
+	if (bMarquee)
+		BrowserCopyMarquee(name, sizeof(name), pEntry->name,
+		                    nameBudget, tick);
+	else
+		BrowserCopyEllipsis(name, sizeof(name), pEntry->name, nameBudget);
+
+	if (pEntry->eType == BROWSER_ENTRYTYPE_DIR)
+		snprintf(out, out_size, BROWSER_DIR_PREFIX "%s" BROWSER_DIR_SUFFIX,
+		         name);
+	else
+		snprintf(out, out_size, "%s", name);
 }
 
 /* ------------------------------------------------------------------
@@ -640,14 +772,20 @@ CBrowserScreen::CBrowserScreen(Uint32 uMaxEntries)
 {
 	m_Dir[0]=0;
 	m_nEntries=0;
-	m_MaxEntries = uMaxEntries;
+	m_MaxEntries = 0;
+	m_bCapacityError = FALSE;
 	m_iSelect=0;
 	m_iScroll=0;
-	m_MaxLines = (209 / 11 - 1); // umm, hacked
+	m_MaxLines = BROWSER_VISIBLE_LINES;
 	m_bMCDir = FALSE;
 	m_bSubMenu = FALSE;
 	m_bStateManager = FALSE;
-	m_pDirEntries = new BrowserEntryT[uMaxEntries];
+	m_bHasExecutables = FALSE;
+	m_pDirEntries = NULL;
+
+	/* uMaxEntries is an initial reservation, not a hard limit. */
+	if (uMaxEntries > 0 && uMaxEntries <= (Uint32)INT_MAX)
+		EnsureEntryCapacity((Int32)uMaxEntries);
 
 	m_SubMenu.SetTitle("File Menu");
 	m_SubMenu.SetEntries((char **)_MenuEntries);
@@ -657,7 +795,7 @@ CBrowserScreen::CBrowserScreen(Uint32 uMaxEntries)
 
 CBrowserScreen::~CBrowserScreen()
 {
-	delete m_pDirEntries;
+	delete[] m_pDirEntries;
 }
 
 void CBrowserScreen::ResetEntries()
@@ -665,6 +803,8 @@ void CBrowserScreen::ResetEntries()
 	m_iSelect  = 0;
 	m_nEntries = 0;
 	m_iScroll  = 0;
+	m_bCapacityError = FALSE;
+	m_bHasExecutables = FALSE;
 }
 
 
@@ -687,20 +827,73 @@ static Int32 _BrowserEntryQSort(const void *pA, const void *pB)
 
 void CBrowserScreen::SortEntries()
 {
-	qsort(m_pDirEntries, m_nEntries, sizeof(m_pDirEntries[0]), _BrowserEntryQSort);
+	if (m_nEntries > 1)
+		qsort(m_pDirEntries, m_nEntries, sizeof(m_pDirEntries[0]), _BrowserEntryQSort);
 }
 
 
-void CBrowserScreen::AddEntry(const Char *pName, BrowserEntryTypeE eType, Int32 size)
+Bool CBrowserScreen::EnsureEntryCapacity(Int32 nRequired)
 {
-	if (m_nEntries < m_MaxEntries)
+	BrowserEntryT *pNewEntries;
+	Int32 nNewCapacity;
+
+	if (nRequired <= m_MaxEntries)
+		return TRUE;
+	if (nRequired <= 0)
+		return FALSE;
+
+	/* Geometric growth makes a directory of thousands of ROMs cheap to
+	   append while leaving the only real ceiling at available EE RAM. */
+	nNewCapacity = m_MaxEntries > 0 ? m_MaxEntries : 256;
+	while (nNewCapacity < nRequired)
 	{
-		strncpy(m_pDirEntries[m_nEntries].name, pName, BROWSER_ENTRY_MAXCHARS - 1);
-		m_pDirEntries[m_nEntries].name[BROWSER_ENTRY_MAXCHARS-1] = '\0';
-		m_pDirEntries[m_nEntries].size = size;
-		m_pDirEntries[m_nEntries].eType = eType;
-		m_nEntries++;
+		if (nNewCapacity > INT_MAX / 2)
+		{
+			nNewCapacity = nRequired;
+			break;
+		}
+		nNewCapacity *= 2;
 	}
+
+	/* BrowserEntryT is POD and the project-wide new[] returns NULL on
+	   allocation failure (exceptions are disabled). */
+	if ((size_t)nNewCapacity > ((size_t)-1) / sizeof(BrowserEntryT))
+		return FALSE;
+	pNewEntries = new BrowserEntryT[nNewCapacity];
+	if (!pNewEntries)
+		return FALSE;
+
+	if (m_pDirEntries && m_nEntries > 0)
+		memcpy(pNewEntries, m_pDirEntries,
+		       (size_t)m_nEntries * sizeof(BrowserEntryT));
+	delete[] m_pDirEntries;
+	m_pDirEntries = pNewEntries;
+	m_MaxEntries = nNewCapacity;
+	return TRUE;
+}
+
+
+Bool CBrowserScreen::AddEntry(const Char *pName, BrowserEntryTypeE eType, Int32 size)
+{
+	if (!pName || m_nEntries == INT_MAX ||
+	    !EnsureEntryCapacity(m_nEntries + 1))
+	{
+		if (!m_bCapacityError)
+		{
+			printf("Browser: out of memory after %d entries\n", m_nEntries);
+			m_bCapacityError = TRUE;
+		}
+		return FALSE;
+	}
+
+	strncpy(m_pDirEntries[m_nEntries].name, pName, BROWSER_ENTRY_MAXCHARS - 1);
+	m_pDirEntries[m_nEntries].name[BROWSER_ENTRY_MAXCHARS-1] = '\0';
+	m_pDirEntries[m_nEntries].size = size;
+	m_pDirEntries[m_nEntries].eType = eType;
+	m_nEntries++;
+	if (eType == BROWSER_ENTRYTYPE_EXECUTABLE)
+		m_bHasExecutables = TRUE;
+	return TRUE;
 }
 
 
@@ -713,17 +906,7 @@ void CBrowserScreen::Draw()
 	/* Name column width: shrinks when cover art is on (to leave room
 	   for the cover box on the right), full width when off so the
 	   screen looks exactly like the original. */
-	Bool bHasRoms = FALSE;
-	{
-		Int32 _i;
-		for (_i = 0; _i < m_nEntries; _i++)
-			if (m_pDirEntries[_i].eType == BROWSER_ENTRYTYPE_EXECUTABLE)
-			{
-				bHasRoms = TRUE;
-				break;
-			}
-	}
-	Bool bCoverUI = (CoverIsEnabled() && bHasRoms) ? TRUE : FALSE;
+	Bool bCoverUI = (CoverIsEnabled() && m_bHasExecutables) ? TRUE : FALSE;
 	Int32 nameMaxPx = bCoverUI ? BROWSER_NAME_MAXPIXELS_COVER : BROWSER_NAME_MAXPIXELS;
 
 	/* Marquee state retained across frames. Reset whenever the
@@ -739,9 +922,21 @@ void CBrowserScreen::Draw()
 	static Uint32 s_marquee_tick   = 0;
 	static Uint32 s_marquee_hold   = 0;
 
-	iEntry = m_iScroll;
-
 	FontSelect(0);
+
+	/* Recompute from the selected font so a future font change cannot
+	   reintroduce the footer overlap. */
+	{
+		Int32 nAdvance = FontGetHeight() + 2;
+		if (nAdvance > 0)
+		{
+			m_MaxLines = (BROWSER_FOOTER_TOP - BROWSER_LIST_TOP) / nAdvance;
+			if (m_MaxLines < 1)
+				m_MaxLines = 1;
+		}
+	}
+
+	iEntry = m_iScroll;
 
 	/* Starfield background. We replace the (faded) SNES output
 	   underneath us with a solid black sheet first so stars sit on a
@@ -796,12 +991,7 @@ void CBrowserScreen::Draw()
 			if (m_iSelect >= 0 && m_iSelect < m_nEntries)
 			{
 				BrowserEntryT *pSel = &m_pDirEntries[m_iSelect];
-				Char probe[BROWSER_ENTRY_MAXCHARS + 4];
-				if (pSel->eType == BROWSER_ENTRYTYPE_DIR)
-					snprintf(probe, sizeof(probe), "/%s", pSel->name);
-				else
-					snprintf(probe, sizeof(probe), "%s", pSel->name);
-				if (FontGetStrWidth(probe) > nameMaxPx)
+				if (BrowserEntryMarqueeLimit(pSel, nameMaxPx) > 0)
 					bScroll = TRUE;
 			}
 
@@ -816,15 +1006,8 @@ void CBrowserScreen::Draw()
 					/* Check if scroll reached the end (tick in px >=
 					   fullW - maxpx). We compute fullW here cheaply
 					   since BrowserCopyMarquee clamps internally. */
-					Char probe2[BROWSER_ENTRY_MAXCHARS + 4];
 					BrowserEntryT *pSel2 = &m_pDirEntries[m_iSelect];
-					if (pSel2->eType == BROWSER_ENTRYTYPE_DIR)
-						snprintf(probe2, sizeof(probe2), "/%s", pSel2->name);
-					else
-						snprintf(probe2, sizeof(probe2), "%s", pSel2->name);
-					Int32 fullW2 = FontGetStrWidth(probe2);
-					Int32 maxOff2 = fullW2 - nameMaxPx;
-					if (maxOff2 < 0) maxOff2 = 0;
+					Int32 maxOff2 = BrowserEntryMarqueeLimit(pSel2, nameMaxPx);
 
 					if ((Int32)s_marquee_tick >= maxOff2)
 					{
@@ -927,10 +1110,9 @@ void CBrowserScreen::Draw()
 
 	for (iLine=0; iLine < m_MaxLines; iLine++)
 	{
-		/* Raw `prefix + entry name` lives here; the visible portion
-		   gets shortened (ellipsis or marquee) into `view` below.
-		   BROWSER_ENTRY_MAXCHARS + 4 is sized so snprintf("%s", name)
-		   plus a leading "/" cannot trip -Wformat-truncation. */
+		/* The full cosmetic label lives in `str`; the visible portion is
+		   shortened into `view`. A directory needs "> " + name + "/" + NUL,
+		   which fits in BROWSER_ENTRY_MAXCHARS + 4. */
 		Char str[BROWSER_ENTRY_MAXCHARS + 4];
 		Char view[BROWSER_ENTRY_MAXCHARS + 8];
 		Char sizestr[32];
@@ -938,20 +1120,18 @@ void CBrowserScreen::Draw()
 		if (iEntry>=0 && iEntry < m_nEntries)
 		{
 			BrowserEntryT *pEntry = &m_pDirEntries[iEntry];
+			BrowserFormatFullEntryLabel(str, sizeof(str), pEntry);
 			if (pEntry->eType==BROWSER_ENTRYTYPE_DIR)
 			{
-				snprintf(str, sizeof(str), "/%s", pEntry->name);
 				sprintf(sizestr, " ");
 			}
 			else
 			if (pEntry->eType==BROWSER_ENTRYTYPE_DRIVE)
 			{
-				snprintf(str, sizeof(str), "%s", pEntry->name);
 				sprintf(sizestr, " ");
 			}
 			else
 			{
-				snprintf(str, sizeof(str), "%s", pEntry->name);
 				sprintf(sizestr, "%3dK", pEntry->size / 1024);
 			}
 
@@ -963,14 +1143,11 @@ void CBrowserScreen::Draw()
 			   GetEntryPath() / GetEntryName() still read directly from
 			   m_pDirEntries[i].name, so the truncation here is purely
 			   cosmetic and never affects fopen(). */
-			if (iEntry == m_iSelect && s_marquee_delay >= BROWSER_MARQUEE_DELAY_FRAMES)
-			{
-				BrowserCopyMarquee(view, sizeof(view), str, nameMaxPx, s_marquee_tick);
-			}
-			else
-			{
-				BrowserCopyEllipsis(view, sizeof(view), str, nameMaxPx);
-			}
+			BrowserFormatVisibleEntryLabel(
+				view, sizeof(view), pEntry, nameMaxPx,
+				(iEntry == m_iSelect &&
+				 s_marquee_delay >= BROWSER_MARQUEE_DELAY_FRAMES) ? TRUE : FALSE,
+				s_marquee_tick);
 
 			// render selection bar
 			if (iEntry == m_iSelect)
@@ -1209,21 +1386,15 @@ void CBrowserScreen::Input(Uint32 buttons, Uint32 trigger)
 }
 
 
-/* Directory iteration via newlib stdio + dirent.h. opendir/readdir
-   route through iomanX once init_ps2_filesystem_driver has run,
-   so cdfs:/, mc0:/, mass:/, host:/ all use the same API path.
-
-   We can no longer rely on dirent->d_type alone to tell files apart
-   from subdirectories - cdfs.irx leaves it at DT_UNKNOWN, and a
-   subset of older iomanX backends also under-fill it. To stay robust
-   across every device we always confirm directories with a follow-up
-   stat() on the joined path. The same trick handles the legacy
-   CDVD.IRX bug where a stray SUBDIR bit leaked into regular files
-   (see PR #76 for the original symptom). */
+/* Enumerate every filesystem through fileXioDread. Unlike the newlib
+   opendir/readdir adapter, iox_dirent_t already contains mode and size,
+   so CDFS no longer performs a second stat RPC (and usually another
+   optical-disc seek) for every single ROM. The same path works for
+   cdfs, mass, mc, host, pfs and mmce. iomanX normalises legacy CDFS mode
+   bits before fileXio sends the record to the EE. */
 
 void CBrowserScreen::SetDir(const Char *pDir)
 {
-    DIR *dir;
     Char openBuf[1024];
     const Char *openPath = pDir;
     /* 0=nao-hdd, 1=dentro de particao (pfs0:), 2=lista de particoes, -1=falha */
@@ -1294,80 +1465,76 @@ void CBrowserScreen::SetDir(const Char *pDir)
 	}
 	else if (strlen(openPath) > 0)
 	{
-		dir = opendir(openPath);
-		if (dir != NULL)
+		int dfd = fileXioDopen(openPath);
+		if (dfd >= 0)
 		{
-			struct dirent *de;
-			while ((de = readdir(dir)) != NULL)
+			iox_dirent_t de;
+			while (fileXioDread(dfd, &de) > 0)
 			{
 				BrowserEntryTypeE eType;
-				Char childPath[1024];
-				struct stat st;
-				bool bIsDir = false;
-				Int32 nSize = 0;
+				BrowserEntryTypeE resolvedType;
+				Bool bIsDir;
+				Int32 nSize;
 
-				if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
+				/* Be defensive with third-party iomanX drivers that fill all
+				   256 bytes without writing a final NUL. */
+				de.name[sizeof(de.name) - 1] = '\0';
+				if (!de.name[0] || !strcmp(de.name, ".") || !strcmp(de.name, ".."))
 					continue;
 
 				/* Hide cover-art PNGs from the browser list - they are
 				   artwork for the cover system, not ROMs. */
 				{
-					size_t _nl = strlen(de->d_name);
-					if (_nl >= 4 && strcasecmp(de->d_name + _nl - 4, ".png") == 0)
+					size_t nLength = strlen(de.name);
+					if (nLength >= 4 &&
+					    strcasecmp(de.name + nLength - 4, ".png") == 0)
 						continue;
 				}
 
-				/* Trust d_type only when it is concrete; otherwise stat
-				   the joined path. cdfs.irx leaves d_type=DT_UNKNOWN. */
-				bool typeKnown = false;
-#ifdef DT_DIR
-				if (de->d_type == DT_DIR) { bIsDir = true; typeKnown = true; }
-				else if (de->d_type == DT_REG) { typeKnown = true; }
-#endif
-				if (!typeKnown)
-				{
-					snprintf(childPath, sizeof(childPath),
-					         "%s%s", openPath, de->d_name);
-					if (stat(childPath, &st) == 0)
-					{
-						bIsDir = S_ISDIR(st.st_mode) ? true : false;
-						nSize  = (Int32)st.st_size;
-					}
-				}
+				resolvedType = (BrowserEntryTypeE)SendMessage(
+					2, 0, (void *)de.name);
 
-				if (bIsDir)
+				/* Recognised ROM extensions win over the directory flag and never
+				   need a getstat/dopen fallback. This
+				   keeps compatibility with old CDVD drivers whose dread result
+				   occasionally leaked a SUBDIR bit into regular files, without
+				   paying for a stat() call per ROM. */
+				if (resolvedType == BROWSER_ENTRYTYPE_EXECUTABLE)
 				{
-					eType = BROWSER_ENTRYTYPE_DIR;
+					eType = BROWSER_ENTRYTYPE_EXECUTABLE;
 				}
 				else
 				{
+					bIsDir = BrowserResolveDirectory(
+						openPath, de.name, de.stat.mode);
+					if (bIsDir)
+					{
+						eType = BROWSER_ENTRYTYPE_DIR;
+					}
+					else
+					{
 					/* The dedicated manager must never invite deletion of
 					   SRAM, state.cfg, icons, or unrelated files that share
 					   mc0:/SNESticle with memory-card state banks. */
-					if (m_bStateManager &&
-					    !BrowserIsStateBankName(de->d_name))
-					{
-						continue;
-					}
-
-					eType = (BrowserEntryTypeE)SendMessage(
-						2, 0, (void *)de->d_name);
-					if (eType != BROWSER_ENTRYTYPE_EXECUTABLE)
+						if (m_bStateManager &&
+						    !BrowserIsStateBankName(de.name))
+							continue;
 						eType = BROWSER_ENTRYTYPE_OTHER;
-
-					/* Pick up size if we did not stat above. */
-					if (nSize == 0)
-					{
-						snprintf(childPath, sizeof(childPath),
-						         "%s%s", openPath, de->d_name);
-						if (stat(childPath, &st) == 0)
-							nSize = (Int32)st.st_size;
 					}
 				}
 
-				AddEntry(de->d_name, eType, nSize);
+				/* BrowserEntryT keeps a legacy signed 32-bit display size. The
+				   size column is disabled, but clamp instead of wrapping huge
+				   files negative. */
+				if (de.stat.hisize != 0 || de.stat.size > (unsigned int)INT_MAX)
+					nSize = INT_MAX;
+				else
+					nSize = (Int32)de.stat.size;
+
+				if (!AddEntry(de.name, eType, nSize))
+					break;
 			}
-			closedir(dir);
+			fileXioDclose(dfd);
 		}
 	} else
 	{

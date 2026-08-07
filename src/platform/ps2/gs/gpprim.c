@@ -36,57 +36,33 @@ static int       _gpprim_curTexValid = 0;
 
 /* Logical-to-physical coordinate scale.
  *
- * The original iaddis pipeline drew everything (SNES blit, menu, font,
- * browser, modals) directly to a 256x240 framebuffer.  All the UI code
- * (uiMenu.cpp, uiList.cpp, font.cpp, mainloop_render.cpp ...) still
- * passes coordinates in that 256x240 logical space.
+ * The original UI and SNES blit are authored in a 256x240 space. The
+ * selected mode owns the physical framebuffer:
  *
- * On real PS2 hardware that 256x240 framebuffer worked when the user
- * was on a CRT plugged in via composite/RGB without GSM, because the
- * PCRTC magnification table happens to match (MagH=10, FBW=4, all
- * reads stay inside the 256-pixel-wide framebuffer rows).
+ *   240p/288p  256x240  -> 1x/1x, native samples (no digital rescale)
+ *   480i        640x480  -> 2.5x/2x
+ *   480p/1080i  640x480  -> 2.5x/2x
  *
- * On a setup that forces the GS into a higher mode -- the most common
- * one is OPL's GSM 480p selector or a passive PS2toHDMI cable that
- * insists on 480p -- the PCRTC programs DW=2559, MagH=0 and tries to
- * read 640 visible pixels per scanline from a framebuffer that is
- * only 256 pixels wide.  The pixels past column 256 fall into the
- * neighbouring framebuffer row (because FBW=4 means each VRAM row is
- * 256*4=1024 bytes), and the read wraps around onto whatever data
- * came next in VRAM.  The visible symptom is the red/green vertical
- * stripes Adriano photographed around the menu when booting through
- * GSM 480p + PS2toHDMI.
- *
- * The robust fix is to allocate a framebuffer wide enough that the
- * PCRTC -- in either native NTSC/PAL mode *or* under GSM 480p -- only
- * reads pixels that we actually drew.  640x448 (FBW=10) covers every
- * PCRTC mode GSM exposes (480i / 480p), so we standardise on that.
- *
- * To avoid touching every UI / menu / font / browser file (each of
- * which hand-codes 256x240 layout in dozens of call sites), we keep
- * the *logical* coordinate space at 256x240 and apply a uniform scale
- * here at the GPPrim level.  Everything that goes through PolyRect /
- * PolyTexRect / FontPuts (i.e. literally every UI draw) is rescaled
- * to fill the wider framebuffer.
- *
- * Critically, the scale is applied to position coordinates (x,y) but
- * *not* to texture UVs: textures are sampled in their own UV space
- * and must not stretch on read.  The blit of _OutTex to the framebuffer
- * therefore renders the SNES image at its native 256x240 UVs but
- * stretched across the 640x448 destination -- which is exactly what
- * is wanted: the SNES picture fills the screen on GSM 480p and on
- * any other display.
- *
- * The blender's own per-scanline GIF chains (snppublend_gs.cpp) target
- * _OutTex (a texture, not the framebuffer) at FBW=4, so they are
- * unaffected by this scale. */
+ * Centralising that transform here avoids mode-specific coordinates in
+ * every menu. It applies only to destination positions; texture UVs stay
+ * in their own native space. The SNES blender renders its 256-pixel lines
+ * into _OutTex and is therefore unaffected until the final screen blit. */
 static float _gpprim_scale_x = 1.0f;
 static float _gpprim_scale_y = 1.0f;
+static float _gpprim_offset_x = 0.0f;
+static float _gpprim_offset_y = 0.0f;
 
 void GPPrimSetScale(float sx, float sy)
 {
+    GPPrimSetTransform(sx, sy, 0.0f, 0.0f);
+}
+
+void GPPrimSetTransform(float sx, float sy, float ox, float oy)
+{
     if (sx > 0.0f) _gpprim_scale_x = sx;
     if (sy > 0.0f) _gpprim_scale_y = sy;
+    _gpprim_offset_x = ox;
+    _gpprim_offset_y = oy;
 }
 
 /* Convert FIXED4 sub-pixel coordinate to float pixels. */
@@ -99,14 +75,16 @@ static inline float fx4_to_float(unsigned v)
    for primitive position coordinates only -- not for texture UVs. */
 static inline float fx4_to_float_sx(unsigned v)
 {
-    return (((float)((int)v)) / 16.0f) * _gpprim_scale_x;
+    return (((float)((int)v)) / 16.0f) * _gpprim_scale_x
+           + _gpprim_offset_x;
 }
 
 /* Like fx4_to_float but applies the logical->physical Y scale.  Used
    for primitive position coordinates only -- not for texture UVs. */
 static inline float fx4_to_float_sy(unsigned v)
 {
-    return (((float)((int)v)) / 16.0f) * _gpprim_scale_y;
+    return (((float)((int)v)) / 16.0f) * _gpprim_scale_y
+           + _gpprim_offset_y;
 }
 
 /* Promote a 32-bit RGBA colour to a 64-bit RGBAQ, with Q = 1.0f.
@@ -198,14 +176,13 @@ void GPPrimTexRect(u32 x1, u32 y1, u32 u1, u32 v1,
 
 float GPPrimGetScaleX(void) { return _gpprim_scale_x; }
 float GPPrimGetScaleY(void) { return _gpprim_scale_y; }
+float GPPrimGetOffsetX(void) { return _gpprim_offset_x; }
+float GPPrimGetOffsetY(void) { return _gpprim_offset_y; }
 
 /* Same as GPPrimTexRect but positions are taken as PHYSICAL framebuffer
-   coordinates (no logical->physical scale applied).  UVs are unscaled,
-   exactly like GPPrimTexRect.  The font uses this to draw each glyph at
-   an exact integer 2x of the atlas, which NEAREST samples as a clean
-   pixel-double -- so every glyph is identical and crisp, instead of the
-   uneven result you get sampling the atlas across the non-integer
-   2.5x/1.867x logical scale. */
+   coordinates (no logical->physical scale applied). UVs are unscaled.
+   The font uses this for exact 1x glyphs in native 240p and exact 2x
+   glyphs in the higher modes, avoiding fractional NEAREST sampling. */
 void GPPrimTexRectAbs(u32 x1, u32 y1, u32 u1, u32 v1,
                       u32 x2, u32 y2, u32 u2, u32 v2,
                       u32 z, u32 colour, unsigned abe)

@@ -28,6 +28,11 @@ struct FontT
 void FontInit(Uint32 uVramAddr);
 void FontShutdown();
 
+/* Number of GS VRAM bytes required by the embedded UI font atlas.
+   The video backend uses this before FontInit() so every video mode can
+   place the atlas after its framebuffers without relying on a fixed TBP. */
+Uint32 FontGetVramSize();
+
 void FontSetFont(Int32 iFont, FontT *pFont);
 void FontSelect(Int32 iFont);
 void FontPrintf(Float32 vx, Float32 vy, const Char *pFormat, ...);
@@ -58,4 +63,3 @@ void FontMakeFromMap(FontT *pFont, class CSurface *pSurface, Uint32 uVramAddr,
                      Int32 uSpaceW, Int32 uLineH);
 
 #endif
-

@@ -13,9 +13,16 @@ const float k_epsilon = 0.001f;
 
 
 static Uint32 _SNPPUColor_Pal15to32[SNPPUCOLOR_NUM];
+static Int32 _SNPPUColor_Profile = SNPPU_COLOR_PROFILE_ORIGINAL;
+static Bool _SNPPUColor_HasCalib = FALSE;
+static SNPPUColorCalibT _SNPPUColor_LastCalib;
 
-static void _SNPPUColorCalibrateColor(float r, float g, float b, float fSin, float fCos, float fBrightness, float fMaxExcursion)
+static void _SNPPUColorCalibrateColor(float *pR, float *pG, float *pB,
+	float fSin, float fCos, float fBrightness, float fMaxExcursion)
 {
+	float r = *pR;
+	float g = *pG;
+	float b = *pB;
 	// Convert from RGB to YUV space.
 	float y = .299f * r + .587f * g + .114f * b;
 	float u = 0.492f * (b - y);
@@ -66,6 +73,10 @@ static void _SNPPUColorCalibrateColor(float r, float g, float b, float fSin, flo
 	r = y + 0.956f * i + 0.620f * q;
 	g = y - 0.272f * i - 0.647f * q;
 	b = y - 1.108f * i + 1.705f * q;
+
+	*pR = r;
+	*pG = g;
+	*pB = b;
 }
 
 
@@ -89,11 +100,40 @@ Uint32 *SNPPUColorGetPalette()
 	return _SNPPUColor_Pal15to32;
 }
 
+Int32 SNPPUColorGetProfile(void)
+{
+	return _SNPPUColor_Profile;
+}
+
+void SNPPUColorSetProfile(Int32 iProfile)
+{
+	if (iProfile < 0 || iProfile >= SNPPU_COLOR_PROFILE_COUNT)
+		iProfile = SNPPU_COLOR_PROFILE_ORIGINAL;
+
+	if (_SNPPUColor_Profile == iProfile)
+		return;
+
+	_SNPPUColor_Profile = iProfile;
+
+	/* VideoSettingsLoad runs before the boot-time calibration call. In
+	   that case only remember the selection; MainLoopInit will build the
+	   table a few moments later. A live menu change rebuilds immediately,
+	   and BeginRender's UPDATE_ALL uploads the new CGRAM colours. */
+	if (_SNPPUColor_HasCalib)
+		SNPPUColorCalibrate(&_SNPPUColor_LastCalib);
+}
+
 
 void SNPPUColorCalibrate(const SNPPUColorCalibT *pCalib)
 {
 	Uint32 uColor15;
 	float fSin, fCos;
+
+	if (!pCalib)
+		return;
+
+	_SNPPUColor_LastCalib = *pCalib;
+	_SNPPUColor_HasCalib = TRUE;
 
 	fCos = cosf(pCalib->fIQAngle * (float)M_PI / 180.0f);
 	fSin = sinf(pCalib->fIQAngle * (float)M_PI / 180.0f);
@@ -114,8 +154,16 @@ void SNPPUColorCalibrate(const SNPPUColorCalibT *pCalib)
 		fG = ((float)uG) * (1.0f / 31.0f);
 		fB = ((float)uB) * (1.0f / 31.0f);
 
-		//
-		_SNPPUColorCalibrateColor(fR, fG, fB,  fSin, fCos, pCalib->fBrightness, pCalib->fMaxExcursion);
+		/* "Original" preserves the palette shipped by every prior build.
+		   "Composite" enables the YIQ/brightness calibration that has been
+		   present in this source since the original emulator but never took
+		   effect because RGB was accidentally passed by value. Keeping it
+		   optional avoids imposing one subjective CRT/RetroArch look. */
+		if (_SNPPUColor_Profile == SNPPU_COLOR_PROFILE_COMPOSITE)
+		{
+			_SNPPUColorCalibrateColor(&fR, &fG, &fB, fSin, fCos,
+				pCalib->fBrightness, pCalib->fMaxExcursion);
+		}
 
 		// clamp R,G,B
 		if (fR > 1.0f) fR = 1.0f; 
@@ -139,5 +187,4 @@ void SNPPUColorCalibrate(const SNPPUColorCalibT *pCalib)
 		_SNPPUColor_Pal15to32[uColor15] = uColor32;
 	}
 }
-
 

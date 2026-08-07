@@ -1,6 +1,6 @@
 /* UI font atlas - generated from m5x7 (Daniel Linssen, CC0) @ size 16.
    Atlas 256x32 RGBA8 + explicit glyph map. Natural (un-dilated) glyphs;
-   the 2x integer draw makes 1px ink crisp on screen. Regen via tools/font_gen_ui.py. */
+   integer 1x/2x drawing keeps 1px ink crisp. Regen via tools/font_gen_ui.py. */
 #include "types.h"
 #include "font.h"
 

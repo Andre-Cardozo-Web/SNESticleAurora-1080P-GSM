@@ -78,10 +78,22 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 **PlayStation 2 platform**
 - gsKit‑based video backend with a **Video Config** screen.
 - Multiple video modes: **480i** (default, universally compatible), **480p**
-  (GSM / HDMI), **240p / 288p** (CRT), plus screen offset and widescreen.
+  (progressive/component), native **256x240 / 288p** (CRT), and **1080i**
+  with a centred 4:3 viewport, plus screen offset, overscan and widescreen.
+  The 480p widescreen path uses a VRAM-safe 16:9 letterbox instead of
+  overflowing the PS2 DISPLAY/MAGH timing window.
+- Switchable SNES colour profiles: **Original** (default) and the emulator's
+  restored **Composite** YIQ calibration; the choice can be previewed live.
 - **Cover art** in the ROM browser — box art / screenshots from PNG files,
   decoded by **upng** (a bundled single‑file decoder, no external libs). See
   [Cover art](#cover-art-capas).
+- The ROM browser consumes each driver's directory records directly, avoids a
+  separate `stat`/disc seek per CDFS entry, and grows its list dynamically.
+  Directory types are read in the normalized `FIO_S_*` format returned by
+  iomanX, with a full-path probe only for drivers that return an unknown type.
+  Its embedded streaming CDFS driver removes PS2SDK's fixed 256-entry ISO
+  table. Folders are shown as `> NAME/`; the marker and final slash remain
+  visible while only a long middle name is truncated or scrolled.
 - **Menu music** — tracker tunes (`.mod` / `.xm`) play in the ROM browser and
   pause menu, with volume and synthesis‑rate controls. See
   [Menu music & audio](#menu-music--audio).
@@ -440,6 +452,10 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
 <summary>Show details</summary>
 
 
+The cumulative notes for the current test version are available in
+[`CHANGELOG_v1.0.4.md`](CHANGELOG_v1.0.4.md).
+
+
 - **Coprocessors**: added DSP‑1, DSP‑2, CX4, OBC1, S‑DD1 and S‑RTC, each
   written clean‑room and verified bit‑exact host‑side against public references.
   **DSP‑4** (Top Gear 3000) is **HLE / self‑contained** (no external files): the
@@ -450,12 +466,20 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
 - **NES (InfoNES) integration**: full PS2 platform layer (render, input, audio,
   one‑frame stepper), with the InfoNES core kept 1:1 with upstream.
 - **Video**: gsKit migration, the Video Config screen, multiple modes, and a
-  **safe 480i default** (240p stays available for CRT users).
+  **safe 480i default** (native 256x240 stays available for CRT users).
 - **Cover art**: the ROM browser shows box art / screenshots from PNG files,
   via a bundled single‑file decoder (RGB/RGBA, grayscale, and palette/indexed).
   Decoded covers are kept in a small RAM cache and neighbours are prefetched, so
   browsing stays smooth even from a CD; toggle it in Video Config, point it at a
   shared folder with `COVERS_PATH`, and cycle box/title/gameplay with □.
+- **ROM browser**: switched CDFS, USB, memory cards, host, MMCE and PFS/HDD to
+  direct directory records, eliminating the per-file `stat` round trip that
+  made large CDFS folders especially slow. iomanX-normalized `FIO_S_*` mode
+  bits identify directories consistently on every device; entries from unusual
+  third-party drivers that report no type are checked by full path. A streaming
+  fork of PS2SDK's CDFS driver removes its fixed 256-entry ISO table, the EE
+  entry array grows on demand, and the list/teal footer have separate geometry
+  so long directories never overwrite the status text.
 - **Menu music & audio controls**: tracker music (`.mod` / `.xm`) plays in the
   ROM browser and pause menu via the PS2 port of **libxmp-lite**, decoded on the
   EE and continuously resampled to the SPU2's 48 kHz. Added **Game Volume**,
@@ -497,7 +521,9 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
   (bsnes/Anomie) and host‑side; the cause is suspected to be the VRAM
   data/upload feeding it. **Under investigation.**
 - Some large / special‑chip titles may still freeze or misbehave.
-- **Missing chips**: SA‑1 and SuperFX (GSU) are not implemented.
+- **SuperFX (GSU)** is experimental in v1.0.4: the core, memory maps and host
+  tests were expanded substantially, but game-by-game validation is ongoing.
+- **Missing chip**: SA‑1 is not implemented.
 
 **NES (InfoNES)**
 - **Performance**: heavy scenes can push a frame over the 16.6 ms budget, which

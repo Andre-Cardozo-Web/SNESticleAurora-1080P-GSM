@@ -14,8 +14,8 @@
  *     emulator core).
  * It is bounded (COVER_CACHE_SLOTS) so it never grows without limit.
  *
- * NOTE (untested on real PS2): the cover texture lives in a hard-coded
- * VRAM slot from the legacy GS layout (COVER_TEX in mainloop_init.cpp).
+ * Its GS VRAM slot is allocated after the active mode's framebuffers and
+ * supplied to CoverInit(), rather than being tied to a fixed address.
  */
 
 #ifndef _UICOVER_H
@@ -23,10 +23,13 @@
 
 #include "types.h"
 
-/* One-time setup: bind the GS VRAM slot (TBP, 256-byte units) used for
-   the on-screen cover texture. Call once after FontInit(). Does NOT
+/* Bind the GS VRAM slot (TBP, 256-byte units) used for the on-screen
+   cover texture. Call after FontInit() and after a video-mode reinit. Does NOT
    allocate the RAM cache (that happens lazily on first use). */
 void CoverInit(Uint32 uVramTBP);
+
+/* Number of GS VRAM bytes reserved for the 256x256 RGBA cover texture. */
+Uint32 CoverGetVramSize(void);
 
 /* Toggle / query the on/off state (default OFF). Disabling frees the
    RAM cache. */

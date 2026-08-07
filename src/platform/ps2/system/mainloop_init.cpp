@@ -119,16 +119,75 @@ extern "C" void DLog(const char *fmt, ...);
 #define FB0     	0x0000
 #define FB1     	0x0C00
 #define Z0      	0x1800
-#define TEXADDR 	0x2400
-#define FONT_TEX 	0x3000
 
-/* Cover-art texture slot (capas). 256x256 RGBA32 = 0x400 TBP units
-   (256-byte units), placed in the free region between the font atlas
-   (which only uses 0x3000..0x3080: a 256x32 RGBA atlas) and the SNES
-   blender at 0x3C00. 0x3400..0x3800 sits clear of both, leaving margin
-   on each side. UNTESTED on real PS2 - this is the single knob to
-   relocate if it ever collides. */
-#define COVER_TEX 	0x3400
+/* GS VRAM resources allocated after the mode-specific framebuffers.
+
+   The old fixed layout put _OutTex at TBP 0x2400 (byte 0x240000).
+   That was safe for the old 640x448/480i layout, whose two RGBA32 buffers
+   ended at 0x230000, but NOT for any 640x480 mode: the second buffer ends
+   at 0x258000. _OutTex therefore overwrote the last 96 KiB of every other
+   480p framebuffer, producing the repeating bands and alternate-frame
+   flicker reported in issue #19. 480i now also uses 480 rows for exact 2x
+   vertical scaling and is protected by this same dynamic allocation.
+
+   Keep every allocation 8 KiB aligned because _OutTex and the blender
+   temporary surface are also used as FRAME targets (FRAME.FBP units).
+   gsKit has already reserved the active mode's FB0/FB1 when this helper
+   runs, so the same layout remains valid for 240p, 480i, 480p and 1080i. */
+#define MAINLOOP_VRAM_FRAME_ALIGN   8192U
+#define MAINLOOP_OUT_TEX_BYTES      (256U * 256U * 4U)
+/* Highest blender address is base + 0x200 TBP (temporary 256px RGBA
+   surface). Reserve through +0x280 TBP so the complete GS page span is
+   private to the blender. */
+#define MAINLOOP_BLEND_VRAM_BYTES   (0x280U * 256U)
+
+static Uint32 s_FontTexTBP  = 0;
+static Uint32 s_CoverTexTBP = 0;
+
+static Uint32 _MainLoopAlignVramBytes(Uint32 bytes)
+{
+	return (bytes + MAINLOOP_VRAM_FRAME_ALIGN - 1U) &
+	       ~(MAINLOOP_VRAM_FRAME_ALIGN - 1U);
+}
+
+static Bool _MainLoopAllocVideoVram(void)
+{
+	Uint32 outTBP;
+	Uint32 fontTBP;
+	Uint32 coverTBP;
+	Uint32 blenderTBP;
+
+	outTBP = GSK_VramAllocTBP(
+		_MainLoopAlignVramBytes(MAINLOOP_OUT_TEX_BYTES));
+	fontTBP = GSK_VramAllocTBP(
+		_MainLoopAlignVramBytes(FontGetVramSize()));
+	coverTBP = GSK_VramAllocTBP(
+		_MainLoopAlignVramBytes(CoverGetVramSize()));
+	blenderTBP = GSK_VramAllocTBP(
+		_MainLoopAlignVramBytes(MAINLOOP_BLEND_VRAM_BYTES));
+
+	/* Address zero is reserved for the first framebuffer, so every user
+	   allocation must be non-zero. A zero here means gsKit rejected the
+	   request because the 4 MiB GS VRAM budget was exhausted. */
+	if (!outTBP || !fontTBP || !coverTBP || !blenderTBP)
+	{
+		_MainLoop_uOutTexTBP  = 0;
+		_MainLoop_uBlenderTBP = 0;
+		s_FontTexTBP = s_CoverTexTBP = 0;
+		printf("[video] GS VRAM allocation failed\n");
+		return FALSE;
+	}
+
+	_MainLoop_uOutTexTBP  = outTBP;
+	_MainLoop_uBlenderTBP = blenderTBP;
+	s_FontTexTBP          = fontTBP;
+	s_CoverTexTBP         = coverTBP;
+
+	printf("[video] VRAM TBP out=%04X font=%04X cover=%04X blend=%04X\n",
+	       (unsigned)outTBP, (unsigned)fontTBP,
+	       (unsigned)coverTBP, (unsigned)blenderTBP);
+	return TRUE;
+}
 
 
 /* Browser starting directory. On real PS2 you typically want "mass:/"
@@ -195,37 +254,21 @@ Bool MainLoopInit()
     #endif
 	// BOOTLOG("[boot] GS_InitGraph()\n");
 	GS_InitGraph(GS_NTSC,GS_NONINTERLACE);
-dispx = MAINLOOP_DISPX;
+	dispx = MAINLOOP_DISPX;
 	dispy = MAINLOOP_DISPY;
 	// BOOTLOG("[boot] GS_SetDispMode()\n");
 	GS_SetDispMode(dispx,dispy, MAINLOOP_SCREENWIDTH, MAINLOOP_SCREENHEIGHT);
-// BOOTLOG("[boot] GS_SetEnv()\n");
-	GS_SetEnv(MAINLOOP_SCREENWIDTH, MAINLOOP_SCREENHEIGHT, FB0, FB1, GS_PSMCT32, Z0, GS_PSMZ16S);
+	// BOOTLOG("[boot] GS_SetEnv()\n");
+	GS_SetEnv(MAINLOOP_SCREENWIDTH, MAINLOOP_SCREENHEIGHT,
+	          FB0, FB1, GS_PSMCT32, Z0, GS_PSMZ16S);
 
-	/* Use the legacy hard-coded VRAM layout that matches the iaddis
-	   original SNESticle ELF (which renders correctly on real PS2 and
-	   on NetherSX2). The previous gsKit-allocator path was the only
-	   non-cosmetic divergence between iaddis's source and HEAD in the
-	   PS2 render pipeline: gsKit_vram_alloc returns addresses *after*
-	   its internal FB0/FB1/Z allocations, with its own padding and
-	   alignment rules, so the returned TBPs would not match the
-	   pre-Fase-1A layout (TEXADDR=0x2400, blender=0x3C00) that the
-	   SNESticle blender was originally tuned against, and on the
-	   PS2's GS the blender per-scanline writes would land in regions
-	   that happened to alias FB0/FB1/Z0/font memory depending on the
-	   gsKit version - producing the vertical-stripe tile corruption
-	   visible on the SMW title screen since the very first successful
-	   boot. Hard-coding to TEXADDR/0x3C00 reproduces iaddis's exact
-	   working layout. */
-	_MainLoop_uOutTexTBP  = TEXADDR;
-	_MainLoop_uBlenderTBP = 0x3C00;
-	// printf("[boot] _OutTex TBP=0x%04X, Blender TBP=0x%04X (legacy layout)\n",
-	// 	(unsigned)_MainLoop_uOutTexTBP, (unsigned)_MainLoop_uBlenderTBP);
+	if (!_MainLoopAllocVideoVram())
+		return FALSE;
 
-GPFifoInit((Uint128 *)_MainLoop_GfxPipe, sizeof(_MainLoop_GfxPipe));
-    PolyInit();
-    FontInit(FONT_TEX);
-    CoverInit(COVER_TEX);
+	GPFifoInit((Uint128 *)_MainLoop_GfxPipe, sizeof(_MainLoop_GfxPipe));
+	PolyInit();
+	FontInit(s_FontTexTBP);
+	CoverInit(s_CoverTexTBP);
 
 	// setup log screen
 	_MainLoop_pLogScreen = new CLogScreen();
@@ -290,8 +333,10 @@ GPFifoInit((Uint128 *)_MainLoop_GfxPipe, sizeof(_MainLoop_GfxPipe));
     if (g_GskVideoMode != GSK_GetActiveVideoMode())
     {
         GSK_ReinitVideo();
-        FontInit(FONT_TEX);
-        CoverInit(COVER_TEX);
+        if (!_MainLoopAllocVideoVram())
+            return FALSE;
+        FontInit(s_FontTexTBP);
+        CoverInit(s_CoverTexTBP);
     }
     else
     {

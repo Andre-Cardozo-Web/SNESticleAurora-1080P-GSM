@@ -36,10 +36,6 @@
 #include "mainloop_bgm.h"
 
 extern "C" {
-#include "ps2ip.h"
-};
-
-extern "C" {
 #include "mcsave_ee.h"
 };
 
@@ -198,17 +194,21 @@ void _MenuDraw()
 	PolyTexture(NULL);
     PolyBlend(TRUE);
 
-
-    t_ip_info config;
-    memset(&config, 0, sizeof(config));
-
 	// draw current screen
 	if (_MainLoop_pScreen)
 	{
 		_MainLoop_pScreen->Draw();
 	}
 
-	int vy = 215;
+	/* Restore a distinct lower status area using the same dark teal as
+	   the original iaddis title bars. Drawing it after the screen also
+	   guarantees that a browser row can never paint over the footer. */
+	const int footerY = 211;
+	const int vy = 215;
+	PolyTexture(NULL);
+	PolyBlend(TRUE);
+	PolyColor4f(0.0f, 0.2f, 0.2f, 0.9f);
+	PolyRect(0, footerY, 256, 224 - footerY);
 
 	FontSelect(2);
 //	FontColor4f(1.0, 0.0f, 0.0f, 1.0f);
@@ -242,17 +242,10 @@ void _MenuDraw()
 		);
 #endif	
 
-    /* Status bar (green): compiler version on the left, IP in the
-       middle, app version right-aligned. Replaces the #if 0 block
-       above which depended on VersionGetInfo (also #if 0). */
+    /* Status bar (green): compiler version on the left and app version
+       right-aligned. Network details already live on the Host settings
+       screen, so the redundant IP field no longer consumes this row. */
     FontPrintf(8, vy, "GCC%d.%d", __GNUC__, __GNUC_MINOR__);
-
-    FontPrintf(48,vy,"IP: %d.%d.%d.%d", 
-            (config.ipaddr.s_addr >> 0) & 0xFF,
-            (config.ipaddr.s_addr >> 8) & 0xFF,
-            (config.ipaddr.s_addr >>16) & 0xFF,
-            (config.ipaddr.s_addr >>24) & 0xFF
-                    );
 
 #ifdef APP_VERSION
     static const char *_AppVersionStr =

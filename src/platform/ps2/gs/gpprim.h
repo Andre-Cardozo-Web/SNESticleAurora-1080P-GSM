@@ -11,21 +11,22 @@ void GPPrimTexRect(u32 x1, u32 y1, u32 u1, u32 v1, u32 x2, u32 y2, u32 u2, u32 v
 void GPPrimSetTex(u32 tbp, u32 tbw, u32 texwidthlog2, u32 texheightlog2, u32 tpsm, u32 cbp, u32 cbw, u32 cpsm, int filter);
 void GPPrimUploadTexture(int TBP, int TBW, int xofs, int yofs, int pxlfmt, void *tex, int wpxls, int hpxls);
 
-/* Set the logical->physical coordinate scale applied by GPPrimRect and
- * GPPrimTexRect to position coordinates (x,y).  UVs are not scaled.
+/* Set the logical->physical coordinate transform applied by GPPrimRect and
+ * GPPrimTexRect to position coordinates (x,y). UVs are not transformed.
  *
  * Used by the gsKit init path (gskit_backend.c::GSK_Init) to map the
- * legacy 256x240 logical layout used throughout the UI to the wider
- * 640x448 physical framebuffer that survives OPL GSM / PS2toHDMI mode
- * forcing.  See the long comment at the top of gpprim.c for the full
- * rationale. */
+ * legacy 256x240 UI layout onto each mode's physical framebuffer. Native
+ * 240p stays 1:1; higher modes use their mode-specific scale. */
 void GPPrimSetScale(float sx, float sy);
+void GPPrimSetTransform(float sx, float sy, float ox, float oy);
 
-/* Read back the current logical->physical scale (set by GPPrimSetScale).
- * The font path uses these to pixel-double the glyph atlas at an exact
- * integer scale instead of the non-integer 2.5x/1.867x NEAREST stretch. */
+/* Read back the current logical->physical transform. The font path uses
+ * it to place an exact 1x/2x glyph draw without fractional NEAREST
+ * resampling, including the centred 480p widescreen canvas. */
 float GPPrimGetScaleX(void);
 float GPPrimGetScaleY(void);
+float GPPrimGetOffsetX(void);
+float GPPrimGetOffsetY(void);
 
 /* Like GPPrimTexRect but x/y are PHYSICAL framebuffer coordinates: the
  * logical->physical position scale is NOT applied (UVs are never scaled,
@@ -34,5 +35,3 @@ float GPPrimGetScaleY(void);
 void GPPrimTexRectAbs(u32 x1, u32 y1, u32 u1, u32 v1, u32 x2, u32 y2, u32 u2, u32 v2, u32 z, u32 colour, unsigned abe);
 
 #endif
-
-

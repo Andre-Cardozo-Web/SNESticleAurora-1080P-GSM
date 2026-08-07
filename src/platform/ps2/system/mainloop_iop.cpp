@@ -353,9 +353,9 @@ void _MainLoopLoadModules(Char **ppSearchPaths)
 
 	/* The custom CDVD.IRX (and CDVD_Init / CDVD_FlushCache RPC) was
 	   the iaddis project's legacy cdfs replacement. It is no longer
-	   loaded here because init_ps2_filesystem_driver() in app/main.cpp
-	   has already brought up the modern cdfs.irx, which registers the
-	   "cdfs:" device with iomanX. The browser and ROM loader now
+	   loaded here because CdfsLoadEmbeddedIrx() in app/main.cpp has
+	   already brought up the streaming cdfs.irx, which registers the
+	   "cdfs:" device. The browser and ROM loader now
 	   reach the disc through plain newlib stdio (opendir("cdfs:/"),
 	   fopen("cdfs:/ROMS/foo.sfc", "rb"), ...) instead of the bespoke
 	   RPC. CDVD_FlushCache call-sites have been replaced with no-ops

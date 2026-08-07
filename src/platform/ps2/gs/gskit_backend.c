@@ -21,25 +21,18 @@
 #include "gskit_backend.h"
 #include "gpprim.h"
 
-/* Physical framebuffer size.
- *
- * 640x448 is the only resolution that survives both the native NTSC /
- * PAL PCRTC magnification *and* the resolution-forcing performed by
- * OPL's GSM (480i / 480p / 720i / 1080i) and by passive PS2toHDMI
- * cables that latch the GS into 480p.  All of those PCRTC programmings
- * read 640 visible pixels per scanline, so the framebuffer must be at
- * least that wide; the height covers full-frame NTSC 480 and the
- * useful part of PAL 512 (the top/bottom 32 lines are inside overscan
- * on every TV we know of).
- *
- * The UI / SNES blit still drives the renderer in the legacy 256x240
- * logical coordinate space; gpprim.c scales that 1:1 -> physical via
- * GPPrimSetScale below.  See the long comment at the top of gpprim.c
- * for the rationale. */
-#define GSK_FB_WIDTH    640
-#define GSK_FB_HEIGHT   448
+/* Legacy logical coordinate space the entire UI was written in.
 
-/* Legacy logical coordinate space the entire UI was written in. */
+   The physical framebuffer is deliberately mode-specific:
+     240p/288p : 256x240 (native SNES/NES horizontal samples)
+     480i      : 640x480 (integer 2x vertical scale)
+     480p      : 640x480 (one complete progressive frame)
+     1080i     : 640x480 (PCRTC-scaled 4:3 window)
+
+   Treating 640x448 as universal caused two separate defects: 240p
+   resampled every 256-pixel line to 640 pixels (scroll shimmer and the
+   tiny font from issue #26), while 480p needed 480 rows and made its
+   second framebuffer overlap the old fixed _OutTex address. */
 #define GSK_LOGICAL_W   256
 #define GSK_LOGICAL_H   240
 
@@ -73,10 +66,10 @@ int g_GskVideoMode = GSK_VIDMODE_480I;
 int g_GskDispOffX  = 0;
 int g_GskDispOffY  = 0;
 int g_GskOverscan  = 0;   /* 0..100 shrink of display area */
-int g_GskWidescreen = 0;  /* 0 = 4:3, 1 = 16:9 anamorphic stretch */
+int g_GskWidescreen = 0;  /* 0 = 4:3, 1 = safe 16:9 presentation */
 static int _gsk_vck         = 4;   /* display-offset VCK units            */
 static int _gsk_fb_width    = 640; /* active FB width                     */
-static int _gsk_fb_height   = 448; /* active FB height                    */
+static int _gsk_fb_height   = 480; /* active FB height                    */
 static int _gsk_active_mode = GSK_VIDMODE_480I; /* mode the GS is in now   */
 
 /* gsKit's computed DISPLAY params, captured after gsKit_init_screen so
@@ -85,6 +78,7 @@ static int _gsk_base_dw, _gsk_base_dh, _gsk_base_magh, _gsk_base_magv;
 static int _gsk_base_startx, _gsk_base_starty;
 
 static void _GskApplyDisplay(void);   /* offset + overscan + widescreen */
+static void _GskApplyRenderTransform(void);
 
 /* Saved GSK_Init arguments so GSK_ReinitVideo() can replay them. */
 static int _gsk_arg_w, _gsk_arg_h, _gsk_arg_dispx, _gsk_arg_dispy;
@@ -173,69 +167,57 @@ void GSK_Init(int width, int height,
         break;
 
     case GSK_VIDMODE_480I:
-        /* 480i interlaced. NTSC = 640x448@60i; em consoles PAL, troca
-           sozinho para 576i@50i (mesma geometria de FB, alinhado ao topo
-           -- seguro, sem realocar). Comportamento NTSC inalterado. */
+        /* 480i interlaced. 640x480 maps the logical 240 lines by an exact
+           2x factor, removing the fractional 240 -> 448 resample visible
+           during vertical scrolling. PAL emits the same 480-line source
+           centred in its 576-line raster. Overscan remains user-adjustable. */
         _pGsGlobal->Mode      = _gsk_DetectTvMode();
         _pGsGlobal->Interlace = GS_INTERLACED;
         _pGsGlobal->Field     = GS_FIELD;
         _gsk_fb_width         = 640;
-        _gsk_fb_height        = 448;
+        _gsk_fb_height        = 480;
         _gsk_vck              = 4;
         break;
 
     case GSK_VIDMODE_1080I:
-        /* 1080i (DTV) - EXPERIMENTAL.  A VRAM do PS2 (4MB) NAO comporta um
-           framebuffer real de 1920x1080; entao mantemos o mesmo FB 640x448
-           do 480i (cabe na VRAM, geometria comprovada) e deixamos o PCRTC
-           AMPLIAR (MAGH/MAGV) ate' preencher o raster 1080i -- mesma ideia
-           que o GSM usa ao "forcar" modos altos.  E' um CASO ISOLADO: nao
-           altera 240p/480i/480p.  So' vai exibir se a TV/conversor travar
-           em 1080i; senao, e' so' escolher outro modo. */
+        /* A full 1920x1080 RGBA framebuffer cannot fit in the PS2's 4 MiB
+           VRAM. Use a 640x480 source and let the PCRTC double it vertically.
+           After gsKit computes the mode registers below, the horizontal
+           display is reduced to 1280 pixels and centred: 1280x960 is 4:3,
+           so the default no longer stretches the game across 16:9. */
         _pGsGlobal->Mode      = GS_MODE_DTV_1080I;
         _pGsGlobal->Interlace = GS_INTERLACED;
         _pGsGlobal->Field     = GS_FIELD;
         _gsk_fb_width         = 640;
-        _gsk_fb_height        = 448;
-        _gsk_vck              = 4;
+        _gsk_fb_height        = 480;
+        _gsk_vck              = 1;
         break;
 
     case GSK_VIDMODE_240P:
     default:
-        /* NTSC 640x240 progressivo (4:3), 60Hz - nativo SNES/NES.
+        /* NTSC 256x240 progressive (PAL consoles emit 256x240 inside a
+           centred 288p raster). This is the native sample grid used by the
+           SNES/NES renderer: no 256 -> 640 digital resample, so horizontal
+           scrolling stays stable and the bitmap font is magnified by the
+           PCRTC together with the rest of the image.
+
            240p e' PROGRESSIVO, igual ao 480p: precisa de GS_FRAME (FFMD=1)
            para o PCRTC ler TODA linha do framebuffer numa varredura unica.
            Com GS_FIELD (FFMD=0) o PCRTC le linha-sim/linha-nao (modo de
            campo, so' faz sentido em entrelacado), resultando em sinal
-           quebrado / sem lock / imagem pela metade no PS2 real. Nao-
-           entrelacado ja' roda a 60Hz independente do FFMD.
-
-           LARGURA = 640 (NAO 320).  Esta e' a mesma razao documentada no
-           topo de gpprim.c: quando o GS e' forcado a um modo mais alto
-           -- exatamente o que um adaptador PS2->HDMI passivo faz ao cravar
-           480p -- o PCRTC passa a ler 640 pixels visiveis por linha.  Um
-           framebuffer mais estreito que isso faz o PCRTC ler alem da borda,
-           caindo na linha vizinha da VRAM = listras verticais coloridas
-           espremidas no canto (o print do Adriano).  640 de largura cobre
-           NTSC nativo E o 480p do adaptador, lendo so' o que desenhamos.
-           Bonus: mantem GPPrimSetScale em 640/256 = 2.5, a mesma proporcao
-           que a UI/fonte foram desenhadas (320 dava 1.25 = UI deformada). */
+           quebrado / sem lock / imagem pela metade no PS2 real. */
         _pGsGlobal->Mode      = _gsk_DetectTvMode();  /* NTSC 240p / PAL 288p (50Hz) */
         _pGsGlobal->Interlace = GS_NONINTERLACED;
         _pGsGlobal->Field     = GS_FRAME;
-        _gsk_fb_width         = 640;
+        _gsk_fb_width         = 256;
         _gsk_fb_height        = 240;
-        _gsk_vck              = 2;
+        _gsk_vck              = 4;
         break;
     }
     _gsk_active_mode = g_GskVideoMode;
 
-    /* Force the framebuffer dimensions to 640x448 regardless of what
-     * the caller passed.  See the GSK_FB_WIDTH/HEIGHT defines above and
-     * the long comment at the top of gpprim.c for the rationale.
-     *
-     * The width/height arguments are still honoured below via
-     * GPPrimSetScale so the existing 256x240 UI layout is preserved. */
+    /* The caller still describes the legacy 256x240 logical canvas;
+       physical dimensions come from the selected output mode above. */
     (void)width;
     (void)height;
     _pGsGlobal->Width  = _gsk_fb_width;
@@ -263,39 +245,26 @@ void GSK_Init(int width, int height,
                 D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
     dmaKit_chan_init(DMA_CHANNEL_GIF);
 
-    /* Zero the entire 4MB of GS VRAM before gsKit_init_screen allocates
-       and programs the framebuffer. This matches the canonical sequence
-       used by picodrive's PS2 port (irixxxx fork, platform/ps2/emu.c
-       around video_init): gsKit_set_clamp -> gsKit_vram_clear ->
-       gsKit_init_screen.
-
-       Why it matters here, even though the previous code worked on
-       PCSX2 / NetherSX2 / a CRT TV without it:
-
-       The framebuffer this app uses is 256x240 (NES native), but users
-       running through OPL's GSM (Graphics Synthesizer Mode selector)
-       force the GS into 480p / 720i / 1080i and rely on the PCRTC
-       magnifying our 256x240 surface to fill the screen. The PCRTC,
-       when magnifying past the actual framebuffer width/height, keeps
-       reading neighbouring VRAM pixels -- and on real PS2 hardware
-       those pixels start out as whatever the BIOS / uLaunchELF / OPL
-       left there, which gsKit_init_screen's own register programming
-       does not touch outside our 256x240 region.
-
-       Symptom on the user's setup (Adriano, modern TV via PS2toHDMI
-       cable + GSM forcing 480p): a strip of red and green vertical
-       bars surrounding the menu area, and the boot appearing to
-       freeze on that frame. Same root cause that killed Open-PS2-
-       Loader's GSM compatibility for several emulator forks until
-       they adopted the picodrive pattern.
-
-       On a CRT (Yamark) without GSM the PCRTC only reads inside the
-       256x240 window, so o leftover VRAM is invisible -- which is
-       why the bug only showed up for users with HDMI converters /
-       progressive scan / OPL GSM. */
+    /* Reset gsKit's VRAM allocation cursor before init_screen reserves the
+       mode-specific framebuffers. (Despite its historical name,
+       gsKit_vram_clear resets allocation state; it does not erase 4 MiB.) */
     gsKit_vram_clear(_pGsGlobal);
 
     gsKit_init_screen(_pGsGlobal);
+
+    /* gsKit maps a 640-wide source across all 1920 pixels in 1080i,
+       which turns 4:3 content into a horizontally stretched 16:9 image.
+       MAGH=1 reads all 640 source pixels into a 1280-pixel window. The
+       640x480 framebuffer is already mapped to 960 output rows (MAGV=1),
+       so the resulting centred 1280x960 window has the correct 4:3 ratio.
+       Widescreen remains an explicit user choice handled later. */
+    if (_gsk_active_mode == GSK_VIDMODE_1080I)
+    {
+        const int aspect_dw = 1280;
+        _pGsGlobal->StartX += (_pGsGlobal->DW - aspect_dw) / 2;
+        _pGsGlobal->MagH = 1;
+        _pGsGlobal->DW   = aspect_dw;
+    }
 
     /* Capture gsKit's computed DISPLAY params as the baseline for the
        overscan / widescreen transform. */
@@ -306,15 +275,14 @@ void GSK_Init(int width, int height,
     _gsk_base_startx = _pGsGlobal->StartX;
     _gsk_base_starty = _pGsGlobal->StartY;
 
-    /* Apply offset + overscan + widescreen (0/off = gsKit's defaults). */
-    _GskApplyDisplay();
+    /* GSK_Init is now usable. Mark it before applying the saved display
+       transform: _GskApplyDisplay used to return early here, so offsets,
+       overscan and widescreen silently failed whenever a saved mode caused
+       a boot-time GS reinitialisation. */
+    _gsk_initialised = 1;
 
-    /* Map the legacy 256x240 logical coordinate space used by every UI
-     * call site (PolyRect, FontPuts, browser, modals, menu, ...) onto
-     * the physical framebuffer.  See the long comment at the top of
-     * gpprim.c for the full rationale. */
-    GPPrimSetScale((float)_gsk_fb_width  / (float)GSK_LOGICAL_W,
-                   (float)_gsk_fb_height / (float)GSK_LOGICAL_H);
+    /* Apply offset + overscan + widescreen (0/off = mode baseline). */
+    _GskApplyDisplay();
 
     /* PMODE / DISPLAY1 / DISPLAY2 are now left at the values that
        gsKit_init_screen programmed (PMODE=0x8046 with CRTMD=1,
@@ -365,7 +333,34 @@ void GSK_Init(int width, int height,
     gsKit_finish();
     gsKit_sync_flip(_pGsGlobal);
 
-    _gsk_initialised = 1;
+}
+
+/* Map the 256x240 application canvas onto the selected framebuffer.
+
+   480p cannot perform the old "anamorphic" trick in DISPLAY/MAGH: its
+   valid horizontal timing window is 1440 VCK, while keeping all 640
+   source pixels and multiplying MAGH by 4/3 asks the PCRTC for 1920 VCK.
+   StartX then becomes negative and wraps to 4095, which NetherSX2 reports
+   as 256x480 and real hardware reads as a torn/repeated framebuffer.
+
+   In that one mode, preserve the standard 640x480 signal and present an
+   exact 16:9 image by using 640x360 centred vertically (letterbox). This
+   retains every source pixel, never reads outside VRAM and can be toggled
+   live. Other modes retain their already-tested PCRTC widescreen path. */
+static void _GskApplyRenderTransform(void)
+{
+    float sx = (float)_gsk_fb_width / (float)GSK_LOGICAL_W;
+    float sy = (float)_gsk_fb_height / (float)GSK_LOGICAL_H;
+    float ox = 0.0f;
+    float oy = 0.0f;
+
+    if (g_GskWidescreen && _gsk_active_mode == GSK_VIDMODE_480P)
+    {
+        sy *= 0.75f; /* 4:3 canvas -> 16:9 without horizontal over-read */
+        oy  = (float)_gsk_fb_height * 0.125f;
+    }
+
+    GPPrimSetTransform(sx, sy, ox, oy);
 }
 
 static void _GskApplyDisplay(void)
@@ -401,15 +396,13 @@ static void _GskApplyDisplay(void)
        is the anamorphic path -- on a 16:9 TV the wider picture fills the
        screen; on a 4:3 TV it overscans the left/right edges.
 
-       NOTE: the previous build only widened DW, which just added a blank
-       margin instead of stretching.  The fix is to scale MAGH too: the
-       picture occupies (DW+1) VCK and reads (DW+1)/(MAGH+1) source
-       pixels, so scaling both by the same factor keeps the source count
-       constant (no garbage) but spreads it wider = a real stretch. */
-    if (g_GskWidescreen)
+       480p is deliberately excluded: its safe fallback is handled by
+       _GskApplyRenderTransform() above because a 4/3 MAGH expansion does
+       not fit in that mode's timing window. */
+    if (g_GskWidescreen && _gsk_active_mode != GSK_VIDMODE_480P)
     {
         int magh1  = magh + 1;
-        int srcpix = magh1 ? (dw + 1) / magh1 : (dw + 1);
+        int srcpix = magh1 ? dw / magh1 : dw;
         int new_magh1 = (magh1 * 4 + 1) / 3;   /* ~ x1.333 (4:3 -> 16:9) */
         int new_dw1;
 
@@ -417,8 +410,8 @@ static void _GskApplyDisplay(void)
         if (new_magh1 < 1)  new_magh1 = 1;
         new_dw1 = new_magh1 * srcpix;
 
-        startx -= (new_dw1 - (dw + 1)) / 2;    /* keep the picture centred */
-        dw   = new_dw1 - 1;
+        startx -= (new_dw1 - dw) / 2;          /* keep the picture centred */
+        dw   = new_dw1;
         magh = new_magh1 - 1;
     }
 
@@ -431,6 +424,7 @@ static void _GskApplyDisplay(void)
 
     /* Re-emit DISPLAY1/2 (also folds in the user X/Y offset). */
     gsKit_set_display_offset(gs, g_GskDispOffX * _gsk_vck, g_GskDispOffY);
+    _GskApplyRenderTransform();
 }
 
 void GSK_SetDisplayOffset(int x, int y)
@@ -598,6 +592,17 @@ void GSK_ResetFrame(void)
     /* COLCLAMP = 1 (clamp).  Register 0x46 takes a single bit. */
     *p_data++ = (u64)1;
     *p_data++ = (u64)GS_REG_COLCLAMP;
+
+    /* Clear the complete PHYSICAL framebuffer, not only the transformed
+       256x240 canvas. This is required for the 480p widescreen letterbox:
+       otherwise the 60-pixel borders retain stale pixels from a previous
+       frame or from the former 4:3 transform. */
+    {
+        u8 previous_alpha = gs->PrimAlphaEnable;
+        gs->PrimAlphaEnable = GS_SETTING_OFF;
+        gsKit_clear(gs, 0);
+        gs->PrimAlphaEnable = previous_alpha;
+    }
 }
 
 void GSK_InvalidateTextureCache(void)

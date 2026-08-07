@@ -32,6 +32,7 @@
 #include "netman_irx.h"
 #include "smap_irx.h"
 #include "ps2ip_irx.h"
+#include "cdfs_stream_irx.h"
 
 /* Stack BDM moderna (USB + FAT/exFAT/GPT). */
 #include "usbd_irx.h"
@@ -72,10 +73,10 @@ struct EmbeddedEntry
                  fallback (used when the BIOS does not ship
                  rom0:LIBSD).  See src/modules/sjpcm/sjpcm_rpc.c for
                  the EE-side wrapper.
-     - cdfs    : init_ps2_filesystem_driver() in app/main.cpp brings
-                 up the modern cdfs.irx through ps2_drivers; the
-                 browser and ROM loader reach the disc through plain
-                 newlib stdio (opendir("cdfs:/"), fopen, ...).
+     - cdfs    : CdfsLoadEmbeddedIrx() loads the in-tree streaming
+                 cdfs.irx, which removes the stock driver's fixed
+                 256-entry directory table. The browser and ROM loader
+                 reach the disc through fileXio/newlib stdio.
      - memcard : sio2man.irx + mcman.irx + mcserv.irx, embedded here
                  and loaded by MemCardLoadEmbeddedIrx().  All save
                  paths go through newlib stdio onto mcman/mcserv via
@@ -201,6 +202,32 @@ extern "C" int EmbeddedIrxLoad(const unsigned char *data,
     }
 
     return module_id;
+}
+
+/* The upstream PS2SDK cdfs.irx stores a whole directory in a fixed
+   TocEntry[256] array during dopen. This embedded fork streams ISO9660/Joliet
+   records through a small sector window instead, so large ROM folders are
+   complete and consume less IOP RAM. */
+static int s_cdfs_loaded_result = 1; /* 1 = not yet attempted */
+
+extern "C" int CdfsLoadEmbeddedIrx(void)
+{
+    int ret;
+
+    if (s_cdfs_loaded_result != 1)
+        return s_cdfs_loaded_result;
+
+    ret = EmbeddedIrxLoad(cdfs_stream_irx, sizeof(cdfs_stream_irx), 0, NULL);
+    BootImport("cdfs_stream", ret);
+    if (ret < 0)
+    {
+        printf("CdfsLoadEmbeddedIrx: cdfs_stream.irx failed (%d)\n", ret);
+        s_cdfs_loaded_result = ret;
+        return s_cdfs_loaded_result;
+    }
+
+    s_cdfs_loaded_result = 0;
+    return s_cdfs_loaded_result;
 }
 
 /* Memory-card stack bring-up.
@@ -865,6 +892,7 @@ extern "C" void EmbeddedIrxResetRuntimeState(void)
        these EE-side caches set would skip a required reload and leave callers
        talking to RPC services that no longer exist. */
     s_memcard_loaded = 0;
+    s_cdfs_loaded_result = 1;
     s_usb_bdm_loaded_result = 1;
     s_dev9_loaded_result = 1;
     s_hdd_loaded = 0;

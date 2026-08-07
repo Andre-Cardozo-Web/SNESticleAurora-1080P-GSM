@@ -116,8 +116,8 @@ extern AudMixBuffer *_AudMix;
 
 /* TBP (256-byte units) of the SNES output texture (_OutTex) and the
    blender's per-frame scratchpad slab. Both are populated by
-   MainLoopInit() through gsKit's VRAM allocator so the addresses are
-   coordinated with the framebuffer pages gsKit reserved for FB0/FB1.
+   MainLoopInit() through gsKit's VRAM allocator after the selected
+   mode reserves its framebuffer pages, so they cannot overlap FB0/FB1.
    _MainLoop_uOutTexTBP is shared between _OutTex (sampled by
    MainLoopRender) and the SNES blender's render-to-texture target,
    so they must come from the same allocation. Initialised to 0 if

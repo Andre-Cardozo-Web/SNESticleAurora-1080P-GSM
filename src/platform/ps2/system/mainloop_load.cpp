@@ -46,9 +46,9 @@ int _MainLoopReadBinaryData(Uint8 *pBuffer, Int32 nBufferBytes, const char *pRom
         FILE *fp;
         size_t nBytes;
 
-        /* newlib stdio. With the modern cdfs.irx registered by
-           init_ps2_filesystem_driver(), "cdfs:/...", "mc0:/...",
-           "mass:/..." and "host:/..." all resolve through iomanX. */
+        /* newlib stdio. With the embedded streaming cdfs.irx and the
+           fileXio stack registered at boot, "cdfs:/...", "mc0:/...",
+           "mass:/..." and "host:/..." all resolve through IOP drivers. */
         fp = fopen(pRomFile, "rb");
         if (!fp)
         {

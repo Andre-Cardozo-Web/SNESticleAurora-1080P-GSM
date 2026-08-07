@@ -268,9 +268,12 @@ int main(int argc, char **argv)
 	UsbBdmLoadEmbeddedIrx();
 	DLog("[boot] UsbBdmLoadEmbeddedIrx: done");
 
-	DLog("[boot] init_cdfs_driver: enter");
-	init_cdfs_driver();
-	DLog("[boot] init_cdfs_driver: done");
+	DLog("[boot] CdfsLoadEmbeddedIrx: enter");
+	{
+		int cdfsret = CdfsLoadEmbeddedIrx();
+		DLog("[boot] CdfsLoadEmbeddedIrx: done (ret=%d)", cdfsret);
+		(void)cdfsret;
+	}
 
 	/* Inicia o cdvd SEM checar disco (SCECdINoD), nao SCECdINIT.  No boot
 	   por DISCO num PS2 real, o drive ainda esta assentando/girando e o
@@ -351,7 +354,7 @@ int main(int argc, char **argv)
 	   gone now: it binds to RPC 0x80000592 (CDVD_INIT_BIND_RPC, see
 	   src/platform/ps2/cdvd/cd.c) which was served by the iaddis-era
 	   custom CDVD.IRX.  That IRX is no longer loaded - the modern
-	   cdfs.irx that init_ps2_filesystem_driver() loads instead exposes
+	   the embedded streaming cdfs.irx instead exposes
 	   cdfs: through iomanX and registers a different RPC number.  With
 	   no server bound to 0x80000592, cdvdInit's SifBindRpc spin loop
 	   never completes and the EE hangs silently (black screen, no

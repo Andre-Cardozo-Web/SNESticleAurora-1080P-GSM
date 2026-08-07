@@ -510,11 +510,10 @@ SDK_EXTRA_IRX := ioptrap.irx poweroff.irx
 # All four .irx files are embedded into the ELF via bin2c and loaded
 # from src/platform/ps2/system/embedded_irx.cpp::NetIfLoadEmbeddedIrx.
 #
-# The legacy iaddis CDVD.IRX is also no longer needed: app/main.cpp's
-# init_ps2_filesystem_driver() brings up the modern cdfs.irx which
-# registers the cdfs: device with iomanX, and the browser / ROM
-# loader reach the disc through plain newlib stdio.
-EMBED_IRX_NAMES := audsrv freesd sio2man mcman mcserv padman mtapman ps2dev9 netman smap ps2ip usbd bdm bdmfs_fatfs usbmass_bd ps2atad ps2hdd mmceman mx4sio_bd
+# The legacy iaddis CDVD.IRX is also no longer needed. The in-tree
+# cdfs_stream.irx registers cdfs: and streams directories instead of using
+# PS2SDK cdfs.irx's fixed 256-entry table.
+EMBED_IRX_NAMES := audsrv freesd sio2man mcman mcserv padman mtapman ps2dev9 netman smap ps2ip cdfs_stream usbd bdm bdmfs_fatfs usbmass_bd ps2atad ps2hdd mmceman mx4sio_bd
 
 # Pin the complete SIO2 storage/input group to one verified PS2SDK revision.
 # This prevents a future SDK update from mixing an incompatible sio2man with
@@ -528,6 +527,7 @@ PADMAN_IRX_PATH    ?= $(CURDIR)/irx/padman.irx
 MTAPMAN_IRX_PATH   ?= $(CURDIR)/irx/mtapman.irx
 MMCEMAN_IRX_PATH   ?= $(CURDIR)/irx/mmceman.irx
 MX4SIO_BD_IRX_PATH ?= $(CURDIR)/irx/mx4sio_bd.irx
+CDFS_STREAM_IRX_PATH ?= $(CURDIR)/irx/cdfs_stream.irx
 
 # ps2fs.irx (PFS): sistema de arquivos das particoes APA do HD interno.
 # Necessario para MONTAR e ler dentro de uma particao (pfs0:).  Opcional:
@@ -577,6 +577,7 @@ check-env: ensure-ps2dev
 	@test -f "$(MTAPMAN_IRX_PATH)" || (echo "ERROR: required MTAPMAN IRX not found: $(MTAPMAN_IRX_PATH)"; exit 1)
 	@test -f "$(MMCEMAN_IRX_PATH)" || (echo "ERROR: required MMCE IRX not found: $(MMCEMAN_IRX_PATH)"; exit 1)
 	@test -f "$(MX4SIO_BD_IRX_PATH)" || (echo "ERROR: required MX4SIO IRX not found: $(MX4SIO_BD_IRX_PATH)"; exit 1)
+	@test -f "$(CDFS_STREAM_IRX_PATH)" || (echo "ERROR: required streaming CDFS IRX not found: $(CDFS_STREAM_IRX_PATH)"; exit 1)
 
 $(OBJ_DIR):
 	@mkdir -p "$(OBJ_DIR)"
@@ -613,6 +614,8 @@ $(EMBED_DIR)/smap_irx.h: $(SMAP_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,smap_irx)
 $(EMBED_DIR)/ps2ip_irx.h: $(PS2IP_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,ps2ip_irx)
+$(EMBED_DIR)/cdfs_stream_irx.h: $(CDFS_STREAM_IRX_PATH) | $(EMBED_DIR)
+	$(call RUN_BIN2C,$<,$@,cdfs_stream_irx)
 $(EMBED_DIR)/usbd_irx.h: $(USBD_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,usbd_irx)
 $(EMBED_DIR)/bdm_irx.h: $(BDM_IRX_PATH) | $(EMBED_DIR)

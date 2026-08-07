@@ -335,11 +335,9 @@ static Bool bPrint = TRUE;
 #if CODE_PLATFORM == CODE_PS2
 #include "snppublend_gs.h"
 /* TBPs of the blender scratchpad slab and the SNES output texture, both
-   allocated via gsKit's VRAM allocator in MainLoopInit() (Fase 1A of
-   the GS->gsKit migration). When zero (e.g. allocator refused, or this
-   path runs before MainLoopInit() for any reason), the constructor
-   falls back to the historical hard-coded addresses (0x3C00, 0x2400)
-   so the bring-up still completes. */
+   allocated via gsKit's VRAM allocator in MainLoopInit() after the
+   mode-specific framebuffers. A zero address is a fatal boot-time VRAM
+   allocation failure, so MainLoopInit() never reaches this renderer then. */
 extern Uint32 _MainLoop_uBlenderTBP;
 extern Uint32 _MainLoop_uOutTexTBP;
 static SNPPUBlendGS *_Blend;
@@ -362,9 +360,8 @@ void SnesPPURender::BeginRender(CRenderSurface *pTarget)
 #if CODE_PLATFORM == CODE_PS2
 	if (!_Blend)
 	{
-		Uint32 uBlenderTBP = _MainLoop_uBlenderTBP ? _MainLoop_uBlenderTBP : 0x3C00;
-		Uint32 uOutTBP     = _MainLoop_uOutTexTBP  ? _MainLoop_uOutTexTBP  : 0x2400;
-		_Blend = new SNPPUBlendGS(uBlenderTBP, uOutTBP);
+		_Blend = new SNPPUBlendGS(_MainLoop_uBlenderTBP,
+		                          _MainLoop_uOutTexTBP);
 	}
 	m_pBlend = _Blend;
 #else
@@ -417,5 +414,3 @@ void SnesPPURender::EndRender()
 void SnesPPURender::UpdateVRAM(Uint32 uVramAddr)
 {
 }
-
-

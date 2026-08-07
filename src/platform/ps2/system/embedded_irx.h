@@ -41,6 +41,11 @@ void EmbeddedIrxResetRuntimeState(void);
    times -- subsequent calls are no-ops. */
 int  MemCardLoadEmbeddedIrx(void);
 
+/* Loads the in-tree streaming CDFS driver. Unlike PS2SDK's stock cdfs.irx,
+   this variant does not copy a directory into a fixed 256-entry table, so
+   ISO folders of any size remain enumerable. */
+int  CdfsLoadEmbeddedIrx(void);
+
 /* Loads the modern PS2SDK pad stack (padman.irx + mtapman.irx) onto
    the IOP from the buffers embedded in this ELF.  Designed to stack
    on top of the modern sio2man.irx already loaded by

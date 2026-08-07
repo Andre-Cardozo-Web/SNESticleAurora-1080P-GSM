@@ -29,8 +29,8 @@
  * Index and cache are malloc'd lazily and freed on disable and on ROM
  * launch (CoverFreeCache).
  *
- * NOTE (untested on real PS2): the cover texture lives in a hard-coded
- * VRAM slot from the legacy GS layout (COVER_TEX in mainloop_init.cpp).
+ * The cover texture's GS VRAM slot is allocated after the active mode's
+ * framebuffers and passed to CoverInit(), so mode changes cannot overlap it.
  */
 
 #include <stdio.h>
@@ -497,6 +497,11 @@ static void _ApplyEntry(CoverEntT *e)
 }
 
 /* ---- public API ---------------------------------------------------- */
+
+Uint32 CoverGetVramSize(void)
+{
+	return COVER_RGBA_BYTES;
+}
 
 void CoverInit(Uint32 uVramTBP)
 {

@@ -19,40 +19,26 @@ extern "C" {
 #define FIXED4(_x) ((Int32)((_x)*16.0f))
 #define FIXED7(_x) ((Int32)((_x)*128.0f))
 
-/* Horizontal un-stretch for the bitmap font.
- *
- * The whole UI is authored in a 256x240 logical space (gpprim.c) that is
- * mapped to the 640x448 framebuffer with sx=2.5, sy=1.867 and then shown
- * on a 4:3 screen.  That makes every glyph ~25% wider than it was drawn,
- * so a square-pixel font looks stretched sideways.  The exact correction
- * is 768/960 = 0.8: squeeze glyph width + advance by 4/5 so letters keep
- * their designed proportions.  Vertical (line height) is left untouched.
- *
- * Integer 4/5 is used in BOTH the draw advance and FontGetStrWidth so
- * centered/right-aligned text stays aligned.  We round (+2) instead of
- * truncating and clamp to >=1 so 1px glyphs (like '.') never vanish. */
-#define FONT_SQX(_w) ((_w) <= 0 ? 0 : (((_w) * 4 + 2) / 5 < 1 ? 1 : ((_w) * 4 + 2) / 5))
-
 /* Integer pixel-doubling for crisp text.
  *
- * The UI logical->physical scale is 2.5x (H) / 1.867x (V) -- non-integer.
- * Sampling the glyph atlas with NEAREST across those ratios rounds
- * differently for every glyph (and every screen position), so each
- * letter ends up a slightly different width/shape: the "entrecortada"
- * look.  Instead we draw each glyph at an EXACT integer 2x of its atlas
- * texels, in physical framebuffer space (GPPrimTexRectAbs).  The GS then
- * pixel-doubles cleanly -> every glyph identical and sharp.
+ * Higher modes use a non-integer logical transform (notably 2.5x in X).
+ * Sampling the glyph atlas through it makes glyph shapes vary with screen
+ * position. Draw glyphs directly in framebuffer space at an integer scale
+ * instead: 1x in native 256x240, 2x in 480i/480p/1080i.
  *
  * Layout still lives in the 256x240 logical space, so advances and
  * FontGetStrWidth convert the physical glyph size back to logical with
  * the SAME helper (_FontAdvLogical) -> centering/columns stay aligned.
- *
- * The factor now adapts to the video mode (round of the vertical
- * logical->physical scale): 240p -> 1x, 480i/480p/576i -> 2x.  Without
- * this the 2x glyphs would overlap the lines at 240p. */
+ * At 240p the framebuffer is now 256 pixels wide as well as 240 high, so
+ * the CRT's PCRTC magnification enlarges text and game pixels together;
+ * the old 640x240 buffer made a 5-pixel glyph only 5/640 of the screen,
+ * which is the tiny/squashed text reported in issue #26. */
 static inline Int32 _FontDrawScale(void)
 {
-    int n = (int)(GPPrimGetScaleY() + 0.5f);
+    /* Round upward so the 480p 16:9-safe transform (1.5x vertically)
+       still uses crisp 2x glyph texels rather than dropping to a tiny
+       1x font. Native 240p remains 1x. */
+    int n = (int)(GPPrimGetScaleY() + 0.999f);
     return (n < 1) ? 1 : n;
 }
 #define FONT_DRAW_SCALE (_FontDrawScale())
@@ -110,8 +96,8 @@ static Int32 _FontDrawChar(FontCharT *pFontChar, float fX, float fY, float z1, U
 
     /* Position via the logical->physical scale, but size the glyph at an
        EXACT integer 2x of the atlas texels (clean pixel-double). */
-    px0 = fX * sx;
-    py0 = fY * sy;
+    px0 = fX * sx + GPPrimGetOffsetX();
+    py0 = fY * sy + GPPrimGetOffsetY();
     px1 = px0 + (float)(width  * FONT_DRAW_SCALE);
     py1 = py0 + (float)(height * FONT_DRAW_SCALE);
 
@@ -344,6 +330,12 @@ Int32 FontGetHeight()
 }
 
 
+Uint32 FontGetVramSize()
+{
+    return (Uint32)_FontTex_ui_w * (Uint32)_FontTex_ui_h * 4U;
+}
+
+
 void FontInit(Uint32 uVramAddr)
 {
     CSurface Surface;
@@ -531,4 +523,3 @@ void FontParseChars(FontT *pFont, CSurface *pSurface, const Char *pCharList)
 	_FontSetCharSize(pFont, 5, uFontHeight);
 
 }
-
