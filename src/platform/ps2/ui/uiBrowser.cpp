@@ -115,6 +115,47 @@ static Bool BrowserResolveDirectory(const Char *pParent, const Char *pName,
 	return TRUE;
 }
 
+/* USB enumeration is asynchronous.  On a real PS2 the BDM modules may all
+   have loaded successfully while FatFs is still reading the partition table,
+   so the first dopen("massN:") can legitimately fail.  ps2_drivers and OPL
+   both wait/retry for this reason.  Keep the wait out of boot (and out of all
+   other devices): it only runs after the user actually selects a mass drive.
+   Three seconds covers slow flash media without making an absent mass1: look
+   like a permanent lock-up. */
+#define BROWSER_MASS_OPEN_RETRIES  (30)
+#define BROWSER_MASS_RETRY_USEC    (100000)
+
+static int BrowserOpenDirectory(const Char *pPath)
+{
+	int dfd;
+	int attempt;
+
+	if (!pPath)
+		return -1;
+
+	dfd = fileXioDopen(pPath);
+	if (dfd >= 0 || strncasecmp(pPath, "mass", 4) != 0)
+		return dfd;
+
+	for (attempt = 0; attempt < BROWSER_MASS_OPEN_RETRIES; ++attempt)
+	{
+		usleep(BROWSER_MASS_RETRY_USEC);
+		dfd = fileXioDopen(pPath);
+		if (dfd >= 0)
+		{
+			printf("Browser: %s ready after %d ms\n",
+			       pPath, (attempt + 1) * (BROWSER_MASS_RETRY_USEC / 1000));
+			return dfd;
+		}
+	}
+
+	printf("Browser: %s not ready after %d ms (dopen=%d)\n",
+	       pPath,
+	       BROWSER_MASS_OPEN_RETRIES * (BROWSER_MASS_RETRY_USEC / 1000),
+	       dfd);
+	return dfd;
+}
+
 /* ------------------------------------------------------------------
    Browser long-name UX: ellipsis truncation + marquee scroll.
 
@@ -1517,7 +1558,7 @@ void CBrowserScreen::SetDir(const Char *pDir)
 	}
 	else if (strlen(openPath) > 0)
 	{
-		int dfd = fileXioDopen(openPath);
+		int dfd = BrowserOpenDirectory(openPath);
 		if (dfd >= 0)
 		{
 			iox_dirent_t de;

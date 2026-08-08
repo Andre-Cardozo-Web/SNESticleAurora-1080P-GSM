@@ -36,11 +36,10 @@ extern "C" {
 };
 
 /* USB is now brought up by UsbBdmLoadEmbeddedIrx() (see
-   embedded_irx.cpp): we embed and load the modern BDM stack
-   (usbd + bdm + bdmfs_fatfs + usbmass_bd, plus ata_bd/ps2hdd for the
-   internal HDD) ourselves instead of going through ps2_drivers'
-   init_usb_driver().  The old init_usb_driver_compat() wrapper and its
-   Makefile feature probe were removed when that switch landed. */
+   embedded_irx.cpp): we embed a pinned BDM stack (FreeUsbd/usbd_mini +
+   bdm + bdmfs_fatfs + usbmass_bd) instead of inheriting whichever usbd
+   happens to be installed in the builder's PS2SDK.  Internal HDD support
+   stays on its separate lazy path. */
 
 /* DLog: writes to EE SIO TX FIFO (defined in modules/sjpcm/sjpcm_rpc.c).
    Plain printf on the EE never reaches PCSX2/NetherSX2's emulator log
@@ -262,7 +261,7 @@ int main(int argc, char **argv)
 	}
 
 	DLog("[boot] UsbBdmLoadEmbeddedIrx: enter");
-	/* USB via stack BDM moderna embutida (FAT/exFAT/MBR/GPT, multi-drive),
+	/* USB via stack BDM fixada (FreeUsbd mini + FAT/exFAT/MBR/GPT),
 	   no lugar do init_usb_driver() do ps2_drivers.  Nao usa dev9, entao
 	   nao corre o risco de travar boot do HD interno. */
 	UsbBdmLoadEmbeddedIrx();

@@ -34,7 +34,7 @@
 #include "ps2ip_irx.h"
 #include "cdfs_stream_irx.h"
 
-/* Stack BDM moderna (USB + FAT/exFAT/GPT). */
+/* Stack BDM moderna fixada (FreeUsbd mini + FAT/exFAT/GPT). */
 #include "usbd_irx.h"
 #include "bdm_irx.h"
 #include "bdmfs_fatfs_irx.h"
@@ -294,11 +294,12 @@ extern "C" int MemCardLoadEmbeddedIrx(void)
 
 /* USB + BDM stack bring-up (substitui o init_usb_driver() do ps2_drivers).
  *
- * Carrega a stack BDM moderna do PROPRIO PS2SDK -- le FAT16/FAT32/exFAT e
- * tabela de particao MBR/GPT, e enumera cada pendrive/HD-externo como uma
- * unidade massN:.  Ordem padrao (igual OPL / exemplos PS2SDK):
+ * Carrega a stack BDM fixada em irx/: le FAT16/FAT32/exFAT e tabelas MBR/GPT,
+ * enumerando cada pendrive/HD externo como massN:.  O usbd.irx completo do
+ * PS2SDK moderno teve regressoes em hardware; o buffer usbd_irx abaixo vem do
+ * FreeUsbd/usbd_mini usado pelo OPL.  Ordem canonica do OPL:
  *
- *   usbd.irx -> bdm.irx -> bdmfs_fatfs.irx -> usbmass_bd.irx
+ *   bdm.irx -> bdmfs_fatfs.irx -> usbd_mini.irx -> usbmass_bd.irx
  *
  * NAO usa dev9 (so' USB), entao nao tem o risco de travar boot do HD
  * interno.  Cada passo loga via ScrPrintf, visivel no splash de boot --
@@ -331,21 +332,12 @@ extern "C" int UsbBdmLoadEmbeddedIrx(void)
     if (s_usb_bdm_loaded_result != 1)
         return s_usb_bdm_loaded_result;
 
-    ret = EmbeddedIrxLoad(usbd_irx, sizeof(usbd_irx), 0, NULL);
-    BootImport("usbd", ret);
-    if (ret < 0)
-    {
-        printf("UsbBdm: usbd.irx failed (%d)\n", ret);
-        s_usb_bdm_loaded_result = -1;
-        return s_usb_bdm_loaded_result;
-    }
-
     ret = EmbeddedIrxLoad(bdm_irx, sizeof(bdm_irx), 0, NULL);
     BootImport("bdm", ret);
     if (ret < 0)
     {
         printf("UsbBdm: bdm.irx failed (%d)\n", ret);
-        s_usb_bdm_loaded_result = -2;
+        s_usb_bdm_loaded_result = -1;
         return s_usb_bdm_loaded_result;
     }
 
@@ -354,6 +346,15 @@ extern "C" int UsbBdmLoadEmbeddedIrx(void)
     if (ret < 0)
     {
         printf("UsbBdm: bdmfs_fatfs.irx failed (%d)\n", ret);
+        s_usb_bdm_loaded_result = -2;
+        return s_usb_bdm_loaded_result;
+    }
+
+    ret = EmbeddedIrxLoad(usbd_irx, sizeof(usbd_irx), 0, NULL);
+    BootImport("usbd_mini", ret);
+    if (ret < 0)
+    {
+        printf("UsbBdm: usbd_mini.irx failed (%d)\n", ret);
         s_usb_bdm_loaded_result = -3;
         return s_usb_bdm_loaded_result;
     }
@@ -378,7 +379,7 @@ extern "C" int UsbBdmLoadEmbeddedIrx(void)
      * assumido antes estava errado: o load em si JA bloqueia, nao so' o
      * waitUntilDeviceIsReady() do ps2_drivers.
      *
-     * O USB (usbd/bdm/bdmfs_fatfs/usbmass_bd, acima) continua intacto.
+     * O USB (usbd_mini/bdm/bdmfs_fatfs/usbmass_bd, acima) continua intacto.
      * Suporte a hdd0: vai voltar depois como carga PREGUICOSA -- so' no
      * primeiro uso pelo browser/BGM e com HDD Support ligado -- para nunca
      * tocar o boot padrao.
@@ -652,7 +653,7 @@ extern "C" int MmceNeedsRestart(void)
 /* ------------------------------------------------------------------------
  * Toggles de dispositivos SEM modulo proprio de carga preguicosa:
  *
- *  - Mass (USB): a stack USB (usbd/bdm/bdmfs_fatfs/usbmass_bd) SEMPRE sobe
+ *  - Mass (USB): a stack USB (usbd_mini/bdm/bdmfs_fatfs/usbmass_bd) SEMPRE sobe
  *    no boot -- e' o armazenamento principal e seguro, e gatear isso no
  *    boot mexeria no caminho critico que causava a tela preta.  Este flag
  *    so' controla a LISTAGEM de mass0:/mass1: no browser e a carga do

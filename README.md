@@ -538,13 +538,15 @@ at boot.
 tables (so drives larger than 2 TB work), mirroring modern OPL. The internal
 HDD additionally uses `ps2atad` + `ps2hdd` for the APA `hdd0:` device.
 
-> **Build note:** the USB/BDM and internal‑HDD modules are embedded from your
-> `$(PS2SDK)/iop/irx`. The complete SIO2 device group (`sio2man`, memory-card,
-> pad/multitap, MMCE and MX4SIO) is pinned to one verified PS2SDK revision
-> under [`irx/`](irx/) and is mandatory. An official build can therefore no
-> longer silently expose an empty device backed by no driver or mix
-> incompatible SIO2 modules. MMCE slots are listed only after a successful
-> hardware PING.
+> **Build note:** the complete USB group (`usbd_mini`, `bdm`,
+> `bdmfs_fatfs`, `usbmass_bd`) and SIO2 group (`sio2man`, memory-card,
+> pad/multitap, MMCE and MX4SIO) are pinned under [`irx/`](irx/). A build no
+> longer changes USB behaviour according to whichever PS2SDK happens to be
+> installed. USB uses the FreeUsbd-based `usbd_mini` selected by OPL for its
+> BDM loader; the browser also retries a selected `massN:` for up to three
+> seconds while a slow drive finishes mounting. Internal-HDD modules remain
+> supplied by PS2SDK because they are loaded only when HDD support is enabled.
+> MMCE slots are listed only after a successful hardware PING.
 >
 > MMCE and MX4SIO both hook SIO2 and are therefore mutually exclusive. Turning
 > one on turns the other setting off. If the opposite driver is already
@@ -657,9 +659,10 @@ The cumulative notes for the current test version are available in
   **Menu Music** volume (0 = off, frees its RAM) and a synthesis **Frequency**
   picker in Video Config — all persisted, shared by SNES and NES. A random track
   plays at boot and a new one each time you leave a game.
-- **Storage**: a modern **BDM** stack (embedded from PS2SDK) replaces the old
-  single‑USB path — two USB ports, external HDD/SSD and MX4SIO all appear as
-  `mass0:`/`mass1:`, reading FAT16/FAT32/exFAT with MBR/GPT. Added the internal
+- **Storage**: a pinned **BDM** stack with OPL's FreeUsbd-based `usbd_mini`
+  replaces the old single‑USB path — two USB ports, external HDD/SSD and
+  MX4SIO all appear as `mass0:`/`mass1:`, reading FAT16/FAT32/exFAT with
+  MBR/GPT. Slow USB media receives a bounded mount retry. Added the internal
   HDD (`hdd0:`, APA) and MMCE carts (`mmce0:`/`mmce1:`, MemCard PRO 2 / SD2PSX).
   See [Storage & devices](#storage--devices).
 - **Boot / input**: controller and IRX bring‑up reworked to behave on real

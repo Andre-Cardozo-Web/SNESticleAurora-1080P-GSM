@@ -565,12 +565,15 @@ NETMAN_IRX_PATH  ?= $(PS2SDK)/iop/irx/netman.irx
 SMAP_IRX_PATH    ?= $(PS2SDK)/iop/irx/smap.irx
 PS2IP_IRX_PATH   ?= $(PS2SDK)/iop/irx/ps2ip.irx
 
-# Stack BDM moderna (USB + FAT/exFAT/GPT), embutida do proprio PS2SDK e
-# carregada no lugar do init_usb_driver() do ps2_drivers.
-USBD_IRX_PATH        ?= $(PS2SDK)/iop/irx/usbd.irx
-BDM_IRX_PATH         ?= $(PS2SDK)/iop/irx/bdm.irx
-BDMFS_FATFS_IRX_PATH ?= $(PS2SDK)/iop/irx/bdmfs_fatfs.irx
-USBMASS_BD_IRX_PATH  ?= $(PS2SDK)/iop/irx/usbmass_bd.irx
+# Stack BDM moderna (USB + FAT/exFAT/GPT).  Mantenha os quatro modulos
+# FIXADOS juntos: depender do $(PS2SDK) de quem compilava misturava revisoes
+# e, em particular, podia embutir o usbd completo que regrediu em pendrives
+# reais.  usbd_mini e' o FreeUsbd compativel usado pelo OPL para BDM.  Os
+# caminhos continuam substituiveis na linha de comando para testes de driver.
+USBD_IRX_PATH        ?= $(CURDIR)/irx/usbd_mini.irx
+BDM_IRX_PATH         ?= $(CURDIR)/irx/bdm.irx
+BDMFS_FATFS_IRX_PATH ?= $(CURDIR)/irx/bdmfs_fatfs.irx
+USBMASS_BD_IRX_PATH  ?= $(CURDIR)/irx/usbmass_bd.irx
 # ATA block device para BDM: expoe o HD INTERNO (FAT/exFAT) como um massN:,
 # igual ao OPL moderno.  Usa o ps2dev9.irx (ja' embutido) como barramento.
 # HD interno formato APA (igual HDD-OSD/OPL): ps2atad (ATA) + ps2hdd
@@ -594,6 +597,10 @@ check-env: ensure-ps2dev
 	@test -f "$(MMCEMAN_IRX_PATH)" || (echo "ERROR: required MMCE IRX not found: $(MMCEMAN_IRX_PATH)"; exit 1)
 	@test -f "$(MX4SIO_BD_IRX_PATH)" || (echo "ERROR: required MX4SIO IRX not found: $(MX4SIO_BD_IRX_PATH)"; exit 1)
 	@test -f "$(CDFS_STREAM_IRX_PATH)" || (echo "ERROR: required streaming CDFS IRX not found: $(CDFS_STREAM_IRX_PATH)"; exit 1)
+	@test -f "$(USBD_IRX_PATH)" || (echo "ERROR: required FreeUsbd mini IRX not found: $(USBD_IRX_PATH)"; exit 1)
+	@test -f "$(BDM_IRX_PATH)" || (echo "ERROR: required BDM IRX not found: $(BDM_IRX_PATH)"; exit 1)
+	@test -f "$(BDMFS_FATFS_IRX_PATH)" || (echo "ERROR: required FAT/exFAT IRX not found: $(BDMFS_FATFS_IRX_PATH)"; exit 1)
+	@test -f "$(USBMASS_BD_IRX_PATH)" || (echo "ERROR: required USB mass IRX not found: $(USBMASS_BD_IRX_PATH)"; exit 1)
 
 $(OBJ_DIR):
 	@mkdir -p "$(OBJ_DIR)"

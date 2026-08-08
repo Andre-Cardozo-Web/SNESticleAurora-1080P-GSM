@@ -2,7 +2,8 @@
 
 Changelog acumulado da versão 1.0.4, comparado com a tag **v1.0.3**.
 
-Data deste pacote de teste: **8 de agosto de 2026**  
+Data deste pacote de teste: **8 de agosto de 2026**
+
 Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 > Esta é uma source de teste. A compilação foi validada, mas modos de vídeo,
@@ -51,8 +52,40 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - Corrigido o segundo congelamento da r7/r8 no PS2: `Nes_Apu` e `Blip_Buffer`
   agora são construídos explicitamente, sem depender de `.init_array` no
   startup antigo do PS2SDK.
+- Restaurado o acesso a pendrives/HDs USB ao iniciar pela ISO: a stack usa
+  `usbd_mini`/FreeUsbd compatível com OPL, IRXs BDM fixados e espera limitada
+  para mídias lentas terminarem de montar em `massN:`.
 - A paleta antiga e excessivamente saturada do InfoNES foi substituída pela
   paleta NTSC 2C02 padrão do **Mesen2**, preservada em RGBA8.
+
+---
+
+## Revisão de armazenamento r10: USB mass/exFAT ao iniciar pela ISO
+
+- Identificada a diferença que explicava o MMCE funcionar enquanto `mass:`
+  falhava: MMCE já usava um IRX fixado no projeto, mas a stack USB era retirada
+  do PS2SDK instalado na máquina de quem compilava.
+- O `usbd.irx` completo foi substituído pelo `usbd_mini.irx` baseado no
+  **FreeUsbd** anterior à reescrita. É a variante escolhida pelo OPL para seu
+  carregador BDM e restaurada no PS2SDK especificamente por regressões USB em
+  hardware real.
+- A ordem de carga passou a seguir o OPL: `bdm` → `bdmfs_fatfs` → `usbd_mini`
+  → `usbmass_bd`.
+- Os quatro IRXs USB/BDM agora ficam juntos em `irx/`, com versão, origem,
+  licença e SHA-256 documentados. Assim, compilar no Debian/DroidSpaces não
+  troca silenciosamente o comportamento conforme a versão local do PS2SDK.
+- O `bdmfs_fatfs` fixado inclui FAT16, FAT32 e **exFAT**, além de MBR/GPT.
+- Ao escolher `mass0:` ou `mass1:`, o navegador repete apenas a abertura desse
+  dispositivo por até três segundos. A enumeração USB é assíncrona e o primeiro
+  `dopen` podia ocorrer antes de uma mídia lenta terminar de montar.
+- A espera não roda no boot, nem em CDFS, memory card, MMCE, host ou HDD; um
+  `massN:` ausente volta ao navegador após o limite em vez de travar para
+  sempre.
+- CDFS continua no driver streaming próprio; MMCE continua no caminho SIO2 com
+  PING; MX4SIO aproveita o mesmo namespace/montagem BDM. Nenhum core, áudio,
+  vídeo, SRAM ou save state foi alterado nesta revisão.
+- Compilação e inspeção dos IRXs foram validadas. O reconhecimento do pendrive
+  exFAT ainda precisa da confirmação final em um PS2 real iniciado pela ISO.
 
 ---
 
