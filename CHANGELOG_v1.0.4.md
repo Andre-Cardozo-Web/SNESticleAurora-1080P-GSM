@@ -2,7 +2,7 @@
 
 Changelog acumulado da versão 1.0.4, comparado com a tag **v1.0.3**.
 
-Data deste pacote de teste: **7 de agosto de 2026**  
+Data deste pacote de teste: **8 de agosto de 2026**  
 Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 > Esta é uma source de teste. A compilação foi validada, mas modos de vídeo,
@@ -48,8 +48,33 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   evitando encurtar o primeiro bloco de áudio depois da retomada.
 - Corrigido o congelamento introduzido pela r7 ao abrir ROMs NES que consultam
   o status do APU no primeiro ciclo de uma janela de áudio.
+- Corrigido o segundo congelamento da r7/r8 no PS2: `Nes_Apu` e `Blip_Buffer`
+  agora são construídos explicitamente, sem depender de `.init_array` no
+  startup antigo do PS2SDK.
 - A paleta antiga e excessivamente saturada do InfoNES foi substituída pela
   paleta NTSC 2C02 padrão do **Mesen2**, preservada em RGBA8.
+
+---
+
+## Revisão NES r9: inicialização correta do APU no PS2
+
+- Corrigida a causa do congelamento que ainda permanecia na r8 ao abrir
+  qualquer jogo de NES, antes mesmo de o primeiro quadro ser apresentado.
+- O GCC atual colocava os construtores globais de `Nes_Apu` e `Blip_Buffer` em
+  `.init_array`, mas o script/startup do PS2SDK usado pelo projeto só percorre
+  a lista antiga `.ctors`. Assim, no PS2, os objetos ficavam apenas zerados e
+  o primeiro `output()` do APU acessava ponteiros de osciladores nulos.
+- Os dois objetos agora usam armazenamento estático alinhado e são construídos
+  explicitamente por `InfoNES_pAPUInit()`. Eles continuam vivos entre trocas
+  de ROM, sem depender de suporte implícito do runtime C++.
+- A inspeção do ELF confirmou que `_GLOBAL__sub_I_pAPUSoundRegs` desapareceu e
+  que `.init_array` encolheu exatamente uma entrada de quatro bytes.
+- Validada também a sequência real de memória inicialmente zerada, construção
+  explícita, leitura de `$4015` no ciclo zero e 600 quadros de geração/drenagem
+  de áudio (320.002 amostras).
+- Compilação limpa do ELF do PS2 concluída sem avisos nem erros. O conserto é
+  restrito à inicialização do áudio NES; SNES, Final Fight, vídeo, navegador,
+  mappers, paleta e saves não foram alterados nesta revisão.
 
 ---
 

@@ -16,6 +16,7 @@
 #include "InfoNES_pAPU.h"
 #include "third_party/nes_snd_emu/Nes_Apu.h"
 #include "third_party/nes_snd_emu/Blip_Buffer.h"
+#include <new>
 
 /* NTSC 2A03 CPU clock.  Blip_Buffer uses this clock directly, so timer
    periods produce the correct pitch without a frame-local PCM resampler. */
@@ -41,12 +42,33 @@ typedef char InfoNESBlipStateFits[
   sizeof(InfoNESBlipStateT) <= INFONES_APU_STATE_MAX ? 1 : -1
 ];
 
-static Nes_Apu     s_NesApu;
-static Blip_Buffer s_NesBlip;
+/* The PS2SDK startup used by this project walks .ctors, while current GCC
+   emits these non-trivial constructors into .init_array.  Keeping Nes_Apu
+   and Blip_Buffer as ordinary global objects therefore leaves them merely
+   zero-filled on real PS2 startup; the first output() call then dereferences
+   null oscillator pointers.  Give both objects static lifetime storage but
+   construct them explicitly before their first use. */
+static unsigned char s_NesApuStorage[sizeof(Nes_Apu)]
+  __attribute__((aligned(16)));
+static unsigned char s_NesBlipStorage[sizeof(Blip_Buffer)]
+  __attribute__((aligned(16)));
+static Nes_Apu     *s_pNesApu;
+static Blip_Buffer *s_pNesBlip;
+static int          s_ApuObjectsConstructed;
 static WORD        s_EnterClock;
 static int         s_LastApuTime;
 static int         s_FrameEndTime;
 static int         s_ApuReady;
+
+static void InfoNES_ApuConstructObjects( void )
+{
+  if ( s_ApuObjectsConstructed )
+    return;
+
+  s_pNesBlip = ::new (s_NesBlipStorage) Blip_Buffer;
+  s_pNesApu = ::new (s_NesApuStorage) Nes_Apu;
+  s_ApuObjectsConstructed = 1;
+}
 
 /* Convert InfoNES's integer scanline CPU budget to the canonical NTSC APU
    timeline.  InfoNES executes 263 * 113 cycles between normal VSync calls;
@@ -100,7 +122,7 @@ static int InfoNES_DmcRead( void *, nes_addr_t addr )
 static void InfoNES_ApuIrqChanged( void * )
 {
   if ( s_ApuReady &&
-       s_NesApu.earliest_irq( s_LastApuTime ) == Nes_Apu::irq_waiting )
+       s_pNesApu->earliest_irq( s_LastApuTime ) == Nes_Apu::irq_waiting )
   {
     IRQ_REQ;
   }
@@ -112,7 +134,7 @@ static void InfoNES_ApuWriteRegister( WORD addr, BYTE value )
     return;
 
   int time = InfoNES_ApuCurrentTime();
-  s_NesApu.write_register( time, addr, value );
+  s_pNesApu->write_register( time, addr, value );
   s_LastApuTime = time;
 }
 
@@ -147,7 +169,7 @@ BYTE InfoNES_pAPUReadStatus( void )
     return 0;
 
   int time = InfoNES_ApuCurrentTime();
-  int status = s_NesApu.read_status( time );
+  int status = s_pNesApu->read_status( time );
   s_LastApuTime = time;
   return (BYTE)status;
 }
@@ -157,11 +179,11 @@ static void InfoNES_ApuDrainSamples( void )
   static short Samples[1024];
   long available;
 
-  while ( (available = s_NesBlip.samples_avail()) > 0 )
+  while ( (available = s_pNesBlip->samples_avail()) > 0 )
   {
     if ( available > (long)(sizeof Samples / sizeof Samples[0]) )
       available = (long)(sizeof Samples / sizeof Samples[0]);
-    long count = s_NesBlip.read_samples( Samples, available );
+    long count = s_pNesBlip->read_samples( Samples, available );
     if ( count <= 0 )
       break;
     InfoNES_SoundOutputSamples( Samples, (int)count );
@@ -177,8 +199,8 @@ void InfoNES_pAPUVsync( void )
   if ( endTime < s_LastApuTime )
     endTime = s_LastApuTime;
 
-  s_NesApu.end_frame( endTime );
-  s_NesBlip.end_frame( endTime );
+  s_pNesApu->end_frame( endTime );
+  s_pNesBlip->end_frame( endTime );
   InfoNES_ApuDrainSamples();
 
   s_EnterClock = K6502_GetPassedClocks();
@@ -194,13 +216,13 @@ int InfoNES_pAPUSaveState( void *pState, int nStateBytes )
     return 0;
 
   int time = InfoNES_ApuCurrentTime();
-  s_NesApu.synchronize( time );
+  s_pNesApu->synchronize( time );
   s_LastApuTime = time;
 
   InfoNES_MemorySet( &State, 0, sizeof State );
   State.uMagic = INFONES_BLIP_STATE_MAGIC;
   State.uVersion = INFONES_BLIP_STATE_VERSION;
-  s_NesApu.save_state( &State.Apu );
+  s_pNesApu->save_state( &State.Apu );
 
   InfoNES_MemorySet( pState, 0, nStateBytes );
   InfoNES_MemoryCopy( pState, &State, sizeof State );
@@ -211,11 +233,11 @@ static void InfoNES_ApuReplayRegisters( void )
 {
   int addr;
 
-  s_NesApu.reset( false, APU_Reg[0x11] & 0x7f );
+  s_pNesApu->reset( false, APU_Reg[0x11] & 0x7f );
   for ( addr = 0x4000; addr <= 0x4013; addr++ )
-    s_NesApu.write_register( 0, (nes_addr_t)addr, APU_Reg[addr & 0x1f] );
-  s_NesApu.write_register( 0, 0x4015, APU_Reg[0x15] & 0x1f );
-  s_NesApu.write_register( 0, 0x4017, APU_Reg[0x17] );
+    s_pNesApu->write_register( 0, (nes_addr_t)addr, APU_Reg[addr & 0x1f] );
+  s_pNesApu->write_register( 0, 0x4015, APU_Reg[0x15] & 0x1f );
+  s_pNesApu->write_register( 0, 0x4017, APU_Reg[0x17] );
 }
 
 int InfoNES_pAPULoadState( const void *pState, int nStateBytes )
@@ -234,7 +256,7 @@ int InfoNES_pAPULoadState( const void *pState, int nStateBytes )
   if ( nStateBytes == (int)sizeof Image )
     InfoNES_MemoryCopy( &Image, pState, sizeof Image );
 
-  s_NesBlip.clear();
+  s_pNesBlip->clear();
 
   if ( nStateBytes == (int)sizeof Image &&
        Image.uMagic == INFONES_BLIP_STATE_MAGIC &&
@@ -244,8 +266,8 @@ int InfoNES_pAPULoadState( const void *pState, int nStateBytes )
   {
     /* Reset establishes synth gains and callback-owned pointers; load_state
        restores only pointer-free oscillator/frame/DMC data. */
-    s_NesApu.reset( false, 0 );
-    s_NesApu.load_state( Image.Apu );
+    s_pNesApu->reset( false, 0 );
+    s_pNesApu->load_state( Image.Apu );
   }
   else if ( magic == INFONES_LEGACY_APU_MAGIC )
   {
@@ -271,24 +293,25 @@ void InfoNES_pAPUInit( void )
 {
   InfoNES_SoundInit();
   s_ApuReady = 0;
+  InfoNES_ApuConstructObjects();
 
   /* 25 ms holds one 60-Hz frame plus Blip's impulse tail and allows the
      higher clock/sample fixed-point precision selected in blargg_config.h. */
-  if ( s_NesBlip.set_sample_rate( NES_APU_OUTPUT_HZ, 25 ) )
+  if ( s_pNesBlip->set_sample_rate( NES_APU_OUTPUT_HZ, 25 ) )
   {
     InfoNES_MessageBox( "Unable to allocate NES audio buffer" );
     return;
   }
 
-  s_NesBlip.clock_rate( NES_APU_CLOCK_HZ );
-  s_NesBlip.bass_freq( 20 );
-  s_NesBlip.clear();
+  s_pNesBlip->clock_rate( NES_APU_CLOCK_HZ );
+  s_pNesBlip->bass_freq( 20 );
+  s_pNesBlip->clear();
 
-  s_NesApu.output( &s_NesBlip );
-  s_NesApu.dmc_reader( InfoNES_DmcRead, 0 );
-  s_NesApu.irq_notifier( InfoNES_ApuIrqChanged, 0 );
-  s_NesApu.volume( 1.0 );
-  s_NesApu.reset( false, 0 );
+  s_pNesApu->output( s_pNesBlip );
+  s_pNesApu->dmc_reader( InfoNES_DmcRead, 0 );
+  s_pNesApu->irq_notifier( InfoNES_ApuIrqChanged, 0 );
+  s_pNesApu->volume( 1.0 );
+  s_pNesApu->reset( false, 0 );
 
   InfoNES_SoundOpen( 0, NES_APU_OUTPUT_HZ );
   s_EnterClock = 0; /* K6502_Reset follows InfoNES_pAPUInit. */
@@ -301,7 +324,10 @@ void InfoNES_pAPUInit( void )
 void InfoNES_pAPUDone( void )
 {
   s_ApuReady = 0;
-  s_NesApu.output( 0 );
-  s_NesBlip.clear();
+  if ( s_ApuObjectsConstructed )
+  {
+    s_pNesApu->output( 0 );
+    s_pNesBlip->clear();
+  }
   InfoNES_SoundClose();
 }
