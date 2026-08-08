@@ -21,6 +21,8 @@
 #include "poly.h"
 #include "uiBrowser.h"
 #include "uiCover.h"
+#include "mainloop_smb.h"
+#include "mainloop_ui.h"
 
 extern "C" {
 #include "mcsave_ee.h"
@@ -68,6 +70,11 @@ static Bool BrowserIsSramDirectoryName(const Char *pName)
 {
 	return pName &&
 	       (!strcasecmp(pName, "SNES") || !strcasecmp(pName, "NES"));
+}
+
+static Bool BrowserIsSmbPath(const Char *pPath)
+{
+	return pPath && strncasecmp(pPath, "smb:", 4) == 0;
 }
 
 /* Resolve the rare DT_UNKNOWN equivalent without slowing down normal ROM
@@ -129,11 +136,24 @@ static int BrowserOpenDirectory(const Char *pPath)
 {
 	int dfd;
 	int attempt;
+	Bool bSmb;
 
 	if (!pPath)
 		return -1;
 
+	/* Network, DHCP, authentication and smbman are all lazy. Nothing touches
+	   DEV9 during boot; the explicit selection of smb: is the trigger. */
+	bSmb = BrowserIsSmbPath(pPath);
+	if (bSmb && !SmbIsMounted())
+		MainLoopModalPrintf(1, "SMB: Connecting...");
+	if (bSmb && SmbEnsureMounted() < 0)
+		return -1;
+
 	dfd = fileXioDopen(pPath);
+	if (bSmb && dfd < 0)
+		SmbReportBrowseError(dfd);
+	else if (bSmb)
+		SmbReportBrowseSuccess();
 	if (dfd >= 0 || strncasecmp(pPath, "mass", 4) != 0)
 		return dfd;
 
@@ -701,6 +721,15 @@ int CBrowserScreen::MenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
 
 	if (pBrowser->GetEntryPath(str, sizeof(str)) == 0)
 	{
+		return 0;
+	}
+
+	/* smb: is deliberately a ROM-loading source only. Do not expose copy,
+	   paste, delete or directory mutation even if a server was accidentally
+	   configured with write permission. */
+	if (BrowserIsSmbPath(str))
+	{
+		pBrowser->m_bSubMenu = FALSE;
 		return 0;
 	}
 
@@ -1375,7 +1404,13 @@ void CBrowserScreen::Input(Uint32 buttons, Uint32 trigger)
 {
 	if (trigger & PAD_SELECT)
 	{
-		m_bSubMenu = !m_bSubMenu;
+		char selectedPath[1024];
+		Bool bSmbSelection =
+			(GetEntryPath(selectedPath, sizeof(selectedPath)) != 0 &&
+			 BrowserIsSmbPath(selectedPath)) ? TRUE : FALSE;
+
+		if (!bSmbSelection)
+			m_bSubMenu = !m_bSubMenu;
 		  /*
 		if (m_bSubMenu)
 		{
@@ -1483,7 +1518,7 @@ void CBrowserScreen::Input(Uint32 buttons, Uint32 trigger)
    opendir/readdir adapter, iox_dirent_t already contains mode and size,
    so CDFS no longer performs a second stat RPC (and usually another
    optical-disc seek) for every single ROM. The same path works for
-   cdfs, mass, mc, host, pfs and mmce. iomanX normalises legacy CDFS mode
+   cdfs, mass, mc, smb, pfs and mmce. iomanX normalises legacy CDFS mode
    bits before fileXio sends the record to the EE. */
 
 void CBrowserScreen::SetDir(const Char *pDir)
@@ -1562,7 +1597,8 @@ void CBrowserScreen::SetDir(const Char *pDir)
 		if (dfd >= 0)
 		{
 			iox_dirent_t de;
-			while (fileXioDread(dfd, &de) > 0)
+			int dreadResult;
+			while ((dreadResult = fileXioDread(dfd, &de)) > 0)
 			{
 				BrowserEntryTypeE eType;
 				BrowserEntryTypeE resolvedType;
@@ -1632,14 +1668,25 @@ void CBrowserScreen::SetDir(const Char *pDir)
 					break;
 			}
 			fileXioDclose(dfd);
+			if (dreadResult < 0 && BrowserIsSmbPath(openPath))
+			{
+				SmbReportBrowseError(dreadResult);
+				MainLoopModalPrintf(60 * 2, "SMB: %s", SmbGetStatusText());
+			}
+		}
+		else if (BrowserIsSmbPath(openPath))
+		{
+			MainLoopModalPrintf(60 * 2, "SMB: %s\nCheck config/network", SmbGetStatusText());
 		}
 	} else
 	{
         AddEntry("cdfs:", BROWSER_ENTRYTYPE_DRIVE, 0);
 //        AddEntry("cdrom:", BROWSER_ENTRYTYPE_DRIVE, 0);
-        /* host: (PC via ps2link) -- so' se ligado nas configs (dev). */
-        if (HostIsEnabled())
-            AddEntry("host:", BROWSER_ENTRYTYPE_DRIVE, 0);
+        /* User-facing host: was a ps2link/HostFS development bridge and did
+           not provide trustworthy file-type metadata in several emulators.
+           smb: is a real iomanX filesystem and is mounted only on selection. */
+        if (SmbSupportIsEnabled())
+            AddEntry("smb:", BROWSER_ENTRYTYPE_DRIVE, 0);
         /* USB/HD via BDM: cada pendrive, HD externo USB e o HD INTERNO
            (FAT/exFAT, via ata_bd) viram uma unidade massN:.  A ordem
            depende da deteccao, entao listamos algumas; as vazias so'
@@ -1687,6 +1734,14 @@ void CBrowserScreen::Chdir(const Char *pSubDir)
 	} else
 	if (!strcmp(pSubDir, ".."))
 	{
+		/* Already at the device list: refresh it instead of calculating from
+		   strlen("") - 2 (the original code wrote one byte before dir here).
+		   This also makes newly enabled SMB/HDD/MMCE entries appear safely. */
+		if (!dir[0])
+		{
+			SetDir("");
+			return;
+		}
         if (strcmp(dir,"/"))
         {
 		    Int32 i = strlen(dir) - 2;
@@ -1708,6 +1763,12 @@ void CBrowserScreen::Chdir(const Char *pSubDir)
 	}
 
 	SetDir(dir);
+}
+
+void CBrowserScreen::RefreshRootDevices()
+{
+	if (!m_Dir[0])
+		SetDir("");
 }
 
 

@@ -55,8 +55,133 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - Restaurado o acesso a pendrives/HDs USB ao iniciar pela ISO: a stack usa
   `usbd_mini`/FreeUsbd compatível com OPL, IRXs BDM fixados e espera limitada
   para mídias lentas terminarem de montar em `massN:`.
+- Substituído o `host:` visível ao usuário por um dispositivo `smb:` de rede,
+  carregado sob demanda e restrito no navegador à leitura/abertura de ROMs.
+- A aba antiga de Host/NetPlay virou um configurador SMB completo e grava o
+  `SMB.CNF` automaticamente, sem exigir que o usuário monte o arquivo à mão.
+- Corrigida a falha intermitente de áudio do boot, mais perceptível em 480i:
+  o serviço era parado no fim da inicialização e só voltava quando algum core
+  — frequentemente o NES — enviasse o primeiro bloco de áudio.
+- O CDFS não usa mais esperas infinitas nem a cascata de 32×32 tentativas; uma
+  mídia ausente ou leitura quebrada agora termina com timeout e erro real sem
+  prender o menu, a música e o carregamento de ROM.
 - A paleta antiga e excessivamente saturada do InfoNES foi substituída pela
   paleta NTSC 2C02 padrão do **Mesen2**, preservada em RGBA8.
+
+---
+
+## Revisão de estabilidade r12: boot 480i, CDFS e configuração SMB
+
+### Áudio não depende mais de abrir um jogo NES
+
+- Encontrada a ligação entre os sintomas aparentemente separados. No fim do
+  boot, `Aud_Clearbuff()` chamava `audsrv_stop_audio()`, que deixa o player do
+  IOP parado. O `Aud_Play()` legado, porém, era uma função vazia.
+- O resultado dependia do tempo da inicialização: a música do menu e o SNES
+  podiam ficar mudos, enquanto abrir um jogo NES parecia “consertar” tudo
+  porque seu primeiro bloco PCM chamava `audsrv_play_audio()` por acaso. O
+  480i apenas tornava essa ordem mais fácil de reproduzir; não era defeito da
+  resolução em si.
+- `Aud_Play()` agora reinicia de verdade o audsrv com um bloco silencioso
+  mínimo e o backend acompanha explicitamente os estados iniciado/parado.
+- O stop desnecessário do fim do boot foi removido. `Aud_Pause()`,
+  `Aud_Clearbuff()` e o primeiro enqueue continuam coerentes caso algum caminho
+  futuro precise parar e retomar o serviço.
+- O conserto não altera o volume, o mixer, o SPC700, o 2A03 nem a frequência
+  dos jogos; corrige somente o ciclo de vida do backend de áudio.
+
+### CDFS deixa de congelar o restante do homebrew
+
+- O fork do driver ainda herdava do PS2SDK chamadas bloqueantes
+  `sceCdDiskReady(0)`/`sceCdSync(0)`, 32 tentativas externas e até 32
+  tentativas internas. Uma ISO ruim, mídia ausente ou comando CDVD perdido
+  podia manter a EE esperando I/O por tempo indefinido; nesse intervalo ela
+  também deixava de alimentar o audsrv, dando a impressão de defeito musical.
+- As esperas foram substituídas por polling não bloqueante com prazo definido.
+  Uma leitura que excede o limite recebe `sceCdBreak()`, tem uma janela curta
+  para encerrar e retorna erro; somente duas tentativas limitadas são feitas.
+- `read()` não copia mais um setor velho/zerado nem informa o tamanho pedido
+  quando a leitura falha. Agora devolve `EIO`, invalida o cache e impede que o
+  carregador trate uma ROM corrompida como válida.
+- `dread()` distingue fim normal de diretório de erro de mídia. `getstat()`
+  agora segue a convenção ioman (`0` no sucesso, `-ENOENT` quando ausente) e
+  nunca preenche o resultado com uma estrutura não inicializada.
+- A leitura do volume descriptor valida tanto o comando quanto a presença de
+  ISO9660/Joliet. O tamanho copiado de nomes também é limitado antes do
+  terminador, removendo uma escrita fora do buffer no IOP.
+- O `cdfs_stream.irx` recompilado possui **11.969 bytes** e SHA-256
+  `f0a14edceb4876130508b0c18ba7c254ccbefa284858d87bc4baebc2ca78cdef`.
+
+### A antiga tela Host agora configura SMB
+
+- A aba de rede do iaddis foi reaproveitada como **SMB Network**. Foram
+  removidos da interface os controles antigos de hospedar/conectar NetPlay,
+  que não configuravam o filesystem de ROMs.
+- A tela permite editar pelo controle o IPv4 do servidor, porta 445/139, nome
+  do compartilhamento, usuário e senha. O editor usa Esquerda/Direita para o
+  cursor, Cima/Baixo para o caractere, Quadrado para apagar e Triângulo para
+  terminar.
+- **Save & Connect** valida os campos, cria automaticamente
+  `mc0:/SNESticle/SMB.CNF` ou usa `mc1:` como fallback, liga a opção SMB e só
+  então inicializa DEV9, DHCP, `smbman`, autenticação e share.
+- Sem memory card, o arquivo pode ser gravado ao lado de um ELF iniciado por
+  um dispositivo gravável. A tela nunca sobrescreve o `SMB.CNF` global de
+  `mc?:/SYS-CONF` usado por outros homebrews.
+- A configuração própria em `mc?:/SNESticle` passou a ter prioridade sobre um
+  arquivo empacotado ao lado do ELF/na ISO, permitindo corrigir IP ou senha sem
+  remontar o disco.
+- Entrar na aba é seguro e preguiçoso: ela apenas lê os campos. Rede e DHCP
+  continuam fora do boot e só são acionados pelo comando explícito de conexão.
+
+---
+
+## Revisão de rede r11: `host:` substituído por SMB somente leitura
+
+- Identificada a finalidade do `host:` original de iaddis: ele era a ponte de
+  desenvolvimento do **ps2link/ps2client HostFS**, usada para enviar ROMs e
+  módulos a partir do PC. Não era um compartilhamento de rede autônomo e
+  dependia dos metadados fornecidos pelo launcher/emulador.
+- Removido `host:` da lista normal de dispositivos. O fallback interno de boot
+  direto/ps2link e os caminhos antigos de depuração permanecem disponíveis,
+  sem serem apresentados como fonte de ROM para o usuário.
+- Adicionado `smb:` como filesystem iomanX real por meio do `smbman.irx` do
+  PS2SDK. O driver devolve `FIO_S_IFREG` e `FIO_S_IFDIR` corretamente, evitando
+  o problema em que todos os arquivos do HostFS pareciam pastas.
+- O `smbman.irx` foi fixado em `irx/`, embutido no ELF e documentado com
+  origem, licença e SHA-256. Nenhum IRX solto precisa acompanhar a aplicação.
+- Rede, DEV9, DHCP, driver SMB, login e abertura do compartilhamento são
+  iniciados somente quando o usuário escolhe `smb:`. O boot normal continua
+  sem tocar na rede.
+- A espera de DHCP é limitada a 15 segundos. Ausência de cabo/servidor gera
+  `DHCP Timeout` em vez de congelar o homebrew indefinidamente.
+- Corrigido o nome da interface da stack moderna de `sm1` para `sm0`. O SMAP
+  atual do PS2SDK registra `sm0`; antes, a configuração podia ser aplicada a
+  uma interface inexistente e nunca obter endereço.
+- Corrigida a ordem de inicialização para a usada pelo OPL:
+  `ps2dev9 → netman → NetManInit → smap → ps2ip → ps2ipInit`. Assim, os eventos
+  de link do SMAP não são perdidos antes de o RPC do EE estar pronto.
+- Adicionado `SMB.CNF` de compartilhamento único, aceitando IP numérico, porta,
+  share, usuário, senha e tipo de senha. Também são aceitos os nomes familiares
+  do wLaunchELF (`smbServer_IP`, `smbUsername`, `smbPasswordType` e outros).
+- O arquivo pode ficar ao lado do ELF, no diretório `SNESticle`/`SYS-CONF` do
+  memory card ou na raiz CDFS. `SMB_CONFIG=/caminho/SMB.CNF` o inclui na raiz
+  de uma ISO sem imprimir credenciais no log do Makefile.
+- A opção antiga **Host (PC link)** da segunda página de Video Config virou
+  **SMB (Network)**, reaproveitando a mesma posição no `video.cfg` para manter
+  compatibilidade. Depois de uma tentativa ela mostra erros específicos de
+  configuração, rede, protocolo, autenticação, share ou navegação.
+- Ao voltar para o navegador enquanto ele está na lista de dispositivos, a
+  lista é atualizada; ligar/desligar SMB passa a surtir efeito sem reiniciar.
+  Também foi corrigida a escrita antes do buffer ao pressionar Triângulo nessa
+  raiz vazia, usada agora como uma atualização segura.
+- Copy, paste e delete ficam bloqueados em todo caminho `smb:`. O frontend usa
+  a rede somente para ler ROMs/ZIPs/capas; SRAM e save states continuam nos
+  destinos locais já configurados. A documentação também exige um share
+  somente leitura no servidor.
+- Documentada a limitação do driver a **SMB1/NT1** e o risco correspondente:
+  usar apenas em LAN confiável/isolada, nunca expor à internet. Emuladores
+  precisam oferecer Ethernet DEV9/SMAP real; HostFS sozinho não substitui a
+  interface de rede.
 
 ---
 
@@ -492,7 +617,7 @@ parte do caminho executado.
   sem índice continuam usando o fallback compatível.
 - Adicionado `make covers ROMS=/pasta`, que cria o mesmo layout `Named_*`
   diretamente em uma pasta destinada a USB, MX4SIO, MMCE, HDD, memory card ou
-  `host:` sem precisar gerar ISO.
+  ao diretório exportado por SMB, sem precisar gerar ISO.
 - `COVER_JOBS` controla o paralelismo e `COVER_BASE_URL` permite espelho ou
   teste local do downloader.
 
@@ -512,7 +637,7 @@ parte do caminho executado.
 
 ### Velocidade e compatibilidade entre dispositivos
 
-- CDFS, USB/mass, cartões de memória, `host:`, MMCE e PFS/HDD usam
+- CDFS, USB/mass, cartões de memória, `smb:`, MMCE e PFS/HDD usam
   `fileXioDopen/fileXioDread` como caminho comum de enumeração.
 - O registro de diretório já contém nome, modo e tamanho; ROMs reconhecidas não
   geram um `stat` ou seek óptico adicional por item.
@@ -556,7 +681,7 @@ parte do caminho executado.
 ## Interface e rodapé
 
 - Removido o endereço IP do rodapé; essa informação já existe na tela de
-  configuração de Host/rede.
+  configuração de rede.
 - Restaurada a faixa inferior em verde-azulado escuro inspirada no visual
   original do iaddis.
 - O rodapé é desenhado depois da tela ativa, impedindo que itens do navegador o
@@ -583,9 +708,12 @@ parte do caminho executado.
 
 ### Validação realizada neste ambiente
 
-- Compilação limpa da source extraída do ZIP com o toolchain PS2DEV: **153
+- Compilação limpa da source extraída do ZIP com o toolchain PS2DEV: **157
   arquivos compilados**.
-- Resultado desta source: **153/153 arquivos**, **0 erros** e **0 avisos**.
+- Resultado desta source: **157/157 arquivos**, **0 erros** e **0 avisos**.
+- Confirmado no ELF final que `smbman.irx` foi realmente embutido, incluindo
+  o identificador de protocolo `NT LM 0.12`; o binário fixado também foi
+  conferido contra o SHA-256 documentado.
 - O relógio DPCM foi conferido contra `1789773 / 44100`: o passo corrigido
   resulta em `40,5844269` ciclos/sample, contra `40,5844218` exatos; o antigo
   resultava em apenas `4,0537109`.
@@ -623,8 +751,9 @@ parte do caminho executado.
   NetherSX2.
 - Confirmar a proporção 4:3 e a opção widescreen em 1080i em diferentes TVs.
 - Abrir `cdfs:/ROMS/`, subpastas e uma ISO com mais de 256 ROMs.
-- Repetir a navegação em `mass0:`, `mass1:`, `mc0:`, `mc1:`, `host:`, MMCE e
-  partições HDD/PFS.
+- Repetir a navegação em `mass0:`, `mass1:`, `mc0:`, `mc1:`, `smb:`, MMCE e
+  partições HDD/PFS; no SMB, testar guest, usuário/senha e pastas grandes em
+  um PS2 real conectado por Ethernet.
 - Comparar os perfis Original e Composite em jogos com gradientes, transparência
   e tons de pele; a preferência visual continua sendo subjetiva.
 - Comparar em PS2 real músicas e efeitos dos cinco canais base, incluindo
@@ -643,6 +772,8 @@ parte do caminho executado.
 
 - Projeto original e layout de interface: iaddis/SNESticle PS2.
 - PS2SDK: iomanX/fileXio e base do driver CDFS.
+- PS2SDK `smbman`, OPL e wLaunchELF_ISR: referência do login, abertura de share
+  e ordem de inicialização da rede/SMB.
 - PicoDrive PS2 de irixxxx: referência para resolução defensiva de entradas de
   diretório sem tipo conhecido.
 - `fhoedemakers/pico-infonesPlus`: referência moderna do InfoNES para as

@@ -95,11 +95,10 @@ extern "C" {
    real (~107ms) e destravam o caso do boot. */
 #define BGM_DRAIN_MAXFRAMES 12
 
-/* O cdfs.irx chama sceCdDiskReady(0) internamente ao abrir a primeira
-   pasta. Esse modo e' BLOQUEANTE e foi a causa da Issue #16 quando o
-   BGM tentou abrir cdfs:/BGM logo no primeiro frame do menu. A sondagem
-   abaixo e' feita aos poucos, com mode=1 (nao bloqueante), antes de
-   permitir qualquer opendir no disco.
+/* A sondagem abaixo continua feita aos poucos antes do primeiro opendir no
+   disco. O cdfs_stream atual tambem possui timeout interno, mas evitar a
+   abertura enquanto BIOS/mechacon ainda detectam a midia deixa o boot mais
+   rapido e poupa tentativas desnecessarias.
 
    - grace: deixa BIOS/mechacon/OPL assentarem depois do SifIopReset;
    - poll: evita um RPC de CDVD em todo frame;
@@ -661,10 +660,9 @@ static void _BuildIndex(void)
     }
 }
 
-/* Um passo curto por frame. Nenhum loop de espera e nenhum acesso a cdfs:
-   acontece antes de o mechacon responder "pronto" duas vezes. O opendir
-   posterior ainda e' sincrono, mas nessa altura o cdfs.irx nao entra no
-   sceCdDiskReady(0) enquanto o drive esta detectando. */
+/* Um passo curto por frame. Nenhum acesso a cdfs: acontece antes de o
+   mechacon responder "pronto" duas vezes. O opendir posterior e' sincrono,
+   mas o driver possui prazo e cancelamento para uma leitura emperrada. */
 static void _DiscScanStep(void)
 {
     int type;

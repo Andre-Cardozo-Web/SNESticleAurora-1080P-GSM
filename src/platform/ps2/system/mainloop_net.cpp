@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "types.h"
 #include "console.h"
@@ -14,7 +15,6 @@
 #include "embedded_irx.h"
 
 extern "C" {
-#include <netman.h>
 #include "ps2ip.h"
 #include "netplay_ee.h"
 }
@@ -134,7 +134,10 @@ Bool _MainLoopConfigureNetwork(char **ppSearchPaths, char *pConfigFileName)
 	// reset ip configuration
     memset(&config, 0, sizeof(config));
 
-	strcpy(config.netif_name, "sm1");
+	/* Modern PS2SDK SMAP registers as sm0. The original iaddis tree used
+	   sm1 with an older stack; keeping that name makes setconfig silently
+	   miss the only interface and DHCP never starts. */
+	strcpy(config.netif_name, "sm0");
 
 	// setup default config to have dhcp enabled
 	config.dhcp_enabled = 1;
@@ -161,10 +164,12 @@ Bool _MainLoopConfigureNetwork(char **ppSearchPaths, char *pConfigFileName)
 		ppSearchPaths++;
 	}
 
-// set configuration
-	ps2ip_setconfig(&config);
+	/* Apply DHCP/static configuration to the actual SMAP interface. */
+	/* This PS2SDK API returns 1 on success and 0 when sm0 was not found. */
+	if (ps2ip_setconfig(&config) <= 0)
+		return FALSE;
 
-	if (ps2ip_getconfig(config.netif_name,&config))
+	if (ps2ip_getconfig(config.netif_name,&config) > 0)
 	{
 		// print info about network configuration
 		printf("%08X %08X %08X %d\n", config.ipaddr.s_addr, config.netmask.s_addr, config.gw.s_addr, config.dhcp_enabled);
@@ -178,13 +183,11 @@ Bool _MainLoopConfigureNetwork(char **ppSearchPaths, char *pConfigFileName)
  * _MainLoopInitNetwork.
  *
  * Sequence:
- *   1. SifExecModuleBuffer ps2dev9 / netman / smap            \
+ *   1. SifExecModuleBuffer ps2dev9 / netman, NetManInit, smap \
  *      via NetIfLoadEmbeddedIrx (src/platform/ps2/system/      | network IRX
  *      embedded_irx.cpp).                                      | stack
- *   2. NetManInit() on the EE side -- registers our SIF RPC    /
- *      bindings so netman can talk to us once smap is up.
- *   3. SifExecModuleBuffer ps2ip -- happens inside step 1.
- *   4. ip4_addr_set_zero on IP/NM/GW so ps2ipInit() starts up
+ *   2. SifExecModuleBuffer ps2ip -- happens inside step 1.
+ *   3. ip4_addr_set_zero on IP/NM/GW so ps2ipInit() starts up
  *      with a no-IP netif we can re-configure later via
  *      ps2ip_setconfig() (which _MainLoopConfigureNetwork does
  *      from `ipconfig.dat` or a hard-coded DHCP default).
@@ -200,6 +203,8 @@ Bool _MainLoopConfigureNetwork(char **ppSearchPaths, char *pConfigFileName)
  * caller (mainloop_iop.cpp::_MainLoopLoadModules) skips the
  * netplay init that depends on the IP stack being live.
  */
+static int s_network_init_result = 1; /* 1=not attempted, 0=ready, -1=failed */
+
 Bool _MainLoopInitNetwork(Char **ppSearchPaths)
 {
     struct ip4_addr IP, NM, GW;
@@ -207,19 +212,16 @@ Bool _MainLoopInitNetwork(Char **ppSearchPaths)
 
     (void)ppSearchPaths;
 
+    if (s_network_init_result != 1)
+        return s_network_init_result == 0 ? TRUE : FALSE;
+
     ret = NetIfLoadEmbeddedIrx();
     if (ret < 0)
     {
         // printf("[boot] NetIfLoadEmbeddedIrx failed (%d) - no network\n", ret);
+        s_network_init_result = -1;
         return FALSE;
     }
-
-    /* NetManInit() lives in libnetman.a and registers the EE side
-       of the netman SIF RPC.  netman.irx queues link-up events
-       until the EE binds to it; if NetManInit() is skipped, smap
-       loads but never delivers frames to ps2ip and every ps2ip
-       socket call later times out. */
-    NetManInit();
 
     /* Bring up lwIP with a no-address netif so the caller can
        drive DHCP / static IP through ps2ip_setconfig() in
@@ -229,8 +231,53 @@ Bool _MainLoopInitNetwork(Char **ppSearchPaths)
     ip4_addr_set_zero(&GW);
 
     // printf("[boot] ps2ipInit\n");
-    ps2ipInit(&IP, &NM, &GW);
+    ret = ps2ipInit(&IP, &NM, &GW);
     // printf("[boot] ps2ipInit done\n");
 
+    if (ret < 0)
+    {
+        printf("_MainLoopInitNetwork: ps2ipInit failed (%d)\n", ret);
+        s_network_init_result = -1;
+        return FALSE;
+    }
+
+    s_network_init_result = 0;
     return TRUE;
+}
+
+/* Wait only after the user explicitly opens a network feature. Network is
+ * never touched during boot. A finite timeout avoids reproducing the old
+ * black-screen hang when no cable or DHCP server is present. */
+Bool _MainLoopWaitForNetwork(Int32 timeoutMs)
+{
+    t_ip_info config;
+    Int32 elapsed = 0;
+
+    if (timeoutMs < 0)
+        timeoutMs = 0;
+
+    while (elapsed <= timeoutMs)
+    {
+        memset(&config, 0, sizeof(config));
+        if (ps2ip_getconfig((char *)"sm0", &config) > 0 &&
+            config.ipaddr.s_addr != 0 &&
+            (!config.dhcp_enabled ||
+             config.dhcp_status == DHCP_STATE_BOUND ||
+             config.dhcp_status == DHCP_STATE_OFF))
+        {
+            printf("Network ready: ip=%08X dhcp=%u\n",
+                   config.ipaddr.s_addr, config.dhcp_status);
+            return TRUE;
+        }
+
+        if (elapsed == timeoutMs)
+            break;
+        usleep(100000);
+        elapsed += 100;
+        if (elapsed > timeoutMs)
+            elapsed = timeoutMs;
+    }
+
+    printf("Network timeout after %d ms\n", timeoutMs);
+    return FALSE;
 }

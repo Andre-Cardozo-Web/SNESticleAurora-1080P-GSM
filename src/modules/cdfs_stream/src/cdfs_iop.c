@@ -2,6 +2,7 @@
 #include <libcdvd-common.h>
 #include <sysclib.h>
 #include <sysmem.h>
+#include <thbase.h>
 
 #include "cdfs_iop.h"
 
@@ -9,6 +10,17 @@
 #define FALSE 0
 
 #define MAX_DIR_CACHE_SECTORS 32
+
+/* Never let a damaged/empty/slow virtual disc hold the whole IOP forever.
+   The old driver used blocking sceCdDiskReady(0)/sceCdSync(0), plus 32 outer
+   retries with 32 internal retries.  A failed probe could therefore stall
+   unrelated services such as audsrv and make the symptom look like an audio
+   or video-mode bug. */
+#define CDFS_POLL_DELAY_US       10000
+#define CDFS_READY_TIMEOUT_POLLS 300
+#define CDFS_READ_TIMEOUT_POLLS  300
+#define CDFS_ABORT_TIMEOUT_POLLS 50
+#define CDFS_READ_ATTEMPTS       2
 
 struct DirTocEntry
 {
@@ -165,6 +177,37 @@ static int isValidDisc(void) {
     return result;
 }
 
+static int cdfs_waitDiscReady(void) {
+    int poll;
+
+    for (poll = 0; poll < CDFS_READY_TIMEOUT_POLLS; ++poll) {
+        if (sceCdDiskReady(1) == SCECdComplete)
+            return isValidDisc();
+        DelayThread(CDFS_POLL_DELAY_US);
+    }
+    return FALSE;
+}
+
+static int cdfs_waitReadComplete(void) {
+    int poll;
+
+    for (poll = 0; poll < CDFS_READ_TIMEOUT_POLLS; ++poll) {
+        if (sceCdSync(1) == 0)
+            return TRUE;
+        DelayThread(CDFS_POLL_DELAY_US);
+    }
+
+    /* Cancel a command that exceeded the deadline and give CDVDMAN a short,
+       bounded window to acknowledge the abort before returning an error. */
+    sceCdBreak();
+    for (poll = 0; poll < CDFS_ABORT_TIMEOUT_POLLS; ++poll) {
+        if (sceCdSync(1) == 0)
+            break;
+        DelayThread(CDFS_POLL_DELAY_US);
+    }
+    return FALSE;
+}
+
 // Copy a TOC Entry from the CD native format to our tidier format
 static void copyToTocEntry(struct TocEntry *tocEntry, struct DirTocEntry *internalTocEntry) {
     int filenamelen;
@@ -192,14 +235,18 @@ static void copyToTocEntry(struct TocEntry *tocEntry, struct DirTocEntry *intern
 
         // This is a Joliet Filesystem, so use Unicode to ISO string copy
         filenamelen = internalTocEntry->filenameLength / 2;
+        if (filenamelen >= (int)sizeof(tocEntry->filename))
+            filenamelen = sizeof(tocEntry->filename) - 1;
 
         for (i = 0; i < filenamelen; i++)
             tocEntry->filename[i] = internalTocEntry->filename[(i << 1) + 1];
     } else {
         filenamelen = internalTocEntry->filenameLength;
+        if (filenamelen >= (int)sizeof(tocEntry->filename))
+            filenamelen = sizeof(tocEntry->filename) - 1;
 
         // use normal string copy
-        strncpy(tocEntry->filename, internalTocEntry->filename, 128);
+        memcpy(tocEntry->filename, internalTocEntry->filename, filenamelen);
     }
 
     tocEntry->filename[filenamelen] = 0;
@@ -234,8 +281,6 @@ static int findPath(char *pathname) {
 
     if (!isValidDisc())
         return FALSE;
-
-    sceCdDiskReady(0);
 
     while (dirname != NULL) {
         int dir_entry;
@@ -379,17 +424,24 @@ static int findPath(char *pathname) {
 static int cdfs_getVolumeDescriptor(void) {
     // Read until we find the last valid Volume Descriptor
     int volDescSector;
+    int found = FALSE;
     static struct CDVolDesc localVolDesc;
     DPRINTF("cdfs_getVolumeDescriptor called\n\n");
 
+    memset(&cdVolDesc, 0, sizeof(cdVolDesc));
+
     for (volDescSector = 16; volDescSector < 20; volDescSector++) {
-        cdfs_readSect(volDescSector, 1, (u8*)&localVolDesc);
+        if (!cdfs_readSect(volDescSector, 1, (u8*)&localVolDesc))
+            return found;
 
         // If this is still a volume Descriptor
         if (memcmp(localVolDesc.volID, "CD001", 5) == 0) {
+            if (localVolDesc.filesystemType == 0xff)
+                break;
             if ((localVolDesc.filesystemType == 1) ||
                 (localVolDesc.filesystemType == 2)) {
                 memcpy(&cdVolDesc, &localVolDesc, sizeof(struct CDVolDesc));
+                found = TRUE;
             }
         } else
             break;
@@ -409,7 +461,7 @@ static int cdfs_getVolumeDescriptor(void) {
     }
 #endif
     //	sceCdStop();
-    return TRUE;
+    return found;
 }
 
 static enum PathMatch comparePath(const char *path) {
@@ -569,12 +621,10 @@ static int cdfs_cacheDir(const char *pathname, enum Cache_getMode getMode) {
 // so lets start again
     DPRINTF("The cache is not valid, or the requested directory is not a sub-dir of the cached one\n\n");
 
-    if (!isValidDisc()) {
+    if (!cdfs_waitDiscReady()) {
         DPRINTF("No supported disc inserted.\n");
         return -1;
     }
-
-    sceCdDiskReady(0);
 
     // Read the main volume descriptor
     if (!cdfs_getVolumeDescriptor()) {
@@ -796,18 +846,18 @@ int cdfs_readSect(u32 lsn, u32 sectors, u8 *buf) {
     u32 consecutive_sectors = (sectors > 2) ? (sectors * 2048) / 2064 : 0;
     int retry;
     int result = 0;
-    cdReadMode.trycount = 32;
+    if (sectors == 0)
+        return TRUE;
+    if (buf == NULL)
+        return FALSE;
 
-    for (retry = 0; retry < 32; retry++) { // 32 retries
-        if (retry <= 8)
-            cdReadMode.spindlctrl = 1;  // Try fast reads for first 8 tries
-        else
-            cdReadMode.spindlctrl = 0;  // Then try slow reads
+    cdReadMode.trycount = 4;
 
-        if (!isValidDisc())
+    for (retry = 0; retry < CDFS_READ_ATTEMPTS; retry++) {
+        cdReadMode.spindlctrl = (retry == 0) ? SCECdSpinStm : SCECdSpinNom;
+
+        if (!cdfs_waitDiscReady())
             return FALSE;
-
-        sceCdDiskReady(0);
 
         if (sceCdGetDiskType() == SCECdDVDV)
         {
@@ -816,8 +866,7 @@ int cdfs_readSect(u32 lsn, u32 sectors, u8 *buf) {
                 result = !sceCdReadDVDV(lsn, consecutive_sectors, buf, &cdReadMode);
                 if (result == 0)
                 {
-                    sceCdSync(0);
-                    result = sceCdGetError();
+                    result = cdfs_waitReadComplete() ? sceCdGetError() : -1;
                 }
                 if (result != 0)
                 {
@@ -833,8 +882,7 @@ int cdfs_readSect(u32 lsn, u32 sectors, u8 *buf) {
                 result = !sceCdReadDVDV(lsn + i, 1, dvdvBuffer, &cdReadMode);
                 if (result == 0)
                 {
-                    sceCdSync(0);
-                    result = sceCdGetError();
+                    result = cdfs_waitReadComplete() ? sceCdGetError() : -1;
                 }
                 if (result != 0)
                 {
@@ -848,8 +896,7 @@ int cdfs_readSect(u32 lsn, u32 sectors, u8 *buf) {
             result = !sceCdRead(lsn, sectors, buf, &cdReadMode);
             if (result == 0)
             {
-                sceCdSync(0);
-                result = sceCdGetError();
+                result = cdfs_waitReadComplete() ? sceCdGetError() : -1;
             }
         }
 
@@ -857,8 +904,8 @@ int cdfs_readSect(u32 lsn, u32 sectors, u8 *buf) {
             break;
     }
 
-    cdReadMode.trycount = 32;
-    cdReadMode.spindlctrl = 1;
+    cdReadMode.trycount = 4;
+    cdReadMode.spindlctrl = SCECdSpinStm;
 
     if (result == 0)
         return TRUE;

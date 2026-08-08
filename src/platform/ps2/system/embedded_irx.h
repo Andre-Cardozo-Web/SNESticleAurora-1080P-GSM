@@ -64,6 +64,7 @@ int  CdfsLoadEmbeddedIrx(void);
 
 int  PadLoadEmbeddedIrx(void);
 int  NetIfLoadEmbeddedIrx(void);
+int  SmbLoadEmbeddedIrx(void);
 
 /* USB + BDM fixado: FreeUsbd/usbd_mini + bdm + FatFs + usbmass_bd,
    lendo FAT/exFAT/MBR/GPT e enumerando massN: por drive. */
@@ -98,14 +99,15 @@ int  MmceGetLastError(void);
 int  MmceNeedsRestart(void);
 
 /* Mass (USB): a stack USB sempre sobe no boot; este flag controla a
-   listagem de mass0:/mass1:.  Host (host:): so' listagem (sem modulo).
+   listagem de mass0:/mass1:. SMB (smb:) e' listado por opcao, mas sua rede e
+   seu driver so' carregam quando o usuario abre o dispositivo.
    MX4SIO (SD via SIO2) tem toggle PROPRIO (Mx4sioIsEnabled/SetEnabled),
    padrao DESLIGADO -- Mx4sioLoadIfEnabled carrega o mx4sio_bd APOS a
    config se o toggle estiver ligado (chamado em mainloop_init). */
 int  MassStorageIsEnabled(void);
 void MassStorageSetEnabled(int enabled);
-int  HostIsEnabled(void);
-void HostSetEnabled(int enabled);
+int  SmbSupportIsEnabled(void);
+void SmbSupportSetEnabled(int enabled);
 int  Mx4sioLoadIfEnabled(void);
 int  Mx4sioIsEnabled(void);
 void Mx4sioSetEnabled(int enabled);

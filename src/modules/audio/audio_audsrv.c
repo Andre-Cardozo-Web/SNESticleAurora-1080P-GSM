@@ -143,6 +143,28 @@ static short _interleave_buf[AUD_MAX_ENQUEUE_SAMPLES * AUD_AUDSRV_CHANNELS]
 
 
 static int sjpcm_inited = 0;
+static int sjpcm_playing = 0;
+
+/* audsrv_stop_audio() does more than empty its queue: it leaves the IOP
+   mixer stopped until the next audsrv_play_audio() call.  Keep that state
+   explicit so the legacy Aud_Play() API really resumes playback instead of
+   relying on the first emulator/BGM block to do it by accident. */
+static void Aud_WakeAudsrv(void)
+{
+    int ret;
+
+    if (!sjpcm_inited || sjpcm_playing)
+        return;
+
+    /* A tiny silent block is enough to restart audsrv.  It also gives
+       audsrv_queued()/available() a deterministic state before producers
+       decide whether there is room to enqueue their first real block. */
+    memset(_interleave_buf, 0, 64 * AUD_BYTES_PER_SAMPLE);
+    ret = audsrv_play_audio((const char *)_interleave_buf,
+                            64 * AUD_BYTES_PER_SAMPLE);
+    if (ret >= 0)
+        sjpcm_playing = 1;
+}
 
 
 int Aud_Init(int sync, int numsamples, int maxenqueuesamples)
@@ -193,18 +215,10 @@ int Aud_Init(int sync, int numsamples, int maxenqueuesamples)
     ret = audsrv_set_volume(MAX_VOLUME);
     // DLog("[snes-aud] set_volume(%d) = %d", MAX_VOLUME, ret);
 
-    /* Prime audsrv: before the first audsrv_play_audio(), audsrv_queued()
-       / audsrv_available() can report a phantom initial occupancy, which
-       makes Aud_Available() return 0. Any producer that only feeds when
-       there is free space (the menu BGM at boot) then stays stuck until
-       some game "wakes up" audsrv with its first play. Pushing a short
-       block of silence here starts the IOP playback engine and clears
-       that state. The ring is empty at this point, so this does not
-       block. (~21 ms of silence: inaudible.) */
-    memset(_interleave_buf, 0, 1024 * AUD_BYTES_PER_SAMPLE);
-    audsrv_play_audio((const char *)_interleave_buf, 1024 * AUD_BYTES_PER_SAMPLE);
-
+    /* Prime audsrv before a producer asks queued()/available(). */
     sjpcm_inited = 1;
+    sjpcm_playing = 0;
+    Aud_WakeAudsrv();
     return 0;
 }
 
@@ -215,6 +229,7 @@ void Aud_Quit(void)
     audsrv_stop_audio();
     audsrv_quit();
     sjpcm_inited = 0;
+    sjpcm_playing = 0;
 }
 
 
@@ -226,7 +241,7 @@ void Aud_Quit(void)
 */
 void Aud_Play(void)
 {
-    /* nothing to do - audsrv plays as soon as samples are enqueued */
+    Aud_WakeAudsrv();
 }
 
 
@@ -234,6 +249,7 @@ void Aud_Pause(void)
 {
     if (!sjpcm_inited) return;
     audsrv_stop_audio();
+    sjpcm_playing = 0;
 }
 
 
@@ -241,6 +257,7 @@ void Aud_Clearbuff(void)
 {
     if (!sjpcm_inited) return;
     audsrv_stop_audio();
+    sjpcm_playing = 0;
 }
 
 
@@ -323,7 +340,8 @@ void Aud_Enqueue(short *left, short *right, int size, int wait)
         audsrv_wait_audio(bytes);
     }
 
-    audsrv_play_audio((const char *)_interleave_buf, bytes);
+    if (audsrv_play_audio((const char *)_interleave_buf, bytes) >= 0)
+        sjpcm_playing = 1;
 }
 
 

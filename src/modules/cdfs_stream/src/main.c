@@ -140,7 +140,7 @@ static int fio_close(iop_file_t *f)
 
     i = (int)f->privdata;
 
-    if (i >= MAX_FILES_OPENED) {
+    if (i < 0 || i >= MAX_FILES_OPENED || !fd_used[i]) {
         printf("fio_close: ERROR: File does not appear to be open!\n");
         return -EPERM;
     }
@@ -168,7 +168,7 @@ static int fio_read(iop_file_t *f, void *buffer, int size)
 
     i = (int)f->privdata;
 
-    if (i >= MAX_FILES_OPENED) {
+    if (i < 0 || i >= MAX_FILES_OPENED || !fd_used[i]) {
         printf("fio_read: ERROR: File does not appear to be open!\n");
         return -EPERM;
     }
@@ -211,6 +211,9 @@ static int fio_read(iop_file_t *f, void *buffer, int size)
     if (read == 0 || (read == 1 && num_sectors > 1)) {
         if (!cdfs_readSect(start_sector + read, num_sectors - read, local_buffer + ((read) << 11))) {
             DPRINTF("Couldn't Read from file for some reason\n");
+            lastsector = -1;
+            last_bk = 0;
+            return -EIO;
         }
         
         last_bk = num_sectors - 1;
@@ -246,7 +249,7 @@ static int fio_lseek(iop_file_t *f, int offset, int whence)
 
     i = (int) f->privdata;
 
-    if (i >= 16) {
+    if (i < 0 || i >= MAX_FILES_OPENED || !fd_used[i]) {
         DPRINTF("fio_lseek: ERROR: File does not appear to be open!\n");
         return -EPERM;
     }
@@ -317,7 +320,7 @@ static int fio_closeDir(iop_file_t *fd)
 
     i = (int)fd->privdata;
 
-    if (i >= MAX_FOLDERS_OPENED) {
+    if (i < 0 || i >= MAX_FOLDERS_OPENED || !fod_used[i]) {
         printf("fio_close: ERROR: File does not appear to be open!\n");
         return -EPERM;
     }
@@ -337,13 +340,18 @@ static int fio_dread(iop_file_t *fd, io_dirent_t *dirent)
 
     i = (int)fd->privdata;
 
-    if (i >= MAX_FOLDERS_OPENED) {
+    if (i < 0 || i >= MAX_FOLDERS_OPENED || !fod_used[i]) {
         printf("fio_dread: ERROR: Folder does not appear to be open!\n\n");
         return -EPERM;
     }
 
-    if (cdfs_dirStreamRead(&fod_table[i].stream, &entry) <= 0)
-        return 0;
+    {
+        int result = cdfs_dirStreamRead(&fod_table[i].stream, &entry);
+        if (result < 0)
+            return -EIO;
+        if (result == 0)
+            return 0;
+    }
 
     DPRINTF("fio_dread: fod_table index=%i\n\n", i);
     DPRINTF("fio_dread: reading entry\n\n");
@@ -359,6 +367,7 @@ static int fio_dread(iop_file_t *fd, io_dirent_t *dirent)
     memcpy(dirent->stat.atime, entry.dateStamp, sizeof(entry.dateStamp));
     memcpy(dirent->stat.mtime, entry.dateStamp, sizeof(entry.dateStamp));
     strncpy(dirent->name, entry.filename, sizeof(dirent->name));
+    dirent->name[sizeof(dirent->name) - 1] = '\0';
     
     return 1;
 }
@@ -366,15 +375,14 @@ static int fio_dread(iop_file_t *fd, io_dirent_t *dirent)
 static int fio_getstat(iop_file_t *fd, const char *name, io_stat_t *stat) 
 {
     struct TocEntry entry;
-    int ret = -EPERM;
-
     (void)fd;
 
     DPRINTF("CDFS: fio_getstat called.\n");
     DPRINTF("      kernel_fd.. %p\n", fd);
     DPRINTF("      name....... %s\n\n", name);
 
-    ret = cdfs_findfile(name, &entry);
+    if (!cdfs_findfile(name, &entry))
+        return -ENOENT;
 
     DPRINTF("      entry.. %p\n", &entry);
     DPRINTF("      filesize....... %i\n\n", entry.fileSize);
@@ -388,7 +396,7 @@ static int fio_getstat(iop_file_t *fd, const char *name, io_stat_t *stat)
     memcpy(stat->atime, entry.dateStamp, sizeof(entry.dateStamp));
     memcpy(stat->mtime, entry.dateStamp, sizeof(entry.dateStamp));
 
-    return ret;
+    return 0;
 }
 
 IOMAN_RETURN_VALUE_IMPL(EIO);

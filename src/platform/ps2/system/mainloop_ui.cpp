@@ -147,6 +147,10 @@ void _UICycle(int dir)
             {
                 _MainLoopStateMenuRefresh();
             }
+            else if (scr == (CScreen*)_MainLoop_pBrowserScreen)
+            {
+                _MainLoop_pBrowserScreen->RefreshRootDevices();
+            }
             _MainLoopSetScreen(scr);
             _bMenu = TRUE;
             ConPrint("UI: screen=%d (L1/R1)\n", idx);
@@ -193,6 +197,10 @@ void _MainLoopCycleScreen(int dir)
             if (scr == (CScreen*)_MainLoop_pStateScreen)
             {
                 _MainLoopStateMenuRefresh();
+            }
+            else if (scr == (CScreen*)_MainLoop_pBrowserScreen)
+            {
+                _MainLoop_pBrowserScreen->RefreshRootDevices();
             }
             _MainLoopSetScreen(scr);
             _bMenu = TRUE;

@@ -15,6 +15,7 @@ extern "C" {
 #include "memcard.h"
 #include "uiCover.h"
 #include "mainloop_bgm.h"
+#include "mainloop_smb.h"
 #include "audmixbuffer.h"
 #include "embedded_irx.h"   /* HddSupportIsEnabled / HddSupportSetEnabled */
 #include "snppucolor.h"
@@ -45,7 +46,7 @@ typedef struct
 	Int32  hddenable;  /* suporte ao HD interno (hdd0:): 0=off, 1=on  */
 	Int32  mmceenable; /* suporte a MMCE (mmce0/1): 0=off, 1=on       */
 	Int32  massenable; /* mass/USB (mass0/1): 0=off, 1=on             */
-	Int32  hostenable; /* host: (PC link via ps2link): 0=off, 1=on    */
+	Int32  smbenable;  /* historical host slot; now smb: 0=off, 1=on */
 	Int32  mx4sioenable; /* MX4SIO (SD via SIO2): 0=off, 1=on         */
 	Int32  colorprofile; /* SNPPU_COLOR_PROFILE_*                     */
 } VideoCfgT;
@@ -104,7 +105,7 @@ void VideoSettingsSave(void)
 	cfg.hddenable  = HddSupportIsEnabled() ? 1 : 0;
 	cfg.mmceenable = MmceSupportIsEnabled() ? 1 : 0;
 	cfg.massenable = MassStorageIsEnabled() ? 1 : 0;
-	cfg.hostenable = HostIsEnabled() ? 1 : 0;
+	cfg.smbenable  = SmbSupportIsEnabled() ? 1 : 0;
 	cfg.mx4sioenable = Mx4sioIsEnabled() ? 1 : 0;
 	cfg.colorprofile = SNPPUColorGetProfile();
 
@@ -167,7 +168,7 @@ void VideoSettingsLoad(void)
 		if (cfg.hddenable == 0 || cfg.hddenable == 1) HddSupportSetEnabled(cfg.hddenable);
 		if (cfg.mmceenable == 0 || cfg.mmceenable == 1) MmceSupportSetEnabled(cfg.mmceenable);
 		if (cfg.massenable == 0 || cfg.massenable == 1) MassStorageSetEnabled(cfg.massenable);
-		if (cfg.hostenable == 0 || cfg.hostenable == 1) HostSetEnabled(cfg.hostenable);
+		if (cfg.smbenable == 0 || cfg.smbenable == 1) SmbSupportSetEnabled(cfg.smbenable);
 		if (cfg.mx4sioenable == 0 || cfg.mx4sioenable == 1) Mx4sioSetEnabled(cfg.mx4sioenable);
 		if (cfg.colorprofile >= 0 && cfg.colorprofile < SNPPU_COLOR_PROFILE_COUNT)
 			SNPPUColorSetProfile(cfg.colorprofile);
@@ -312,8 +313,8 @@ void CVideoScreen::Draw()
 		          HddSupportIsEnabled() ? "On" : "Off"); vy += 12;
 		_VideoRow(vy, 12, m_iSelect, "MMCE Cards",
 		          _VideoMmceStatus()); vy += 12;
-		_VideoRow(vy, 13, m_iSelect, "Host (PC link)",
-		          HostIsEnabled() ? "On" : "Off"); vy += 12;
+		_VideoRow(vy, 13, m_iSelect, "SMB (Network)",
+		          SmbGetStatusText()); vy += 12;
 		_VideoRow(vy, 14, m_iSelect, "MX4SIO (SD)",
 		          _VideoMx4sioStatus()); vy += 12;
 	}
@@ -441,8 +442,16 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 				MmceProbeAvailableSlots();
 			break;
 
-		case 13: /* Host (host:) on/off -- so' lista a entrada (sem modulo). */
-			HostSetEnabled(!HostIsEnabled());
+		case 13: /* SMB on/off. Driver/network stay lazy until smb: is opened. */
+			if (SmbSupportIsEnabled())
+			{
+				SmbDisconnect();
+				SmbSupportSetEnabled(0);
+			}
+			else
+			{
+				SmbSupportSetEnabled(1);
+			}
 			break;
 
 		case 14: /* MX4SIO (SD via SIO2) on/off -- carga preguicosa (deferida).

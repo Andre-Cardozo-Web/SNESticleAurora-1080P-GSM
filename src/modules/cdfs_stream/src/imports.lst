@@ -5,6 +5,7 @@ I_sceCdRead
 I_sceCdReadDVDV
 I_sceCdStop
 I_sceCdSync
+I_sceCdBreak
 I_sceCdDiskReady
 I_sceCdGetDiskType
 I_sceCdTrayReq
@@ -39,3 +40,7 @@ sysmem_IMPORTS_start
 I_AllocSysMemory
 I_FreeSysMemory
 sysmem_IMPORTS_end
+
+thbase_IMPORTS_start
+I_DelayThread
+thbase_IMPORTS_end

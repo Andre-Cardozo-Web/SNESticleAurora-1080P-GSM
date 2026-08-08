@@ -82,6 +82,7 @@ public:
 
 	void SetDir(const Char *pDir);
 	void Chdir(const Char *pSubDir);
+	void RefreshRootDevices();
 	void SetStateManager(Bool bEnabled) { m_bStateManager = bEnabled; }
 
 };

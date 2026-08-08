@@ -12,6 +12,10 @@
 #include <fileXio_rpc.h>
 #undef NEWLIB_PORT_AWARE
 
+extern "C" {
+#include <netman.h>
+}
+
 #include "embedded_irx.h"
 
 /* These headers are generated at build time by bin2c from the
@@ -32,6 +36,7 @@
 #include "netman_irx.h"
 #include "smap_irx.h"
 #include "ps2ip_irx.h"
+#include "smbman_irx.h"
 #include "cdfs_stream_irx.h"
 
 /* Stack BDM moderna fixada (FreeUsbd mini + FAT/exFAT/GPT). */
@@ -658,16 +663,17 @@ extern "C" int MmceNeedsRestart(void)
  *    boot mexeria no caminho critico que causava a tela preta.  Este flag
  *    so' controla a LISTAGEM de mass0:/mass1: no browser e a carga do
  *    mx4sio (abaixo).  Padrao LIGADO.
- *  - Host (host:): entrada de dev (PC via ps2link/ps2client); nao carrega
- *    modulo, so' aparece/some do browser.  Padrao DESLIGADO.
+ *  - SMB (smb:): compartilhamento de rede para ROMs. O toggle controla a
+ *    listagem; a rede, o smbman e a autenticacao so' sobem quando o usuario
+ *    abre smb:. Padrao DESLIGADO.
  * ------------------------------------------------------------------------ */
 static int s_mass_enabled = 1;   /* padrao LIGADO */
-static int s_host_enabled = 0;   /* padrao DESLIGADO */
+static int s_smb_enabled = 0;    /* padrao DESLIGADO */
 
 extern "C" int  MassStorageIsEnabled(void)   { return s_mass_enabled; }
 extern "C" void MassStorageSetEnabled(int e) { s_mass_enabled = e ? 1 : 0; }
-extern "C" int  HostIsEnabled(void)          { return s_host_enabled; }
-extern "C" void HostSetEnabled(int e)        { s_host_enabled = e ? 1 : 0; }
+extern "C" int  SmbSupportIsEnabled(void)     { return s_smb_enabled; }
+extern "C" void SmbSupportSetEnabled(int e)   { s_smb_enabled = e ? 1 : 0; }
 
 extern "C" int Mx4sioIsEnabled(void)
 {
@@ -746,9 +752,10 @@ extern "C" int Mx4sioNeedsRestart(void)
  *                    smap binary built into PS2SDK
  *                    ($(PS2SDK)/iop/irx/smap.irx) is the netman-aware
  *                    variant.
- *   3. smap.irx    - Sony Multi-Application Player ethernet driver
+ *   3. NetManInit  - binds the EE side before SMAP registers with netman.
+ *   4. smap.irx    - Sony Multi-Application Player ethernet driver
  *                    (the Network Adapter NIC).
- *   4. ps2ip.irx   - lwIP TCP/IP stack on the IOP side.  Talks to
+ *   5. ps2ip.irx   - lwIP TCP/IP stack on the IOP side.  Talks to
  *                    smap through netman.  After this one is up the
  *                    EE can call ps2ipInit() / ps2ip_setconfig() and
  *                    open BSD sockets through <sys/socket.h>.
@@ -757,21 +764,17 @@ extern "C" int Mx4sioNeedsRestart(void)
  * rules for EMBED_IRX_NAMES) so we do not need ps2dev9.irx /
  * netman.irx / smap.irx / ps2ip.irx to exist on disk next to the ELF.
  *
- * The EE-side NetManInit() call is NOT done here -- it lives in
- * src/platform/ps2/system/mainloop_net.cpp::_MainLoopInitNetwork
- * between the smap and ps2ip loads, because the caller needs to
- * be able to bail out cleanly if any individual step fails (e.g.
- * no Network Adapter installed on a slim PS2).  This function only
- * owns the IRX bring-up itself; consumers can check the return value
- * to decide whether to continue with ps2ipInit() or to skip network
- * features entirely.
+ * NetManInit() deliberately happens immediately after netman.irx and before
+ * smap.irx. This is the order used by OPL and prevents SMAP link events from
+ * being lost before the EE RPC endpoint exists.
  *
  * Returns 0 on success, or a negative value indicating which IRX
  * failed:
  *   -1 ps2dev9.irx
  *   -2 netman.irx
- *   -3 smap.irx
- *   -4 ps2ip.irx
+ *   -3 NetManInit
+ *   -4 smap.irx
+ *   -5 ps2ip.irx
  *
  * Safe to call multiple times -- subsequent calls return the cached
  * result.
@@ -800,11 +803,19 @@ extern "C" int NetIfLoadEmbeddedIrx(void)
         return s_netif_loaded_result;
     }
 
+    ret = NetManInit();
+    if (ret < 0)
+    {
+        printf("NetIfLoadEmbeddedIrx: NetManInit failed (%d)\n", ret);
+        s_netif_loaded_result = -3;
+        return s_netif_loaded_result;
+    }
+
     ret = EmbeddedIrxLoad(smap_irx, sizeof(smap_irx), 0, NULL);
     if (ret < 0)
     {
         printf("NetIfLoadEmbeddedIrx: smap.irx failed (%d)\n", ret);
-        s_netif_loaded_result = -3;
+        s_netif_loaded_result = -4;
         return s_netif_loaded_result;
     }
 
@@ -812,11 +823,35 @@ extern "C" int NetIfLoadEmbeddedIrx(void)
     if (ret < 0)
     {
         printf("NetIfLoadEmbeddedIrx: ps2ip.irx failed (%d)\n", ret);
-        s_netif_loaded_result = -4;
+        s_netif_loaded_result = -5;
         return s_netif_loaded_result;
     }
 
     s_netif_loaded_result = 0;
+    return 0;
+}
+
+/* SMB filesystem driver. It is intentionally loaded only after the network
+ * stack has an address and only when the user enters smb:. smbman registers
+ * the normal iomanX "smb:" device, so the browser, ZIP reader and ROM loader
+ * keep using the same fileXio/newlib read path as local devices. */
+static int s_smb_loaded_result = 1; /* 1 = not yet attempted */
+
+extern "C" int SmbLoadEmbeddedIrx(void)
+{
+    int ret;
+
+    if (s_smb_loaded_result != 1) return s_smb_loaded_result;
+
+    ret = EmbeddedIrxLoad(smbman_irx, sizeof(smbman_irx), 0, NULL);
+    if (ret < 0)
+    {
+        printf("SmbLoadEmbeddedIrx: smbman.irx failed (%d)\n", ret);
+        s_smb_loaded_result = ret;
+        return ret;
+    }
+
+    s_smb_loaded_result = 0;
     return 0;
 }
 
@@ -907,5 +942,6 @@ extern "C" void EmbeddedIrxResetRuntimeState(void)
     s_storage_sio2_backend = STORAGE_SIO2_NONE;
 
     s_netif_loaded_result = 1;
+    s_smb_loaded_result = 1;
     s_pad_loaded_result = 1;
 }

@@ -98,7 +98,8 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
   pause menu, with volume and synthesis‑rate controls. See
   [Menu music & audio](#menu-music--audio).
 - Audio via **audsrv**, with separate **Game Volume** and **Menu Music**
-  controls in the Video Config screen.
+  controls in the Video Config screen. Its stop/resume state is explicit, so
+  menu and SNES audio no longer depend on opening a NES game after boot.
 - **SNES and NES cartridge save states** — five slots; USB, memory-card, MMCE
   and internal-HDD storage; ROM and CRC validation; and two-bank writes that
   preserve the previous valid state.
@@ -345,7 +346,7 @@ PNG next to the ROM → box art → title screen → gameplay snap → logo → 
 > the exact base name of your ROM. The automatic downloader described below
 > handles this conversion for you.
 
-### 3. USB, MX4SIO, MMCE, HDD, memory cards, host and CDFS
+### 3. USB, MX4SIO, MMCE, HDD, memory cards, SMB and CDFS
 
 The directory layout is identical on every device; only the path prefix
 changes:
@@ -356,13 +357,14 @@ changes:
 | Standard memory card | `mc0:/ROMS/` or `mc1:/ROMS/` |
 | MemCard PRO 2 / SD2PSX (MMCE) | `mmce0:/ROMS/` or `mmce1:/ROMS/` |
 | Internal APA/PFS HDD | `hdd0:/PARTITION/ROMS/` |
-| PC through ps2link | `host:/ROMS/` |
+| Read-only network share | `smb:/ROMS/` |
 | Disc or ISO | `cdfs:/ROMS/` |
 
-For USB, HDD, MMCE, memory cards or `host:`, copy the ROM and the `Named_*`
-directories to the device using the layout shown above. The browser indexes
-the PNG files when entering the directory, avoiding a slow storage scan on
-every selection change.
+For USB, HDD, MMCE, memory cards or SMB, copy the ROM and the `Named_*`
+directories to the device/share using the layout shown above. The browser
+indexes the PNG files when entering the directory, avoiding a slow storage
+scan on every selection change. See [SMB ROM loading](#smb-rom-loading-replaces-host)
+for the required `SMB.CNF` and server settings.
 
 `make covers` and `COVER=y` also generate a small `COVERS.IDX` beside the
 ROMs. It lets CDFS and other slow devices load one sequential index instead of
@@ -521,9 +523,10 @@ make iso roms=/path/to/roms bgm=/path/to/tracks
 <summary>Show details</summary>
 
 
-The ROM browser lists every storage device the build can reach. Pick one to
-browse it. There are no build flags for this — it all comes up automatically
-at boot.
+The ROM browser lists local devices immediately. Optional hardware and network
+sources are enabled in **Video Config → Storage / Devices** and initialized
+only when selected, so a missing HDD, MMCE card, network cable or DHCP server
+cannot stall normal boot.
 
 | Device | What it is |
 |--------|------------|
@@ -532,11 +535,109 @@ at boot.
 | `mc0:` / `mc1:` | **Memory cards** — including the original **MemCard PRO** (gen 1), which behaves as a normal card. |
 | `mmce0:` / `mmce1:` | **MMCE** carts (**MemCard PRO 2**, **SD2PSX**) via `mmceman`. |
 | `cdfs:` | The game/data disc (or the ISO this ELF was burned into). |
+| `smb:` | One configured **read-only SMB network share** used for browsing and loading ROMs. |
 
 **Filesystems / partitions:** the bundled **BDM** stack (`bdm` + `bdmfs_fatfs` +
 `usbmass_bd`) reads **FAT16 / FAT32 / exFAT** with **MBR or GPT** partition
 tables (so drives larger than 2 TB work), mirroring modern OPL. The internal
 HDD additionally uses `ps2atad` + `ps2hdd` for the APA `hdd0:` device.
+
+### SMB ROM loading (replaces `host:`)
+
+The original iaddis `host:` entry was a development bridge for
+**ps2link/ps2client HostFS**. It let the author load ROMs and IRX files from a
+PC while developing, but it was never a normal network share. Its behaviour
+depends on the launcher or emulator supplying HostFS; some implementations
+return unreliable type metadata and make regular files appear as directories.
+For that reason `host:` is no longer shown in the user ROM browser. The
+internal direct-ELF/ps2link boot fallback remains available for developers.
+
+SNESticle now embeds PS2SDK's `smbman` and exposes one configured share as
+`smb:`. Network modules, DHCP and login start only when you explicitly connect
+or select `smb:`; merely booting or opening the setup tab does not touch DEV9.
+
+#### Recommended: configure it on the PS2
+
+Use L1/R1 to open the **SMB Network** tab (the former Host screen), then set:
+
+| Field | Meaning |
+|-------|---------|
+| **Server IP** | Numeric IPv4 address of the PC/NAS. Press Cross, choose an octet with Left/Right, and change it with Up/Down. |
+| **Port** | Cross or Left/Right switches between the usual ports 445 and 139. |
+| **Share** | Share name only, such as `roms`; it is not a local filesystem path. |
+| **Username** | SMB account, or `GUEST` for a guest share. |
+| **Password** | Leave empty for guest access. It is masked on screen. |
+
+For Share/Username/Password, press Cross to edit, Left/Right to move the
+cursor, Up/Down to choose a character, Cross to advance/add, Square to delete,
+and Triangle to finish. Select **Save & Connect** when done. The emulator
+automatically validates and writes `mc0:/SNESticle/SMB.CNF` (falling back to
+`mc1:`), enables SMB, and attempts the connection. The exact saved path and a
+specific connection error are shown on screen. Circle reloads the saved file.
+
+#### Advanced: create `SMB.CNF` manually
+
+You can instead copy and edit [`SMB.CNF.example`](SMB.CNF.example):
+
+```ini
+SERVER_IP=192.168.1.100
+SERVER_PORT=445
+SHARE=roms
+USER=GUEST
+PASSWORD=
+PASSWORD_TYPE=-1
+```
+
+`SERVER_IP` must be a numeric IPv4 address. `SHARE` is the share name, not a
+filesystem path. Password modes are `-1` for guest/no password, `0` for legacy
+plaintext and `1` to hash the supplied password locally before authentication.
+If a non-empty password is supplied without `PASSWORD_TYPE`, mode `1` is used.
+The compatible wLaunchELF names `smbServer_IP`, `smbServer_Port`,
+`smbUsername`, `smbPassword`, `smbPasswordType` and `smbShare` are also
+accepted.
+
+Manual files are searched in this order:
+
+- `mc0:/SNESticle/SMB.CNF` or `mc1:/SNESticle/SMB.CNF`;
+- `mc0:/SYS-CONF/SMB.CNF` or `mc1:/SYS-CONF/SMB.CNF`;
+- beside a standalone ELF;
+- the root of a disc/ISO as `cdfs:/SMB.CNF`.
+
+The on-console setup writes only the emulator-owned `SNESticle` location; it
+does not overwrite a shared wLaunchELF file under `SYS-CONF`. A memory-card
+file takes priority over a read-only bundled file, so changing a server does
+not require rebuilding the ISO.
+
+For an ISO build, it can be copied to the root automatically:
+
+```bash
+make iso ROMS=/path/to/roms SMB_CONFIG=/path/to/SMB.CNF
+```
+
+For a manual file, enable **Video Config → SMB (Network)**, save with Cross and
+open `smb:` in the browser. The **Save & Connect** action in the SMB Network
+tab enables that option automatically. Statuses such as **No SMB.CNF**,
+**DHCP Timeout**, **Auth Error** or **Share Error** identify a failed stage.
+
+The browser deliberately disables copy, paste and delete on `smb:`. ROMs,
+ZIPs and their PNG artwork are read from the share; SRAM and save states still
+go to the configured local memory-card/USB destination. Configure the server
+share itself as read-only too. A minimal Samba share is:
+
+```ini
+[roms]
+    path = /srv/ps2-roms
+    browseable = yes
+    read only = yes
+    guest ok = yes
+```
+
+> `smbman` implements **SMB1/NT1**, not SMB2/3. If the server requires it,
+> `server min protocol = NT1` is a global Samba setting. SMB1 is obsolete and
+> unsafe on an untrusted network: use a dedicated read-only share on an
+> isolated/trusted LAN and never expose it to the internet. An emulator also
+> needs working DEV9/SMAP Ethernet emulation; providing HostFS alone is not
+> enough.
 
 > **Build note:** the complete USB group (`usbd_mini`, `bdm`,
 > `bdmfs_fatfs`, `usbmass_bd`) and SIO2 group (`sio2man`, memory-card,
@@ -607,6 +708,7 @@ Produces `SNESticle.elf` (and a packed ELF / ISO for the `iso` target).
 | `COVERS_PATH=path` | Shared cover‑art folder baked into the build (e.g. `mass:/snes/covers`). See [Cover art](#-cover-art). |
 | `BGM_PATH=path` | Folder scanned first for menu‑music `.mod`/`.xm` files. See [Menu music & audio](#menu-music--audio). |
 | `BGM_RATE=hz` | Default menu‑music synthesis rate (e.g. `32000`). |
+| `SMB_CONFIG=/path/SMB.CNF` | Copy a single-share SMB configuration into an ISO root without printing its credentials. |
 
 > Note: changing a flag like `PROFILE=1` does **not** force a recompile on its
 > own (make only tracks file timestamps). Run `make clean` first when toggling
@@ -645,7 +747,7 @@ The cumulative notes for the current test version are available in
   browsing stays smooth even from a CD. `make iso ... COVER=y` fetches all
   matching art into CDFS without touching the source ROMs; `make covers
   ROMS=...` prepares the same `Named_*` layout for any other device.
-- **ROM browser**: switched CDFS, USB, memory cards, host, MMCE and PFS/HDD to
+- **ROM browser**: switched CDFS, USB, memory cards, SMB, MMCE and PFS/HDD to
   direct directory records, eliminating the per-file `stat` round trip that
   made large CDFS folders especially slow. iomanX-normalized `FIO_S_*` mode
   bits identify directories consistently on every device; entries from unusual
@@ -664,6 +766,8 @@ The cumulative notes for the current test version are available in
   MX4SIO all appear as `mass0:`/`mass1:`, reading FAT16/FAT32/exFAT with
   MBR/GPT. Slow USB media receives a bounded mount retry. Added the internal
   HDD (`hdd0:`, APA) and MMCE carts (`mmce0:`/`mmce1:`, MemCard PRO 2 / SD2PSX).
+  The unreliable user-facing `host:` device was replaced by a lazy, read-only
+  `smb:` ROM share with bounded DHCP/login errors and correct file types.
   See [Storage & devices](#storage--devices).
 - **Boot / input**: controller and IRX bring‑up reworked to behave on real
   hardware, not just emulators. Direct ELF boot also tolerates launchers that

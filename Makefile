@@ -160,7 +160,7 @@ CXXFLAGS += $(COVERS_DEF)
 # rede. COVER=y/cover=y, usado com `make iso ROMS=...`, baixa boxart, title,
 # snap e logo para a arvore temporaria da ISO sem modificar as ROMs originais.
 # `make covers ROMS=...` e' o modo explicito para gravar as mesmas pastas no
-# dispositivo/pasta de ROMs (USB, HDD, MMCE, host etc.).
+# dispositivo/pasta de ROMs (USB, HDD, MMCE, SMB etc.).
 COVER ?= n
 cover ?= $(COVER)
 COVER_SYSTEM ?= auto
@@ -442,6 +442,7 @@ SRCS := \
 	src/platform/ps2/system/mainloop_iop.cpp \
 	src/platform/ps2/system/boot_status.cpp \
 	src/platform/ps2/system/mainloop_net.cpp \
+	src/platform/ps2/system/mainloop_smb.cpp \
 	src/platform/ps2/system/mainloop_ui.cpp \
 	src/platform/ps2/system/mainloop_install.cpp \
 	src/platform/ps2/system/mainloop_menu.cpp \
@@ -521,15 +522,17 @@ SDK_EXTRA_IRX := ioptrap.irx poweroff.irx
 # hugorsgarcia/PS2SNESticle/SNESticle/Modules/netplay/Source/*) and
 # talks directly to lwIP through PS2SDK's <sys/socket.h> shims.  The
 # net stack bring-up is the modern PS2SDK netman + ps2ip flow:
-#   ps2dev9.irx -> netman.irx -> smap.irx -> NetManInit() ->
-#   ps2ip.irx  -> ps2ipInit()
+#   ps2dev9.irx -> netman.irx -> NetManInit() -> smap.irx ->
+#   ps2ip.irx -> ps2ipInit()
 # All four .irx files are embedded into the ELF via bin2c and loaded
 # from src/platform/ps2/system/embedded_irx.cpp::NetIfLoadEmbeddedIrx.
+# smbman.irx is also embedded, but loaded only when smb: is opened after
+# DHCP succeeds; it never enters the normal boot path.
 #
 # The legacy iaddis CDVD.IRX is also no longer needed. The in-tree
 # cdfs_stream.irx registers cdfs: and streams directories instead of using
 # PS2SDK cdfs.irx's fixed 256-entry table.
-EMBED_IRX_NAMES := audsrv freesd sio2man mcman mcserv padman mtapman ps2dev9 netman smap ps2ip cdfs_stream usbd bdm bdmfs_fatfs usbmass_bd ps2atad ps2hdd mmceman mx4sio_bd
+EMBED_IRX_NAMES := audsrv freesd sio2man mcman mcserv padman mtapman ps2dev9 netman smap ps2ip smbman cdfs_stream usbd bdm bdmfs_fatfs usbmass_bd ps2atad ps2hdd mmceman mx4sio_bd
 
 # Pin the complete SIO2 storage/input group to one verified PS2SDK revision.
 # This prevents a future SDK update from mixing an incompatible sio2man with
@@ -544,6 +547,7 @@ MTAPMAN_IRX_PATH   ?= $(CURDIR)/irx/mtapman.irx
 MMCEMAN_IRX_PATH   ?= $(CURDIR)/irx/mmceman.irx
 MX4SIO_BD_IRX_PATH ?= $(CURDIR)/irx/mx4sio_bd.irx
 CDFS_STREAM_IRX_PATH ?= $(CURDIR)/irx/cdfs_stream.irx
+SMBMAN_IRX_PATH      ?= $(CURDIR)/irx/smbman.irx
 
 # ps2fs.irx (PFS): sistema de arquivos das particoes APA do HD interno.
 # Necessario para MONTAR e ler dentro de uma particao (pfs0:).  Opcional:
@@ -597,6 +601,7 @@ check-env: ensure-ps2dev
 	@test -f "$(MMCEMAN_IRX_PATH)" || (echo "ERROR: required MMCE IRX not found: $(MMCEMAN_IRX_PATH)"; exit 1)
 	@test -f "$(MX4SIO_BD_IRX_PATH)" || (echo "ERROR: required MX4SIO IRX not found: $(MX4SIO_BD_IRX_PATH)"; exit 1)
 	@test -f "$(CDFS_STREAM_IRX_PATH)" || (echo "ERROR: required streaming CDFS IRX not found: $(CDFS_STREAM_IRX_PATH)"; exit 1)
+	@test -f "$(SMBMAN_IRX_PATH)" || (echo "ERROR: required SMB filesystem IRX not found: $(SMBMAN_IRX_PATH)"; exit 1)
 	@test -f "$(USBD_IRX_PATH)" || (echo "ERROR: required FreeUsbd mini IRX not found: $(USBD_IRX_PATH)"; exit 1)
 	@test -f "$(BDM_IRX_PATH)" || (echo "ERROR: required BDM IRX not found: $(BDM_IRX_PATH)"; exit 1)
 	@test -f "$(BDMFS_FATFS_IRX_PATH)" || (echo "ERROR: required FAT/exFAT IRX not found: $(BDMFS_FATFS_IRX_PATH)"; exit 1)
@@ -637,6 +642,8 @@ $(EMBED_DIR)/smap_irx.h: $(SMAP_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,smap_irx)
 $(EMBED_DIR)/ps2ip_irx.h: $(PS2IP_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,ps2ip_irx)
+$(EMBED_DIR)/smbman_irx.h: $(SMBMAN_IRX_PATH) | $(EMBED_DIR)
+	$(call RUN_BIN2C,$<,$@,smbman_irx)
 $(EMBED_DIR)/cdfs_stream_irx.h: $(CDFS_STREAM_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,cdfs_stream_irx)
 $(EMBED_DIR)/usbd_irx.h: $(USBD_IRX_PATH) | $(EMBED_DIR)
@@ -968,6 +975,7 @@ ISO_ROOT_DIR  ?= $(OBJ_DIR)/iso_root
 ISO_OUT       ?= $(OBJ_DIR)/$(ISO_GAME_ID).$(ISO_GAME_NAME).iso
 ISO_BOOT      ?= $(ISO_GAME_ID)
 ISO_VMODE     ?= NTSC
+SMB_CONFIG    ?=
 
 # User-facing knobs (lowercase)
 OUT ?= 
@@ -1056,6 +1064,17 @@ iso-root: $(TARGET_STRIPPED) iso-check
 		"VMODE = $(ISO_VMODE)" > "$(ISO_ROOT_DIR)/SYSTEM.CNF"
 	@echo "[ ISO-ROOT ] SYSTEM.CNF:"
 	@cat "$(ISO_ROOT_DIR)/SYSTEM.CNF"
+	@# Optional single-share network config. Keep it opt-in because it may
+	@# contain credentials. The runtime also accepts SMB.CNF from the memory
+	@# card or beside a standalone ELF.
+	@if [ -n "$(strip $(SMB_CONFIG))" ]; then \
+		if [ ! -f "$(SMB_CONFIG)" ]; then \
+			echo "ERRO: SMB_CONFIG nao existe: $(SMB_CONFIG)"; \
+			exit 1; \
+		fi; \
+		cp -f "$(SMB_CONFIG)" "$(ISO_ROOT_DIR)/SMB.CNF"; \
+		echo "[ ISO-ROOT ] SMB.CNF incluido (credenciais nao exibidas)"; \
+	fi
 	@# No loose IRX files are copied into the ISO any more.  The ELF
 	@# embeds every IRX it needs (audsrv, freesd, sio2man, mcman,
 	@# mcserv, ps2dev9, netman, smap, ps2ip) via bin2c and loads them
@@ -1264,6 +1283,7 @@ help:
 	printf "  make iso roms=/path out=/out Same as uppercase variables\n"; \
 	printf "  make iso ROMS=/p OUT=/o JOBS=3  Parallel ISO build (now honors JOBS)\n"; \
 	printf "  make iso ROMS=/p COVER=y       Fetch all Libretro art into the ISO\n"; \
+	printf "  make iso SMB_CONFIG=/p/SMB.CNF Add read-only SMB share config\n"; \
 	printf "  make covers ROMS=/path         Fetch art beside ROMs for any device\n"; \
 	printf "  make iso PACK=0              Build ISO using unpacked ELF\n"; \
 	printf "\n"; \
@@ -1287,6 +1307,7 @@ help:
 	printf "  out=/path                    Same as OUT=/path\n"; \
 	printf "  ROMS=/path                   ROM folder for ISO build\n"; \
 	printf "  roms=/path                   Same as ROMS=/path\n"; \
+	printf "  SMB_CONFIG=/path/SMB.CNF     Copy SMB network config into ISO root\n"; \
 	printf "  COVER=n                      No network/downloads (default)\n"; \
 	printf "  COVER=y / cover=y            Auto-fetch box/title/snap/logo for ISO\n"; \
 	printf "  COVER_SYSTEM=auto            Detect SNES/NES; accepts snes or nes\n"; \

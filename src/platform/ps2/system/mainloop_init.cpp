@@ -460,8 +460,6 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	_MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
 
 	_MainLoop_pNetworkScreen = new CNetworkScreen();
-	_MainLoop_pNetworkScreen->SetMsgFunc(_MainLoopNetworkEvent);
-	_MainLoop_pNetworkScreen->SetPort(MAINLOOP_NETPORT);
 
 	_MainLoop_pVideoScreen = new CVideoScreen();
 
@@ -501,11 +499,14 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	// load snes palette
         _MainLoopLoadSnesPalette("mc0:/SNESticle/default.snpal");
 	// load rom
-	_MainLoopExecuteFile(_pRomFile, TRUE);
+        _MainLoopExecuteFile(_pRomFile, TRUE);
         _bMenu = _pSystem ? FALSE : TRUE;
         if (_MainLoop_bAudioReady)
         {
-            Aud_Clearbuff();
+            /* Aud_Init already starts with a clean queue.  Stopping audsrv
+               here used to leave it asleep because the old Aud_Play() was a
+               no-op; whether menu/SNES sound returned then depended on which
+               producer happened to enqueue first (commonly the NES core). */
             Aud_Play();
         }
 	// BOOTLOG("[boot] MainLoopInit: leave (bMenu=%d, sjpcm=%d, mcsave=%d)\n",
