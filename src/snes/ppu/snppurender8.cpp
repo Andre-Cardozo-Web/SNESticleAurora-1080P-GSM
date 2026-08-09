@@ -1178,7 +1178,7 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
         // get pointer to obj
 		pObj = pObjBase + pObjList[nObjList];
 
-		uSize = pObj->uSize;
+		uSize = pObj->uWidth;
 
 		// get obj position
 		ObjX = pObj->uPosX;
@@ -1186,7 +1186,7 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 		ObjX>>=32-9;
 		ObjY = iLine - pObj->uPosY;
 		ObjY^= pObj->uVXOR;
-		ObjY&= pObj->uSize - 1;
+		ObjY&= pObj->uHeight - 1;
 
 		SnesPPUTile4T *pTile4;
 		Uint32 uTileAddr;
@@ -1226,7 +1226,7 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 
 		while (uSize > 0)
 		{
-			if (ObjX >= -8 && ObjX < 256)
+			if (_SnesPPUOBJTileCountedX(pObj->uPosX, ObjX))
 			{
 				uTile = uPage | (uRow << 4) | ((uCol0 + iCol) & 0x0F);
 				uTileAddr = uBaseAddr + uTile * 16;

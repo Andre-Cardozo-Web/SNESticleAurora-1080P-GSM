@@ -236,14 +236,21 @@ static Bool bPrint = TRUE;
 			m_UpdateFlags &= ~SNESPPURENDER_UPDATE_OBJ;
 		}
 
-		if (m_UpdateFlags & SNESPPURENDER_UPDATE_BGSCR)
+		/* Tiles and decoded character rows are cached across scanlines. A VRAM
+		   upload can replace either the tilemap or the character data without
+		   changing scroll/base registers, so both update classes must invalidate
+		   the cached VRAM addresses. This is especially visible after pause/map
+		   screens and SuperFX text overlays. */
+		if (m_UpdateFlags &
+		    (SNESPPURENDER_UPDATE_BGSCR | SNESPPURENDER_UPDATE_BGCHR))
 		{
             pRenderInfo->uBGVramAddr[0] = 0xFFFFFFFF;
             pRenderInfo->uBGVramAddr[1] = 0xFFFFFFFF; 
             pRenderInfo->uBGVramAddr[2] = 0xFFFFFFFF; 
             pRenderInfo->uBGVramAddr[3] = 0xFFFFFFFF; 
 
-			m_UpdateFlags &= ~SNESPPURENDER_UPDATE_BGSCR;
+			m_UpdateFlags &= ~(SNESPPURENDER_UPDATE_BGSCR |
+			                   SNESPPURENDER_UPDATE_BGCHR);
 		}
 
 	    if (m_UpdateFlags & SNESPPURENDER_UPDATE_WINDOW)
@@ -413,4 +420,12 @@ void SnesPPURender::EndRender()
 
 void SnesPPURender::UpdateVRAM(Uint32 uVramAddr)
 {
+	(void)uVramAddr;
+
+	/* VRAM writes normally arrive as a DMA burst. Set bits only; the next
+	   rendered scanline performs one cache invalidation for the entire burst.
+	   OBJ pixels are fetched directly from VRAM and do not need a separate
+	   decoded-tile cache flush here. */
+	SetUpdateFlags(SNESPPURENDER_UPDATE_BGSCR |
+	               SNESPPURENDER_UPDATE_BGCHR);
 }

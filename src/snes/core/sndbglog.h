@@ -3,19 +3,25 @@
  *
  *  Build temporaria de diagnostico abrangente. Mede os blocos quentes da
  *  emulacao, atividade do GSU, PPU/OBJ e trafego dos ports OAM/VRAM/CGRAM.
- *  Os contadores sao baratos e a saida e' resumida a cada 60 frames para o
- *  proprio logger nao virar o gargalo que estamos tentando encontrar.
+ *  A saida e' resumida a cada 60 frames para o proprio logger nao virar o
+ *  gargalo que estamos tentando encontrar. Os contadores ficam compilados
+ *  somente quando SNES_DIAGNOSTICS=1.
  *
  *  Saida via DLog() (EE SIO) -> logs.txt do NetherSX2, prefixo [snes-tmg].
  *
- *  >>> definir SNDBG_LOG 0 (ou remover) antes de release. <<<
+ *  O build normal define SNDBG_LOG=0.
  */
 #ifndef _SNDBGLOG_H
 #define _SNDBGLOG_H
 
 #include "types.h"
 
-#define SNDBG_LOG 1
+/* The normal build keeps the counters out of every emulated instruction.
+   A diagnostic build can opt in with -DSNDBG_LOG=1 (the Makefile exposes a
+   friendly switch for that). */
+#ifndef SNDBG_LOG
+#define SNDBG_LOG 0
+#endif
 
 // resume a cada N frames (60 = ~1 s)
 #define SNDBG_FRAME_PERIOD 60

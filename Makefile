@@ -77,6 +77,12 @@ DEBUG_BOOT_SCREEN ?= 0
 # broken). Override on the make line: `make MAINLOOP_DEBUG_GS_TEST=1`.
 MAINLOOP_DEBUG_GS_TEST ?= 0
 
+# SNES_DIAGNOSTICS=1 enables the once-per-second CPU/PPU/GSU/OBJ counters
+# used by the v1.0.4 investigation. Keep it off for normal gameplay: the
+# per-instruction GSU counters are useful for profiling but are themselves
+# measurable work on the EE.
+SNES_DIAGNOSTICS ?= 0
+
 # Conservative flags to bridge the GCC 3.2 (2003) -> GCC 15.1 (2025)
 # gap in default optimization behavior. The original iaddis source was
 # written assuming the older compiler's much more conservative defaults,
@@ -104,11 +110,13 @@ CONSERVATIVE_FLAGS := \
 
 CFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) \
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
+	-DSNDBG_LOG=$(SNES_DIAGNOSTICS) \
 	-DDEBUG_BOOT_SCREEN=$(DEBUG_BOOT_SCREEN) \
 	-DMAINLOOP_DEBUG_GS_TEST=$(MAINLOOP_DEBUG_GS_TEST)
 
 CXXFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fno-exceptions -fno-rtti -fpermissive \
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
+	-DSNDBG_LOG=$(SNES_DIAGNOSTICS) \
 	-DDEBUG_BOOT_SCREEN=$(DEBUG_BOOT_SCREEN) \
 	-DMAINLOOP_DEBUG_GS_TEST=$(MAINLOOP_DEBUG_GS_TEST)
 
@@ -1307,6 +1315,7 @@ help:
 	printf "  SHOW_WARN_LOG=1              Print full warning logs\n"; \
 	printf "  VERBOSE=1                    Show full warning AND error text (no truncation)\n"; \
 	printf "  PROFILE=1                    Enable on-screen profiler (press R3 in-game)\n"; \
+	printf "  SNES_DIAGNOSTICS=1           Enable once-per-second SNES/GSU debug counters\n"; \
 	printf "  OUT=/path                    Copy final ELF to this folder\n"; \
 	printf "  out=/path                    Same as OUT=/path\n"; \
 	printf "  ROMS=/path                   ROM folder for ISO build\n"; \

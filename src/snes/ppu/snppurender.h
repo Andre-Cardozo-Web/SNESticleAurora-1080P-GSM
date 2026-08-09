@@ -71,12 +71,15 @@ struct SnesRenderObjT
 	Uint8   uPad;
 	Uint16	uTile;
 	Uint8	bHFlip;		// h-flip
-	Uint8	uVXOR;		// v-flip
-	Uint8	uSize;
-	Uint8	uSizeShift;
+	Uint8	uVXOR;		// v-flip (usa width-1 nos modos retangulares)
+	Uint8	uWidth;
+	Uint8	uHeight;
 	Uint8	uPri;		
 	Uint8	uPal;
 };
+
+Bool _SnesPPUOBJVisibleX(Uint16 uPosX, Uint8 uWidth);
+Bool _SnesPPUOBJTileCountedX(Uint16 uObjectX, Int32 iTileX);
 
 
 struct SnesRenderTileT

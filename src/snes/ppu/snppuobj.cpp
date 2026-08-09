@@ -13,51 +13,87 @@
 
 
 
-static Uint8 _SnesPPU_OAMSize[8][2]=
+// OBSEL.5-7 escolhe dois tamanhos. Os modos 6/7 sao retangulares e nao
+// podem ser representados por um unico shift, como fazia o renderer antigo.
+static const Uint8 _SnesPPU_OAMWidth[8][2]=
 {
-	{0, 1},	// 000  8 & 16
-	{0, 2},	// 001  8 & 32
-	{0, 3}, // 010  8 & 64
-	{1, 2}, // 011 16 & 32
-	{1, 3}, // 100 16 & 64
-	{2, 3}, // 101 32 & 64 
-	{0, 0}, // 110 ??
-	{0, 0}, // 111 ??
+	{ 8, 16}, { 8, 32}, { 8, 64}, {16, 32},
+	{16, 64}, {32, 64}, {16, 32}, {16, 32}
 };
 
-
-void _DecodeOBJEX(Uint8 *pObjEx, SnesRenderObjT *pObjs, Int32 nObjs, Uint8 *pOAMSize)
+static const Uint8 _SnesPPU_OAMHeight[8][2]=
 {
+	{ 8, 16}, { 8, 32}, { 8, 64}, {16, 32},
+	{16, 64}, {32, 64}, {32, 64}, {32, 32}
+};
+
+Bool _SnesPPUOBJVisibleX(Uint16 uPosX, Uint8 uWidth)
+{
+	uPosX &= 0x1FF;
+
+	/* X=256 is the hardware's special counted-but-hidden position. Other
+	   negative positions count only while at least one pixel reaches x=0. */
+	if (uPosX == 0x100)
+		return TRUE;
+
+	if (uPosX & 0x100)
+		return ((Int32)uPosX - 512) > -(Int32)uWidth;
+
+	return TRUE;
+}
+
+Bool _SnesPPUOBJTileCountedX(Uint16 uObjectX, Int32 iTileX)
+{
+	/* OBJ X=256 is a hardware quirk: its tiles consume the 34-tile budget
+	   even though no pixel is visible. A tile ending exactly at x=-1 is the
+	   first ordinary off-left tile that counts. */
+	return ((uObjectX & 0x1FF) == 0x100) ||
+	       (iTileX > -8 && iTileX < 256);
+}
+
+
+void _DecodeOBJEX(Uint8 *pObjEx, SnesRenderObjT *pObjs, Int32 nObjs, Uint32 uBaseSize)
+{
+	uBaseSize &= 7;
 	while (nObjs > 0)
 	{
 		Uint8	uObjEx;
+		Uint8  uLarge;
 
 		// fetch obj byte
 		uObjEx = *pObjEx++;
 
 		//uObjEx|=0xAA;
 
-		pObjs->uPosX	   = (uObjEx & 1) << 8; 
+		pObjs->uPosX	   = (uObjEx & 1) << 8;
 		uObjEx>>=1;
-		pObjs->uSizeShift  = pOAMSize[uObjEx & 1]; 
-		uObjEx>>=1;
-		pObjs++;
-
-		pObjs->uPosX	   = (uObjEx & 1) << 8; 
-		uObjEx>>=1;
-		pObjs->uSizeShift  = pOAMSize[uObjEx & 1]; 
+		uLarge = uObjEx & 1;
+		pObjs->uWidth  = _SnesPPU_OAMWidth [uBaseSize][uLarge];
+		pObjs->uHeight = _SnesPPU_OAMHeight[uBaseSize][uLarge];
 		uObjEx>>=1;
 		pObjs++;
 
-		pObjs->uPosX	   = (uObjEx & 1) << 8; 
+		pObjs->uPosX	   = (uObjEx & 1) << 8;
 		uObjEx>>=1;
-		pObjs->uSizeShift  = pOAMSize[uObjEx & 1]; 
+		uLarge = uObjEx & 1;
+		pObjs->uWidth  = _SnesPPU_OAMWidth [uBaseSize][uLarge];
+		pObjs->uHeight = _SnesPPU_OAMHeight[uBaseSize][uLarge];
 		uObjEx>>=1;
 		pObjs++;
 
-		pObjs->uPosX	   = (uObjEx & 1) << 8; 
+		pObjs->uPosX	   = (uObjEx & 1) << 8;
 		uObjEx>>=1;
-		pObjs->uSizeShift  = pOAMSize[uObjEx & 1]; 
+		uLarge = uObjEx & 1;
+		pObjs->uWidth  = _SnesPPU_OAMWidth [uBaseSize][uLarge];
+		pObjs->uHeight = _SnesPPU_OAMHeight[uBaseSize][uLarge];
+		uObjEx>>=1;
+		pObjs++;
+
+		pObjs->uPosX	   = (uObjEx & 1) << 8;
+		uObjEx>>=1;
+		uLarge = uObjEx & 1;
+		pObjs->uWidth  = _SnesPPU_OAMWidth [uBaseSize][uLarge];
+		pObjs->uHeight = _SnesPPU_OAMHeight[uBaseSize][uLarge];
 		uObjEx>>=1;
 		pObjs++;
 
@@ -90,38 +126,20 @@ void _DecodeOBJ(SnesPPUOBJT *pPPUObj, SnesRenderObjT *pObjs, Int32 nObjs, Uint8 
 		pObjs->uPal   = (uAttrib >> 1) & 7;
 		pObjs->uPri   = (uAttrib >> 4) & 3;
 		pObjs->bHFlip = (uAttrib >> 6) & 1;
-		pObjs->uSize  = 8 << pObjs->uSizeShift;
-		
 		if (uAttrib & 0x80)
 		{
-			pObjs->uVXOR = pObjs->uSize - 1;
+			// Nos modos H=2*W, o PPU vira duas metades W x W em vez de
+			// espelhar o retangulo inteiro. Isso equivale a XOR com W-1.
+			pObjs->uVXOR = pObjs->uWidth - 1;
 		} else
 		{
 			pObjs->uVXOR = 0;
 		}
 
 		pObjs->uTile = uTile;
-		//pObjs->uTile = ((uTile >> 4) << 4) + ((uTile & (0xF>>0)) << 0);
-		/*
-		switch (pObjs->uSizeShift)
-		{
-		case 0: // 8x8
-		pObjs->uTile = ((uTile >> 4) << 4) + ((uTile & (0xF>>0)) << 0);
-		break;
-		case 1: // 16x16
-		pObjs->uTile = ((uTile >> 3) << 5) + ((uTile & (0xF>>1)) << 1);
-		break;
-		case 2: // 32x32
-		pObjs->uTile = ((uTile >> 2) << 6) + ((uTile & (0xF>>2)) << 2);
-		break;
-		case 3: // 64x64
-		pObjs->uTile = ((uTile >> 1) << 7) + ((uTile & (0xF>>3)) << 3);
-		break;
-		}
-		*/
 
         *pObjY++    = pObjs->uPosY;
-        *pObjSize++ = pObjs->uSize;
+        *pObjSize++ = pObjs->uHeight;
 
 		// next obj
 		pPPUObj++;
@@ -147,7 +165,8 @@ Int32 SnesPPURender::CheckOBJ(SnesRenderObjT *pObjs, Int32 iObj, Int32 nObjs, Ui
 		uObjY = iLine - pObj->uPosY;
 		uObjY&= 0xFF;
 
-		if (uObjY < pObj->uSize) 
+		if (uObjY < pObj->uHeight &&
+		    _SnesPPUOBJVisibleX(pObj->uPosX, pObj->uWidth))
 		{
 			// we got an obj
 			*pObjList =  iObj;
@@ -235,7 +254,9 @@ void SnesPPURender::UpdateOBJVisibility(Uint8 *pObjY, Uint8 *pObjSize, Int32 iOb
         uObjSize = pObjSize[iObj];
 		uObjY    = pObjY[iObj];
 
-        while (uObjSize > 0)
+		if (_SnesPPUOBJVisibleX(m_Objs[iObj].uPosX,
+		                           m_Objs[iObj].uWidth))
+		while (uObjSize > 0)
         {
             if (uObjY < SNPPU_MAXLINE)
             {
@@ -267,7 +288,7 @@ void SnesPPURender::UpdateOBJ(Uint8 *pObjY, Uint8 *pObjSize)
 	const SnesPPURegsT *pRegs  = m_pPPU->GetRegs();
 
 	// decode objs
-	_DecodeOBJEX(pOAM->ObjEx, m_Objs, SNESPPU_OBJ_NUM, _SnesPPU_OAMSize[(pRegs->obsel >> 5) & 7]);
+	_DecodeOBJEX(pOAM->ObjEx, m_Objs, SNESPPU_OBJ_NUM,
+	             (pRegs->obsel >> 5) & 7);
 	_DecodeOBJ(pOAM->Objs, m_Objs, SNESPPU_OBJ_NUM, pObjY, pObjSize);
 }
-

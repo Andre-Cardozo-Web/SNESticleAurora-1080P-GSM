@@ -3,9 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
 
 #define NEWLIB_PORT_AWARE
+#include <io_common.h>
 #include <fileXio.h>
 #include <fileXio_rpc.h>
 #undef NEWLIB_PORT_AWARE
@@ -27,17 +27,19 @@ static int read_file_to_alloc(const char *path, void **out_buf, int *out_size)
         if (!path || !path[0])
                 return -1;
 
-        fd = fileXioOpen(path, O_RDONLY, 0);
+        /* Direct fileXio calls use IOP flags, not newlib/POSIX flags.
+           FIO_O_RDONLY is 1 while newlib O_RDONLY is 0. */
+        fd = fileXioOpen(path, FIO_O_RDONLY, 0);
         if (fd < 0)
                 return -1;
 
-        size = fileXioLseek(fd, 0, SEEK_END);
+        size = fileXioLseek(fd, 0, FIO_SEEK_END);
         if (size <= 0)
         {
                 fileXioClose(fd);
                 return -1;
         }
-        if (fileXioLseek(fd, 0, SEEK_SET) < 0)
+        if (fileXioLseek(fd, 0, FIO_SEEK_SET) < 0)
         {
                 fileXioClose(fd);
                 return -1;

@@ -40,7 +40,6 @@ void SNGSU::SetVersion(Uint8 uVersion)
 void SNGSU::Reset()
 {
     memset(m_R, 0, sizeof(m_R));
-    m_RegLatch = 0;
     m_bZ = m_bCY = m_bS = m_bOV = FALSE;
     m_bGo = FALSE;
     m_bRomRead = FALSE;
@@ -120,6 +119,12 @@ Uint32 SNGSU::RomOffset(Uint8 uBank, Uint16 uAddr) const
 
 Uint8 SNGSU::RomReadByte(Uint8 uBank, Uint16 uAddr) const
 {
+    // Na visao do GSU, $60-$7F seleciona a Game Pak RAM inclusive para
+    // opcodes (PBR) e para o prefetch de dados (ROMBR). O tamanho fisico da
+    // RAM faz esses bancos espelharem naturalmente em RamReadByte().
+    if (uBank >= 0x60 && uBank <= 0x7F)
+        return RamReadByte(((Uint32)(uBank & 1) << 16) | uAddr);
+
     if (!m_pRom || !m_uRomSize) return 0xFF;
     Uint32 off = RomOffset(uBank, uAddr);
     // Todos os cartuchos SuperFX comerciais tem ROM com tamanho potencia de
@@ -132,8 +137,6 @@ Uint8 SNGSU::RomReadByte(Uint8 uBank, Uint16 uAddr) const
 
 Uint8 SNGSU::RawCodeRead(Uint16 uAddr) const
 {
-    if (m_PBR >= 0x70 && m_PBR <= 0x71)
-        return RamReadByte(((Uint32)(m_PBR & 1) << 16) | uAddr);
     return RomReadByte(m_PBR, uAddr);
 }
 
@@ -270,12 +273,12 @@ Uint8 SNGSU::ReadReg(Uint16 uAddrLow)
 {
     Uint16 a = uAddrLow & 0xFFFF;
 
-    // A janela da CPU ($3100-$32FF) enxerga o cache rotacionado pelo CBR.
-    // Internamente guardamos o byte zero como o inicio logico CBR, portanto
-    // convertemos o indice fisico documentado para um deslocamento relativo.
+    // A janela da CPU ($3100-$32FF) soma os nove bits baixos do CBR ao
+    // indice fisico. Com CBR=$C3A0, por exemplo, o byte logico zero aparece
+    // em $3160: ($060 + $1A0) & $1FF = 0.
     if (a >= 0x3100 && a <= 0x32FF)
     {
-        Uint16 off = (Uint16)(((a - 0x3100) - (m_CBR & 0x01FF)) & 0x01FF);
+        Uint16 off = (Uint16)(((a - 0x3100) + (m_CBR & 0x01FF)) & 0x01FF);
         return m_Cache[off];
     }
 
@@ -314,7 +317,7 @@ void SNGSU::WriteReg(Uint16 uAddrLow, Uint8 uData)
 
     if (a >= 0x3100 && a <= 0x32FF)
     {
-        Uint32 off = ((a - 0x3100) - (m_CBR & 0x01FF)) & 0x01FF;
+        Uint32 off = ((a - 0x3100) + (m_CBR & 0x01FF)) & 0x01FF;
         m_Cache[off] = uData;
         if ((off & 15) == 15) m_CacheValid |= (Uint32)1 << (off >> 4);
         return;
@@ -323,12 +326,16 @@ void SNGSU::WriteReg(Uint16 uAddrLow, Uint8 uData)
     if (a >= 0x3040 && a <= 0x30FF) a = (Uint16)(0x3000 | (a & 0x3F));
     else if (a >= 0x3300 && a <= 0x34FF) a = (Uint16)(0x3000 | (a & 0x3F));
 
-    // R0-R15: par = LATCH; impar = aplica (MSB=data, LSB=latch)
+    // R0-R15 sao byte-addressable. Preservar o outro byte do proprio
+    // registrador tambem cobre escritas isoladas ou intercaladas; um latch
+    // global misturava o byte baixo de registradores diferentes.
     if (a >= 0x3000 && a <= 0x301F)
     {
-        if ((a & 1) == 0) { m_RegLatch = uData; return; }
         Int32 idx = (a - 0x3000) >> 1;
-        m_R[idx] = (Uint16)(((Uint16)uData << 8) | m_RegLatch);
+        if ((a & 1) == 0)
+            m_R[idx] = (Uint16)((m_R[idx] & 0xFF00) | uData);
+        else
+            m_R[idx] = (Uint16)(((Uint16)uData << 8) | (m_R[idx] & 0x00FF));
         if (idx == 14) UpdateRomBuffer();
         if (a == 0x301F)        // escrita em R15.MSB dispara GO
         {
@@ -348,9 +355,10 @@ void SNGSU::WriteReg(Uint16 uAddrLow, Uint8 uData)
         {
             Bool wasGo = m_bGo;
             SfrWriteLow(uData);
-            // Uma escrita explicita de GO=0 limpa CBR/cache. STOP tambem
-            // baixa GO, mas preserva o cache ate a CPU escrever o SFR.
-            if (!m_bGo) { m_CBR = 0; FlushCodeCache(); }
+            // Limpa CBR/cache somente na transicao explicita GO=1 -> GO=0.
+            // Uma escrita de flags enquanto ja parado nao pode destruir o
+            // codigo que a CPU acabou de carregar na janela de cache.
+            if (wasGo && !m_bGo) { m_CBR = 0; FlushCodeCache(); }
             if (!wasGo && m_bGo)
             {
                 m_Runaway = 0;
@@ -364,7 +372,14 @@ void SNGSU::WriteReg(Uint16 uAddrLow, Uint8 uData)
 #endif
         }
         break;
-    case 0x3031: /* high: normalmente nao escrito pelo SNES */ break;
+    case 0x3031:
+        m_bAlt1 = (uData & 0x01) != 0;
+        m_bAlt2 = (uData & 0x02) != 0;
+        m_bIL   = (uData & 0x04) != 0;
+        m_bIH   = (uData & 0x08) != 0;
+        m_bB    = (uData & 0x10) != 0;
+        m_bIrq  = (uData & 0x80) != 0;
+        break;
     case 0x3033: /* BRAMR (backup ram enable) - ignorado por enquanto */ break;
     case 0x3034: m_PBR  = uData & 0x7F; FlushCodeCache(); break;
     case 0x3037: m_CFGR = uData; break;
@@ -560,13 +575,13 @@ void SNGSU::ColorWrite(Uint8 src)
     else                    m_Color = src;
 }
 
-void SNGSU::Run(Int32 nClocks)
-{
-    while (m_bGo && nClocks-- > 0)
-        Step();
-}
+#if defined(__GNUC__)
+#define SNGSU_ALWAYS_INLINE inline __attribute__((always_inline))
+#else
+#define SNGSU_ALWAYS_INLINE inline
+#endif
 
-void SNGSU::Step()
+SNGSU_ALWAYS_INLINE void SNGSU::Step()
 {
 #if SNDBG_LOG
     m_Diag.Instructions++;
@@ -760,12 +775,12 @@ void SNGSU::Step()
     {
         // Produto com sinal de Sreg x R6 (32 bits).  FMULT: 16 bits altos ->
         // destino, CY = bit15 do produto.  LMULT (ALT1): alem disso, 16 bits
-        // baixos -> R4.  R4 nunca pode ser destino do byte alto.
+        // baixos -> R4 antes de escrever o destino (inclusive se Dreg=R4).
         Int32  p  = (Int32)(Int16)sr * (Int32)(Int16)m_R[6];
         Uint32 up = (Uint32)p;
         Uint16 hi = (Uint16)(up >> 16);
         if (m_bAlt1) m_R[4] = (Uint16)(up & 0xFFFF);   // LMULT: low 16 -> R4
-        if (m_Dreg != 4 || m_bAlt1) WriteRegister(m_Dreg, hi);
+        WriteRegister(m_Dreg, hi);
         SetZSfromWord(hi);
         m_bCY = ((up >> 15) & 1) != 0;                 // CY = bit15 do produto
     }
@@ -942,3 +957,14 @@ void SNGSU::Step()
         m_R[15]++;
 
 }
+
+void SNGSU::Run(Int32 nClocks)
+{
+    // Step e' o caminho mais quente dos jogos SuperFX (milhoes de chamadas
+    // por minuto). Mantê-lo visivel acima permite ao GCC incorporar o loop,
+    // removendo uma chamada C++ por instrucao emulada no EE do PS2.
+    while (m_bGo && nClocks-- > 0)
+        Step();
+}
+
+#undef SNGSU_ALWAYS_INLINE

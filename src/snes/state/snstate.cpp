@@ -192,6 +192,8 @@ void SnesPPU::RestoreState(struct SNStatePPUT *pState)
 	memcpy(m_CGRAM,   pState->m_CGRAM, sizeof(m_CGRAM));
 	memcpy(m_VRAM,    pState->m_VRAM,  sizeof(m_VRAM));
 	m_OAM = pState->m_OAM;
+	m_OAMLatch = 0;
+	UpdateOAMPriority();
 }
 
 
@@ -244,5 +246,4 @@ void SNStateCompare(SnesStateT *pStateA, SnesStateT *pStateB)
     _SNStateMemDiff("DMAC", (Uint8 *)&pStateA->DMAC, (Uint8 *)&pStateB->DMAC, sizeof(pStateA->DMAC));
 
 }
-
 

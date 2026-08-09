@@ -179,6 +179,20 @@ int main()
         g.SetVersion(0x04); g.Reset();
         CHECK("VCR GSU2 persiste", g.ReadReg(0x303B), 0x04);
     }
+    {
+        // Cada metade de R0-R15 preserva a outra metade do MESMO registro.
+        // Escritas intercaladas nao compartilham um latch global.
+        SNGSU g;
+        g.SetMemory(g_rom,sizeof(g_rom),g_ram,sizeof(g_ram)); g.Reset();
+        g.WriteReg(0x3000, 0x34);             // R0 low
+        g.WriteReg(0x3002, 0x78);             // R1 low (intercalado)
+        g.WriteReg(0x3001, 0x12);             // R0 high
+        CHECK("MMIO R0 bytes independentes", g.GetReg(0), 0x1234);
+        CHECK("MMIO R1 low preservado",      g.GetReg(1), 0x0078);
+
+        g.WriteReg(0x3031, 0x13);             // ALT1|ALT2|B
+        CHECK("SFR high gravavel", g.ReadReg(0x3031) & 0x1F, 0x13);
+    }
 
     // ===== Parte C: controle de fluxo + memoria =====
     printf("\n--- controle de fluxo + memoria ---\n");
@@ -259,6 +273,14 @@ int main()
             0x00 };
         SNGSU g = runProgram(p6, sizeof(p6));
         CHECK("FMULT R2 (alto)", g.GetReg(2), 0xF51C);
+    }
+    {
+        // DREG=R4 continua sendo um destino valido para os 16 bits altos.
+        static const uint8_t p6r4[] = {
+            0xF6,0xAB,0xDA, 0xF5,0xAA,0x4A,
+            0xB5,0x14,0x9F,0x00 };
+        SNGSU g = runProgram(p6r4, sizeof(p6r4));
+        CHECK("FMULT permite destino R4", g.GetReg(4), 0xF51C);
     }
     {
         // Prefixos sobrevivem ao proprio branch. O byte no delay slot usa
@@ -414,8 +436,8 @@ int main()
     }
     {
         // Com CBR=$C3A0, o inicio logico do cache aparece para a CPU em
-        // $32A0 (3100h + (CBR & 1FFh)). STOP preserva CBR; uma escrita
-        // explicita de GO=0 no SFR deve finalmente zerar CBR/cache.
+        // $3160: ($060 + $1A0) & $1FF = 0. STOP e escritas com GO ja zero
+        // preservam o CBR; somente a transicao GO=1 -> GO=0 o limpa.
         memset(g_rom, 0x01, sizeof(g_rom));
         memset(g_ram, 0x00, sizeof(g_ram));
         g_rom[0x43A4] = 0x02;                 // CACHE em PBR=0:$C3A4
@@ -430,14 +452,31 @@ int main()
 
         uint8_t line[16]; memset(line, 0x01, sizeof(line));
         line[0]=0xF3; line[1]=0xEF; line[2]=0xBE; line[3]=0x00;
-        for (int i=0; i<16; i++) g.WriteReg((uint16_t)(0x32A0+i),line[i]);
+        for (int i=0; i<16; i++) g.WriteReg((uint16_t)(0x3160+i),line[i]);
         g.WriteReg(0x301E,0xA0); g.WriteReg(0x301F,0xC3);
         g.Run(100000);
         CHECK("cache rotacionado pelo CBR", g.GetReg(3), 0xBEEF);
         CHECK("STOP preserva CBR", g.ReadReg(0x303E), 0xA0);
         g.WriteReg(0x3030,0x00);
-        CHECK("SFR GO=0 limpa CBR low",  g.ReadReg(0x303E), 0x00);
-        CHECK("SFR GO=0 limpa CBR high", g.ReadReg(0x303F), 0x00);
+        CHECK("GO ja zero preserva CBR", g.ReadReg(0x303E), 0xA0);
+        g.WriteReg(0x3030,0x20);
+        g.WriteReg(0x3030,0x00);
+        CHECK("transicao GO limpa CBR low",  g.ReadReg(0x303E), 0x00);
+        CHECK("transicao GO limpa CBR high", g.ReadReg(0x303F), 0x00);
+    }
+    {
+        // PBR $60-$7F executa da Game Pak RAM. No Mario Chip 1 esta janela
+        // e' usada diretamente; limitar o core a $70/$71 deixa Star Fox sem
+        // executar os blocos enviados pelo 65816.
+        memset(g_rom, 0x01, sizeof(g_rom));
+        memset(g_ram, 0x01, sizeof(g_ram));
+        static const uint8_t ramProgram[] = { 0xF3,0x34,0x12,0x00 };
+        memcpy(g_ram, ramProgram, sizeof(ramProgram));
+        SNGSU g; g.SetMemory(g_rom,sizeof(g_rom),g_ram,sizeof(g_ram)); g.Reset();
+        g.WriteReg(0x3034,0x60);
+        g.WriteReg(0x301E,0x00); g.WriteReg(0x301F,0x80);
+        g.Run(1000);
+        CHECK("PBR $60 executa Game Pak RAM", g.GetReg(3), 0x1234);
     }
 
     // ===== Parte D: graficos (PLOT / pixel cache / RPIX) =====

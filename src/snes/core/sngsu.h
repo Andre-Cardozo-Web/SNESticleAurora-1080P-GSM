@@ -95,7 +95,6 @@ public:
 private:
     // ---- estado de CPU ----
     Uint16 m_R[16];          // R0-R15 (R15 = PC)
-    Uint8  m_RegLatch;       // latch das escritas MMIO em endereco par
 
     // flags do SFR
     Bool   m_bZ, m_bCY, m_bS, m_bOV;   // bits 1-4
@@ -174,7 +173,7 @@ private:
     Uint8  RawCodeRead(Uint16 uAddr) const;             // sem passar pelo code-cache
     Uint8  CodeRead(Uint16 uAddr);                       // le opcode/cache sem mover R15
     Uint8  Pipe();                                       // consome byte do pipeline
-    Uint8  RomReadByte(Uint8 uBank, Uint16 uAddr) const;
+    Uint8  RomReadByte(Uint8 uBank, Uint16 uAddr) const; // barramento PBR/ROMBR
     Uint8  RamReadByte(Uint32 uAddr) const;
     void   RamWriteByte(Uint32 uAddr, Uint8 v);
     Uint32 RamLinear(Uint16 uAddr) const;     // RAMBR:addr -> offset linear

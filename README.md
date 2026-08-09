@@ -860,13 +860,16 @@ The cumulative notes for the current test version are available in
 **SNES**
 - Save states currently support base-hardware games only; coprocessor games
   are blocked until each extra chip has complete serialization.
-- **Final Fight 2** — large (32×32) / page‑1 object sprites render garbled. The
-  OBJ fetch/render path has been verified correct against hardware references
-  (bsnes/Anomie) and host‑side; the cause is suspected to be the VRAM
-  data/upload feeding it. **Under investigation.**
+- **Final Fight 2** — correcting the rectangular OBSEL 6/7 sizes was necessary
+  but did not fix the reported gameplay scene by itself. r15 additionally
+  aligns OAM address/latch writes, priority rotation and off-screen OBJ/tile
+  evaluation with hardware references. These paths have host coverage, but
+  the original scene still needs a PS2/NetherSX2 retest and is **not yet
+  considered fixed**.
 - Some large / special‑chip titles may still freeze or misbehave.
-- **SuperFX (GSU)** is experimental in v1.0.4: the core, memory maps and host
-  tests were expanded substantially, but game-by-game validation is ongoing.
+- **SuperFX (GSU)** is experimental in v1.0.4: r15 corrects cache-window
+  rotation, executable RAM banks `$60-$7F`, byte MMIO and the hot loop, but
+  Star Fox/Yoshi and other boards still need game-by-game PS2 validation.
 - **Missing chip**: SA‑1 is not implemented.
 
 **NES (InfoNES)**

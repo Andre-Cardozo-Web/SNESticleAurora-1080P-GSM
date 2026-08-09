@@ -1,8 +1,7 @@
 #include <string.h>
 #include <stdio.h>
-#include <fcntl.h>
-#include <unistd.h>
 #define NEWLIB_PORT_AWARE
+#include <io_common.h>
 #include <fileXio.h>
 #include <fileXio_rpc.h>
 #undef NEWLIB_PORT_AWARE
@@ -54,7 +53,10 @@ int _MainLoopReadBinaryData(Uint8 *pBuffer, Int32 nBufferBytes, const char *pRom
            server chunks and DMA-copies the request internally until EOF.
            newlib fread() uses its own small buffering and is substantially
            slower for multi-megabyte ROMs, especially on cdfs/mass/SMB. */
-        fd = fileXioOpen(pRomFile, O_RDONLY, 0);
+        /* fileXioOpen() is an IOP API, so it must receive the IOP/FIO flag.
+           newlib's O_RDONLY is zero; passing it directly makes drivers such
+           as cdfs reject every ROM before the first byte is read. */
+        fd = fileXioOpen(pRomFile, FIO_O_RDONLY, 0);
         if (fd < 0)
         {
                 return -1;

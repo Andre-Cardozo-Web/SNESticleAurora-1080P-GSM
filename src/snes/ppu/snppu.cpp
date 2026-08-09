@@ -221,53 +221,72 @@ Uint8 SnesPPU::ReadVMDATAH()
 
 
 
+static Uint32 _MapOAMAddress(Uint32 uAddress)
+{
+	uAddress &= 0x3FF;
+	return (uAddress < 0x200) ? uAddress : 0x200 | (uAddress & 0x1F);
+}
+
+void SnesPPU::UpdateOAMPriority()
+{
+	Uint16 uOldPriority = m_Regs.oampri.w;
+
+	m_Regs.oampri.w = (m_Regs.oamaddr.w & 0x8000)
+		? ((m_Regs.oamaddr.w & 0x1FF) >> 2) : 0;
+
+	if (m_Regs.oampri.w != uOldPriority && m_pRender)
+		m_pRender->SetUpdateFlags(SNESPPURENDER_UPDATE_OBJ);
+}
+
 void SnesPPU::WriteOAMDATA(Uint8 uData)
 {
 #if SNDBG_LOG
 	g_DbgOAMWrites++;
 #endif
 	Uint8	*pOamData = (Uint8 *)&m_OAM;
-	Uint32 oamaddr;
+	Uint32 uAddress = m_Regs.oamaddr.w & 0x3FF;
+	Bool bChanged = FALSE;
 
-	// get oam addr
-	oamaddr =  m_Regs.oamaddr.w & 0x3FF;
-	
-	if (oamaddr >= sizeof(m_OAM))
+	/* Low OAM is a 16-bit write port: the even byte is latched and the pair
+	   is committed only by the odd byte. High OAM writes immediately and is
+	   mirrored every 32 bytes throughout the logical $200-$3ff range. */
+	if (!(uAddress & 1))
+		m_OAMLatch = uData;
+
+	if (uAddress & 0x200)
 	{
-		oamaddr &= (sizeof(m_OAM) - 1);
+		Uint32 uPhysical = _MapOAMAddress(uAddress);
+		bChanged = pOamData[uPhysical] != uData;
+		pOamData[uPhysical] = uData;
+	}
+	else if (uAddress & 1)
+	{
+		Uint32 uEven = uAddress & ~1;
+		bChanged = pOamData[uEven] != m_OAMLatch ||
+		           pOamData[uAddress] != uData;
+		pOamData[uEven] = m_OAMLatch;
+		pOamData[uAddress] = uData;
 	}
 
-	assert(oamaddr < sizeof(m_OAM));
+	m_Regs.oamaddr.w = (m_Regs.oamaddr.w & 0x8000) |
+	                     ((uAddress + 1) & 0x3FF);
+	UpdateOAMPriority();
 
-	// write data to OAM
-	pOamData[oamaddr] = uData;
-
-	// set oam addr
-	m_Regs.oamaddr.w++;
-
-	m_pRender->SetUpdateFlags(SNESPPURENDER_UPDATE_OBJ);
+	if (bChanged)
+		m_pRender->SetUpdateFlags(SNESPPURENDER_UPDATE_OBJ);
 }
 
 Uint8 SnesPPU::ReadOAMDATA()
 {
 	Uint8	*pOamData = (Uint8 *)&m_OAM;
-	Uint32 oamaddr;
+	Uint32 uAddress = m_Regs.oamaddr.w & 0x3FF;
+	Uint8 uData = pOamData[_MapOAMAddress(uAddress)];
 
-	// get oam addr
-	oamaddr =  m_Regs.oamaddr.w & 0x3FF;
+	m_Regs.oamaddr.w = (m_Regs.oamaddr.w & 0x8000) |
+	                     ((uAddress + 1) & 0x3FF);
+	UpdateOAMPriority();
 
-	if (oamaddr >= sizeof(m_OAM))
-	{
-		oamaddr &= (sizeof(m_OAM) - 1);
-	}
-
-	assert(oamaddr < sizeof(m_OAM));
-
-	// set oam addr
-	m_Regs.oamaddr.w++;
-
-	// write data to OAM
-	return pOamData[oamaddr];
+	return uData;
 }
 
 
@@ -316,33 +335,23 @@ void SnesPPU::Write8(Uint32 uAddr, Uint8 uData)
 
 	case 0x2102:	// oamaddl (oam address low)
 	{
-		Uint16 uOldPri = m_Regs.oampri.w;
-		m_Regs.oamaddr.w &= 0x8000; 
-		m_Regs.oamaddr.w |= (uData &0xFF) << 1;  
-
-		// Com priority rotation desligado o primeiro OBJ volta a ser o 0.
-		// O codigo antigo mantinha o indice anterior e nao invalidava a lista
-		// por scanline, fazendo jogos continuarem desenhando a OAM a partir de
-		// um sprite obsoleto depois de escrever em $2102/$2103.
-		m_Regs.oampri.w = (m_Regs.oamaddr.w & 0x8000)
-			? ((m_Regs.oamaddr.w & 0x1FF) >> 2) : 0;
-		if (m_Regs.oampri.w != uOldPri)
-			m_pRender->SetUpdateFlags(SNESPPURENDER_UPDATE_OBJ);
+		// $2102 altera apenas os oito bits baixos do endereco em palavras.
+		// Preserve tanto OAMADDH.0 (bit 9) quanto a rotacao de prioridade.
+		m_Regs.oamaddr.w = (m_Regs.oamaddr.w & 0x8200) |
+		                       ((Uint16)uData << 1);
+		m_OAMLatch = 0;
+		UpdateOAMPriority();
 
 		m_Regs.oamaddrlatch.w = m_Regs.oamaddr.w;
 		break;
 	}
 	case 0x2103:	// oamaddh (oam address high)
 	{
-		Uint16 uOldPri = m_Regs.oampri.w;
-		m_Regs.oamaddr.w &= 0x1FF; 
-		m_Regs.oamaddr.w |= (uData&0x01) << 9; 
-		m_Regs.oamaddr.w |= (uData&0x80) << 8; 
-
-		m_Regs.oampri.w = (m_Regs.oamaddr.w & 0x8000)
-			? ((m_Regs.oamaddr.w & 0x1FF) >> 2) : 0;
-		if (m_Regs.oampri.w != uOldPri)
-			m_pRender->SetUpdateFlags(SNESPPURENDER_UPDATE_OBJ);
+		m_Regs.oamaddr.w = (m_Regs.oamaddr.w & 0x01FE) |
+		                       ((uData & 0x01) << 9) |
+		                       ((uData & 0x80) << 8);
+		m_OAMLatch = 0;
+		UpdateOAMPriority();
 
 		m_Regs.oamaddrlatch.w = m_Regs.oamaddr.w;
 		break;
@@ -663,6 +672,8 @@ void SnesPPU::EndFrame()
         // reset oam addr to latched value
         // RTYPE-3 needs this
         m_Regs.oamaddr.w = m_Regs.oamaddrlatch.w;
+		m_OAMLatch = 0;
+		UpdateOAMPriority();
     }
 }
 
@@ -725,6 +736,7 @@ void SnesPPU::Reset()
 	memset(&m_CGRAM, 0, sizeof(m_CGRAM));
 	memset(&m_VRAM, 0, sizeof(m_VRAM));
 	memset(&m_OAM, 0, sizeof(m_OAM));
+	m_OAMLatch = 0;
 
 	// confirmed:
 	m_Regs.stat77 =  SNPPU_VERSION_5C77;
@@ -734,6 +746,7 @@ void SnesPPU::Reset()
 SnesPPU::SnesPPU()
 {
 	m_pRender = NULL;
+	m_OAMLatch = 0;
 }
 
 #ifdef SNES_DEBUG

@@ -205,6 +205,7 @@ private:
     SnesColor16T	        m_CGRAM[SNESPPU_CGRAM_NUM] _ALIGN(16);			// 16-bit palette
     Uint16			        m_VRAM[SNESPPU_VRAM_NUMWORDS] _ALIGN(16);
     SnesOAMT		        m_OAM;
+	Uint8                   m_OAMLatch;
 
     ISnesPPURender *        m_pRender;
 
@@ -213,6 +214,7 @@ private:
 #endif
 
     void                    UpdateMatMul();
+	void                    UpdateOAMPriority();
 };
 
 

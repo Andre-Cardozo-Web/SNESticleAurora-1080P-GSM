@@ -2,7 +2,7 @@
 
 Changelog acumulado da versão 1.0.4, comparado com a tag **v1.0.3**.
 
-Data deste pacote de teste: **8 de agosto de 2026**
+Data deste pacote de teste: **9 de agosto de 2026**
 
 Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
@@ -67,6 +67,16 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   grandes, leitura/decode de capas, gravação de configurações e conexão SMB.
 - Abertura de ROM comum, ZIP e GZ passou para leituras grandes diretas por
   `fileXio`, sem abrir o mesmo arquivo duas vezes nem zerar 8 MiB sem uso.
+- Corrigida a regressão dessa troca para `fileXio`: o loader agora usa os
+  flags IOP corretos e volta a abrir ROM comum, ZIP e GZ em todos os devices.
+- Escritas em VRAM invalidam o cache de tilemap/caracteres do renderer, evitando
+  conservar gráficos antigos depois de mapa, pausa, diálogo ou novo upload.
+- Os modos OBJ retangulares 6/7 agora usam 16×32, 32×64 e 32×32 reais; a OAM
+  também passa a respeitar latch, endereço alto, rotação e descarte horizontal.
+  A cena reportada de Final Fight 2 segue pendente de reteste, sem alegação de
+  correção apenas com a bancada host.
+- Corrigidos no SuperFX o giro da janela de cache, execução em RAM `$60-$7F`,
+  MMIO byte a byte e o hot loop; os diagnósticos pesados agora são opcionais.
 - O player de MOD/XM foi atualizado do antigo libxmp-lite 4.5.0 para o upstream
   oficial 4.7.2; MOD aplica `DEFPAN=50` antes da carga e recebe as correções
   modernas de canal, instrumento, efeitos e fluxo do ProTracker.
@@ -81,6 +91,87 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   prender o menu, a música e o carregamento de ROM.
 - A paleta antiga e excessivamente saturada do InfoNES foi substituída pela
   paleta NTSC 2C02 padrão do **Mesen2**, preservada em RGBA8.
+
+---
+
+## Revisão r15: hotfix de ROM, PPU/OAM e SuperFX test 5
+
+### ROM comum, ZIP e GZ voltam a abrir sem perder a carga rápida
+
+- A revisão r14 trocou `fopen`/`fread` por chamadas diretas a `fileXio`, mas
+  passou `O_RDONLY` da newlib. Na EE esse valor é `0`; o IOP/iomanX exige
+  `FIO_O_RDONLY`, cujo valor é `1`. Drivers como o CDFS rejeitavam a abertura
+  antes do primeiro byte e, como os três formatos compartilham esse caminho,
+  nenhuma ROM era iniciada.
+- As duas entradas diretas — ROM sem compressão e o slurp usado por ZIP/GZ —
+  usam agora `FIO_O_RDONLY` e `FIO_SEEK_*` de `io_common.h`.
+- A leitura grande foi preservada. O servidor `fileXio` continua dividindo o
+  pedido em blocos de 16 KiB no IOP, portanto o conserto não reintroduz os RPCs
+  pequenos nem a abertura duplicada que deixavam o lançamento lento.
+
+### Upload novo de VRAM não reutiliza tilemap antigo
+
+- `SnesPPURender::UpdateVRAM()` estava vazio. O renderer podia manter as 33
+  entradas de tile já decodificadas quando um jogo sobrescrevia o tilemap no
+  mesmo endereço e sem alterar scroll/base.
+- Toda escrita pelos ports `$2118/$2119`, inclusive DMA, agora agenda uma única
+  invalidação de `BGSCR|BGCHR` para a próxima scanline. Uma rajada inteira só
+  refaz o cache uma vez; o caminho OBJ continua lendo a VRAM diretamente.
+- Isso ataca a classe observada ao voltar do mapa de Super Metroid e após
+  caixas de diálogo/overlays. O caminho OBJ lê VRAM diretamente e recebe uma
+  correção independente abaixo; ambos os grupos ainda devem ser retestados no
+  PS2.
+
+### OBJ retangular e avaliação de OAM seguem as regras do hardware
+
+- A tabela antiga representava tamanho por um único shift e deixava os modos
+  `OBSEL.5-7 = 6/7` como `??`, configurados por engano como 8×8 nos dois bits
+  de seleção. Esses modos são retangulares no hardware e aparecem justamente
+  em jogos com sprites grandes, incluindo Final Fight 2.
+- O renderer agora guarda largura e altura separadas. Os pares corretos são
+  16×32/32×64 no modo 6 e 16×32/32×32 no modo 7; seleção de scanline usa a
+  altura e a busca horizontal usa a largura.
+- O flip vertical também segue a peculiaridade do SNES para `H = 2×W`: cada
+  metade quadrada é invertida dentro de si, em vez de espelhar o retângulo
+  inteiro.
+- O primeiro reteste visual mostrou que essa correção de tamanho, isoladamente,
+  não resolve a cena reportada de Final Fight 2. A investigação encontrou mais
+  diferenças objetivas no caminho usado para alimentar e selecionar os OBJ.
+- `$2102` preserva agora o bit alto escrito por `$2103`. Na tabela OAM baixa, o
+  byte par fica no latch e o par só é gravado quando chega o byte ímpar; a
+  tabela alta grava imediatamente e espelha seus 32 bytes por `$200-$3FF`.
+  Leituras/escritas que avançam o endereço também atualizam o primeiro sprite
+  quando a rotação de prioridade está ligada.
+- Sprites completamente à esquerda deixam de consumir uma das 32 entradas da
+  scanline. A contagem de 34 tiles também exclui o tile que termina em `x=-1`
+  e preserva a exceção do hardware em `OBJ X=256`, que conta mesmo invisível.
+- A bancada `tools/pputest` valida tamanhos, flip, limites horizontais, latch,
+  espelhamento e rotação de prioridade contra bsnes/Snes9x. Os testes host
+  passam; Final Fight 2 permanece **pendente de confirmação visual** no
+  PS2/NetherSX2 e não é anunciado como corrigido nesta revisão.
+
+### SuperFX: cache correto, RAM executável completa e menos custo no EE
+
+- A janela `$3100-$32FF` agora aplica a rotação documentada somando os nove bits
+  baixos de `CBR`. Com `CBR=$C3A0`, o byte lógico zero é acessado pela CPU em
+  `$3160`; o sentido anterior colocava o programa enviado ao cache no lugar
+  errado.
+- PBR/ROMBR tratam toda a faixa `$60-$7F` como Game Pak RAM, com espelhamento
+  pelo tamanho físico. A implementação anterior reconhecia somente `$70/$71`,
+  deixando o Mario Chip 1 sem executar alguns blocos carregados pelo 65816.
+- Escritas nos pares R0-R15 preservam o outro byte do próprio registrador, em
+  vez de compartilhar um latch global. O byte alto do SFR também é gravável e
+  o cache só é limpo na transição real `GO=1 -> GO=0`.
+- `FMULT/LMULT` aceita R4 como destino conforme o hardware. O `Step()` foi
+  incorporado ao loop `Run()`, removendo uma chamada C++ por instrução; o
+  benchmark host do caminho sintético melhorou cerca de 15% sem aumentar o
+  objeto gerado.
+- `SNDBG_LOG` deixa de ficar forçado em toda build. O padrão normal é zero e
+  `make SNES_DIAGNOSTICS=1` recompila os contadores de investigação quando um
+  log detalhado for necessário.
+- A bancada host passa com os diagnósticos ligados e desligados: 17.960 vetores
+  aritméticos, além de pipeline, MMIO, cache rotacionado, PBR em `$60`, RAM,
+  branches e `PLOT/RPIX`, todos sem falhas.
 
 ---
 
