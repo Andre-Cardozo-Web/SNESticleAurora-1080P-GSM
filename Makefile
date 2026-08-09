@@ -112,9 +112,9 @@ CXXFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fn
 	-DDEBUG_BOOT_SCREEN=$(DEBUG_BOOT_SCREEN) \
 	-DMAINLOOP_DEBUG_GS_TEST=$(MAINLOOP_DEBUG_GS_TEST)
 
-# libxmp-lite's official PS2 port builds the embedded/core configuration.
-# It keeps the MOD/XM effect and loop engines while omitting desktop-only
-# depackers and format extras, which matters for both ELF size and EE CPU.
+# The official libxmp-lite embedded/core configuration keeps the MOD/XM effect
+# and loop engines while omitting desktop-only depackers and format extras,
+# which matters for both ELF size and EE CPU on the PS2.
 CFLAGS   += -DLIBXMP_CORE_PLAYER
 CXXFLAGS += -DLIBXMP_CORE_PLAYER
 
@@ -351,19 +351,23 @@ SRCS := \
 	src/third_party/libxmp-lite/src/period.c \
 	src/third_party/libxmp-lite/src/player.c \
 	src/third_party/libxmp-lite/src/read_event.c \
+	src/third_party/libxmp-lite/src/misc.c \
 	src/third_party/libxmp-lite/src/dataio.c \
 	src/third_party/libxmp-lite/src/lfo.c \
 	src/third_party/libxmp-lite/src/scan.c \
 	src/third_party/libxmp-lite/src/control.c \
 	src/third_party/libxmp-lite/src/filter.c \
 	src/third_party/libxmp-lite/src/effects.c \
+	src/third_party/libxmp-lite/src/flow.c \
 	src/third_party/libxmp-lite/src/mixer.c \
 	src/third_party/libxmp-lite/src/mix_all.c \
 	src/third_party/libxmp-lite/src/load_helpers.c \
 	src/third_party/libxmp-lite/src/load.c \
+	src/third_party/libxmp-lite/src/filetype.c \
 	src/third_party/libxmp-lite/src/hio.c \
 	src/third_party/libxmp-lite/src/smix.c \
 	src/third_party/libxmp-lite/src/memio.c \
+	src/third_party/libxmp-lite/src/rng.c \
 	src/third_party/libxmp-lite/src/loaders/common.c \
 	src/third_party/libxmp-lite/src/loaders/itsex.c \
 	src/third_party/libxmp-lite/src/loaders/sample.c \

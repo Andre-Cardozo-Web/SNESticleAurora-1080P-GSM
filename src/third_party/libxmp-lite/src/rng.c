@@ -1,5 +1,5 @@
 /* Extended Module Player
- * Copyright (C) 1996-2021 Claudio Matsuoka and Hipolito Carraro Jr
+ * Copyright (C) 1996-2024 Claudio Matsuoka and Hipolito Carraro Jr
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -20,50 +20,36 @@
  * THE SOFTWARE.
  */
 
-/* _[v]snprintf() from msvcrt.dll might not nul terminate */
-/* OpenWatcom-provided versions seem to behave the same.. */
-
 #include "common.h"
+#include "rng.h"
 
-#if defined(USE_LIBXMP_SNPRINTF)
+#include <time.h>
 
-#undef snprintf
-#undef vsnprintf
-
-int libxmp_vsnprintf(char *str, size_t sz, const char *fmt, va_list ap)
+static unsigned libxmp_random_step_xorshift32(unsigned state)
 {
-	int rc = _vsnprintf(str, sz, fmt, ap);
-	if (sz != 0) {
-		if (rc < 0) rc = (int)sz;
-		if ((size_t)rc >= sz) str[sz - 1] = '\0';
-	}
-	return rc;
+	if (state == 0) state = 1;
+	state ^= state << 13u;
+	state ^= state >> 17u;
+	return   state <<  5u;
 }
 
-int libxmp_snprintf (char *str, size_t sz, const char *fmt, ...)
+unsigned libxmp_get_random(struct rng_state *rng, unsigned range)
 {
-	va_list ap;
-	int rc;
+	unsigned state = libxmp_random_step_xorshift32(rng->state);
+	rng->state = state;
 
-	va_start (ap, fmt);
-	rc = _vsnprintf(str, sz, fmt, ap);
-	va_end (ap);
-
-	return rc;
+	return (uint64)range * state >> 32u;
 }
 
-#endif
-
-/* Win32 debug message helper by Mirko Buffoni */
-#if defined(_MSC_VER) && defined(DEBUG)
-void libxmp_msvc_dbgprint(const char *format, ...)
+void libxmp_set_random(struct rng_state *rng, unsigned state)
 {
-	va_list argptr;
-
-	/* do the output */
-	va_start(argptr, format);
-	vprintf(format, argptr);
-	printf("\n");
-	va_end(argptr);
+	rng->state = state;
 }
-#endif
+
+void libxmp_init_random(struct rng_state *rng)
+{
+	rng->state = (unsigned) time(NULL);
+	libxmp_get_random(rng, 0);
+	libxmp_get_random(rng, 0);
+	libxmp_get_random(rng, 0);
+}

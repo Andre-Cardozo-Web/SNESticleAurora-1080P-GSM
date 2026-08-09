@@ -13,6 +13,7 @@
 #include "mainloop_debug.h"
 #include "mainloop_bgm.h"
 #include "embedded_irx.h"
+#include "mainloop_iop.h"
 
 extern "C" {
 int MCSave_Write(char *pPath, char *pData, int nBytes);
@@ -538,8 +539,11 @@ static MainLoopStateCandidateT _MainLoop_StateCandidates[MAINLOOP_STATE_MAX_CAND
 static Uint8 _MainLoop_StateCompressed[MAINLOOP_STATE_COMPRESS_BYTES]
     __attribute__((aligned(64)));
 static Int32 _MainLoop_StateUnformattedCard = -1;
+static Char _MainLoop_StateConfigPath[1024] = "";
 
 static Bool _MainLoopStateEnsureOneDir(const Char *pPath);
+static void _MainLoopStateDeleteSettings();
+static void _MainLoopStateLoadSettingsFromRomDevice();
 
 static Uint32 _MainLoopStateGetSystemId()
 {
@@ -582,6 +586,14 @@ void MainLoopStateOnRomChanged()
     _MainLoop_StateRomCRC = 0;
     _MainLoop_StateUnformattedCard = -1;
     _bStateSaved = FALSE;
+
+    /* A disc/ISO boot may have no writable config device until the user opens
+       a ROM from mass2+, MMCE or HDD. Once that device is known, recover its
+       saved default without doing a broad probe or directory scan. */
+    if (_pSystem && _RomPath[0] && !_MainLoop_StateDeviceChosen)
+    {
+        _MainLoopStateLoadSettingsFromRomDevice();
+    }
 }
 
 Int32 MainLoopStateGetSlot()
@@ -626,8 +638,7 @@ void MainLoopStateForgetDeviceChoice()
     _MainLoop_StateDevice = MAINLOOP_STATEDEVICE_AUTO;
     _MainLoop_StateSlot = 0;
     _MainLoop_StateDeviceChosen = FALSE;
-    remove("mc0:/SNESticle/state.cfg");
-    remove("mc1:/SNESticle/state.cfg");
+    _MainLoopStateDeleteSettings();
 }
 
 void MainLoopStateSetDevice(MainLoopStateDeviceE eDevice)
@@ -700,66 +711,350 @@ void MainLoopStateCycleDevice()
     }
 }
 
+static Bool _MainLoopStateConfigValid(const MainLoopStateConfigT *pConfig)
+{
+    return !memcmp(
+                pConfig->Magic,
+                _MainLoop_StateConfigMagic,
+                sizeof(pConfig->Magic)) &&
+           pConfig->uVersion == 2 &&
+           pConfig->nConfigBytes == sizeof(*pConfig) &&
+           pConfig->eDevice < MAINLOOP_STATEDEVICE_NUM &&
+           pConfig->iSlot < MAINLOOP_STATE_SLOT_NUM;
+}
+
+static Bool _MainLoopStateConfigPathIsWritable(const Char *pPath)
+{
+    if (!pPath || !pPath[0])
+    {
+        return FALSE;
+    }
+
+    /* host: is a development filesystem and smb:/cdfs: are intentionally
+       read-only in this frontend. Never pick one as the sole persistence
+       location for the user's quick-save default. */
+    return strncmp(pPath, "host:", 5) &&
+           strncmp(pPath, "smb:", 4) &&
+           strncmp(pPath, "cdfs:", 6) &&
+           strncmp(pPath, "cdrom", 5) &&
+           strncmp(pPath, "rom", 3);
+}
+
+static Bool _MainLoopStateConfigMapPath(
+    const Char *pPath,
+    Char *pMapped,
+    Int32 nMappedBytes)
+{
+    if (!pPath || !pMapped || nMappedBytes <= 0)
+    {
+        return FALSE;
+    }
+
+    if (!strncmp(pPath, "hdd0:", 5))
+    {
+        return HddMapPath(pPath, pMapped, nMappedBytes) == 1;
+    }
+
+    return snprintf(pMapped, nMappedBytes, "%s", pPath) < nMappedBytes;
+}
+
+static void _MainLoopStateConfigEnsureParent(const Char *pPath)
+{
+    Char Directory[1024];
+    Char *pSlash;
+    size_t nLength;
+
+    if (!pPath || strlen(pPath) >= sizeof(Directory))
+    {
+        return;
+    }
+
+    strcpy(Directory, pPath);
+    pSlash = strrchr(Directory, '/');
+    if (!pSlash)
+    {
+        return;
+    }
+    *pSlash = 0;
+    nLength = strlen(Directory);
+    if (nLength > 0 && Directory[nLength - 1] != ':')
+    {
+        _MainLoopStateEnsureOneDir(Directory);
+    }
+}
+
+static Bool _MainLoopStateConfigRead(
+    const Char *pPath,
+    MainLoopStateConfigT *pConfig)
+{
+    Char MappedPath[1024];
+    FILE *pFile;
+    size_t nRead;
+
+    if (!_MainLoopStateConfigMapPath(
+            pPath,
+            MappedPath,
+            sizeof(MappedPath)))
+    {
+        return FALSE;
+    }
+
+    pFile = fopen(MappedPath, "rb");
+    if (!pFile)
+    {
+        return FALSE;
+    }
+    nRead = fread(pConfig, 1, sizeof(*pConfig), pFile);
+    fclose(pFile);
+
+    if (nRead != sizeof(*pConfig) || !_MainLoopStateConfigValid(pConfig))
+    {
+        return FALSE;
+    }
+
+    snprintf(
+        _MainLoop_StateConfigPath,
+        sizeof(_MainLoop_StateConfigPath),
+        "%s",
+        pPath
+    );
+    return TRUE;
+}
+
+static Bool _MainLoopStateConfigWrite(
+    const Char *pPath,
+    const MainLoopStateConfigT *pConfig)
+{
+    Char MappedPath[1024];
+    FILE *pFile;
+    size_t nWritten;
+    Bool bOK;
+
+    if (!_MainLoopStateConfigPathIsWritable(pPath) ||
+        !_MainLoopStateConfigMapPath(
+            pPath,
+            MappedPath,
+            sizeof(MappedPath)))
+    {
+        return FALSE;
+    }
+
+    _MainLoopStateConfigEnsureParent(MappedPath);
+    pFile = fopen(MappedPath, "wb");
+    if (!pFile)
+    {
+        return FALSE;
+    }
+    nWritten = fwrite(pConfig, 1, sizeof(*pConfig), pFile);
+    bOK = fflush(pFile) == 0;
+    if (fclose(pFile) != 0)
+    {
+        bOK = FALSE;
+    }
+    if (nWritten != sizeof(*pConfig) || !bOK)
+    {
+        return FALSE;
+    }
+
+    snprintf(
+        _MainLoop_StateConfigPath,
+        sizeof(_MainLoop_StateConfigPath),
+        "%s",
+        pPath
+    );
+    return TRUE;
+}
+
+static Bool _MainLoopStateConfigApply(const MainLoopStateConfigT *pConfig)
+{
+    if (!_MainLoopStateConfigValid(pConfig))
+    {
+        return FALSE;
+    }
+
+    _MainLoop_StateDevice = (MainLoopStateDeviceE)pConfig->eDevice;
+    _MainLoop_StateSlot = (Int32)pConfig->iSlot;
+    if (_MainLoop_StateDevice == MAINLOOP_STATEDEVICE_AUTO)
+    {
+        _MainLoop_StateSlot = 0;
+    }
+    _MainLoop_StateDeviceChosen = TRUE;
+    return TRUE;
+}
+
+static Bool _MainLoopStateConfigBuildRomPath(Char *pPath, Int32 nPathBytes)
+{
+    const Char *pColon;
+    const Char *pPartitionEnd;
+    Int32 nRootBytes;
+
+    if (!_RomPath[0] || !pPath || nPathBytes <= 0)
+    {
+        return FALSE;
+    }
+
+    if (!strncmp(_RomPath, "hdd0:/", 6))
+    {
+        pPartitionEnd = strchr(_RomPath + 6, '/');
+        if (!pPartitionEnd)
+        {
+            pPartitionEnd = _RomPath + strlen(_RomPath);
+        }
+        nRootBytes = (Int32)(pPartitionEnd - _RomPath);
+    }
+    else if (!strncmp(_RomPath, "pfs0:", 5))
+    {
+        nRootBytes = 5;
+    }
+    else if (!strncmp(_RomPath, "mass", 4) ||
+             !strncmp(_RomPath, "mc", 2) ||
+             !strncmp(_RomPath, "mmce", 4))
+    {
+        pColon = strchr(_RomPath, ':');
+        if (!pColon)
+        {
+            return FALSE;
+        }
+        nRootBytes = (Int32)(pColon - _RomPath) + 1;
+    }
+    else
+    {
+        /* cdfs, smb and host are deliberately read-only/non-persistent. */
+        return FALSE;
+    }
+
+    return snprintf(
+               pPath,
+               nPathBytes,
+               "%.*s/SNESticle/state.cfg",
+               nRootBytes,
+               _RomPath) < nPathBytes;
+}
+
+static void _MainLoopStateLoadSettingsFromRomDevice()
+{
+    MainLoopStateConfigT Config;
+    Char RomConfigPath[1024];
+
+    if (_MainLoopStateConfigBuildRomPath(
+            RomConfigPath,
+            sizeof(RomConfigPath)) &&
+        _MainLoopStateConfigRead(RomConfigPath, &Config))
+    {
+        _MainLoopStateConfigApply(&Config);
+    }
+}
+
 void MainLoopStateSettingsLoad()
 {
     MainLoopStateConfigT Config;
-    static const Char *pConfigPaths[] =
+    static const Char *pMemoryCardPaths[] =
     {
         "mc0:/SNESticle/state.cfg",
-        "mc1:/SNESticle/state.cfg"
+        "mc1:/SNESticle/state.cfg",
+        NULL
     };
+    static const Char *pMassPaths[] =
+    {
+        "mass0:/SNESticle/state.cfg",
+        "mass1:/SNESticle/state.cfg",
+        "mass:/SNESticle/state.cfg",
+        NULL
+    };
+    static const Char *pMMCEPaths[] =
+    {
+        "mmce0:/SNESticle/state.cfg",
+        "mmce1:/SNESticle/state.cfg",
+        NULL
+    };
+    Char BootPath[1024];
     Int32 i;
 
     _MainLoop_StateDevice = MAINLOOP_STATEDEVICE_AUTO;
     _MainLoop_StateSlot = 0;
     _MainLoop_StateDeviceChosen = FALSE;
+    _MainLoop_StateConfigPath[0] = 0;
 
-    for (i = 0; i < 2; i++)
+    /* Preserve the existing mc0/mc1 priority so upgrades keep their chosen
+       target. A standalone ELF directory and every enabled writable local
+       backend are fallbacks for consoles without a usable memory card. */
+    for (i = 0; pMemoryCardPaths[i]; i++)
     {
-        if (!MemCardReadFile(
-                (char *)pConfigPaths[i],
-                (Uint8 *)&Config,
-                sizeof(Config)))
+        if (_MainLoopStateConfigRead(pMemoryCardPaths[i], &Config) &&
+            _MainLoopStateConfigApply(&Config))
         {
-            continue;
+            return;
         }
+    }
 
-        if (memcmp(
-                Config.Magic,
-                _MainLoop_StateConfigMagic,
-                sizeof(Config.Magic)) ||
-            Config.uVersion != 2 ||
-            Config.nConfigBytes != sizeof(Config) ||
-            Config.eDevice >= MAINLOOP_STATEDEVICE_NUM ||
-            Config.iSlot >= MAINLOOP_STATE_SLOT_NUM)
-        {
-            continue;
-        }
-
-        _MainLoop_StateDevice = (MainLoopStateDeviceE)Config.eDevice;
-        _MainLoop_StateSlot = (Int32)Config.iSlot;
-        if (_MainLoop_StateDevice == MAINLOOP_STATEDEVICE_AUTO)
-        {
-            _MainLoop_StateSlot = 0;
-        }
-        _MainLoop_StateDeviceChosen = TRUE;
+    if (_MainLoop_BootDir[0] &&
+        _MainLoopStateConfigPathIsWritable(_MainLoop_BootDir) &&
+        snprintf(
+            BootPath,
+            sizeof(BootPath),
+            "%sstate.cfg",
+            _MainLoop_BootDir) < (Int32)sizeof(BootPath) &&
+        _MainLoopStateConfigRead(BootPath, &Config) &&
+        _MainLoopStateConfigApply(&Config))
+    {
         return;
+    }
+
+    if (MassStorageIsEnabled() || Mx4sioIsEnabled())
+    {
+        for (i = 0; pMassPaths[i]; i++)
+        {
+            if (_MainLoopStateConfigRead(pMassPaths[i], &Config) &&
+                _MainLoopStateConfigApply(&Config))
+            {
+                return;
+            }
+        }
+    }
+
+    if (MmceSupportIsEnabled() && !MmceNeedsRestart())
+    {
+        Int32 iSlots = MmceGetAvailableSlots();
+        if (!iSlots)
+        {
+            iSlots = MmceProbeAvailableSlots();
+        }
+        for (i = 0; pMMCEPaths[i]; i++)
+        {
+            if ((iSlots & (1 << i)) &&
+                _MainLoopStateConfigRead(pMMCEPaths[i], &Config) &&
+                _MainLoopStateConfigApply(&Config))
+            {
+                return;
+            }
+        }
     }
 }
 
 Bool MainLoopStateSettingsSave()
 {
     MainLoopStateConfigT Config;
-    static const Char *pConfigDirectories[] =
-    {
-        "mc0:/SNESticle",
-        "mc1:/SNESticle"
-    };
-    static const Char *pConfigPaths[] =
+    static const Char *pMemoryCardPaths[] =
     {
         "mc0:/SNESticle/state.cfg",
-        "mc1:/SNESticle/state.cfg"
+        "mc1:/SNESticle/state.cfg",
+        NULL
     };
+    static const Char *pMassPaths[] =
+    {
+        "mass0:/SNESticle/state.cfg",
+        "mass1:/SNESticle/state.cfg",
+        "mass:/SNESticle/state.cfg",
+        NULL
+    };
+    static const Char *pMMCEPaths[] =
+    {
+        "mmce0:/SNESticle/state.cfg",
+        "mmce1:/SNESticle/state.cfg",
+        NULL
+    };
+    Char BootPath[1024];
+    Char RomConfigPath[1024];
     Int32 i;
     Bool bSaved = FALSE;
 
@@ -773,25 +1068,98 @@ Bool MainLoopStateSettingsSave()
     Config.iSlot = (Uint32)_MainLoop_StateSlot;
     _MainLoop_StateDeviceChosen = TRUE;
 
-    /* A state can be the first thing the user saves for a ROM with no
-       battery-backed SRAM, so the normal SRAM path may not have created
-       the application directory yet. */
+    /* Update the location that supplied the config first. If none exists,
+       prefer the writable ELF directory, then mc, mass/MX4SIO and MMCE.
+       This makes the one-time choice persistent even without a memory card. */
     BgmIOBegin();
-    for (i = 0; i < 2; i++)
+    if (_MainLoop_StateConfigPath[0])
     {
-        if (_MainLoopStateEnsureOneDir(pConfigDirectories[i]) &&
-            MemCardWriteFile(
-                (char *)pConfigPaths[i],
-                (Uint8 *)&Config,
-                sizeof(Config)))
+        bSaved = _MainLoopStateConfigWrite(
+            _MainLoop_StateConfigPath,
+            &Config
+        );
+    }
+
+    if (!bSaved && _MainLoop_BootDir[0] &&
+        _MainLoopStateConfigPathIsWritable(_MainLoop_BootDir) &&
+        snprintf(
+            BootPath,
+            sizeof(BootPath),
+            "%sstate.cfg",
+            _MainLoop_BootDir) < (Int32)sizeof(BootPath))
+    {
+        bSaved = _MainLoopStateConfigWrite(BootPath, &Config);
+    }
+
+    if (!bSaved && _MainLoopStateConfigBuildRomPath(
+            RomConfigPath,
+            sizeof(RomConfigPath)))
+    {
+        bSaved = _MainLoopStateConfigWrite(RomConfigPath, &Config);
+    }
+
+    for (i = 0; !bSaved && pMemoryCardPaths[i]; i++)
+    {
+        bSaved = _MainLoopStateConfigWrite(pMemoryCardPaths[i], &Config);
+    }
+
+    if (!bSaved && (MassStorageIsEnabled() || Mx4sioIsEnabled()))
+    {
+        for (i = 0; !bSaved && pMassPaths[i]; i++)
         {
-            bSaved = TRUE;
-            break;
+            bSaved = _MainLoopStateConfigWrite(pMassPaths[i], &Config);
+        }
+    }
+
+    if (!bSaved && MmceSupportIsEnabled() && !MmceNeedsRestart())
+    {
+        Int32 iSlots = MmceGetAvailableSlots();
+        if (!iSlots)
+        {
+            iSlots = MmceProbeAvailableSlots();
+        }
+        for (i = 0; !bSaved && pMMCEPaths[i]; i++)
+        {
+            if (iSlots & (1 << i))
+            {
+                bSaved = _MainLoopStateConfigWrite(pMMCEPaths[i], &Config);
+            }
         }
     }
     BgmIOEnd();
 
     return bSaved;
+}
+
+static void _MainLoopStateDeleteSettings()
+{
+    static const Char *pConfigPaths[] =
+    {
+        "mc0:/SNESticle/state.cfg",
+        "mc1:/SNESticle/state.cfg",
+        "mass0:/SNESticle/state.cfg",
+        "mass1:/SNESticle/state.cfg",
+        "mass:/SNESticle/state.cfg",
+        "mmce0:/SNESticle/state.cfg",
+        "mmce1:/SNESticle/state.cfg",
+        NULL
+    };
+    Char MappedPath[1024];
+    Int32 i;
+
+    if (_MainLoop_StateConfigPath[0] &&
+        _MainLoopStateConfigMapPath(
+            _MainLoop_StateConfigPath,
+            MappedPath,
+            sizeof(MappedPath)))
+    {
+        remove(MappedPath);
+    }
+    for (i = 0; pConfigPaths[i]; i++)
+    {
+        remove(pConfigPaths[i]);
+    }
+    _MainLoop_StateConfigPath[0] = 0;
 }
 
 static const Char *_MainLoopStateGetUnsupportedChip(Uint32 uFlags)

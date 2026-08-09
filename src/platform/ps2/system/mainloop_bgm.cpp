@@ -15,10 +15,10 @@
  * o decoder carregado e' retomado sem reler o dispositivo.
  *
  * O player anterior (jar_mod/jar_xm) implementava apenas parte dos efeitos
- * de tracker e tinha erros em sample loops/pattern loops. libxmp-lite e'
- * usado por um port nativo de PS2 e preserva as regras ProTracker/FastTracker
- * para que andamento, instrumentos, E6 loops e saltos de pattern sejam
- * reproduzidos como no tracker original.
+ * de tracker e tinha erros em sample loops/pattern loops. libxmp-lite 4.7.2
+ * preserva as regras ProTracker/FastTracker e corrige regressões antigas de
+ * mute/instrument swap, para que andamento, instrumentos, E6 loops e saltos
+ * de pattern sejam reproduzidos como no tracker original.
  */
 
 #include <stdio.h>
@@ -830,6 +830,12 @@ static void _TryLoad(void)
         s_xmp = xmp_create_context();
         if (fileBuf && s_xmp)
         {
+            /* MODs classicos usam separacao 100% L/R. Em TVs/HDMI que fazem
+               downmix imperfeito isso soa como canal/instrumento faltando,
+               enquanto XM (com pan proprio) costuma parecer normal. O valor
+               50 e' o default-pan recomendado pelo libxmp atual e precisa ser
+               aplicado ANTES do load para afetar o pan inicial do modulo. */
+            xmp_set_player(s_xmp, XMP_PLAYER_DEFPAN, 50);
             loadRet = xmp_load_module_from_memory(s_xmp, fileBuf, len);
             if (loadRet == 0)
             {

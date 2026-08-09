@@ -2,6 +2,10 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
+#define NEWLIB_PORT_AWARE
+#include <fileXio.h>
+#include <fileXio_rpc.h>
+#undef NEWLIB_PORT_AWARE
 #include "types.h"
 #include "console.h"
 #include "file.h"
@@ -43,22 +47,23 @@ void _MainLoopGetName(Char *pName, const Char *pPath)
 
 int _MainLoopReadBinaryData(Uint8 *pBuffer, Int32 nBufferBytes, const char *pRomFile)
 {
-        FILE *fp;
-        size_t nBytes;
+        int fd;
+        int nBytes;
 
-        /* newlib stdio. With the embedded streaming cdfs.irx and the
-           fileXio stack registered at boot, "cdfs:/...", "mc0:/...",
-           "mass:/..." and "host:/..." all resolve through IOP drivers. */
-        fp = fopen(pRomFile, "rb");
-        if (!fp)
+        /* One fileXio read becomes one EE->IOP RPC; the IOP-side fileXio
+           server chunks and DMA-copies the request internally until EOF.
+           newlib fread() uses its own small buffering and is substantially
+           slower for multi-megabyte ROMs, especially on cdfs/mass/SMB. */
+        fd = fileXioOpen(pRomFile, O_RDONLY, 0);
+        if (fd < 0)
         {
                 return -1;
         }
 
-        nBytes = fread(pBuffer, 1, (size_t)nBufferBytes, fp);
-        fclose(fp);
+        nBytes = fileXioRead(fd, pBuffer, nBufferBytes);
+        fileXioClose(fd);
 
-        return (int)nBytes;
+        return nBytes;
 }
 
 int _MainLoopReadGZData(Uint8 *pBuffer, Int32 nBufferBytes, const char *pRomFile)
@@ -226,16 +231,6 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	// make copy of filename
 	snprintf(FileName, sizeof(FileName), "%s", pFileName);
 
-	// see if file exists first...
-	FILE *fp;
-	fp = fopen(pFileName, "rb");
-	if (!fp)
-	{
-		return FALSE;
-	}
-	fclose(fp);
-
-
 	// resolve file extension of filename
 	if (!PathExtResolve(FileName, &eType, TRUE))
 	{
@@ -258,9 +253,6 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	int nRomBytes = 0;
 	Uint8 *pBuffer = _RomData;
 	Int32 nBufferBytes = sizeof(_RomData);
-
-	// clear rom data buffer
-    memset(pBuffer, 0, nBufferBytes);
 
 	// load rom data from disk into our buffer
 	if (eType == MAINLOOP_ENTRYTYPE_GZ)
@@ -299,6 +291,17 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	{
 		return FALSE;
 	}
+
+    /* Parsers receive the exact byte count, so clearing all 8 MiB before
+       every launch was redundant. Keep only a small zero guard for old
+       cartridge code that may legally perform aligned look-ahead reads. */
+    {
+        Int32 nGuardBytes = nBufferBytes - nRomBytes;
+        if (nGuardBytes > 1024)
+            nGuardBytes = 1024;
+        if (nGuardBytes > 0)
+            memset(pBuffer + nRomBytes, 0, nGuardBytes);
+    }
 
     printf("ROM data read: %s (%d bytes)\n", pFileName, nRomBytes);
 

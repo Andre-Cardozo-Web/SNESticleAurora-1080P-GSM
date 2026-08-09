@@ -1,16 +1,23 @@
-libxmp-lite 4.5.0, PS2 port
-================================
+libxmp-lite 4.7.2, embedded PS2 build
+=====================================
 
 Source:
-  https://github.com/tatokis/libxmp-lite-ps2
+  https://github.com/libxmp/libxmp/releases/tag/libxmp-4.7.2
 
-Imported revision:
-  99ff14c973326b11d0d50701daee58fad2e6ebb3
+Imported archive:
+  libxmp-lite-4.7.2.tar.gz
+  SHA-256: bace7f53248a2cd5adcf77f9402a8858fc0fec05f4e6d6436e3d2a28d68f640e
 
-Only the public header and the library source needed by the in-tree build
-are vendored here. The original PS2 Makefile compiles these sources with
-LIBXMP_CORE_PLAYER enabled; SNESticle Revive does the same from its main
-Makefile. The menu scanner currently exposes only MOD and XM files even
-though this libxmp-lite source also contains S3M and IT loaders.
+Matching upstream tag commit:
+  a13276d27feabcf9ee4f982913f718ee05a65cb7
+
+The public header and libxmp-lite source are vendored for a deterministic
+cross-build. SNESticle Revive compiles the embedded/core configuration with
+LIBXMP_CORE_PLAYER from its main Makefile. The menu scanner currently exposes
+only MOD and XM files even though the library also contains S3M and IT loaders.
+
+The PS2 integration sets XMP_PLAYER_DEFPAN to 50 before loading a module. This
+keeps classic hard-panned MOD channels audible on displays or receivers whose
+mono/downmix path would otherwise make instruments appear to disappear.
 
 See LICENSE for the MIT license.

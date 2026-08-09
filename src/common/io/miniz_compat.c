@@ -3,61 +3,57 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+
+#define NEWLIB_PORT_AWARE
+#include <fileXio.h>
+#include <fileXio_rpc.h>
+#undef NEWLIB_PORT_AWARE
 
 #include "miniz.h"
 
-/* All ROM-source paths reachable by the project (cdfs:/, mc0:/,
-   mass:/, host:/, ...) are exposed by iomanX once
-   init_ps2_filesystem_driver() has run. We can therefore use newlib
-   stdio uniformly. We still slurp the entire compressed file into a
-   heap buffer and hand it to miniz's mem-reader rather than letting
-   miniz fopen() it itself, because miniz's fopen path emits
-   fseek/ftell/fread patterns that some iomanX backends are picky
-   about (cdfs.irx in particular). The cost is one extra copy of the
-   compressed archive, which is a few MB tops. */
+/* All ROM-source paths reachable by the project are exposed by iomanX.
+   Slurp the compressed file once and hand it to miniz's memory reader, but
+   use direct fileXio calls: one large EE->IOP read avoids the repeated small
+   stdio RPCs that made ZIP/GZ launch noticeably slower on cdfs/mass/SMB. */
 
 static int read_file_to_alloc(const char *path, void **out_buf, int *out_size)
 {
-        FILE *fp;
-        long size;
-        size_t n;
+        int fd;
+        int size;
+        int n;
         void *buf;
 
         if (!path || !path[0])
                 return -1;
 
-        fp = fopen(path, "rb");
-        if (!fp)
+        fd = fileXioOpen(path, O_RDONLY, 0);
+        if (fd < 0)
                 return -1;
 
-        if (fseek(fp, 0, SEEK_END) != 0)
-        {
-                fclose(fp);
-                return -1;
-        }
-        size = ftell(fp);
+        size = fileXioLseek(fd, 0, SEEK_END);
         if (size <= 0)
         {
-                fclose(fp);
+                fileXioClose(fd);
                 return -1;
         }
-        if (fseek(fp, 0, SEEK_SET) != 0)
+        if (fileXioLseek(fd, 0, SEEK_SET) < 0)
         {
-                fclose(fp);
+                fileXioClose(fd);
                 return -1;
         }
 
         buf = malloc((size_t)size);
         if (!buf)
         {
-                fclose(fp);
+                fileXioClose(fd);
                 return -1;
         }
 
-        n = fread(buf, 1, (size_t)size, fp);
-        fclose(fp);
+        n = fileXioRead(fd, buf, size);
+        fileXioClose(fd);
 
-        if ((long)n != size)
+        if (n != size)
         {
                 free(buf);
                 return -1;

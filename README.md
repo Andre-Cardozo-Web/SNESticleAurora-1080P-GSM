@@ -94,6 +94,9 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
   Its embedded streaming CDFS driver removes PS2SDK's fixed 256-entry ISO
   table. Folders are shown as `> NAME/`; the marker and final slash remain
   visible while only a long middle name is truncated or scrolled.
+- Launching a plain, ZIP or GZ ROM uses bulk `fileXio` reads instead of small
+  stdio RPCs. The loader no longer opens every ROM twice or clears an unused
+  8 MiB buffer before parsing it, reducing launch latency on slow devices.
 - **Menu music** — tracker tunes (`.mod` / `.xm`) play in the ROM browser and
   pause menu, with volume and synthesis‑rate controls. See
   [Menu music & audio](#menu-music--audio).
@@ -187,23 +190,32 @@ The first in-game **L2 + Cross** press opens a small, temporary **Save State
 Location** screen. Select **Auto**, **USB**, **Memory Card**, **MMCE**, or
 **Internal HDD** and press Cross: the target is remembered, the first state is
 saved, and the screen closes back to the game automatically. Press Circle to
-cancel. MMCE is shown only when its support is enabled **and a device answers
-the port probe**; Internal HDD is shown only when the current ROM came from an
-enabled internal-HDD partition.
+cancel. All five choices are always shown, so a removable device can be chosen
+as the future default even when it is not inserted during setup. Saving to a
+currently unavailable target reports a normal error instead of silently
+changing the preference.
 
 Later **L2 + Cross** presses save directly and **L2 + Circle** loads directly.
 This temporary selector pauses without flushing SRAM; **L2 + R2** remains the
-dedicated menu/SRAM shortcut. The choice is stored in
-`mc0:/SNESticle/state.cfg`, falling back to `mc1:`, when a card is available.
+dedicated menu/SRAM shortcut. The choice is stored in `state.cfg`. Existing
+`mc0:/SNESticle/state.cfg` and `mc1:` files retain priority; without a writable
+card the emulator can persist it beside a writable standalone ELF, then under
+`SNESticle/state.cfg` on `mass0:`/`mass1:`/legacy `mass:` (USB or MX4SIO) or
+an enabled MMCE slot. If a disc/ISO boot later opens a ROM from another local
+unit such as `mass2:` or an HDD partition, that ROM device is also used and its
+choice is recovered as soon as the ROM is opened. CDFS and SMB remain read-only
+and are never selected as configuration or state-write targets.
 
 **Auto** first tries the device that supplied the ROM, then the available
 `massN:`, `mc0:`/`mc1:` and enabled `mmce0:`/`mmce1:` devices. **USB** covers
 USB flash drives, external USB HDD/SSD and MX4SIO devices exposed as `massN:`.
 **Memory Card** tries both PS2 slots. **MMCE** tries both MMCE slots when MMCE
 support is enabled in Video Config. **Internal HDD** writes to the same mounted
-APA/PFS partition as the current ROM, so it is available only when that ROM
-was opened from the internal HDD. Auto always uses quick-save slot 1; with only
-a PS2 memory card available it falls through to that card, preferring `mc0:`.
+APA/PFS partition as the current ROM. It can be selected as a default at any
+time, but an actual HDD save requires the current ROM to have been opened from
+an enabled internal-HDD partition. Auto always uses quick-save slot 1; with
+only a PS2 memory card available it falls through to that card, preferring
+`mc0:`.
 
 If a selected PS2 memory card is present but unformatted, the emulator asks
 before formatting it. The safe **No / Cancel** option is selected by default,
@@ -453,9 +465,14 @@ decoding time.
 
 Background music plays in the ROM browser and the pause menu — tracker modules
 in **`.mod`** (Amiga ProTracker) and **`.xm`** (FastTracker II) formats, decoded
-on the EE by the bundled PS2 port of **libxmp-lite**. It applies the original
-ProTracker/FastTracker effect, tempo, instrument and loop rules instead of the
-partial tracker players used by earlier builds.
+on the EE by the bundled official [**libxmp-lite 4.7.2**](https://github.com/libxmp/libxmp/releases/tag/libxmp-4.7.2)
+source. It applies the
+original ProTracker/FastTracker effect, tempo, instrument and loop rules and
+includes the upstream fixes made after the old 4.5.0 PS2 fork, including a
+channel-unmute regression that could make notes disappear. Classic MODs also
+set the upstream-recommended default pan to 50 before loading; this keeps
+hard-left/right instruments audible through imperfect HDMI/TV mono downmix.
+This setting affects menu tracker music only, not SNES or NES game audio.
 
 Drop one or more tracks in any of these folders. Memory-card and mass-storage
 folders are indexed immediately; enabled MMCE/HDD sources are checked once
@@ -568,6 +585,28 @@ internal direct-ELF/ps2link boot fallback remains available for developers.
 SNESticle now embeds PS2SDK's `smbman` and exposes one configured share as
 `smb:`. Network modules, DHCP and login start only when you explicitly connect
 or select `smb:`; merely booting or opening the setup tab does not touch DEV9.
+
+#### NetherSX2 2.2n+ DEV9 setup
+
+In the screenshot where **API** and **Device** show **Not Set / Não definido**,
+the virtual PS2 has no network link and SNESticle SMB cannot reach DHCP or the
+server. In NetherSX2 open **App Settings → Settings → System → Networking** and
+use:
+
+| NetherSX2 setting | Value for a normal home network |
+|--------------------|---------------------------------|
+| **Enable DEV9 Ethernet** | On |
+| **API** | `Sockets` |
+| **Device** | `WiFi` when the Android device and SMB PC/NAS are on the same Wi-Fi/LAN; use `VPN` only when the phone routes the connection through a VPN, or the appropriate `SIM DATA` option for mobile data. |
+| **DNS1 / DNS2 Mode** | `Auto (Default)` |
+| **DNS1 / DNS2** | `0.0.0.0 (Default)` |
+
+Manual DNS presets in that screen are intended for PS2 online-game servers;
+SNESticle uses the numeric **Server IP** entered in its SMB Network tab and
+does not need one. After applying the settings, fully restart the emulated PS2,
+then configure **Server IP**, **Share**, user/password and port inside
+SNESticle. The [official NetherSX2 2.2n release instructions](https://github.com/Trixarian/NetherSX2-patch/releases/tag/2.2n)
+document the same DEV9 `Sockets` and device selection.
 
 #### Recommended: configure it on the PS2
 
@@ -888,7 +927,7 @@ tools/         host‑side test harnesses (chip + OBJ verification)
 - **[game-music-emu](https://github.com/libgme/game-music-emu)** — Shay Green's Nes_Snd_Emu and Blip_Buffer used for the five cycle-timed base NES audio channels (LGPL-2.1+).
 - **[Mesen2](https://github.com/SourMesen/Mesen2)** — reference/default NTSC 2C02 palette used by the NES renderer.
 - **[upng](https://github.com/elanthis/upng)** — Sean Middleditch & Lode Vandevenne; the bundled single‑file PNG decoder used for cover art (zlib license). Extended in this repo with palette/indexed support.
-- **[libxmp-lite](https://github.com/tatokis/libxmp-lite-ps2)** — Claudio Matsuoka, Hipolito Carraro Jr and PS2 porter tatokis; the embedded MOD/XM replay engine used for accurate tracker effects, timing and loops (MIT).
+- **[libxmp-lite](https://github.com/libxmp/libxmp)** — Claudio Matsuoka and Hipolito Carraro Jr; official 4.7.2 embedded MOD/XM replay source used for tracker effects, timing and loops (MIT). The earlier PS2 integration by tatokis was the original porting reference.
 - **[hugorsgarcia/PS2SNESticle](https://github.com/hugorsgarcia/PS2SNESticle)** — **Hugo Garcia**, whose PS2 work was the reference for the controller / memory‑card / IRX bring‑up and the netplay module.
 - **Open‑PS2‑Loader**, **picodrive‑PS2** and **uLaunchELF** — references for correct PS2 boot, IOP and video behavior.
 - **ReyFxck** — this revival/fork and ongoing development.

@@ -65,6 +65,14 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   antiga espera fixa de um segundo após o save.
 - A música do menu continua sendo alimentada durante modais, listagem de pastas
   grandes, leitura/decode de capas, gravação de configurações e conexão SMB.
+- Abertura de ROM comum, ZIP e GZ passou para leituras grandes diretas por
+  `fileXio`, sem abrir o mesmo arquivo duas vezes nem zerar 8 MiB sem uso.
+- O player de MOD/XM foi atualizado do antigo libxmp-lite 4.5.0 para o upstream
+  oficial 4.7.2; MOD aplica `DEFPAN=50` antes da carga e recebe as correções
+  modernas de canal, instrumento, efeitos e fluxo do ProTracker.
+- O seletor inicial de save state agora mostra sempre Auto, USB/mass, Memory
+  Card, MMCE e HDD; o padrão também pode persistir no ELF gravável, USB,
+  MX4SIO ou MMCE quando não há memory card.
 - Corrigida a falha intermitente de áudio do boot, mais perceptível em 480i:
   o serviço era parado no fim da inicialização e só voltava quando algum core
   — frequentemente o NES — enviasse o primeiro bloco de áudio.
@@ -73,6 +81,80 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   prender o menu, a música e o carregamento de ROM.
 - A paleta antiga e excessivamente saturada do InfoNES foi substituída pela
   paleta NTSC 2C02 padrão do **Mesen2**, preservada em RGBA8.
+
+---
+
+## Revisão r14: carga de ROM, MOD/libxmp e destinos de save state
+
+### ROMs não fazem mais I/O duplicado
+
+- `_MainLoopExecuteFile` abria toda ROM uma vez apenas para confirmar a
+  existência e fechava o arquivo; em seguida o loader abria e lia tudo outra
+  vez. A abertura de teste foi removida e o erro real de leitura passou a ser
+  a confirmação única.
+- ROMs sem compressão usam uma chamada grande de `fileXioRead`. O servidor
+  `fileXio` do IOP divide esse pedido internamente e transfere os blocos por
+  DMA, evitando a sequência de RPCs pequenos criada pelo buffer de `fread`.
+- ZIP e GZ ainda são descompactados inteiramente na EE, mas o arquivo
+  comprimido agora é medido e lido com `fileXioOpen/Lseek/Read`, sem a cadeia
+  `fopen/fseek/ftell/fseek/fread` do stdio.
+- Foi removido o `memset` de 8 MiB feito antes de todo lançamento. O parser já
+  recebe o tamanho exato; somente uma guarda de até 1 KiB após o fim real é
+  zerada para manter seguros os antigos acessos alinhados de look-ahead.
+- A mudança vale para CDFS, USB/MX4SIO, memory card, MMCE, HDD/PFS e SMB porque
+  todos esses caminhos passam pelo mesmo `fileXio` registrado no frontend.
+
+### MOD atualizado para o libxmp-lite oficial 4.7.2
+
+- O snapshot de 2021 do fork PS2, baseado no libxmp-lite 4.5.0, foi substituído
+  pela source oficial `libxmp-lite-4.7.2.tar.gz`, tag/commit
+  `a13276d27feabcf9ee4f982913f718ee05a65cb7`.
+- SHA-256 do arquivo importado:
+  `bace7f53248a2cd5adcf77f9402a8858fc0fec05f4e6d6436e3d2a28d68f640e`.
+- O Makefile passou a compilar também `misc.c`, `flow.c`, `filetype.c` e
+  `rng.c`, mantendo `LIBXMP_CORE_PLAYER` para a configuração embarcada.
+- Entre as correções acumuladas do upstream está a regressão introduzida no
+  4.5.0 em que `xmp_start_player` não desmutava canais normais, além de várias
+  correções de instrumento, pan, pattern loop e compatibilidade de tracker.
+- Antes de carregar MOD/XM, o frontend define
+  `XMP_PLAYER_DEFPAN=50`, exatamente na ordem recomendada pelo upstream. Isso
+  reduz o hard-pan dos MODs clássicos e evita que um downmix mono ruim de
+  TV/HDMI pareça apagar instrumentos. O XM continua usando seu pan próprio.
+- Esta revisão mexe somente na música tracker do menu. O áudio emulado de SNES
+  e NES não foi alterado.
+
+### Todos os destinos aparecem e o padrão não depende de memory card
+
+- O seletor da primeira combinação **L2 + Cross** não filtra mais o menu pelo
+  hardware detectado naquele instante. Ele sempre mostra **Auto**, **USB / mass**,
+  **Memory Card**, **MMCE** e **Internal HDD**.
+- Assim é possível escolher como padrão uma mídia removível ausente. Se ela
+  continuar ausente ao salvar, o usuário recebe o erro normal do destino; a
+  preferência não é trocada silenciosamente.
+- `state.cfg` continua lendo primeiro as cópias antigas em
+  `mc0:/SNESticle` e `mc1:/SNESticle`. Sem card gravável, usa a pasta do ELF
+  quando ela for local e gravável, depois `mass0:`, `mass1:`, o alias `mass:`
+  e os slots MMCE habilitados/detectados.
+- Quando o ELF veio de uma ISO mas a ROM foi aberta por outro device local, o
+  caminho exato dessa ROM também entra no fallback. Isso inclui `mass2+` e a
+  partição APA/PFS atual; a preferência é relida assim que essa ROM abre.
+- O driver MX4SIO configurado é carregado antes da leitura de `state.cfg`, de
+  modo que o fallback em `massN:` exista no momento correto.
+- `cdfs:` e `smb:` continuam estritamente fora dessa lista: são origens de ROM
+  somente leitura, não destinos de configuração/state.
+- **Ask Save Location Again** remove a cópia ativa e os fallbacks locais
+  conhecidos, para que a próxima gravação realmente peça a escolha outra vez.
+
+### README: DEV9 do NetherSX2
+
+- Foi adicionada uma seção específica para NetherSX2 2.2n+: ativar
+  **Enable DEV9 Ethernet**, escolher **API = Sockets** e **Device = WiFi**
+  numa LAN normal (ou VPN/SIM conforme a rota usada pelo Android).
+- Para SMB por IP numérico, DNS1/DNS2 permanecem em **Auto / 0.0.0.0**. Os
+  presets manuais de DNS são para servidores de jogos PS2 e não substituem o
+  endereço do PC/NAS configurado na aba SMB do SNESticle.
+- Se **API** ou **Device** aparecer como **Não definido**, o PS2 virtual não
+  possui link de rede e o SMB termina em timeout/erro de conexão.
 
 ---
 
@@ -771,9 +853,9 @@ parte do caminho executado.
 
 ### Validação realizada neste ambiente
 
-- Compilação limpa da source extraída do ZIP com o toolchain PS2DEV: **157
+- Compilação limpa da source extraída do ZIP com o toolchain PS2DEV: **161
   arquivos compilados**.
-- Resultado desta source: **157/157 arquivos**, **0 erros** e **0 avisos**.
+- Resultado desta source: **161/161 arquivos**, **0 erros** e **0 avisos**.
 - Confirmado no ELF final que `smbman.irx` foi realmente embutido, incluindo
   o identificador de protocolo `NT LM 0.12`; o binário fixado também foi
   conferido contra o SHA-256 documentado.

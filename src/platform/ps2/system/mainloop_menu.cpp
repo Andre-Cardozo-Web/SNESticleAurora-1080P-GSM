@@ -355,8 +355,10 @@ static void _MainLoopStateDeviceAddEntry(
         MainLoopStateDeviceE eDevice,
         char *pEntry)
 {
-        if (!MainLoopStateDeviceAvailable(eDevice) ||
-            _MainLoop_StateDeviceEntryCount >= MAINLOOP_STATEDEVICE_NUM)
+        /* A default is a user preference, not a probe result. Show every
+           writable storage class even when no device is attached right now;
+           an unavailable target will report a normal save error later. */
+        if (_MainLoop_StateDeviceEntryCount >= MAINLOOP_STATEDEVICE_NUM)
         {
                 return;
         }

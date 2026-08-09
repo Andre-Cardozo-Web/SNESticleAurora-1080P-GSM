@@ -1,5 +1,5 @@
 /* Extended Module Player
- * Copyright (C) 1996-2018 Claudio Matsuoka and Hipolito Carraro Jr
+ * Copyright (C) 1996-2026 Claudio Matsuoka and Hipolito Carraro Jr
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -33,7 +33,6 @@
 	if (err != NULL) *err = (x);	\
 } while (0)
 
-
 uint8 read8(FILE *f, int *err)
 {
 	int a;
@@ -62,13 +61,13 @@ int8 read8s(FILE *f, int *err)
 
 uint16 read16l(FILE *f, int *err)
 {
-	int a, b;
+	int32 a, b;
 
 	read_byte(a);
 	read_byte(b);
 
 	set_error(0);
-	return ((uint16)b << 8) | a;
+	return ((uint32)b << 8) | a;
 
     error:
 	set_error(ferror(f) ? errno : EOF);
@@ -77,7 +76,7 @@ uint16 read16l(FILE *f, int *err)
 
 uint16 read16b(FILE *f, int *err)
 {
-	int a, b;
+	int32 a, b;
 
 	read_byte(a);
 	read_byte(b);
@@ -92,7 +91,7 @@ uint16 read16b(FILE *f, int *err)
 
 uint32 read24l(FILE *f, int *err)
 {
-	int a, b, c;
+	int32 a, b, c;
 
 	read_byte(a);
 	read_byte(b);
@@ -103,12 +102,12 @@ uint32 read24l(FILE *f, int *err)
 
     error:
 	set_error(ferror(f) ? errno : EOF);
-	return 0xffffff;
+	return 0xffffffff;
 }
 
 uint32 read24b(FILE *f, int *err)
 {
-	int a, b, c;
+	int32 a, b, c;
 
 	read_byte(a);
 	read_byte(b);
@@ -119,12 +118,12 @@ uint32 read24b(FILE *f, int *err)
 
     error:
 	set_error(ferror(f) ? errno : EOF);
-	return 0xffffff;
+	return 0xffffffff;
 }
 
 uint32 read32l(FILE *f, int *err)
 {
-	int a, b, c, d;
+	int32 a, b, c, d;
 
 	read_byte(a);
 	read_byte(b);
@@ -132,7 +131,7 @@ uint32 read32l(FILE *f, int *err)
 	read_byte(d);
 
 	set_error(0);
-	return (d << 24) | (c << 16) | (b << 8) | a;
+	return ((uint32)d << 24) | (c << 16) | (b << 8) | a;
 
     error:
 	set_error(ferror(f) ? errno : EOF);
@@ -141,7 +140,7 @@ uint32 read32l(FILE *f, int *err)
 
 uint32 read32b(FILE *f, int *err)
 {
-	int a, b, c, d;
+	int32 a, b, c, d;
 
 	read_byte(a);
 	read_byte(b);
@@ -149,7 +148,7 @@ uint32 read32b(FILE *f, int *err)
 	read_byte(d);
 
 	set_error(0);
-	return (a << 24) | (b << 16) | (c << 8) | d;
+	return ((uint32)a << 24) | (b << 16) | (c << 8) | d;
 
     error:
 	set_error(ferror(f) ? errno : EOF);
@@ -250,20 +249,6 @@ void write32b(FILE *f, uint32 w)
 	write8(f, (w & 0x00ff0000) >> 16);
 	write8(f, (w & 0x0000ff00) >> 8);
 	write8(f, w & 0x000000ff);
-}
-
-int move_data(FILE *out, FILE *in, int len)
-{
-	uint8 buf[1024];
-	int l;
-
-	do {
-		l = fread(buf, 1, len > 1024 ? 1024 : len, in);
-		fwrite(buf, 1, l, out);
-		len -= l;
-	} while (l > 0 && len > 0);
-
-	return 0;
 }
 
 #endif

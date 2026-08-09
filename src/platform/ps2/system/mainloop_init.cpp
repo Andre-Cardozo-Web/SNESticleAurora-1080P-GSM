@@ -325,11 +325,13 @@ Bool MainLoopInit()
        480i before the card was available.  Default (480i) users take the
        else branch and the GS is left exactly as it was. */
     VideoSettingsLoad();
-    MainLoopStateSettingsLoad();
     /* MX4SIO (SD via SIO2) carrega AQUI, depois da config -- nunca no boot.
        So' se o suporte a Mass estiver ligado (padrao on).  Best-effort:
        em quem nao tem o adaptador, so' nao acha hardware. */
     Mx4sioLoadIfEnabled();
+    /* state.cfg can live on USB/MX4SIO/MMCE as well as a memory card. Load it
+       only after the configured removable-storage backend is available. */
+    MainLoopStateSettingsLoad();
     if (g_GskVideoMode != GSK_GetActiveVideoMode())
     {
         GSK_ReinitVideo();

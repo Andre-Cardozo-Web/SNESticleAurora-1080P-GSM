@@ -1,5 +1,5 @@
 /* Extended Module Player
- * Copyright (C) 1996-2018 Claudio Matsuoka and Hipolito Carraro Jr
+ * Copyright (C) 1996-2026 Claudio Matsuoka and Hipolito Carraro Jr
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -20,24 +20,20 @@
  * THE SOFTWARE.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <stdarg.h>
-
 #include "format.h"
 #include "virtual.h"
 #include "mixer.h"
+#include "rng.h"
 
-const char *xmp_version = XMP_VERSION;
-const unsigned int xmp_vercode = XMP_VERCODE;
+/* TODO: Change this to const char *const in a future ABI change */
+const char *xmp_version LIBXMP_EXPORT_VAR = XMP_VERSION;
+const unsigned int xmp_vercode LIBXMP_EXPORT_VAR = XMP_VERCODE;
 
-xmp_context xmp_create_context()
+xmp_context xmp_create_context(void)
 {
 	struct context_data *ctx;
 
-	ctx = calloc(1, sizeof(struct context_data));
+	ctx = (struct context_data *) calloc(1, sizeof(struct context_data));
 	if (ctx == NULL) {
 		return NULL;
 	}
@@ -45,6 +41,7 @@ xmp_context xmp_create_context()
 	ctx->state = XMP_STATE_UNLOADED;
 	ctx->m.defpan = 100;
 	ctx->s.numvoc = SMIX_NUMVOC;
+	libxmp_init_random(&ctx->rng);
 
 	return (xmp_context)ctx;
 }
@@ -52,10 +49,14 @@ xmp_context xmp_create_context()
 void xmp_free_context(xmp_context opaque)
 {
 	struct context_data *ctx = (struct context_data *)opaque;
+	struct module_data *m = &ctx->m;
 
 	if (ctx->state > XMP_STATE_UNLOADED)
 		xmp_release_module(opaque);
 
+	xmp_end_smix(opaque);
+
+	free(m->instrument_path);
 	free(opaque);
 }
 
@@ -75,53 +76,54 @@ static void set_position(struct context_data *ctx, int pos, int dir)
 		seq = p->sequence;
 	}
 
-	if (seq == 0xff) {
+	if (seq < 0 || seq >= m->num_sequences) {
 		return;
 	}
 
 	has_marker = HAS_QUIRK(QUIRK_MARKER);
 
-	if (seq >= 0) {
-		int start = m->seq_data[seq].entry_point;
+	p->sequence = seq;
 
-		p->sequence = seq;
+	if (pos >= 0) {
+		int pat;
 
-		if (pos >= 0) {
-			int pat;
-
-			while (has_marker && mod->xxo[pos] == 0xfe) {
-				if (dir < 0) {
-					if (pos > start) {
-						pos--;
-					}
-				} else {
-					pos++;
-				}
-			}
-			pat = mod->xxo[pos];
-
-			if (pat < mod->pat) {
-				if (has_marker && pat == 0xff) {
-					return;
-				}
-
-				if (pos > p->scan[seq].ord) {
-					f->end_point = 0;
-				} else {
-					f->num_rows = mod->xxp[pat]->rows;
-					f->end_point = p->scan[seq].num;
-					f->jumpline = 0;
-				}
-			}
-		}
-
-		if (pos < mod->len) {
-			if (pos == 0) {
-				p->pos = -1;
+		while (has_marker && pos > 0 && pos < mod->len - 1 &&
+		       mod->xxo[pos] == XMP_MARK_SKIP) {
+			if (dir < 0) {
+				pos--;
 			} else {
-				p->pos = pos;
+				pos++;
 			}
 		}
+		if (pos >= mod->len) {
+			return;
+		}
+		pat = mod->xxo[pos];
+
+		if (pat < mod->pat) {
+			if (has_marker && pat == XMP_MARK_END) {
+				return;
+			}
+
+			if (pos > p->scan[seq].ord) {
+				f->end_point = 0;
+			} else {
+				f->num_rows = mod->xxp[pat]->rows;
+				f->end_point = p->scan[seq].num;
+				f->jumpline = 0;
+			}
+		}
+	}
+
+	if (pos < mod->len) {
+		if (pos == 0) {
+			p->pos = -1;
+		} else {
+			p->pos = pos;
+		}
+		/* Clear flow vars to prevent old pattern jumps and
+		 * other junk from executing in the new position. */
+		libxmp_reset_flow(ctx);
 	}
 }
 
@@ -134,8 +136,13 @@ int xmp_next_position(xmp_context opaque)
 	if (ctx->state < XMP_STATE_PLAYING)
 		return -XMP_ERROR_STATE;
 
-	if (p->pos < m->mod.len)
+	if (p->pos < 0) {
+		/* Restart a stopped or restarting module.
+		 * This was previously done implicitly. */
+		set_position(ctx, -1, 1);
+	} else if (p->pos < m->mod.len) {
 		set_position(ctx, p->pos + 1, 1);
+	}
 
 	return p->pos;
 }
@@ -166,7 +173,7 @@ int xmp_set_position(xmp_context opaque, int pos)
 	if (ctx->state < XMP_STATE_PLAYING)
 		return -XMP_ERROR_STATE;
 
-	if (pos >= m->mod.len)
+	if (pos < 0 || pos >= m->mod.len)
 		return -XMP_ERROR_INVALID;
 
 	set_position(ctx, pos, 0);
@@ -182,16 +189,17 @@ int xmp_set_row(xmp_context opaque, int row)
 	struct xmp_module *mod = &m->mod;
 	struct flow_control *f = &p->flow;
 	int pos = p->pos;
-	int pattern = mod->xxo[pos];
+	int pattern;
 
 	if (pos < 0 || pos >= mod->len) {
 		pos = 0;
 	}
+	pattern = mod->xxo[pos];
 
 	if (ctx->state < XMP_STATE_PLAYING)
 		return -XMP_ERROR_STATE;
 
-	if (row >= mod->xxp[pattern]->rows)
+	if (pattern >= mod->pat || row < 0 || row >= mod->xxp[pattern]->rows)
 		return -XMP_ERROR_INVALID;
 
 	/* See set_position. */
@@ -214,6 +222,7 @@ void xmp_stop_module(xmp_context opaque)
 		return;
 
 	p->pos = -2;
+	libxmp_reset_flow(ctx);
 }
 
 void xmp_restart_module(xmp_context opaque)
@@ -226,6 +235,7 @@ void xmp_restart_module(xmp_context opaque)
 
 	p->loop_count = 0;
 	p->pos = -1;
+	libxmp_reset_flow(ctx);
 }
 
 int xmp_seek_time(xmp_context opaque, int time)
@@ -233,7 +243,10 @@ int xmp_seek_time(xmp_context opaque, int time)
 	struct context_data *ctx = (struct context_data *)opaque;
 	struct player_data *p = &ctx->p;
 	struct module_data *m = &ctx->m;
-	int i, t;
+	struct ord_data *oinfo;
+	double t;
+	int pos;
+	int i;
 
 	if (ctx->state < XMP_STATE_PLAYING)
 		return -XMP_ERROR_STATE;
@@ -246,8 +259,12 @@ int xmp_seek_time(xmp_context opaque, int time)
 		if (libxmp_get_sequence(ctx, i) != p->sequence) {
 			continue;
 		}
+		/* TODO: using rounding to preserve compatibility with
+		 * the old (bad) int conversion here until this API
+		 * function can be fixed or replaced. */
 		t = m->xxo_info[i].time;
-		if (time >= t) {
+		CLAMP(t, 0.0, (double)INT_MAX);
+		if (time >= (int)t) {
 			set_position(ctx, i, 1);
 			break;
 		}
@@ -255,6 +272,72 @@ int xmp_seek_time(xmp_context opaque, int time)
 	if (i < 0) {
 		xmp_set_position(opaque, 0);
 	}
+
+	/* Get the correct start row + force the next xmp_play_frame call to
+	 * do a reposition, which updates properties such as BPM and global
+	 * volume and normally doesn't happen within the same position: */
+	pos = p->pos >= 0 ? p->pos : m->seq_data[p->sequence].entry_point;
+
+	oinfo = &m->xxo_info[pos];
+	p->flow.jumpline = oinfo->start_row;
+	p->flow.force_reposition = 1;
+
+	/* For the first p->current_time + libxmp_get_frame_time check
+	 * in xmp_seek_time_frame: */
+	p->current_time = oinfo->time;
+	p->bpm = oinfo->bpm;
+
+	return p->pos < 0 ? 0 : p->pos;
+}
+
+int xmp_seek_time_frame(xmp_context opaque, int time)
+{
+	struct context_data *ctx = (struct context_data *)opaque;
+	struct player_data *p = &ctx->p;
+	struct module_data *m = &ctx->m;
+	double max_time, t;
+	int ret, i;
+
+	if ((ret = xmp_seek_time(opaque, time)) < 0) {
+		return ret;
+	}
+
+	/* set_position/xmp_set_position doesn't actually complete the seek;
+	 * may need to play frames from the start of the new position until
+	 * the player is at the closest frame to the requested time.
+	 * TODO: it may be possible to get closer times for xmp_play_buffer
+	 * users.
+	 */
+#if 0
+	D_(D_INFO "%d %d init: %.06f, %.06f >=? %.06f", p->pos, p->flow.jumpline,
+		p->current_time, p->current_time + libxmp_get_frame_time(ctx),
+		(double)time);
+#endif
+
+	max_time = m->seq_data[p->sequence].duration - 0.1;
+	t = MIN((double)time, max_time);
+
+	/* Try to find the correct frame (this may take a while).
+	 * TODO: temporarily put the mixer in a lower rate? */
+	for (i = 0; i < (1 << 13); i++) {
+		double prev = p->current_time;
+
+		/* TODO: the actual BPM isn't known until mid-frame. */
+		if (p->current_time + libxmp_get_frame_time(ctx) > t) {
+			break;
+		}
+		if (xmp_play_frame(opaque) < 0 || p->current_time < prev) {
+			break;
+		}
+#if 0
+		D_(D_INFO "%d %d %d: %.06f >=? %.06f", p->pos, p->row, p->frame,
+			p->current_time + libxmp_get_frame_time(ctx), t);
+#endif
+	}
+
+	/* Force an xmp_play_buffer refresh so the new (wrong) frame data
+	 * doesn't confuse the caller: */
+	xmp_play_buffer(opaque, NULL, 0, 0);
 
 	return p->pos < 0 ? 0 : p->pos;
 }
@@ -306,18 +389,22 @@ int xmp_channel_vol(xmp_context opaque, int chn, int vol)
 }
 
 #ifdef USE_VERSIONED_SYMBOLS
-LIBXMP_EXPORT extern int xmp_set_player_v40__(xmp_context, int, int);
-LIBXMP_EXPORT extern int xmp_set_player_v41__(xmp_context, int, int)
-			__attribute__((alias("xmp_set_player_v40__")));
-LIBXMP_EXPORT extern int xmp_set_player_v43__(xmp_context, int, int)
-			__attribute__((alias("xmp_set_player_v40__")));
-LIBXMP_EXPORT extern int xmp_set_player_v44__(xmp_context, int, int)
-			__attribute__((alias("xmp_set_player_v40__")));
+LIBXMP_BEGIN_DECLS /* no name-mangling */
+LIBXMP_EXPORT_VERSIONED extern int xmp_set_player_v40__(xmp_context, int, int) LIBXMP_ATTRIB_SYMVER("xmp_set_player@XMP_4.0");
+LIBXMP_EXPORT_VERSIONED extern int xmp_set_player_v41__(xmp_context, int, int)
+			__attribute__((alias("xmp_set_player_v40__"))) LIBXMP_ATTRIB_SYMVER("xmp_set_player@XMP_4.1");
+LIBXMP_EXPORT_VERSIONED extern int xmp_set_player_v43__(xmp_context, int, int)
+			__attribute__((alias("xmp_set_player_v40__"))) LIBXMP_ATTRIB_SYMVER("xmp_set_player@XMP_4.3");
+LIBXMP_EXPORT_VERSIONED extern int xmp_set_player_v44__(xmp_context, int, int)
+			__attribute__((alias("xmp_set_player_v40__"))) LIBXMP_ATTRIB_SYMVER("xmp_set_player@@XMP_4.4");
 
+#ifndef HAVE_ATTRIBUTE_SYMVER
 asm(".symver xmp_set_player_v40__, xmp_set_player@XMP_4.0");
 asm(".symver xmp_set_player_v41__, xmp_set_player@XMP_4.1");
 asm(".symver xmp_set_player_v43__, xmp_set_player@XMP_4.3");
 asm(".symver xmp_set_player_v44__, xmp_set_player@@XMP_4.4");
+#endif
+LIBXMP_END_DECLS
 
 #define xmp_set_player__ xmp_set_player_v40__
 #else
@@ -424,21 +511,25 @@ int xmp_set_player__(xmp_context opaque, int parm, int val)
 }
 
 #ifdef USE_VERSIONED_SYMBOLS
-LIBXMP_EXPORT extern int xmp_get_player_v40__(xmp_context, int);
-LIBXMP_EXPORT extern int xmp_get_player_v41__(xmp_context, int)
-		__attribute__((alias("xmp_get_player_v40__")));
-LIBXMP_EXPORT extern int xmp_get_player_v42__(xmp_context, int)
-		__attribute__((alias("xmp_get_player_v40__")));
-LIBXMP_EXPORT extern int xmp_get_player_v43__(xmp_context, int)
-		__attribute__((alias("xmp_get_player_v40__")));
-LIBXMP_EXPORT extern int xmp_get_player_v44__(xmp_context, int)
-		__attribute__((alias("xmp_get_player_v40__")));
+LIBXMP_BEGIN_DECLS /* no name-mangling */
+LIBXMP_EXPORT_VERSIONED extern int xmp_get_player_v40__(xmp_context, int) LIBXMP_ATTRIB_SYMVER("xmp_get_player@XMP_4.0");
+LIBXMP_EXPORT_VERSIONED extern int xmp_get_player_v41__(xmp_context, int)
+		__attribute__((alias("xmp_get_player_v40__"))) LIBXMP_ATTRIB_SYMVER("xmp_get_player@XMP_4.1");
+LIBXMP_EXPORT_VERSIONED extern int xmp_get_player_v42__(xmp_context, int)
+		__attribute__((alias("xmp_get_player_v40__"))) LIBXMP_ATTRIB_SYMVER("xmp_get_player@XMP_4.2");
+LIBXMP_EXPORT_VERSIONED extern int xmp_get_player_v43__(xmp_context, int)
+		__attribute__((alias("xmp_get_player_v40__"))) LIBXMP_ATTRIB_SYMVER("xmp_get_player@XMP_4.3");
+LIBXMP_EXPORT_VERSIONED extern int xmp_get_player_v44__(xmp_context, int)
+		__attribute__((alias("xmp_get_player_v40__"))) LIBXMP_ATTRIB_SYMVER("xmp_get_player@@XMP_4.4");
 
+#ifndef HAVE_ATTRIBUTE_SYMVER
 asm(".symver xmp_get_player_v40__, xmp_get_player@XMP_4.0");
 asm(".symver xmp_get_player_v41__, xmp_get_player@XMP_4.1");
 asm(".symver xmp_get_player_v42__, xmp_get_player@XMP_4.2");
 asm(".symver xmp_get_player_v43__, xmp_get_player@XMP_4.3");
 asm(".symver xmp_get_player_v44__, xmp_get_player@@XMP_4.4");
+#endif
+LIBXMP_END_DECLS
 
 #define xmp_get_player__ xmp_get_player_v40__
 #else
@@ -526,7 +617,7 @@ int xmp_get_player__(xmp_context opaque, int parm)
 	return ret;
 }
 
-char **xmp_get_format_list()
+const char *const *xmp_get_format_list(void)
 {
 	return format_list();
 }
@@ -543,15 +634,20 @@ void xmp_inject_event(xmp_context opaque, int channel, struct xmp_event *e)
 	p->inject_event[channel]._flag = 1;
 }
 
-int xmp_set_instrument_path(xmp_context opaque, char *path)
+int xmp_set_instrument_path(xmp_context opaque, const char *path)
 {
 	struct context_data *ctx = (struct context_data *)opaque;
 	struct module_data *m = &ctx->m;
 
-	if (m->instrument_path != NULL)
+	if (m->instrument_path != NULL) {
 		free(m->instrument_path);
+		m->instrument_path = NULL;
+	}
+	if (path == NULL) {
+		return 0;
+	}
 
-	m->instrument_path = strdup(path);
+	m->instrument_path = libxmp_strdup(path);
 	if (m->instrument_path == NULL) {
 		return -XMP_ERROR_SYSTEM;
 	}
@@ -567,16 +663,80 @@ int xmp_set_tempo_factor(xmp_context opaque, double val)
 	struct mixer_data *s = &ctx->s;
 	int ticksize;
 
-	if (val <= 0.0) {
+	/* This function relies on values initialized by xmp_start_player
+	 * and will behave in an undefined manner if called prior. */
+	if (ctx->state < XMP_STATE_PLAYING) {
+		return -XMP_ERROR_STATE;
+	}
+
+	if (val <= 0.0 || val != val /* NaN */) {
 		return -1;
 	}
 
 	val *= 10;
-	ticksize = s->freq * m->time_factor * m->rrate / p->bpm / 1000 * sizeof(int);
-	if (ticksize > XMP_MAX_FRAMESIZE) {
+
+	/* s->freq can change between xmp_start_player calls and p->bpm can
+	 * change during playback, so repeat these checks in the mixer. */
+	ticksize = libxmp_mixer_get_ticksize(s->freq,
+		val * p->time_factor_relative, m->rrate, p->bpm);
+
+	/* ticksize is in frames, s->total_size is in frames * 2. */
+	if (ticksize < 0 || ticksize > (s->total_size / 2)) {
 		return -1;
 	}
 	m->time_factor = val;
 
 	return 0;
+}
+
+int xmp_set_tempo_factor_relative(xmp_context opaque, double val)
+{
+	struct context_data *ctx = (struct context_data *)opaque;
+	struct player_data *p = &ctx->p;
+	struct module_data *m = &ctx->m;
+	struct mixer_data *s = &ctx->s;
+	int ticksize;
+
+	/* This function relies on values initialized by xmp_start_player
+	 * and will behave in an undefined manner if called prior. */
+	if (ctx->state < XMP_STATE_PLAYING) {
+		return -XMP_ERROR_STATE;
+	}
+
+	if (val <= 0.0 || val != val /* NaN */) {
+		return -1;
+	}
+
+	ticksize = libxmp_mixer_get_ticksize(s->freq,
+		m->time_factor * val, m->rrate, p->bpm);
+
+	/* ticksize is in frames, s->total_size is in frames * 2. */
+	if (ticksize < 0 || ticksize > (s->total_size / 2)) {
+		return -1;
+	}
+	p->time_factor_relative = val;
+
+	return 0;
+}
+
+double xmp_get_tempo_factor(xmp_context opaque)
+{
+	struct context_data *ctx = (struct context_data *)opaque;
+
+	if (ctx->state < XMP_STATE_LOADED) {
+		return -1.0 * XMP_ERROR_STATE;
+	}
+
+	return ctx->m.time_factor * 0.1;
+}
+
+double xmp_get_tempo_factor_relative(xmp_context opaque)
+{
+	struct context_data *ctx = (struct context_data *)opaque;
+
+	if (ctx->state < XMP_STATE_PLAYING) {
+		return -1.0 * XMP_ERROR_STATE;
+	}
+
+	return ctx->p.time_factor_relative;
 }
