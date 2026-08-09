@@ -9,6 +9,7 @@
 #include "snppurender.h"
 #include "snppublend_gs.h"
 #include "snppucolor.h"
+#include "sndbglog.h"
 
 #include <tamtypes.h>
 extern "C" {
@@ -34,6 +35,66 @@ typedef char SNPPUScratchLayoutCheck[
 	(sizeof(SnesRender8pInfoT) <= SNPPU_DMA_BLENDINFO_OFFSET &&
 	 SNPPU_DMA_BLENDINFO_OFFSET + sizeof(SNPPUBlendInfoT) <= 16 * 1024)
 		? 1 : -1];
+
+#if SNDBG_LOG
+#define SNPPU_GS_DIAG_SAMPLES 8
+struct SNPPUGSDiagT
+{
+	Uint32 Frames;
+	Uint32 Lines;
+	Uint32 SyncCalls;
+	Uint32 SyncCycles;
+	Uint32 CopyCycles;
+	Uint32 KickCycles;
+	Uint32 StageMismatch;
+	Uint32 CopyMismatch;
+	Uint32 SourceHash;
+	Uint32 StageHash;
+	Uint32 Expected[SNPPU_GS_DIAG_SAMPLES];
+	Bool   HasExpected;
+};
+
+static SNPPUGSDiagT _SNPPUGSDiag;
+
+static Uint32 _SNPPUGSSample(const SNPPUBlendInfoT *pInfo,
+	                          Uint32 *pSamples)
+{
+	const Uint32 *pWords = (const Uint32 *)pInfo;
+	const Uint32 nWords = sizeof(*pInfo) / sizeof(Uint32);
+	Uint32 h = 2166136261u;
+	Uint32 i;
+
+	for (i = 0; i < SNPPU_GS_DIAG_SAMPLES; i++)
+	{
+		Uint32 uIndex = (nWords - 1) * i / (SNPPU_GS_DIAG_SAMPLES - 1);
+		Uint32 uValue = pWords[uIndex];
+		if (pSamples)
+			pSamples[i] = uValue;
+		h ^= uValue;
+		h *= 16777619u;
+	}
+	return h;
+}
+
+static void _SNPPUGSValidateStage(const SNPPUBlendInfoT *pInfo)
+{
+	Uint32 uSamples[SNPPU_GS_DIAG_SAMPLES];
+	Uint32 i;
+
+	if (!_SNPPUGSDiag.HasExpected)
+		return;
+
+	_SNPPUGSSample(pInfo, uSamples);
+	for (i = 0; i < SNPPU_GS_DIAG_SAMPLES; i++)
+	{
+		if (uSamples[i] != _SNPPUGSDiag.Expected[i])
+		{
+			_SNPPUGSDiag.StageMismatch++;
+			break;
+		}
+	}
+}
+#endif
 
 #define SNPPUBLEND_PAL32 (TRUE)
 
@@ -286,6 +347,12 @@ static void _SNPPURenderLine(Int32 iDestLine, int abe)
 
 void SNPPUBlendGS::Begin(CRenderSurface *pTarget)
 {
+#if SNDBG_LOG
+	/* End() ja esperou a ultima chain. O mixer de audio tambem usa o
+	   scratchpad entre quadros, portanto uma expectativa antiga nao deve ser
+	   comparada com o primeiro scanline do quadro seguinte. */
+	_SNPPUGSDiag.HasExpected = FALSE;
+#endif
     m_pTarget = pTarget;
 	if (!m_pTarget)
 	{
@@ -358,7 +425,19 @@ void SNPPUBlendGS::End()
 	}
 
     // wait for previous dma to finish
+#if SNDBG_LOG
+	{
+		Uint32 uStart = ProfCtrGetCycle();
+		DmaSyncGIF();
+		_SNPPUGSDiag.SyncCycles += ProfCtrGetCycle() - uStart;
+		_SNPPUGSDiag.SyncCalls++;
+		_SNPPUGSValidateStage(
+			(const SNPPUBlendInfoT *)SNPPU_DMA_BLENDINFO_ADDR);
+		_SNPPUGSDiag.HasExpected = FALSE;
+	}
+#else
     DmaSyncGIF();
+#endif
 
     GPFifoResume();
 
@@ -383,6 +462,29 @@ void SNPPUBlendGS::End()
        the invalidate here closes that race so every gsKit sample of
        _OutTex sees the fresh blender output. */
     GSK_InvalidateTextureCache();
+
+#if SNDBG_LOG
+	_SNPPUGSDiag.Frames++;
+	if (_SNPPUGSDiag.Frames >= SNDBG_FRAME_PERIOD)
+	{
+		Uint32 uLines = _SNPPUGSDiag.Lines ? _SNPPUGSDiag.Lines : 1;
+		Uint32 uSync = _SNPPUGSDiag.SyncCalls ? _SNPPUGSDiag.SyncCalls : 1;
+		DLog("[snes-gs] frames/lines=%u/%u avgcyc sync/copy/kick=%u/%u/%u mismatch stage/copy=%u/%u",
+			(unsigned)_SNPPUGSDiag.Frames, (unsigned)_SNPPUGSDiag.Lines,
+			(unsigned)(_SNPPUGSDiag.SyncCycles / uSync),
+			(unsigned)(_SNPPUGSDiag.CopyCycles / uLines),
+			(unsigned)(_SNPPUGSDiag.KickCycles / uLines),
+			(unsigned)_SNPPUGSDiag.StageMismatch,
+			(unsigned)_SNPPUGSDiag.CopyMismatch);
+		DLog("[snes-gs] sampled cpu/stage hash=%08X/%08X blendbytes=%u renderbytes=%u stage=%08X",
+			(unsigned)_SNPPUGSDiag.SourceHash,
+			(unsigned)_SNPPUGSDiag.StageHash,
+			(unsigned)sizeof(SNPPUBlendInfoT),
+			(unsigned)sizeof(SnesRender8pInfoT),
+			(unsigned)SNPPU_DMA_BLENDINFO_ADDR);
+		memset(&_SNPPUGSDiag, 0, sizeof(_SNPPUGSDiag));
+	}
+#endif
 
     m_pTarget = NULL;
 }
@@ -611,6 +713,14 @@ SNPPUBlendGS::SNPPUBlendGS(Uint32 uVramAddr, Uint32 uOutAddr)
     pList->uTempAddr       = uVramAddr + 0x200 ;
 
 	pList->uOutAddr = uOutAddr;
+
+#if SNDBG_LOG
+	DLog("[snes-gs-layout] vram blend/out=%X/%X scratch render/stage=%08X/%08X bytes=%u/%u",
+		(unsigned)uVramAddr, (unsigned)uOutAddr,
+		(unsigned)PS2MEM_SCRATCHPAD, (unsigned)SNPPU_DMA_BLENDINFO_ADDR,
+		(unsigned)sizeof(SnesRender8pInfoT),
+		(unsigned)sizeof(SNPPUBlendInfoT));
+#endif
 }
 
 void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor32, SNMaskT *pColorMask, Bool bAddSub, Uint32 uIntensity)
@@ -644,12 +754,41 @@ void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor3
 
     // wait for previous dma to finish
     PROF_ENTER("SNPPUGS");
+#if SNDBG_LOG
+	{
+		Uint32 uStart = ProfCtrGetCycle();
+		DmaSyncGIF();
+		_SNPPUGSDiag.SyncCycles += ProfCtrGetCycle() - uStart;
+		_SNPPUGSDiag.SyncCalls++;
+		_SNPPUGSValidateStage(pDmaInfo);
+	}
+#else
     DmaSyncGIF();
+#endif
     PROF_LEAVE("SNPPUGS");
 
 	/* The previous GIF chain is done with the staging area now. Snapshot
 	   palette, main, sub and attributes before launching this scanline. */
+#if SNDBG_LOG
+	{
+		Uint32 uStart = ProfCtrGetCycle();
+		Uint32 uSourceHash;
+		Uint32 uStageHash;
+		memcpy(pDmaInfo, pInfo, sizeof(*pDmaInfo));
+		_SNPPUGSDiag.CopyCycles += ProfCtrGetCycle() - uStart;
+		uSourceHash = _SNPPUGSSample(pInfo, NULL);
+		uStageHash = _SNPPUGSSample(pDmaInfo, _SNPPUGSDiag.Expected);
+		if (uSourceHash != uStageHash)
+			_SNPPUGSDiag.CopyMismatch++;
+		_SNPPUGSDiag.SourceHash =
+			(_SNPPUGSDiag.SourceHash << 5) ^ uSourceHash ^ (Uint32)iLine;
+		_SNPPUGSDiag.StageHash =
+			(_SNPPUGSDiag.StageHash << 5) ^ uStageHash ^ (Uint32)iLine;
+		_SNPPUGSDiag.HasExpected = TRUE;
+	}
+#else
 	memcpy(pDmaInfo, pInfo, sizeof(*pDmaInfo));
+#endif
 
     PROF_ENTER("SNPPUBlendExec");
 
@@ -659,7 +798,16 @@ void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor3
     PROF_LEAVE("SNPPUBlendExec");
 
     // transfer render ilst
+#if SNDBG_LOG
+	{
+		Uint32 uStart = ProfCtrGetCycle();
+		DmaExecGIFChain(m_DmaList.Data);
+		_SNPPUGSDiag.KickCycles += ProfCtrGetCycle() - uStart;
+		_SNPPUGSDiag.Lines++;
+	}
+#else
     DmaExecGIFChain(m_DmaList.Data);
+#endif
 
 }
 

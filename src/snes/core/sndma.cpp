@@ -172,6 +172,72 @@ void SnesDMAC::Write8(Uint32 uChan, Uint32 uAddr, Uint8 uData)
 
 void SnesDMAC::SetMDMAEnable(Uint8 uData)
 {
+#if SNDBG_LOG
+	Uint32 uChan;
+
+	for (uChan = 0; uChan < SNESDMAC_CHANNEL_NUM; uChan++)
+	{
+		SnesDMAChT *pChan;
+		Uint32 uBytes;
+		Uint32 uMode;
+		Int32 iDelta;
+
+		if (!(uData & (1 << uChan)))
+			continue;
+
+		pChan = &m_Channels[uChan];
+		uBytes = pChan->dasx ? (Uint32)pChan->dasx : 0x10000u;
+		uMode = pChan->dmapx & 7;
+		iDelta = _SNDma_MDMAInc[(pChan->dmapx >> 3) & 3];
+
+		g_DbgDMAStarts++;
+		g_DbgDMAModes[uMode]++;
+		if (uBytes > g_DbgDMAMaxBytes)
+			g_DbgDMAMaxBytes = uBytes;
+
+		if (g_DbgCaptureActive)
+		{
+			const SnesPPURegsT *pRegs = m_pPPU->GetRegs();
+			DLog("[snes-dma-start] f=%u ch=%u dmap=%02X mode=%u dir=%s src=%02X:%04X len=%u bbad=%02X oam/vm/cg=%04X/%04X/%04X vmain=%02X",
+				(unsigned)g_DbgCaptureFrameNo, (unsigned)uChan,
+				(unsigned)pChan->dmapx, (unsigned)uMode,
+				(pChan->dmapx & 0x80) ? "B>A" : "A>B",
+				(unsigned)pChan->a1bx, (unsigned)pChan->a1tx,
+				(unsigned)uBytes, (unsigned)pChan->bbadx,
+				(unsigned)pRegs->oamaddr.w, (unsigned)pRegs->vmaddr.w,
+				(unsigned)pRegs->cgadd.w, (unsigned)(Uint8)pRegs->vmain);
+		}
+
+		if ((iDelta > 0 && uBytes > 0x10000u - pChan->a1tx) ||
+		    (iDelta < 0 && uBytes > (Uint32)pChan->a1tx + 1u))
+			g_DbgDMAWraps++;
+
+		if (pChan->dmapx & 0x80)
+		{
+			g_DbgDMAReadBytes += uBytes;
+		}
+		else
+		{
+			/* Count the exact B-bus ports selected by the four-byte mode
+			   pattern, rather than assuming that BBAD alone names the port. */
+			Uint32 uPhase;
+			for (uPhase = 0; uPhase < 4 && uPhase < uBytes; uPhase++)
+			{
+				Uint32 uCount = 1u + (uBytes - 1u - uPhase) / 4u;
+				Uint32 uPort = (pChan->bbadx +
+					_SNDma_MDMATransfer[uMode][uPhase]) & 0xFF;
+				if (uPort == 0x04)
+					g_DbgDMAOAMBytes += uCount;
+				else if (uPort == 0x18 || uPort == 0x19)
+					g_DbgDMAVRAMBytes += uCount;
+				else if (uPort == 0x22)
+					g_DbgDMACGRAMBytes += uCount;
+				else
+					g_DbgDMAOtherBytes += uCount;
+			}
+		}
+	}
+#endif
 	m_MDMAEnable = uData;
 }
 

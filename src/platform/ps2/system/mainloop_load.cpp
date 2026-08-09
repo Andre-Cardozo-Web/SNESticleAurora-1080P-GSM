@@ -23,6 +23,7 @@
 #include "emumovie.h"
 #include "mainloop_load.h"
 #include "embedded_irx.h"   /* HddMapPath (hdd0:/PART -> pfs0:) */
+#include "sndbglog.h"
 
 extern "C" {
 #include "miniz_compat.h"
@@ -445,6 +446,13 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 		{
 		    printf("Rom Title: %s\n", pRomTitle);
 		}
+
+#if SNDBG_LOG
+		DLog("[rom] file='%s' bytes=%d title='%s' mapper='%s'",
+			_RomName, (int)nRomBytes,
+			pRomTitle ? pRomTitle : "<none>",
+			pRomMapper ? pRomMapper : "<none>");
+#endif
 
 		// print info about rom regions
 		nRegions = pRom->GetNumRomRegions();

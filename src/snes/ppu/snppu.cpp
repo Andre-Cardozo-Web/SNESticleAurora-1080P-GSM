@@ -816,6 +816,7 @@ void SnesPPU::Sync(Uint32 uLine)
 				PROF_ENTER("PPURender");
 #if SNDBG_LOG
 				Uint32 _tPPU = ProfCtrGetCycle();
+				g_DbgPPURenderLines++;
 #endif
 				m_pRender->RenderLine(m_uLine);;
 #if SNDBG_LOG

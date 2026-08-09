@@ -1163,6 +1163,14 @@ static void _RenderBG8(Uint8 *pLine8, SNMaskT *pLine, SNMaskT *pBGPlane, SNMaskT
 static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList, SnesRenderObj8T *pObjLine, Int32 MaxObj8Line, Int32 iLine, Uint32 uBaseAddr, Uint32 uNameSelect, Uint16 *pVram)
 {
 	Int32 nObjLine = 0;
+#if SNDBG_LOG
+	Bool bTrace = g_DbgCaptureActive &&
+		(iLine == 72 || iLine == 112 || iLine == 152 || iLine == 192);
+	if (bTrace)
+		DLog("[snes-obj-trace] f=%u line=%d selected=%d base/name=%04X/%04X",
+			(unsigned)g_DbgCaptureFrameNo, (int)iLine, (int)nObjList,
+			(unsigned)uBaseAddr, (unsigned)uNameSelect);
+#endif
 
 	// A busca reversa e' intencional: o PPU primeiro seleciona ate' 32 OBJ
 	// na ordem iniciada por OAMPRI e depois busca ate' 34 tiles na ordem
@@ -1218,6 +1226,52 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 		Uint32 uCol0 = pObj->uTile & 0x0F;
 		Uint32 uYoff = ObjY & 7;
 		Int32  iTileX = 0;
+
+#if SNDBG_LOG
+		if (bTrace)
+		{
+			Uint32 uTraceHash = 2166136261u;
+			Uint32 uFirstAddr = 0;
+			Uint32 uLastAddr = 0;
+			Int32 iTraceTile;
+
+			DLog("[snes-obj-trace] f=%u line=%d idx=%u xy=%d/%u wh=%u/%u tile=%03X row=%X yoff=%u pal/pri=%u/%u h/vxor=%u/%u",
+				(unsigned)g_DbgCaptureFrameNo, (int)iLine,
+				(unsigned)pObjList[nObjList], (int)ObjX,
+				(unsigned)pObj->uPosY, (unsigned)pObj->uWidth,
+				(unsigned)pObj->uHeight, (unsigned)pObj->uTile,
+				(unsigned)uRow, (unsigned)uYoff, (unsigned)pObj->uPal,
+				(unsigned)pObj->uPri, (unsigned)pObj->bHFlip,
+				(unsigned)pObj->uVXOR);
+
+			for (iTraceTile = 0; iTraceTile < (pObj->uWidth >> 3);
+			     iTraceTile++)
+			{
+				Int32 iSource = _SnesPPUOBJSourceColumn(iTraceTile,
+					pObj->uWidth, pObj->bHFlip);
+				Uint32 uTraceTile = uPage | (uRow << 4) |
+					((uCol0 + iSource) & 0x0F);
+				Uint32 uTraceAddr = uBaseAddr + uTraceTile * 16;
+				Uint32 uWord0;
+				Uint32 uWord8;
+
+				if (uTraceTile & 0x100)
+					uTraceAddr += uNameSelect;
+				uTraceAddr = (uTraceAddr & 0x7FFF) + uYoff;
+				if (!iTraceTile)
+					uFirstAddr = uTraceAddr;
+				uLastAddr = uTraceAddr;
+				uWord0 = pVram[uTraceAddr];
+				uWord8 = pVram[uTraceAddr + 8];
+				uTraceHash = (uTraceHash ^ uWord0) * 16777619u;
+				uTraceHash = (uTraceHash ^ uWord8) * 16777619u;
+			}
+			DLog("[snes-obj-vram] f=%u line=%d idx=%u addr first/last=%04X/%04X rowhash=%08X",
+				(unsigned)g_DbgCaptureFrameNo, (int)iLine,
+				(unsigned)pObjList[nObjList], (unsigned)uFirstAddr,
+				(unsigned)uLastAddr, (unsigned)uTraceHash);
+		}
+#endif
 
 		while (uSize > 0)
 		{
@@ -1494,7 +1548,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 #if SNDBG_LOG
 	Uint32 _tObjA = ProfCtrGetCycle();
 #endif
-	nObjLine = _FetchOBJ(m_Objs, m_ObjLine[iLine], m_nObjLine[iLine], ObjLine, SNPPU_MAXOBJCHR, iLine, (pRegs->obsel & 3) << 13, ((pRegs->obsel>>3) & 3) << 12, m_pPPU->GetVramPtr(0));
+	nObjLine = _FetchOBJ(m_Objs, m_ObjLine[iLine], m_nObjLine[iLine], ObjLine, SNPPU_MAXOBJCHR, iLine, (pRegs->obsel & 7) << 13, ((pRegs->obsel>>3) & 3) << 12, m_pPPU->GetVramPtr(0));
 #if SNDBG_LOG
 	g_TmgCycObj += ProfCtrGetCycle() - _tObjA;
 	{

@@ -137,7 +137,7 @@ static void _ProfLogPrintSummary(ProfLogSectionT *pSection, Int32 nSections)
 		pSection++;
 	}
 
-	DLog("[prof] ==== end (EE ~294912 cyc = 1 scanline; ~16.6ms frame budget) ====");
+	DLog("[prof] ==== end (CP0 Count ~2457600 cyc = 16.67ms at 147.456MHz) ====");
 }
 
 
@@ -293,4 +293,3 @@ void ProfLogPrint(ProfLogT *pLog, Bool bPrintLog, Bool bPrintSummary)
 		_ProfLogPrintSummary(_ProfLog_Section, _ProfLog_nSections);
 	}
 }
-

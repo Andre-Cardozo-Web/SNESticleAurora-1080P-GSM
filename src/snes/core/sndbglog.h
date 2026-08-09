@@ -65,6 +65,27 @@ extern Uint8  g_DbgObjOBSEL;
 extern Uint8  g_DbgObjTM;
 extern Uint8  g_DbgObjTS;
 extern Uint16 g_DbgObjPriority;
+
+// Sincronizacao PPU e descricao das DMAs iniciadas por $420B. Estes dados
+// distinguem "o port recebeu N bytes" de "qual canal/modo/endereco enviou
+// esses bytes", que e' essencial para rastrear OAM/VRAM corrompida.
+extern Uint32 g_DbgPPUSyncCalls;
+extern Uint32 g_DbgPPURenderLines;
+extern Uint32 g_DbgDMAStarts;
+extern Uint32 g_DbgDMAReadBytes;
+extern Uint32 g_DbgDMAOAMBytes;
+extern Uint32 g_DbgDMAVRAMBytes;
+extern Uint32 g_DbgDMACGRAMBytes;
+extern Uint32 g_DbgDMAOtherBytes;
+extern Uint32 g_DbgDMAWraps;
+extern Uint32 g_DbgDMAMaxBytes;
+extern Uint32 g_DbgDMAModes[8];
+
+// A cada cinco segundos uma build diagnostica captura OAM completa e alguns
+// scanlines OBJ. Assim o log continua pequeno, mas contem os dados necessarios
+// para reproduzir o endereco de tile usado pelo renderer.
+extern Bool   g_DbgCaptureActive;
+extern Uint32 g_DbgCaptureFrameNo;
 #endif
 
 #endif // _SNDBGLOG_H

@@ -59,6 +59,19 @@ Uint8  g_DbgObjOBSEL = 0;
 Uint8  g_DbgObjTM = 0;
 Uint8  g_DbgObjTS = 0;
 Uint16 g_DbgObjPriority = 0;
+Uint32 g_DbgPPUSyncCalls = 0;
+Uint32 g_DbgPPURenderLines = 0;
+Uint32 g_DbgDMAStarts = 0;
+Uint32 g_DbgDMAReadBytes = 0;
+Uint32 g_DbgDMAOAMBytes = 0;
+Uint32 g_DbgDMAVRAMBytes = 0;
+Uint32 g_DbgDMACGRAMBytes = 0;
+Uint32 g_DbgDMAOtherBytes = 0;
+Uint32 g_DbgDMAWraps = 0;
+Uint32 g_DbgDMAMaxBytes = 0;
+Uint32 g_DbgDMAModes[8] = {0,0,0,0,0,0,0,0};
+Bool   g_DbgCaptureActive = FALSE;
+Uint32 g_DbgCaptureFrameNo = 0;
 // contagem de acessos ao DSP por janela (diagnostico de carga)
 static Uint32 g_TmgDspRd = 0;
 static Uint32 g_TmgDspWr = 0;
@@ -87,6 +100,27 @@ static Uint32 SnesDbgHash32(const void *pData, Uint32 nBytes)
 		h *= 16777619u;
 	}
 	return h;
+}
+
+static void SnesDbgDumpOAM(const SnesOAMT *pOAM, Uint32 uFrame,
+	                       const char *pPhase)
+{
+	const Uint8 *p = (const Uint8 *)pOAM;
+	Uint32 uOffset;
+
+	for (uOffset = 0; uOffset < sizeof(*pOAM); uOffset += 16)
+	{
+		DLog("[snes-oam] f=%u phase=%s off=%03X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+			(unsigned)uFrame, pPhase, (unsigned)uOffset,
+			(unsigned)p[uOffset +  0], (unsigned)p[uOffset +  1],
+			(unsigned)p[uOffset +  2], (unsigned)p[uOffset +  3],
+			(unsigned)p[uOffset +  4], (unsigned)p[uOffset +  5],
+			(unsigned)p[uOffset +  6], (unsigned)p[uOffset +  7],
+			(unsigned)p[uOffset +  8], (unsigned)p[uOffset +  9],
+			(unsigned)p[uOffset + 10], (unsigned)p[uOffset + 11],
+			(unsigned)p[uOffset + 12], (unsigned)p[uOffset + 13],
+			(unsigned)p[uOffset + 14], (unsigned)p[uOffset + 15]);
+	}
 }
 #endif
 
@@ -187,6 +221,9 @@ void SnesSystem::SyncSPC(Int32 uExtra)
 
 inline void SnesSystem::SyncPPU()
 {
+#if SNDBG_LOG
+	g_DbgPPUSyncCalls++;
+#endif
 	// sync ppu to current line
 	m_PPU.Sync(m_uLine);
 }
@@ -1271,7 +1308,21 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
     m_uLine = 0;
 
 #if SNDBG_LOG
-	// --- timing: marca inicio do frame (COP0 cycle counter da EE) ---
+	g_DbgCaptureFrameNo = g_TmgFrameNo + 1;
+	g_DbgCaptureActive =
+		(g_DbgCaptureFrameNo % (SNDBG_FRAME_PERIOD * 5u)) == 0;
+	if (g_DbgCaptureActive)
+	{
+		DLog("[snes-capture] begin f=%u (OAM pre/post + OBJ trace + profiler)",
+			(unsigned)g_DbgCaptureFrameNo);
+		SnesDbgDumpOAM(m_PPU.GetOAM(), g_DbgCaptureFrameNo, "pre");
+#if PROF_ENABLED
+		/* A captura automatica evita o antigo L2+R2, que abria o menu antes
+		   de o frame do jogo ser executado e produzia um perfil vazio. */
+		ProfStartProfile(1);
+#endif
+	}
+	// --- timing: marca inicio do frame depois do dump diagnostico ---
 	g_TmgFrameStart  = ProfCtrGetCycle();
 	g_TmgCycM7  = 0;
 	g_TmgCycObj = 0;
@@ -1482,11 +1533,28 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 			}
 			g_DbgPrevObjDrawn = fDrawn;
 		}
+		if (g_DbgCaptureActive)
+		{
+			const SnesPPURegsT *pr = m_PPU.GetRegs();
+			DLog("[snes-capture] f=%u regs inidisp/obsel/mode/tm/ts/setini=%02X/%02X/%02X/%02X/%02X/%02X oam=%04X base=%04X first=%u vmain/vmaddr/cgadd=%02X/%04X/%04X",
+				(unsigned)g_TmgFrameNo,
+				(unsigned)(Uint8)pr->inidisp, (unsigned)(Uint8)pr->obsel,
+				(unsigned)(Uint8)pr->bgmode, (unsigned)(Uint8)pr->tm,
+				(unsigned)(Uint8)pr->ts, (unsigned)(Uint8)pr->setini,
+				(unsigned)pr->oamaddr.w, (unsigned)pr->oamaddrlatch.w,
+				(unsigned)pr->oampri.w, (unsigned)(Uint8)pr->vmain,
+				(unsigned)pr->vmaddr.w, (unsigned)pr->cgadd.w);
+			SnesDbgDumpOAM(m_PPU.GetOAM(), g_TmgFrameNo, "post");
+			DLog("[snes-capture] end f=%u", (unsigned)g_TmgFrameNo);
+		}
 		if (g_TmgWinFrames >= SNDBG_FRAME_PERIOD)
 		{
 			Uint32 sum   = g_TmgWinSumCyc ? g_TmgWinSumCyc : 1;
 			Uint32 avg   = g_TmgWinSumCyc / g_TmgWinFrames;
 			Uint32 ratio = avg ? (g_TmgWinMaxCyc * 100u / avg) : 0;
+			/* CP0 Count avanca a metade do clock de 294.912 MHz da EE. */
+			Uint32 fps10 = avg
+				? (Uint32)(1474560000ull / (Uint64)avg) : 0;
 			Uint32 pM7   = (Uint32)(((Uint64)g_TmgWinSumM7  * 100u) / sum);
 			Uint32 pObj  = (Uint32)(((Uint64)g_TmgWinSumObj * 100u) / sum);
 			Uint32 pPPU  = (Uint32)(((Uint64)g_TmgWinSumPPU * 100u) / sum);
@@ -1508,8 +1576,10 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 			// CPU/APU/PPU sao medidas inclusivas (podem se sobrepor quando um
 			// acesso do 65816 sincroniza outro bloco). Ainda assim identificam
 			// diretamente qual rotina esta consumindo o tempo da EE.
-			DLog("[snes-perf] f=%u avg=%u peak=%u%% cpu=%u%% ppu=%u%% gsu=%u%% apu=%u%% mix=%u%% mdma=%u%% hdma=%u%%",
-				(unsigned)g_TmgFrameNo, (unsigned)avg, (unsigned)ratio,
+			DLog("[snes-perf] f=%u avg=%u snes=%u.%u fps peak=%u%% cpu=%u%% ppu=%u%% gsu=%u%% apu=%u%% mix=%u%% mdma=%u%% hdma=%u%%",
+				(unsigned)g_TmgFrameNo, (unsigned)avg,
+				(unsigned)(fps10 / 10), (unsigned)(fps10 % 10),
+				(unsigned)ratio,
 				(unsigned)pCPU, (unsigned)pPPU, (unsigned)pGSU,
 				(unsigned)pAPU, (unsigned)pMix, (unsigned)pMDMA,
 				(unsigned)pHDMA);
@@ -1529,6 +1599,37 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 				(unsigned)g_DbgObjCandidatePixels, (unsigned)g_DbgObjDrawnPixels,
 				(unsigned)g_DbgObjOBSEL, (unsigned)g_DbgObjTM,
 				(unsigned)g_DbgObjTS, (unsigned)g_DbgObjPriority);
+			{
+				const SnesPPURegsT *pr = m_PPU.GetRegs();
+				Uint32 hOAM = SnesDbgHash32(m_PPU.GetOAM(), sizeof(SnesOAMT));
+				Uint32 hVRAM = SnesDbgHash32(m_PPU.GetVramPtr(0), 0x10000);
+				Uint32 hCGRAM = SnesDbgHash32(m_PPU.GetCGData(), 512);
+				DLog("[snes-state] f=%u hash oam/vram/cgram=%08X/%08X/%08X regs inidisp/mode/obsel/tm/ts/setini=%02X/%02X/%02X/%02X/%02X/%02X",
+					(unsigned)g_TmgFrameNo, (unsigned)hOAM,
+					(unsigned)hVRAM, (unsigned)hCGRAM,
+					(unsigned)(Uint8)pr->inidisp,
+					(unsigned)(Uint8)pr->bgmode,
+					(unsigned)(Uint8)pr->obsel, (unsigned)(Uint8)pr->tm,
+					(unsigned)(Uint8)pr->ts, (unsigned)(Uint8)pr->setini);
+				DLog("[snes-state] addr oam/base/first=%04X/%04X/%u vmain/vmaddr/cgadd=%02X/%04X/%04X bgsc=%02X/%02X/%02X/%02X bgnba=%02X/%02X",
+					(unsigned)pr->oamaddr.w, (unsigned)pr->oamaddrlatch.w,
+					(unsigned)pr->oampri.w, (unsigned)(Uint8)pr->vmain,
+					(unsigned)pr->vmaddr.w, (unsigned)pr->cgadd.w,
+					(unsigned)(Uint8)pr->bg1sc, (unsigned)(Uint8)pr->bg2sc,
+					(unsigned)(Uint8)pr->bg3sc, (unsigned)(Uint8)pr->bg4sc,
+					(unsigned)(Uint8)pr->bg12nba, (unsigned)(Uint8)pr->bg34nba);
+			}
+			DLog("[snes-sync] ppu calls/lines=%u/%u dma starts=%u read=%u wrap=%u max=%u",
+				(unsigned)g_DbgPPUSyncCalls, (unsigned)g_DbgPPURenderLines,
+				(unsigned)g_DbgDMAStarts, (unsigned)g_DbgDMAReadBytes,
+				(unsigned)g_DbgDMAWraps, (unsigned)g_DbgDMAMaxBytes);
+			DLog("[snes-dma] bytes oam/vram/cgram/other=%u/%u/%u/%u modes=%u/%u/%u/%u/%u/%u/%u/%u",
+				(unsigned)g_DbgDMAOAMBytes, (unsigned)g_DbgDMAVRAMBytes,
+				(unsigned)g_DbgDMACGRAMBytes, (unsigned)g_DbgDMAOtherBytes,
+				(unsigned)g_DbgDMAModes[0], (unsigned)g_DbgDMAModes[1],
+				(unsigned)g_DbgDMAModes[2], (unsigned)g_DbgDMAModes[3],
+				(unsigned)g_DbgDMAModes[4], (unsigned)g_DbgDMAModes[5],
+				(unsigned)g_DbgDMAModes[6], (unsigned)g_DbgDMAModes[7]);
 			DLog("[snes-gsu] ins=%u start/stop/abort/wd=%u/%u/%u/%u max=%u cur=%u plot/rpix=%u/%u ramw=%u",
 				(unsigned)gd.Instructions, (unsigned)gd.Starts,
 				(unsigned)gd.Stops, (unsigned)gd.Aborts,
@@ -1569,8 +1670,20 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 			g_DbgObjEmptyLines = 0;
 			g_DbgObjRangeLimitLines = 0;
 			g_DbgObjLimitLines = 0;
+			g_DbgPPUSyncCalls = 0;
+			g_DbgPPURenderLines = 0;
+			g_DbgDMAStarts = 0;
+			g_DbgDMAReadBytes = 0;
+			g_DbgDMAOAMBytes = 0;
+			g_DbgDMAVRAMBytes = 0;
+			g_DbgDMACGRAMBytes = 0;
+			g_DbgDMAOtherBytes = 0;
+			g_DbgDMAWraps = 0;
+			g_DbgDMAMaxBytes = 0;
+			memset(g_DbgDMAModes, 0, sizeof(g_DbgDMAModes));
 			m_GSU.ClearDiagWindow();
 		}
+		g_DbgCaptureActive = FALSE;
 	}
 #endif
 
