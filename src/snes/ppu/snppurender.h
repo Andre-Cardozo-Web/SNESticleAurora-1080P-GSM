@@ -81,6 +81,12 @@ struct SnesRenderObjT
 Bool _SnesPPUOBJVisibleX(Uint16 uPosX, Uint8 uWidth);
 Bool _SnesPPUOBJTileCountedX(Uint16 uObjectX, Int32 iTileX);
 
+_INLINE Int32 _SnesPPUOBJSourceColumn(Int32 iTileX, Uint8 uWidth,
+	                                  Bool bHFlip)
+{
+	return bHFlip ? ((Int32)(uWidth >> 3) - 1 - iTileX) : iTileX;
+}
+
 
 struct SnesRenderTileT
 {

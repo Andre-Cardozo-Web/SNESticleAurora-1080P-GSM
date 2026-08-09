@@ -318,11 +318,7 @@ void SnesDMAC::TransferData(SnesDMAChT *pChan, Uint8 *pData, Int32 nBytes)
 		switch (pChan->bbadx)
 		{
 		case 0x04: // oamdata (oam data)
-			while (nBytes > 0)
-			{
-				m_pPPU->WriteOAMDATA(*pData++);
-				nBytes--;
-			}
+			m_pPPU->WriteOAMBlock(pData, nBytes);
 			break;
 		case 0x18: // vmaddl (video port address low)
 			while (nBytes > 0)
@@ -358,23 +354,7 @@ void SnesDMAC::TransferData(SnesDMAChT *pChan, Uint8 *pData, Int32 nBytes)
 	} else
 	if ((pChan->dmapx & 7)==1 && pChan->bbadx==0x18)
 	{
-		while (nBytes >= 2)
-		{
-			Uint8 uData0, uData1;
-
-			// fetch data byte
-			uData0 = *pData++;
-			uData1 = *pData++;
-
-			m_pPPU->WriteVMDATALH(uData0, uData1);
-			nBytes-=2;
-		}
-
-		while (nBytes > 0)
-		{
-			m_pPPU->WriteVMDATAL(*pData++);
-			nBytes-=1;
-		}
+		m_pPPU->WriteVMDATABlock(pData, nBytes);
 	} else
 	{
 		Uint8 *pTransfer;
@@ -526,17 +506,25 @@ void SnesDMAC::ProcessMDMAChFast(Uint32 uChan)
 		    {
 		    case 0: //+1 increment
                 {
-                    // are we reading past end of bank? if so clamp
-                    if ( ((Int32)pChan->a1tx) + nBytes > 0x10000)
-                    {
-                        nBytes = 0x10000 - pChan->a1tx;
-                    }
+					Int32 nFirst = nBytes;
+					Int32 nToBankEnd = 0x10000 - (Int32)pChan->a1tx;
 
-			        // read data into dma buffer (post increment)
-			        SNCPUReadMem(m_pCPU, pChan->a1tx | (pChan->a1bx << 16), DmaBuffer, nBytes);
+					if (nFirst > nToBankEnd)
+						nFirst = nToBankEnd;
+
+			        // A1T wraps inside A1B. Keep both pieces in one buffer so
+			        // TransferData also keeps its B-bus mode phase continuous.
+			        SNCPUReadMem(m_pCPU,
+			                     pChan->a1tx | (pChan->a1bx << 16),
+			                     DmaBuffer, nFirst);
+					if (nFirst < nBytes)
+					{
+						SNCPUReadMem(m_pCPU, pChan->a1bx << 16,
+						             DmaBuffer + nFirst, nBytes - nFirst);
+					}
 
 			        // increment src address 
-			        pChan->a1tx += nBytes;
+			        pChan->a1tx = (Uint16)(pChan->a1tx + nBytes);
                 }
 			    break;
 		    case 2: //-1 decrement
@@ -810,5 +798,3 @@ void SnesDMAC::Reset()
 	m_MDMAEnable = 0;
 	m_HDMAEnable = 0;
 }
-
-

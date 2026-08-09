@@ -1,6 +1,7 @@
 
 
 #include <stdlib.h>
+#include <string.h>
 #include "types.h"
 #include "prof.h"
 #include "snmask.h"
@@ -21,6 +22,18 @@ extern "C" {
 #include "ps2mem.h"
 #include "gskit_backend.h"
 }
+
+/* RenderInfo occupies the beginning of the 16 KiB EE scratchpad. Keep a
+   second, DMA-owned copy of BlendInfo after it: the CPU may then compose the
+   next scanline while GIF is still consuming the previous one. */
+#define SNPPU_DMA_BLENDINFO_OFFSET (6 * 1024)
+#define SNPPU_DMA_BLENDINFO_ADDR \
+	(PS2MEM_SCRATCHPAD + SNPPU_DMA_BLENDINFO_OFFSET)
+
+typedef char SNPPUScratchLayoutCheck[
+	(sizeof(SnesRender8pInfoT) <= SNPPU_DMA_BLENDINFO_OFFSET &&
+	 SNPPU_DMA_BLENDINFO_OFFSET + sizeof(SNPPUBlendInfoT) <= 16 * 1024)
+		? 1 : -1];
 
 #define SNPPUBLEND_PAL32 (TRUE)
 
@@ -602,6 +615,9 @@ SNPPUBlendGS::SNPPUBlendGS(Uint32 uVramAddr, Uint32 uOutAddr)
 
 void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor32, SNMaskT *pColorMask, Bool bAddSub, Uint32 uIntensity)
 {
+	SNPPUBlendInfoT *pDmaInfo =
+		(SNPPUBlendInfoT *)SNPPU_DMA_BLENDINFO_ADDR;
+
 	if (!m_pTarget)
 	{
 		return;
@@ -609,8 +625,9 @@ void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor3
 
     if (m_pDmaBlendInfo != pInfo)
     {
-        // build dma list for this blend info
-        _SNPPUBlendBuildList(&m_DmaList, pInfo, m_DmaList.uOutAddr);
+		/* REF tags must point at the stable staging copy, never at the
+		   scanline buffer that RenderLine8 is about to reuse. */
+        _SNPPUBlendBuildList(&m_DmaList, pDmaInfo, m_DmaList.uOutAddr);
 
         // flush cache
         FlushCache(0);
@@ -629,6 +646,10 @@ void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor3
     PROF_ENTER("SNPPUGS");
     DmaSyncGIF();
     PROF_LEAVE("SNPPUGS");
+
+	/* The previous GIF chain is done with the staging area now. Snapshot
+	   palette, main, sub and attributes before launching this scanline. */
+	memcpy(pDmaInfo, pInfo, sizeof(*pDmaInfo));
 
     PROF_ENTER("SNPPUBlendExec");
 

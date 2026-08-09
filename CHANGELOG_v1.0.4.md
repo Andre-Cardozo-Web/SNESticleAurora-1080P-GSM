@@ -91,6 +91,32 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 ---
 
+## Revisão r17: sprites estáveis e DMA mais rápido
+
+- O blender do GS não entrega mais ao GIF-DMA o mesmo `BlendInfo` que a CPU
+  reutiliza para montar a scanline seguinte. Cada linha é copiada para uma
+  área estável do scratchpad depois do `DmaSyncGIF`; CPU e GS continuam
+  sobrepostos, mas o DMA não mistura pedaços de duas linhas. Esse era um
+  candidato direto para os personagens fragmentados de Final Fight 2.
+- DMA modo 1 para `$2118/$2119`, caminho comum dos uploads de tiles e sprites,
+  grava rajadas lineares diretamente na VRAM e invalida o cache uma vez por
+  bloco. O fallback mantém remapeamento, incremento e byte final ímpar.
+- A atualização completa da OAM também virou uma operação em bloco, preservando
+  latch da tabela baixa, espelho da tabela alta e rotação de prioridade sem
+  pagar uma chamada e invalidação por byte.
+- A fonte de DMA que cruza `$xx:FFFF -> $xx:0000` é reunida no mesmo bloco para
+  não reiniciar no meio da transferência a sequência de portas B do modo DMA.
+- OBJ com flip horizontal passa a ser buscado da esquerda para a direita, como
+  no hardware; o flip seleciona a coluna de tile espelhada. Assim o corte no
+  limite de 34 tiles descarta o lado correto.
+- `DecodeBGInfo` começa zerado, impedindo campos não usados dos modos de BG de
+  habilitarem camadas fantasmas e trabalho aleatório.
+- A bancada host cobre OAM em bloco, VRAM linear/com wrap/com byte ímpar,
+  fallback de incremento e seleção de coluna OBJ normal/espelhada. A cena e o
+  FPS de Final Fight 2 ainda exigem reteste no PS2/NetherSX2.
+
+---
+
 ## Revisão r16: somente 480i e 1080i
 
 - Removidos da tela Video Config os modos `240p/288p (CRT)` e `480p`. A opção

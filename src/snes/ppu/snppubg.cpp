@@ -628,6 +628,11 @@ void SnesPPURender::DecodeBGInfo(SnesBGInfoT *pBGInfo)
 {
 	const SnesPPURegsT *pRegs = m_pPPU->GetRegs();
 
+	/* Several modes do not assign every palette/priority/depth field below.
+	   Leaving this scanline-local structure uninitialized can enable phantom
+	   BG layers and add a large amount of useless tile work. */
+	memset(pBGInfo, 0, sizeof(*pBGInfo) * 4);
+
 	pBGInfo[0].uScrollX = pRegs->bg1hofs.w & 0x7FF;
 	pBGInfo[0].uScrollY = pRegs->bg1vofs.w & 0x7FF;
 	pBGInfo[0].uScrAddr = (pRegs->bg1sc >> 2) << 10;
@@ -789,5 +794,4 @@ void SnesPPURender::DecodeWindows(SNMaskT *pWindow, SNMaskT *pBGWindow)
 
 	PROF_LEAVE("DecodeWindows");
 }
-
 

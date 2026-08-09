@@ -860,11 +860,12 @@ The cumulative notes for the current test version are available in
 - Save states currently support base-hardware games only; coprocessor games
   are blocked until each extra chip has complete serialization.
 - **Final Fight 2** — correcting the rectangular OBSEL 6/7 sizes was necessary
-  but did not fix the reported gameplay scene by itself. r15 additionally
-  aligns OAM address/latch writes, priority rotation and off-screen OBJ/tile
-  evaluation with hardware references. These paths have host coverage, but
-  the original scene still needs a PS2/NetherSX2 retest and is **not yet
-  considered fixed**.
+  but did not fix the reported gameplay scene by itself. r17 removes a GIF-DMA
+  race that let the GS read a scanline while the CPU reused its source buffer,
+  preserves DMA mode phase across a 64 KiB bank wrap and aligns mirrored OBJ
+  tile-fetch order with the 34-tile hardware limit. OAM/VRAM burst paths also
+  avoid per-byte overhead. These paths have host coverage, but the original
+  scene still needs a PS2/NetherSX2 retest before it is considered fixed.
 - Some large / special‑chip titles may still freeze or misbehave.
 - **SuperFX (GSU)** is experimental in v1.0.4: r15 corrects cache-window
   rotation, executable RAM banks `$60-$7F`, byte MMIO and the hot loop, but

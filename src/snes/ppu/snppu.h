@@ -176,9 +176,11 @@ public:
 
 	void                    WriteCGDATA(Uint8 uData);
 	void                    WriteOAMDATA(Uint8 uData);
+	void                    WriteOAMBlock(const Uint8 *pData, Int32 nBytes);
 	void                    WriteVMDATAL(Uint8 uData);
 	void                    WriteVMDATAH(Uint8 uData);
 	void                    WriteVMDATALH(Uint8 uDataL, Uint8 uDataH);
+	void                    WriteVMDATABlock(const Uint8 *pData, Int32 nBytes);
 	void                    Write8(Uint32 uAddr, Uint8 uData);
 	Uint8                   Read8(Uint32 uAddr);
 	Uint8                   ReadOAMDATA();

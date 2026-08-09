@@ -1173,7 +1173,6 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 		SnesRenderObjT *pObj;
 		Int32 ObjX, ObjY;
 		Uint32 uSize;
-		Int32 iDeltaX;
 
         // get pointer to obj
 		pObj = pObjBase + pObjList[nObjList];
@@ -1200,14 +1199,10 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 		{
 			pLookup = &_SnesPPU_PlaneLookup[1];
 			pHFlip  = _SnesPPU_HFlipLookup[0];
-
-			ObjX += uSize - 8;
-			iDeltaX = -8;
 		} else
 		{
 			pLookup = &_SnesPPU_PlaneLookup[0];
 			pHFlip  = _SnesPPU_HFlipLookup[1];
-			iDeltaX = 8;
 		}
 
 		// SNES OBJ: dentro de um sprite, a COLUNA (nibble baixo) e a LINHA
@@ -1222,12 +1217,15 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 		Uint32 uRow  = ((pObj->uTile >> 4) + (ObjY >> 3)) & 0x0F;
 		Uint32 uCol0 = pObj->uTile & 0x0F;
 		Uint32 uYoff = ObjY & 7;
-		Int32  iCol  = 0;
+		Int32  iTileX = 0;
 
 		while (uSize > 0)
 		{
 			if (_SnesPPUOBJTileCountedX(pObj->uPosX, ObjX))
 			{
+				Int32 iCol = _SnesPPUOBJSourceColumn(iTileX,
+				                                           pObj->uWidth,
+				                                           pObj->bHFlip);
 				uTile = uPage | (uRow << 4) | ((uCol0 + iCol) & 0x0F);
 				uTileAddr = uBaseAddr + uTile * 16;
 				if (uTile & 0x100)
@@ -1270,9 +1268,12 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 				if (nObjLine >= MaxObj8Line) return nObjLine;
 			}
 
-			ObjX += iDeltaX;
+			/* OBJ fetch always advances left-to-right. H-flip mirrors the
+			   source column, not the fetch position; this matters when the
+			   hardware stops at the 34-tile scanline limit. */
+			ObjX += 8;
 			uSize -= 8;
-			iCol++;
+			iTileX++;
 		}
 		}
 

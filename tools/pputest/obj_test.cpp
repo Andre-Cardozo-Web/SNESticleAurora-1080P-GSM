@@ -72,6 +72,10 @@ int main()
 	Check("tile x 255 counted", _SnesPPUOBJTileCountedX(255, 255), TRUE);
 	Check("tile x 256 skipped", _SnesPPUOBJTileCountedX(257, 256), FALSE);
 	Check("object x 256 quirk", _SnesPPUOBJTileCountedX(256, -256), TRUE);
+	Check("normal tile column 0", _SnesPPUOBJSourceColumn(0, 32, FALSE), 0);
+	Check("normal tile column 3", _SnesPPUOBJSourceColumn(3, 32, FALSE), 3);
+	Check("hflip left fetches right", _SnesPPUOBJSourceColumn(0, 32, TRUE), 3);
+	Check("hflip right fetches left", _SnesPPUOBJSourceColumn(3, 32, TRUE), 0);
 
     std::printf(g_Failures ? "FAIL (%d)\n" : "PASS\n", g_Failures);
     return g_Failures ? 1 : 0;

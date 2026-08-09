@@ -148,6 +148,7 @@ void SnesPPU::WriteVMDATALH(Uint8 uDataL, Uint8 uDataH)
 
 	// calculate vram address
 	uVramAddr = _SwizzleVramAddr(m_Regs.vmaddr.w, (m_Regs.vmain >> 2) & 3);
+	m_Regs.vmreadlatch.w = m_Regs.vmaddr.w;
 
 	// write to vram
 	pVram[uVramAddr].b.l = uDataL;
@@ -156,6 +157,7 @@ void SnesPPU::WriteVMDATALH(Uint8 uDataL, Uint8 uDataH)
 	{
 		// increment vram addr
 		m_Regs.vmaddr.w += m_Regs.vminc[0];
+		m_Regs.vmreadlatch.w = m_Regs.vmaddr.w;
 
 		// re-calculate vram address
 		uVramAddr = _SwizzleVramAddr(m_Regs.vmaddr.w, (m_Regs.vmain >> 2) & 3);
@@ -168,6 +170,68 @@ void SnesPPU::WriteVMDATALH(Uint8 uDataL, Uint8 uDataH)
 	m_Regs.vmaddr.w += m_Regs.vminc[1];
 
 	m_pRender->UpdateVRAM(uVramAddr);
+}
+
+
+void SnesPPU::WriteVMDATABlock(const Uint8 *pData, Int32 nBytes)
+{
+	/* DMA mode 1 to $2118/$2119 is by far the most common path for tile
+	   uploads. With normal address mapping and increment-after-high, each
+	   byte pair is one consecutive VRAM word. Copy those words here and
+	   invalidate the renderer once for the whole burst instead of making
+	   thousands of calls through WriteVMDATALH(). */
+	if (nBytes >= 2 &&
+	    ((m_Regs.vmain >> 2) & 3) == 0 &&
+	    m_Regs.vminc[0] == 0 && m_Regs.vminc[1] == 1)
+	{
+		Int32 nWords = nBytes >> 1;
+		Int32 nWordsLeft = nWords;
+		Uint16 uLastAddress = m_Regs.vmaddr.w;
+		Uint32 uFirstPhysical = m_Regs.vmaddr.w & 0x7FFF;
+
+		while (nWordsLeft > 0)
+		{
+			Uint32 uPhysical = m_Regs.vmaddr.w & 0x7FFF;
+			Int32 nChunk = 0x8000 - (Int32)uPhysical;
+			Int32 iWord;
+
+			if (nChunk > nWordsLeft)
+				nChunk = nWordsLeft;
+
+			for (iWord = 0; iWord < nChunk; iWord++)
+			{
+				m_VRAM[uPhysical + iWord] =
+					(Uint16)pData[0] | ((Uint16)pData[1] << 8);
+				pData += 2;
+			}
+
+			uLastAddress = (Uint16)(m_Regs.vmaddr.w + nChunk - 1);
+			m_Regs.vmaddr.w = (Uint16)(m_Regs.vmaddr.w + nChunk);
+			nWordsLeft -= nChunk;
+		}
+
+		m_Regs.vmreadlatch.w = uLastAddress;
+#if SNDBG_LOG
+		g_DbgVRAMWrites += nWords * 2;
+#endif
+		m_pRender->UpdateVRAM(uFirstPhysical);
+
+		nBytes -= nWords * 2;
+	}
+	else
+	{
+		while (nBytes >= 2)
+		{
+			WriteVMDATALH(pData[0], pData[1]);
+			pData += 2;
+			nBytes -= 2;
+		}
+	}
+
+	/* An odd DMA length ends on $2118, so preserve the low-port increment
+	   and latch behaviour for its final byte. */
+	if (nBytes > 0)
+		WriteVMDATAL(*pData);
 }
 
 
@@ -272,6 +336,52 @@ void SnesPPU::WriteOAMDATA(Uint8 uData)
 	                     ((uAddress + 1) & 0x3FF);
 	UpdateOAMPriority();
 
+	if (bChanged)
+		m_pRender->SetUpdateFlags(SNESPPURENDER_UPDATE_OBJ);
+}
+
+void SnesPPU::WriteOAMBlock(const Uint8 *pData, Int32 nBytes)
+{
+	Uint8 *pOamData = (Uint8 *)&m_OAM;
+	Uint32 uAddress = m_Regs.oamaddr.w & 0x3FF;
+	Bool bChanged = FALSE;
+
+#if SNDBG_LOG
+	g_DbgOAMWrites += nBytes;
+#endif
+
+	/* OAM is normally refreshed by one 544-byte DMA every frame. Preserve
+	   the low-table latch and high-table mirroring exactly, but publish the
+	   final address/priority and renderer invalidation only once. */
+	while (nBytes-- > 0)
+	{
+		Uint8 uData = *pData++;
+
+		if (!(uAddress & 1))
+			m_OAMLatch = uData;
+
+		if (uAddress & 0x200)
+		{
+			Uint32 uPhysical = _MapOAMAddress(uAddress);
+			if (pOamData[uPhysical] != uData)
+				bChanged = TRUE;
+			pOamData[uPhysical] = uData;
+		}
+		else if (uAddress & 1)
+		{
+			Uint32 uEven = uAddress & ~1;
+			if (pOamData[uEven] != m_OAMLatch ||
+			    pOamData[uAddress] != uData)
+				bChanged = TRUE;
+			pOamData[uEven] = m_OAMLatch;
+			pOamData[uAddress] = uData;
+		}
+
+		uAddress = (uAddress + 1) & 0x3FF;
+	}
+
+	m_Regs.oamaddr.w = (m_Regs.oamaddr.w & 0x8000) | uAddress;
+	UpdateOAMPriority();
 	if (bChanged)
 		m_pRender->SetUpdateFlags(SNESPPURENDER_UPDATE_OBJ);
 }
