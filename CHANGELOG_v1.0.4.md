@@ -59,6 +59,12 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   carregado sob demanda e restrito no navegador à leitura/abertura de ROMs.
 - A aba antiga de Host/NetPlay virou um configurador SMB completo e grava o
   `SMB.CNF` automaticamente, sem exigir que o usuário monte o arquivo à mão.
+- O `SMB.CNF` agora possui fallback de gravação e leitura em ELF gravável,
+  `mass0:`/`mass1:`/`mass:` e slots MMCE detectados, além de `mc0:`/`mc1:`.
+- L2+R2 publica o menu imediatamente e agenda a SRAM dois frames depois, sem a
+  antiga espera fixa de um segundo após o save.
+- A música do menu continua sendo alimentada durante modais, listagem de pastas
+  grandes, leitura/decode de capas, gravação de configurações e conexão SMB.
 - Corrigida a falha intermitente de áudio do boot, mais perceptível em 480i:
   o serviço era parado no fim da inicialização e só voltava quando algum core
   — frequentemente o NES — enviasse o primeiro bloco de áudio.
@@ -67,6 +73,63 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   prender o menu, a música e o carregamento de ROM.
 - A paleta antiga e excessivamente saturada do InfoNES foi substituída pela
   paleta NTSC 2C02 padrão do **Mesen2**, preservada em RGBA8.
+
+---
+
+## Revisão de responsividade r13: L2+R2, BGM durante I/O e fallback SMB
+
+### L2+R2 não espera mais o memory card nem a playlist
+
+- A pausa grande ao sair de um jogo SNES tinha três custos empilhados antes de
+  `_bMenu` ser ligado: a primeira chamada de `BgmNext()` podia varrer todas as
+  pastas de música, a SRAM era escrita de forma síncrona e o sucesso ainda
+  abria um modal bloqueante de 60 frames.
+- `_MenuEnable(TRUE)` agora marca e arma o menu imediatamente, preserva o
+  decoder já carregado e apenas agenda o save quando a SRAM está suja.
+- O trabalho pendente espera duas telas completas. Assim o menu e a mensagem
+  `Saving SRAM...` aparecem antes de qualquer RPC do memory card.
+- O sucesso/erro usa status não bloqueante. Foi removida a espera artificial de
+  um segundo que não aumentava a segurança do arquivo.
+- A verificação forçada de checksum continua no momento do L2+R2, portanto uma
+  escrita do jogo ocorrida dentro da janela normal de 30 frames não é perdida.
+- A criação de `SNESticle/SNES` ou `SNESticle/NES`, a migração do save antigo e
+  a confirmação explícita antes de formatar um card continuam inalteradas.
+
+### Música continua tocando enquanto a UI espera I/O
+
+- O ring do `audsrv` guarda aproximadamente 50 ms; qualquer `fopen`, `dread`,
+  `fwrite` ou decode de PNG mais demorado fazia o tracker ficar sem produtor.
+  Além disso, `MainLoopRender()` não chamava `BgmUpdate()` enquanto um modal
+  estivesse na tela, então até mensagens sem I/O silenciavam a música.
+- Foi criado um helper EE exclusivo para escopos de I/O do menu. Ele recebe o
+  contexto libxmp por um semáforo, sintetiza somente a faixa que já está na
+  memória e alimenta o `audsrv`; nunca abre arquivos, varre dispositivos nem
+  tenta carregar a próxima faixa.
+- O helper acorda somente na transição para uma operação lenta e dorme de forma
+  real no kernel ao terminar. Não existe polling, timer ou custo dessa thread
+  durante SNES/NES gameplay.
+- A proteção foi aplicada à enumeração e ordenação de diretórios em todos os
+  devices, montagem/espera de USB, índice e decode de capas, `video.cfg`,
+  `state.cfg`, configuração/conexão SMB e save pendente de SRAM.
+- Modais agora desenham o menu ao fundo e chamam o BGM normalmente. O status é
+  desenhado depois da tela, corrigindo também a ordem que escondia mensagens.
+- Alterar **Menu Music Frequency** reinicia o player libxmp já carregado na nova
+  taxa, sem liberar o módulo e relê-lo do CD/USB/memory card.
+
+### `SMB.CNF` usa todos os fallbacks locais compatíveis
+
+- **Save & Connect** primeiro atualiza uma configuração própria já carregada;
+  para um arquivo novo tenta `mc0:/SNESticle`, `mc1:/SNESticle`, o diretório do
+  ELF quando gravável, `mass0:`, `mass1:`, o alias `mass:` e os slots MMCE
+  habilitados que responderam ao PING.
+- MX4SIO entra pelos mesmos namespaces `massN:`. Um ELF iniciado numa partição
+  APA/PFS do HDD pode gravar ao lado dele após o mapeamento `hdd0:` → `pfs0:`.
+- A carga segue a mesma família de caminhos. Arquivos próprios graváveis têm
+  prioridade sobre o `SMB.CNF` compartilhado de wLaunchELF e sobre a cópia
+  somente leitura da ISO, portanto o fallback recém-salvo é realmente usado na
+  reconexão e no próximo boot em que o respectivo device estiver habilitado.
+- `mc?:/SYS-CONF/SMB.CNF` continua aceito para compatibilidade, mas nunca é
+  sobrescrito pelo configurador.
 
 ---
 

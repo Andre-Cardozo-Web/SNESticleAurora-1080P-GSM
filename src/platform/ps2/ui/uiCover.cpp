@@ -43,6 +43,7 @@
 #include "types.h"
 #include "texture.h"
 #include "poly.h"
+#include "mainloop_bgm.h"
 #include "embedded_irx.h"   /* HddMapPath (capas no HD: hdd0:->pfs0:) */
 
 extern "C" {
@@ -447,8 +448,13 @@ static void _EnsureIndex(const char *romDir)
 {
 	if (s_index && strcmp(s_indexDir, romDir) == 0)
 		return;
+
+	BgmIOBegin();
 	if (!_IndexEnsureCapacity(COVER_INDEX_INITIAL))
+	{
+		BgmIOEnd();
 		return;
+	}
 
 	s_indexCount = 0;
 	s_nDirs      = 0;
@@ -493,6 +499,7 @@ static void _EnsureIndex(const char *romDir)
 		qsort(s_index, s_indexCount, sizeof(s_index[0]), _IndexCompare);
 
 	s_indexGen++;
+	BgmIOEnd();
 }
 
 static Bool _IndexBuiltFor(const char *romDir)
@@ -640,6 +647,7 @@ static CoverEntT *_CacheDecode(const char *coverFile)
 	snprintf(e->key, sizeof(e->key), "%s", coverFile);
 	e->valid = TRUE;
 	e->lru   = ++s_lruClock;
+	BgmIOBegin();
 	if (_DecodeFileInto(coverFile, e->rgba, &w, &h)) {
 		e->usedW = w;
 		e->usedH = h;
@@ -647,6 +655,7 @@ static CoverEntT *_CacheDecode(const char *coverFile)
 		e->usedW = 0;
 		e->usedH = 0;
 	}
+	BgmIOEnd();
 	return e;
 }
 

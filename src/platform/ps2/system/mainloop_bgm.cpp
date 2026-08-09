@@ -2,16 +2,17 @@
  *
  * Trilha sonora de fundo do menu (.mod / .xm) via libxmp-lite.
  *
- * Arquitetura (igual ao resto do projeto): sem thread.  A cada frame de
- * menu, MainLoopRender chama BgmUpdate(), que gera PCM na EE com o
- * player de tracker e empurra para o audsrv via Aud_Enqueue(). Durante
- * o menu o core do SNES/NES nao roda, entao o BGM e' o unico produtor
- * de audio -- nao briga com o AudMixBuffer do jogo.
+ * Arquitetura normal: a cada frame de menu, MainLoopRender chama
+ * BgmUpdate(), que gera PCM na EE com o player de tracker e empurra para o
+ * audsrv via Aud_Enqueue(). Durante uma operacao SINCRONA de filesystem, um
+ * helper EE temporariamente mantem apenas esse decoder alimentado; fora desses
+ * escopos a thread dorme. Durante o menu o core SNES/NES nao roda, entao o BGM
+ * e' o unico produtor de audio -- nao briga com o AudMixBuffer do jogo.
  *
  * Descoberta de arquivo: procura todas as faixas .mod/.xm em BGM_PATH
  * (define do Makefile) e em pastas padrao, indexa-as e toca como uma
- * playlist: ao terminar uma faixa avanca para a proxima (e ao sair de uma
- * ROM, via BgmNext, tambem avanca para dar variedade).
+ * playlist: ao terminar uma faixa avanca para a proxima. Ao voltar de uma ROM
+ * o decoder carregado e' retomado sem reler o dispositivo.
  *
  * O player anterior (jar_mod/jar_xm) implementava apenas parte dos efeitos
  * de tracker e tinha erros em sample loops/pattern loops. libxmp-lite e'
@@ -26,6 +27,8 @@
 #include <time.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <kernel.h>
+#include <delaythread.h>
 #include <libcdvd.h>
 #define NEWLIB_PORT_AWARE
 #include <fileXio.h>
@@ -185,6 +188,20 @@ static Bool         s_mmceScanDone    = FALSE;
 static Bool         s_hddWasEnabled   = FALSE;
 static Bool         s_hddScanDone     = FALSE;
 
+/* Synchronous filesystem calls run on the UI thread, but the already-loaded
+   tracker can be mixed safely by a small EE helper thread while that thread
+   waits for mc/cdfs/mass/mmce/SMB. A binary semaphore gives the helper sole
+   ownership of the libxmp context; it never scans or opens files itself. */
+#define BGM_IO_THREAD_STACK_BYTES (32 * 1024)
+#define BGM_IO_THREAD_PRIORITY    48
+#define BGM_IO_TICK_USEC          6000
+static int          s_ioLock       = -1;
+static int          s_ioThread     = -1;
+static volatile int s_ioDepth      = 0;
+static Bool         s_menuActive   = FALSE;
+static unsigned char s_ioStack[BGM_IO_THREAD_STACK_BYTES]
+    __attribute__((aligned(64)));
+
 /* Buffer-fonte na taxa do tracker e estado do reamostrador CONTINUO.
    O codigo antigo reiniciava a fase em zero e descartava 1-2 amostras a
    cada frame de video; isso introduzia jitter de andamento/pitch e pequenas
@@ -195,6 +212,19 @@ static int          s_sourceFrames = 0;
 static unsigned int s_resampleFrac = 0; /* fracao exata / 48000 */
 static short s_left [BGM_OUT_CHUNK]     __attribute__((aligned(64)));
 static short s_right[BGM_OUT_CHUNK]     __attribute__((aligned(64)));
+
+
+static void _BgmLock(void)
+{
+    if (s_ioLock > 0)
+        WaitSema(s_ioLock);
+}
+
+static void _BgmUnlock(void)
+{
+    if (s_ioLock > 0)
+        SignalSema(s_ioLock);
+}
 
 
 /* ---- utilitarios ----------------------------------------------------- */
@@ -855,7 +885,7 @@ static void _BgmFreeDecoder(void)
 
 /* Libera o decoder e o buffer do arquivo E re-arma a logica de
    volume/dreno.  Chamado quando a trilha e' desligada (BgmSetVolume(0)) ou
-   ao abrir o menu (BgmNext): nesses casos queremos esperar a cauda de
+   numa troca explicita (BgmNext): nesses casos queremos esperar a cauda de
    audio do jogo drenar antes de soltar o tracker de novo. */
 static void _BgmFree(void)
 {
@@ -880,33 +910,53 @@ static Bool _BgmAdvance(void)
 
 void BgmStop(void)
 {
+    _BgmLock();
     /* Para de alimentar SEM liberar o decoder: a faixa fica carregada,
        entao reabrir o menu e' instantaneo (sem reler do disco -> sem a
        travadinha).  So' re-arma a logica de volume/dreno para a proxima
        entrada no menu (esperar a cauda de audio do jogo drenar antes de
        soltar o tracker).  A liberacao real acontece em BgmSetVolume(0). */
+    s_menuActive = FALSE;
     s_volSet = FALSE;
     s_drainWait = 0;
     s_gapFrames = 0;
+    _BgmUnlock();
+}
+
+void BgmMenuEnter(void)
+{
+    /* This is intentionally lighter than BgmUpdate(): entering the menu must
+       never scan a drive or reload a module before the first frame appears. */
+    _BgmLock();
+    s_menuActive = TRUE;
+    _BgmUnlock();
 }
 
 void BgmNext(void)
 {
     /* Avanca para a proxima faixa do indice e libera o decoder atual, de
        modo que o proximo BgmUpdate carregue a nova faixa.  Chamado ao
-       ABRIR o menu (sair do jogo) para dar variedade.  Releria do disco
+       uma troca explicita de faixa. Releria do disco
        (pode dar um hitch breve no memory card), por isso so' troca quando
        ha 2+ faixas; com 0/1 faixa nao faz nada (sem reload, sem hitch). */
-    if (s_indexCount < 0) _BuildIndex();
-    if (s_indexCount <= 1) return;
+    _BgmLock();
+    /* Before the first normal BgmUpdate the index is unknown. Do not turn a
+       simple L2+R2 press into a synchronous scan of every storage device. */
+    if (s_indexCount <= 1)
+    {
+        _BgmUnlock();
+        return;
+    }
 
     s_trackIdx = (s_trackIdx + 1) % s_indexCount;
 
     if (s_state == BGM_MOD || s_state == BGM_XM) _BgmFree();
+    _BgmUnlock();
 }
 
 void BgmSetVolume(int vol)
 {
+    _BgmLock();
     if (vol < 0)   vol = 0;
     if (vol > 100) vol = 100;
 
@@ -924,65 +974,113 @@ void BgmSetVolume(int vol)
     }
 
     s_volume = vol;
+    _BgmUnlock();
 }
 
 int BgmGetVolume(void)
 {
-    return s_volume;
+    int result;
+    _BgmLock();
+    result = s_volume;
+    _BgmUnlock();
+    return result;
 }
 
 int BgmTrackCount(void)
 {
-    /* O indice local nasce imediatamente; MMCE entra apos PING, HDD apos
-       montar uma particao PFS e cdfs vem depois da espera do disco. */
-    if (s_indexCount < 0) _BuildIndex();
-    _MmceScanStep();
-    _HddScanStep();
-    return s_indexCount;
+    int result;
+    /* Draw/getter paths stay memory-only. The next normal BgmUpdate performs
+       lazy discovery; merely drawing Video Config must not open devices. */
+    _BgmLock();
+    result = s_indexCount < 0 ? 0 : s_indexCount;
+    _BgmUnlock();
+    return result;
 }
 
 int BgmIsSearching(void)
 {
-    if (s_indexCount < 0) _BuildIndex();
-    return s_discScanState == BGM_DISC_PENDING ? 1 : 0;
+    int result;
+    _BgmLock();
+    result = (s_indexCount < 0 || s_discScanState == BGM_DISC_PENDING) ? 1 : 0;
+    _BgmUnlock();
+    return result;
 }
 
 int BgmGetRate(void)
 {
-    return s_rate;
+    int result;
+    _BgmLock();
+    result = s_rate;
+    _BgmUnlock();
+    return result;
+}
+
+static void _BgmSetRateLocked(int hz)
+{
+    Bool wasPlaying;
+
+    if (hz < 8000)  hz = 8000;
+    if (hz > 48000) hz = 48000;
+    if (hz == s_rate) return;
+    wasPlaying = (s_xmp && (s_state == BGM_MOD || s_state == BGM_XM))
+                 ? TRUE : FALSE;
+    s_rate = hz;
+
+    /* Changing synthesis frequency does not require reading the module again.
+       Keep it loaded in libxmp, restart only the player at the new rate and
+       reset the resampler. The previous code freed the entire context, so one
+       Left/Right press caused a synchronous disk reload and an audible stop. */
+    if (wasPlaying)
+    {
+        xmp_end_player(s_xmp);
+        if (xmp_start_player(s_xmp, s_rate, 0) == 0)
+        {
+            xmp_set_player(s_xmp, XMP_PLAYER_INTERP, XMP_INTERP_LINEAR);
+            _ResetResampler();
+        }
+        else
+        {
+            _BgmFree();
+        }
+    }
 }
 
 void BgmSetRate(int hz)
 {
-    if (hz < 8000)  hz = 8000;
-    if (hz > 48000) hz = 48000;
-    if (hz == s_rate) return;
-    s_rate = hz;
-    /* recarrega o decoder na nova taxa: _BgmFree zera o estado e o proximo
-       BgmUpdate recarrega em s_rate. */
-    if (s_state == BGM_MOD || s_state == BGM_XM) _BgmFree();
+    _BgmLock();
+    _BgmSetRateLocked(hz);
+    _BgmUnlock();
 }
 
 void BgmCycleRate(int dir)
 {
     int i, idx = 3; /* fallback ~32000 */
+    _BgmLock();
     for (i = 0; i < BGM_RATE_COUNT; i++)
         if (s_rateList[i] == s_rate) { idx = i; break; }
     idx += (dir < 0) ? -1 : 1;
     if (idx < 0)               idx = BGM_RATE_COUNT - 1;
     if (idx >= BGM_RATE_COUNT)  idx = 0;
-    BgmSetRate(s_rateList[idx]);
+    _BgmSetRateLocked(s_rateList[idx]);
+    _BgmUnlock();
 }
 
-void BgmUpdate(void)
+static void _BgmUpdateLocked(Bool allowFilesystem)
 {
     int avail, n, j;
 
     if (s_volume <= 0)         return;   /* OFF: nem toca o drive */
-    if (s_indexCount < 0)      _BuildIndex();
-    _MmceScanStep();
-    _HddScanStep();
-    _DiscScanStep();
+    if (s_indexCount < 0)
+    {
+        if (!allowFilesystem) return;
+        _BuildIndex();
+    }
+    if (allowFilesystem)
+    {
+        _MmceScanStep();
+        _HddScanStep();
+        _DiscScanStep();
+    }
     if (!Aud_IsInitialized())  return;
 
     /* Respiro entre faixas: apos detectar o fim e avancar (decoder ja'
@@ -1005,7 +1103,11 @@ void BgmUpdate(void)
         return;
     }
 
-    if (s_state == BGM_UNTRIED) _TryLoad();
+    if (s_state == BGM_UNTRIED)
+    {
+        if (!allowFilesystem) return;
+        _TryLoad();
+    }
     if (s_state != BGM_MOD && s_state != BGM_XM) return; /* FAILED/nada */
 
     /* Espera a cauda de audio do jogo (mutada pelo _MenuEnable ao abrir o
@@ -1134,4 +1236,114 @@ void BgmUpdate(void)
        acima, apos a cauda do jogo drenar. */
 
     Aud_Enqueue(s_left, s_right, n, 0); /* wait=0: best-effort, nao trava */
+}
+
+void BgmUpdate(void)
+{
+    _BgmLock();
+    s_menuActive = TRUE;
+    /* While a caller holds an I/O scope, only the helper is allowed to own
+       filesystem progress. A nested render/modal may still fill PCM. */
+    _BgmUpdateLocked(s_ioDepth == 0 ? TRUE : FALSE);
+    _BgmUnlock();
+}
+
+static void _BgmIOThread(void *argument)
+{
+    (void)argument;
+
+    for (;;)
+    {
+        Bool active;
+
+        _BgmLock();
+        active = (s_ioDepth > 0 && s_menuActive) ? TRUE : FALSE;
+        if (active)
+        {
+            /* Memory/CPU only: no opendir/fopen, no device probing and no
+               module reload. This remains safe even when the UI thread is
+               blocked inside fileXio or newlib on another device. */
+            _BgmUpdateLocked(FALSE);
+        }
+        _BgmUnlock();
+
+        if (active)
+            DelayThread(BGM_IO_TICK_USEC);
+        else
+            /* No timer, polling or semaphore churn during gameplay. The
+               0->1 I/O-depth transition wakes this thread explicitly. */
+            SleepThread();
+    }
+}
+
+static Bool _BgmEnsureIOThread(void)
+{
+    ee_sema_t sema;
+    ee_thread_t thread;
+    int result;
+
+    if (s_ioThread > 0)
+        return TRUE;
+
+    if (s_ioLock <= 0)
+    {
+        memset(&sema, 0, sizeof(sema));
+        sema.init_count = 1;
+        sema.max_count = 1;
+        s_ioLock = CreateSema(&sema);
+        if (s_ioLock <= 0)
+            return FALSE;
+    }
+
+    memset(&thread, 0, sizeof(thread));
+    thread.func = (void *)_BgmIOThread;
+    thread.stack = s_ioStack;
+    thread.stack_size = sizeof(s_ioStack);
+    thread.gp_reg = &_gp;
+    thread.initial_priority = BGM_IO_THREAD_PRIORITY;
+
+    result = CreateThread(&thread);
+    if (result <= 0)
+        return FALSE;
+    s_ioThread = result;
+    if (StartThread(s_ioThread, NULL) < 0)
+    {
+        DeleteThread(s_ioThread);
+        s_ioThread = -1;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+void BgmIOBegin(void)
+{
+    Bool wake;
+
+    if (!_BgmEnsureIOThread())
+        return;
+
+    _BgmLock();
+    wake = s_ioDepth == 0 ? TRUE : FALSE;
+    s_ioDepth++;
+    if (s_menuActive)
+    {
+        /* Fill whatever room exists before the blocking call begins; the
+           helper then tops the ring up every few milliseconds. */
+        _BgmUpdateLocked(FALSE);
+    }
+    _BgmUnlock();
+
+    if (wake)
+        WakeupThread(s_ioThread);
+}
+
+void BgmIOEnd(void)
+{
+    if (s_ioLock <= 0)
+        return;
+
+    _BgmLock();
+    if (s_ioDepth > 0)
+        s_ioDepth--;
+    _BgmUnlock();
 }

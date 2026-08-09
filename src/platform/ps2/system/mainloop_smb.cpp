@@ -14,6 +14,7 @@ extern "C" {
 }
 
 #include "embedded_irx.h"
+#include "mainloop_bgm.h"
 #include "mainloop_iop.h"
 #include "mainloop_net.h"
 #include "mainloop_smb.h"
@@ -41,6 +42,19 @@ static int s_last_error = 0;
 static int s_mounted = 0;
 static int s_driver_ready = 0;
 static char s_config_path[512] = "";
+
+static const char *s_mass_config_paths[] = {
+    "mass0:/SNESticle/SMB.CNF",
+    "mass1:/SNESticle/SMB.CNF",
+    "mass:/SNESticle/SMB.CNF",
+    NULL
+};
+
+static const char *s_mmce_config_paths[] = {
+    "mmce0:/SNESticle/SMB.CNF",
+    "mmce1:/SNESticle/SMB.CNF",
+    NULL
+};
 
 static char *SmbTrim(char *text)
 {
@@ -137,9 +151,21 @@ static int SmbReadConfigFile(const char *path, SmbConfigT *config)
 {
     FILE *file;
     char line[640];
+    char mappedPath[512];
+    const char *openPath = path;
     int passwordTypeSeen = 0;
 
-    file = fopen(path, "rb");
+    /* hdd0: is the logical browser path. PFS files become accessible only
+       after the partition is mounted as pfs0:, so configs beside an ELF on
+       the internal HDD need the same translation used by the ROM browser. */
+    if (path && strncasecmp(path, "hdd0:", 5) == 0)
+    {
+        if (HddMapPath(path, mappedPath, sizeof(mappedPath)) != 1)
+            return 0;
+        openPath = mappedPath;
+    }
+
+    file = fopen(openPath, "rb");
     if (!file)
         return 0;
 
@@ -253,9 +279,12 @@ static int SmbTryConfig(const char *path, SmbConfigT *config)
 
 static int SmbLoadConfig(SmbConfigT *config)
 {
-    static const char *fixedPaths[] = {
+    static const char *ownedMemoryCardPaths[] = {
         "mc0:/SNESticle/SMB.CNF",
         "mc1:/SNESticle/SMB.CNF",
+        NULL
+    };
+    static const char *sharedMemoryCardPaths[] = {
         "mc0:/SYS-CONF/SMB.CNF",
         "mc1:/SYS-CONF/SMB.CNF",
         NULL
@@ -267,21 +296,64 @@ static int SmbLoadConfig(SmbConfigT *config)
     s_config_path[0] = '\0';
 
     /* User-created memory-card config wins over a bundled ISO/ELF config. */
-    for (index = 0; fixedPaths[index]; ++index)
+    for (index = 0; ownedMemoryCardPaths[index]; ++index)
     {
-        result = SmbTryConfig(fixedPaths[index], config);
+        result = SmbTryConfig(ownedMemoryCardPaths[index], config);
         if (result != 0)
             return result;
     }
 
-    /* Fall back to a file beside the ELF. Never probe HostFS/SMB recursively. */
+    /* A writable standalone ELF directory is more specific than a generic
+       device fallback. Defer read-only disc paths until after mass/MMCE so a
+       config saved by this screen can override the SMB.CNF bundled in an ISO. */
     if (_MainLoop_BootDir[0] &&
         strncasecmp(_MainLoop_BootDir, "host:", 5) != 0 &&
         strncasecmp(_MainLoop_BootDir, "smb:", 4) != 0 &&
+        strncasecmp(_MainLoop_BootDir, "cdfs:", 6) != 0 &&
+        strncasecmp(_MainLoop_BootDir, "cdrom", 5) != 0 &&
+        strncasecmp(_MainLoop_BootDir, "rom", 3) != 0 &&
         snprintf(bootPath, sizeof(bootPath), "%sSMB.CNF",
                  _MainLoop_BootDir) < (int)sizeof(bootPath))
     {
         result = SmbTryConfig(bootPath, config);
+        if (result != 0)
+            return result;
+    }
+
+    /* A console without a usable memory card can keep the emulator-owned
+       config on USB/MX4SIO or MMCE. Probe only storage the user enabled, and
+       only after SMB was explicitly requested, so boot remains lazy. */
+    if (MassStorageIsEnabled() || Mx4sioIsEnabled())
+    {
+        for (index = 0; s_mass_config_paths[index]; ++index)
+        {
+            result = SmbTryConfig(s_mass_config_paths[index], config);
+            if (result != 0)
+                return result;
+        }
+    }
+
+    if (MmceSupportIsEnabled() && !MmceNeedsRestart())
+    {
+        int slots = MmceGetAvailableSlots();
+        if (!slots)
+            slots = MmceProbeAvailableSlots();
+        for (index = 0; s_mmce_config_paths[index]; ++index)
+        {
+            if (!(slots & (1 << index)))
+                continue;
+            result = SmbTryConfig(s_mmce_config_paths[index], config);
+            if (result != 0)
+                return result;
+        }
+    }
+
+    /* Legacy/shared wLaunchELF configs remain readable, but an emulator-owned
+       file on any writable device must win so Save & Connect can actually
+       replace the active server without modifying another application's file. */
+    for (index = 0; sharedMemoryCardPaths[index]; ++index)
+    {
+        result = SmbTryConfig(sharedMemoryCardPaths[index], config);
         if (result != 0)
             return result;
     }
@@ -316,24 +388,54 @@ static int SmbPathIsWritable(const char *path)
            strncasecmp(path, "rom", 3) != 0;
 }
 
+static int SmbPathIsSharedConfig(const char *path)
+{
+    /* The wLaunchELF-compatible SYS-CONF file may be shared by unrelated
+       homebrew. It is readable as a fallback but never overwritten here. */
+    return path &&
+           (strstr(path, "/SYS-CONF/") || strstr(path, "/sys-conf/"));
+}
+
+static void SmbEnsureParentDirectory(const char *path)
+{
+    char directory[512];
+    char *slash;
+    size_t length;
+
+    if (!path || strlen(path) >= sizeof(directory))
+        return;
+    strcpy(directory, path);
+    slash = strrchr(directory, '/');
+    if (!slash)
+        return;
+    *slash = '\0';
+    length = strlen(directory);
+    if (length > 0 && directory[length - 1] != ':')
+        mkdir(directory, 0777);
+}
+
 static int SmbWriteConfigFile(const char *path, const SmbConfigT *config)
 {
     FILE *file;
+    char mappedPath[512];
+    const char *openPath = path;
     int ok;
 
     if (!SmbPathIsWritable(path))
         return -1;
 
-    /* mc0's normal save directory already exists after boot. mkdir is
-       harmless there and makes the mc1 fallback work when slot 0 is absent. */
-    if (strncasecmp(path, "mc0:/SNESticle/",
-                    sizeof("mc0:/SNESticle/") - 1) == 0)
-        mkdir("mc0:/SNESticle", 0777);
-    else if (strncasecmp(path, "mc1:/SNESticle/",
-                         sizeof("mc1:/SNESticle/") - 1) == 0)
-        mkdir("mc1:/SNESticle", 0777);
+    if (strncasecmp(path, "hdd0:", 5) == 0)
+    {
+        if (HddMapPath(path, mappedPath, sizeof(mappedPath)) != 1)
+            return -1;
+        openPath = mappedPath;
+    }
 
-    file = fopen(path, "wb");
+    /* Works for mc, mass, mmce and an already mounted pfs0:. The root exists;
+       only the emulator-owned SNESticle child may need to be created. */
+    SmbEnsureParentDirectory(openPath);
+
+    file = fopen(openPath, "wb");
     if (!file)
         return -1;
 
@@ -382,7 +484,13 @@ int SmbSaveConfig(const SmbConfigT *source)
     if (!SmbValidateConfig(&config))
         return -2;
 
-    /* Always write the emulator-owned config. Do not overwrite a shared
+    /* If the setup screen loaded an existing writable emulator/user file,
+       update that same file first. Do not overwrite a shared SYS-CONF file. */
+    if (s_config_path[0] && !SmbPathIsSharedConfig(s_config_path) &&
+        SmbWriteConfigFile(s_config_path, &config) == 0)
+        return 0;
+
+    /* Always prefer the emulator-owned config. Do not overwrite a shared
        mc?:/SYS-CONF/SMB.CNF that may belong to wLaunchELF or another app.
        The save directory is created during normal memory-card init; mc1 is
        a transparent fallback. */
@@ -397,24 +505,54 @@ int SmbSaveConfig(const SmbConfigT *source)
         SmbWriteConfigFile(bootPath, &config) == 0)
         return 0;
 
+    /* No memory card and a read-only boot device (usually an ISO): fall back
+       to every enabled writable storage family. mass: is kept after mass0/1
+       for older drivers that expose only the unnumbered alias. */
+    if (MassStorageIsEnabled() || Mx4sioIsEnabled())
+    {
+        for (index = 0; s_mass_config_paths[index]; ++index)
+            if (SmbWriteConfigFile(s_mass_config_paths[index], &config) == 0)
+                return 0;
+    }
+
+    if (MmceSupportIsEnabled() && !MmceNeedsRestart())
+    {
+        int slots = MmceGetAvailableSlots();
+        if (!slots)
+            slots = MmceProbeAvailableSlots();
+        for (index = 0; s_mmce_config_paths[index]; ++index)
+            if ((slots & (1 << index)) &&
+                SmbWriteConfigFile(s_mmce_config_paths[index], &config) == 0)
+                return 0;
+    }
+
     return -3;
 }
 
 int SmbSaveAndConnect(const SmbConfigT *config)
 {
-    int result = SmbSaveConfig(config);
+    int result;
+
+    /* File writes, DHCP and authentication are synchronous PS2SDK calls.
+       Keep the already-loaded menu tracker serviced from the EE I/O helper
+       while the UI thread waits for them. */
+    BgmIOBegin();
+    result = SmbSaveConfig(config);
     if (result < 0)
     {
         s_status = (result == -2) ? SMB_STATUS_CONFIG_INVALID
                                   : SMB_STATUS_CONFIG_SAVE_ERROR;
         s_last_error = result;
         s_mounted = 0;
+        BgmIOEnd();
         return result;
     }
 
     SmbDisconnect();
     SmbSupportSetEnabled(1);
-    return SmbEnsureMounted();
+    result = SmbEnsureMounted();
+    BgmIOEnd();
+    return result;
 }
 
 static void SmbSetFailure(SmbStatusE status, int error)

@@ -236,6 +236,21 @@ void MainLoopRender()
     }
 
 
+	/* Keep menu audio alive even while a modal overlays the UI. Previously
+	   BgmUpdate lived only in the non-modal branch below, so every fixed-time
+	   message starved audsrv regardless of whether any I/O was happening. */
+	if (_bMenu)
+	{
+		static Bool s_bgmArmed = FALSE;
+		if ((void *)_MainLoop_pScreen == (void *)_MainLoop_pBrowserScreen)
+			s_bgmArmed = TRUE;
+		if (s_bgmArmed)
+			BgmUpdate();
+		/* Draw the live menu first, then place modal/status text on top. The
+		   previous order painted _MenuDraw after the status and hid it. */
+		_MenuDraw();
+	}
+
 	if (_MainLoop_ModalCount > 0)
 	{
 		FontSelect(0);
@@ -243,9 +258,9 @@ void MainLoopRender()
 		FontPrintf(128 - FontGetStrWidth(_MainLoop_ModalStr) / 2,100, _MainLoop_ModalStr);
 
 		_MainLoop_ModalCount--;
-	} else
+	}
+	else
 	{
-
 		if (_MainLoop_StatusCount > 0)
 		{
 			FontSelect(0);
@@ -253,21 +268,7 @@ void MainLoopRender()
 			FontPrintf(20, 200, _MainLoop_StatusStr);
 
 			_MainLoop_StatusCount--;
-		} 
-
-
-		if (_bMenu)
-		{
-			/* Trilha de fundo do menu: so "arma" (comeca a tocar)
-			   depois que a tela de message log do boot der lugar ao
-			   browser pela 1a vez.  Depois disso toca sempre. */
-			static Bool s_bgmArmed = FALSE;
-			if ((void *)_MainLoop_pScreen == (void *)_MainLoop_pBrowserScreen)
-				s_bgmArmed = TRUE;
-			if (s_bgmArmed)
-				BgmUpdate();
-			_MenuDraw();
-		} 
+		}
 	}
 
 

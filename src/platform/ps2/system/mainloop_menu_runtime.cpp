@@ -36,150 +36,93 @@
 #include "mainloop_bgm.h"
 
 extern "C" {
-#include "mcsave_ee.h"
-};
-
-extern "C" {
 #include "audio.h"
 };
 
 
-/* MAINLOOP_MEMCARD lives in mainloop_shared.h (included above) and
-   gates the memcard SRAM / save-file path inside _MenuEnable(). */
+/* The L2+R2 path must return control immediately. The old implementation did
+   all memory-card work plus a fixed 60-frame success modal before setting
+   _bMenu, which made the shortcut look frozen. Schedule the write a couple of
+   already-visible menu frames later; BgmIO keeps the tracker alive during the
+   still-synchronous device operation. */
+static Bool s_sramSavePending = FALSE;
+static Int32 s_sramSaveDelay = 0;
+
+static void _MenuSavePendingSRAM(void)
+{
+	Bool bSaved;
+
+	if (!s_sramSavePending)
+		return;
+	s_sramSavePending = FALSE;
+
+	BgmIOBegin();
+	#if MAINLOOP_MEMCARD
+	if (MemCardGetStatus(0) == MEMCARD_STATUS_UNFORMATTED)
+	{
+		BgmIOEnd();
+		_MainLoopMemCardFormatPromptOpen(
+			0,
+			MAINLOOP_MEMCARDFORMAT_SRAM_SAVE
+		);
+		return;
+	}
+	#endif
+
+	bSaved = _MainLoopSaveSRAM(TRUE);
+	BgmIOEnd();
+	MainLoopStatusPrintf(
+		bSaved ? 90 : 180,
+		bSaved ? "SRAM saved." : "Error saving SRAM!"
+	);
+}
+
+void _MenuRuntimeUpdate(void)
+{
+	if (!_bMenu || !s_sramSavePending)
+		return;
+	if (s_sramSaveDelay > 0)
+	{
+		s_sramSaveDelay--;
+		return;
+	}
+	_MenuSavePendingSRAM();
+}
 
 
 void _MenuEnable(Bool bEnable)
 {
-	Bool bPromptMemCardFormat = FALSE;
-
 	if (bEnable!=_bMenu)
 	{
-		/* Mute audsrv BEFORE the SRAM save block below runs.
-		   MainLoopModalPrintf() (see mainloop_ui.cpp) spins
-		   MainLoopRender() inline for N frames and MCSave_WriteSync()
-		   also blocks the EE for the duration of the memcard write,
-		   so the SNES core is starved of CPU and stops feeding
-		   audsrv. The IOP-side play_thread keeps running, drains the
-		   legitimate ~107 ms tail, and then re-reads stale samples
-		   from the same ring buffer region — audible as a drone of
-		   the last SNES audio for the full duration of the
-		   "Saving SRAM..." / "SRAM saved.\n" / "Error Saving SRAM!\n"
-		   modals (~1 - 1.5 s). Muting here, before any of those
-		   blocking calls, silences both the legitimate tail and the
-		   drone. The matching unmute on menu exit is at the bottom
-		   of this function. See the unmute comment for why we mute
-		   via Aud_Setvol rather than Aud_Clearbuff. */
-		if (bEnable && _MainLoop_bAudioReady)
-		{
-			Aud_Setvol(0);
-		}
-
-		/* Ao abrir o menu (sair do jogo), troca para a proxima faixa da
-		   trilha para dar variedade.  No-op se houver 0/1 faixa. */
 		if (bEnable)
 		{
-			BgmNext();
-		}
+			/* Publish the menu state before any storage RPC. MainLoopProcess
+			   will render two frames, then run the pending save below. */
+			_bMenu = TRUE;
+			BgmMenuEnter();
+			if (_MainLoop_bAudioReady)
+				Aud_Setvol(0);
 
-		// if menu is enabled, then attempt to save sram immediately
-		if (bEnable)
-		{
-			#if 1
-			/* Force a fresh dirty-flag check before deciding to save.
-			   _MainLoopCheckSRAM() throttles its full-SRAM checksum
-			   to once every ~30 frames (~0.5s) since its only job
-			   here is to keep _MainLoop_SRAMUpdated current for this
-			   exact decision -- without the force-check, an SRAM
-			   write that the game performed in the same 30-frame
-			   window as the user's L2+R2 press could leave
-			   _MainLoop_SRAMUpdated still FALSE and skip the save
-			   the user explicitly requested. */
+			/* Preserve a write performed in the <30-frame checksum window. */
 			_MainLoopForceCheckSRAM();
-
 			if (_MainLoopHasSRAM() && _MainLoop_SRAMUpdated)
 			{
-				#if MAINLOOP_MEMCARD
-				if (MemCardGetStatus(0) ==
-				    MEMCARD_STATUS_UNFORMATTED)
-				{
-					/* Finish entering the menu first; the confirmation
-					   screen is opened below and never formats by itself. */
-					bPromptMemCardFormat = TRUE;
-				}
-				else
-				#endif
-				{
-					MainLoopModalPrintf(10, "Saving SRAM...");
-
-					if (_MainLoopHasSRAM())
-					{
-						#if MAINLOOP_MEMCARD
-						if (_MainLoop_bMCSaveReady) MCSave_WriteSync(1, NULL);
-
-						if (MemCardCheckNewCard())
-						{
-							printf("New memcard detected\n");
-							if (MemCardCreateSave(_SramPath, _MainLoop_SaveTitle, FALSE))
-							{
-								MemCardCreateSave(_SramPath, _MainLoop_SaveTitle, FALSE);
-							}
-						}
-						#endif
-
-						if (_MainLoopSaveSRAM(TRUE))
-						{
-							MainLoopModalPrintf(60, "SRAM saved.\n");
-						} else
-						{
-							MainLoopModalPrintf(60 * 1 + 30, "Error Saving SRAM!\n");
-						}
-					}
-				}
+				s_sramSavePending = TRUE;
+				s_sramSaveDelay = 2;
+				MainLoopStatusPrintf(180, "Saving SRAM...");
 			}
-			#endif
 		}
-
-		_bMenu = bEnable;
-
-		if (bPromptMemCardFormat)
+		else
 		{
-			_MainLoopMemCardFormatPromptOpen(
-				0,
-				MAINLOOP_MEMCARDFORMAT_SRAM_SAVE
-			);
-		}
-
-		/* Saindo do menu (inicio de jogo ou retomada): para a trilha de
-		   fundo e libera o decoder, devolvendo o audsrv ao core do jogo.
-		   Ao reabrir o menu, BgmUpdate() recarrega a faixa sozinho. */
-		if (!bEnable)
-		{
+			/* Normal input cannot close the menu again before the two-frame
+			   delay expires. Clear defensively if another subsystem launches a
+			   game directly while a save was queued for the previous ROM. */
+			s_sramSavePending = FALSE;
+			s_sramSaveDelay = 0;
+			_bMenu = FALSE;
 			BgmStop();
-		}
-
-		/* Restore audsrv output when leaving the menu. The entry-side
-		   mute happens at the top of this function (above the SRAM
-		   save block) so the modal-printf loops there also play
-		   silent; we only handle the leave side here.
-
-		   We mute via Aud_Setvol(0) rather than Aud_Clearbuff
-		   (audsrv_stop_audio) because the latter sets audsrv's
-		   `playing` flag to 0, which freezes the IOP-side readpos
-		   and writepos and prevents audsrv_available() from ever
-		   advancing. The next Aud_Enqueue(...,wait=1) issued by
-		   AudMixBuffer::Flush after the menu is dismissed then
-		   deadlocks inside audsrv_wait_audio, which is what made the
-		   audio stay dead until an emulator reset. Volume mute keeps
-		   audsrv in its normal playing state: the queue keeps
-		   draining, audsrv_wait_audio stays unblocked, and audio
-		   resumes the moment the SNES core writes new samples after
-		   the menu is closed. 0x3FFF is full scale in the 14-bit
-		   Aud_Setvol scale (rescaled to audsrv's MAX_VOLUME). Gated
-		   on _MainLoop_bAudioReady for symmetry with the boot
-		   sequence in mainloop_init.cpp. */
-		if (!bEnable && _MainLoop_bAudioReady)
-		{
-			Aud_Setvol(0x3FFF);
+			if (_MainLoop_bAudioReady)
+				Aud_Setvol(0x3FFF);
 		}
 	}
 }

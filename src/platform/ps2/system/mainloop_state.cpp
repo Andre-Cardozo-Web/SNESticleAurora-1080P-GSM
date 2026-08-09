@@ -11,6 +11,7 @@
 #include "memcard.h"
 #include "miniz.h"
 #include "mainloop_debug.h"
+#include "mainloop_bgm.h"
 #include "embedded_irx.h"
 
 extern "C" {
@@ -760,6 +761,7 @@ Bool MainLoopStateSettingsSave()
         "mc1:/SNESticle/state.cfg"
     };
     Int32 i;
+    Bool bSaved = FALSE;
 
     memset(&Config, 0, sizeof(Config));
     memcpy(Config.Magic, _MainLoop_StateConfigMagic, sizeof(Config.Magic));
@@ -774,6 +776,7 @@ Bool MainLoopStateSettingsSave()
     /* A state can be the first thing the user saves for a ROM with no
        battery-backed SRAM, so the normal SRAM path may not have created
        the application directory yet. */
+    BgmIOBegin();
     for (i = 0; i < 2; i++)
     {
         if (_MainLoopStateEnsureOneDir(pConfigDirectories[i]) &&
@@ -782,11 +785,13 @@ Bool MainLoopStateSettingsSave()
                 (Uint8 *)&Config,
                 sizeof(Config)))
         {
-            return TRUE;
+            bSaved = TRUE;
+            break;
         }
     }
+    BgmIOEnd();
 
-    return FALSE;
+    return bSaved;
 }
 
 static const Char *_MainLoopStateGetUnsupportedChip(Uint32 uFlags)

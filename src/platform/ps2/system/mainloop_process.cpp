@@ -234,6 +234,10 @@ Bool MainLoopProcess()
     }
 
     _MainLoopCheckSRAM();
+	/* Deferred menu work runs only after _MenuEnable has returned. In the
+	   L2+R2 path this leaves two complete frames for the menu/status to become
+	   visible before a synchronous SRAM write begins. */
+	_MenuRuntimeUpdate();
 
 	MainLoopRender();
 

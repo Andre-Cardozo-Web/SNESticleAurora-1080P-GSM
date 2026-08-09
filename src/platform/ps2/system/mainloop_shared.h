@@ -166,6 +166,7 @@ extern Float32 _MainLoop_fOutputIntensity;
 
 void MainLoopRender();
 void _MenuEnable(Bool bEnable);
+void _MenuRuntimeUpdate(void);
 /* Drawn from MainLoopRender() (mainloop_render.cpp), defined in
    mainloop_menu_runtime.cpp. Was a file-static helper inside
    mainloop.cpp; promoted to extern when MainLoopRender() and the

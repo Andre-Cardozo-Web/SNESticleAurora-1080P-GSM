@@ -110,7 +110,9 @@ void VideoSettingsSave(void)
 	cfg.colorprofile = SNPPUColorGetProfile();
 
 	_VideoCfgPath(path);
+	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
+	BgmIOEnd();
 }
 
 void VideoSettingsLoad(void)
@@ -439,13 +441,19 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		case 12: /* MMCE (mmce0/1) on/off -- lista + carga preguicosa. */
 			MmceSupportSetEnabled(!MmceSupportIsEnabled());
 			if (MmceSupportIsEnabled())
+			{
+				BgmIOBegin();
 				MmceProbeAvailableSlots();
+				BgmIOEnd();
+			}
 			break;
 
 		case 13: /* SMB on/off. Driver/network stay lazy until smb: is opened. */
 			if (SmbSupportIsEnabled())
 			{
+				BgmIOBegin();
 				SmbDisconnect();
+				BgmIOEnd();
 				SmbSupportSetEnabled(0);
 			}
 			else
@@ -459,7 +467,11 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		            sondagem do SIO2.  Independente do Mass/USB. */
 			Mx4sioSetEnabled(!Mx4sioIsEnabled());
 			if (Mx4sioIsEnabled())
+			{
+				BgmIOBegin();
 				Mx4sioLoadIfEnabled();
+				BgmIOEnd();
+			}
 			break;
 		}
 	}

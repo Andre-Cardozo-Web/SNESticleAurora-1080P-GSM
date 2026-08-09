@@ -121,7 +121,8 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 
 The PS2 pad maps to an SNES controller. **L2 + R2** (pressed together) toggles
 between the game and the menu at any time, flushing changed SRAM when the menu
-opens.
+opens. The menu is displayed first; a pending SRAM write starts two rendered
+frames later and reports completion without the old fixed one-second pause.
 
 <details>
 <summary>🎮 In Game</summary>
@@ -172,6 +173,9 @@ memory-card save: `mc0:/SNESticle/SNES/<game>.srm` and
 `mc0:/SNESticle/NES/<game>.srm`. NES SRAM is enabled only for iNES ROMs whose
 header contains the battery flag and stores the complete 8 KiB cartridge RAM.
 Opening the in-game menu with **L2 + R2** flushes changed SRAM.
+The UI no longer waits for the memory card before entering the menu: the write
+is deferred by two visible frames, while the menu-music I/O helper keeps an
+already-loaded track feeding `audsrv` during the synchronous card operation.
 
 For backward compatibility, an SNES save missing from `SNES/` is looked up at
 the old `mc0:/SNESticle/<game>.srm` location. It is loaded normally and a copy
@@ -491,6 +495,15 @@ a game** and return to the menu (when more than one track is present).
 | **Menu Music** | Off / 1–100 | Background‑music volume. **0 = Off** — the player isn't loaded and uses no RAM. Shows **Searching** while CD/DVD detection is pending, then **No Track** only when no playable `.mod`/`.xm` is found. |
 | **Frequency** | 16–48 kHz | Synthesis rate of the menu music (the output is always resampled to 48 kHz). Higher = better quality but more CPU; **24 kHz** is the default and safest setting for a steady frame rate. |
 
+Menu-side filesystem calls on the PS2 are synchronous. While the browser is
+enumerating a large folder, a cover is being read/decoded, a settings file is
+being written, or SMB is connecting, a small EE helper thread services only
+the already-loaded tracker and `audsrv`; it never opens or scans a filesystem
+itself. Modal messages also continue updating the player. The helper sleeps
+completely outside those I/O scopes, including during gameplay. Changing the
+synthesis frequency restarts the loaded libxmp player in memory instead of
+re-reading the module from disk.
+
 All three persist to the memory card (press ✕ to save), and work the same for
 SNES and NES (the menu and audio path are shared).
 
@@ -572,8 +585,12 @@ For Share/Username/Password, press Cross to edit, Left/Right to move the
 cursor, Up/Down to choose a character, Cross to advance/add, Square to delete,
 and Triangle to finish. Select **Save & Connect** when done. The emulator
 automatically validates and writes `mc0:/SNESticle/SMB.CNF` (falling back to
-`mc1:`), enables SMB, and attempts the connection. The exact saved path and a
-specific connection error are shown on screen. Circle reloads the saved file.
+`mc1:`). If neither card is writable, it tries the writable ELF directory,
+`mass0:`/`mass1:`/legacy `mass:` (USB or MX4SIO), then enabled and detected
+`mmce0:`/`mmce1:` storage. An ELF launched from an internal-HDD PFS partition
+can save beside itself as well. It then enables SMB and attempts the
+connection. The exact saved path and a specific connection error are shown on
+screen. Circle reloads the saved file.
 
 #### Advanced: create `SMB.CNF` manually
 
@@ -599,14 +616,20 @@ accepted.
 Manual files are searched in this order:
 
 - `mc0:/SNESticle/SMB.CNF` or `mc1:/SNESticle/SMB.CNF`;
-- `mc0:/SYS-CONF/SMB.CNF` or `mc1:/SYS-CONF/SMB.CNF`;
-- beside a standalone ELF;
+- beside a writable standalone ELF;
+- `mass0:/SNESticle/SMB.CNF`, `mass1:/SNESticle/SMB.CNF`, then the legacy
+  `mass:/SNESticle/SMB.CNF` alias when Mass/USB or MX4SIO support is enabled;
+- `mmce0:/SNESticle/SMB.CNF` or `mmce1:/SNESticle/SMB.CNF` for enabled MMCE
+  slots that answer the hardware probe;
+- the compatible shared `mc0:/SYS-CONF/SMB.CNF` or
+  `mc1:/SYS-CONF/SMB.CNF` fallback;
 - the root of a disc/ISO as `cdfs:/SMB.CNF`.
 
-The on-console setup writes only the emulator-owned `SNESticle` location; it
-does not overwrite a shared wLaunchELF file under `SYS-CONF`. A memory-card
-file takes priority over a read-only bundled file, so changing a server does
-not require rebuilding the ISO.
+The on-console setup updates the writable file it loaded, or creates only an
+emulator-owned `SNESticle/SMB.CNF` fallback. It never overwrites a shared
+wLaunchELF file under `SYS-CONF`. Emulator-owned files on local storage take
+priority over shared/read-only bundled files, so changing a server does not
+require rebuilding the ISO.
 
 For an ISO build, it can be copied to the root automatically:
 
@@ -759,8 +782,11 @@ The cumulative notes for the current test version are available in
   ROM browser and pause menu via the PS2 port of **libxmp-lite**, decoded on the
   EE and continuously resampled to the SPU2's 48 kHz. Added **Game Volume**,
   **Menu Music** volume (0 = off, frees its RAM) and a synthesis **Frequency**
-  picker in Video Config — all persisted, shared by SNES and NES. A random track
-  plays at boot and a new one each time you leave a game.
+  picker in Video Config — all persisted, shared by SNES and NES. A random
+  track plays at boot; returning from a game resumes the loaded decoder without
+  a disk reload, and the playlist advances when a track completes. A sleeping
+  EE helper prevents directory, cover, settings and SMB I/O from starving the
+  menu stream.
 - **Storage**: a pinned **BDM** stack with OPL's FreeUsbd-based `usbd_mini`
   replaces the old single‑USB path — two USB ports, external HDD/SSD and
   MX4SIO all appear as `mass0:`/`mass1:`, reading FAT16/FAT32/exFAT with

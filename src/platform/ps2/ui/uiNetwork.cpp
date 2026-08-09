@@ -7,6 +7,7 @@
 #include "poly.h"
 #include "uiNetwork.h"
 #include "uiVideo.h"
+#include "mainloop_bgm.h"
 #include "mainloop_smb.h"
 #include "mainloop_ui.h"
 
@@ -74,8 +75,10 @@ void CNetworkScreen::LoadConfig()
 {
     if (m_bLoaded)
         return;
+    BgmIOBegin();
     if (SmbLoadCurrentConfig(&m_Config) < 0)
         SmbConfigDefaults(&m_Config);
+    BgmIOEnd();
     SetEditIP(m_Config.serverIp);
     m_bLoaded = TRUE;
 }
@@ -311,7 +314,9 @@ void CNetworkScreen::Input(Uint32 buttons, Uint32 trigger)
         }
         else if (m_iSelect == 6)
         {
+            BgmIOBegin();
             SmbDisconnect();
+            BgmIOEnd();
             MainLoopModalPrintf(60, "SMB: Disconnected");
         }
     }

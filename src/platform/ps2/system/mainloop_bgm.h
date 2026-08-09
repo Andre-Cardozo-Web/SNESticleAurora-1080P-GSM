@@ -3,9 +3,8 @@
  * Trilha sonora de fundo do menu (browser de ROMs e menu de pausa).
  *
  * Toca modulos de tracker .mod (Amiga ProTracker) e .xm (FastTracker II)
- * via os single-header players jar_mod / jar_xm (em src/third_party/jar).
- * O PCM e' gerado na CPU (EE) a cada frame de menu e empurrado para o
- * audsrv pela API Aud_* (48000 Hz / 16-bit / stereo).
+ * via libxmp-lite. O PCM e' gerado na CPU (EE) a cada frame de menu e
+ * empurrado para o audsrv pela API Aud_* (48000 Hz / 16-bit / stereo).
  *
  * Uso:
  *   - BgmUpdate() e' chamado a cada frame enquanto o menu esta visivel
@@ -31,13 +30,23 @@ extern "C" {
    se nao houver faixa, ou se o audio ainda nao esta pronto. */
 void BgmUpdate(void);
 
+/* Mark menu entry without doing discovery or file I/O. This lets L2+R2 show
+   its first frame immediately; normal BgmUpdate performs lazy loading. */
+void BgmMenuEnter(void);
+
 /* Para a reproducao (chamado ao lancar uma ROM).  NAO libera o decoder:
    mantem a faixa carregada para reabrir o menu sem reler do disco. */
 void BgmStop(void);
 
-/* Avanca para a proxima faixa (chamado ao abrir o menu / sair do jogo).
-   So' troca se houver 2+ faixas; releria do disco. */
+/* Avanca explicitamente para a proxima faixa. So' troca se houver 2+
+   faixas; a retomada normal do menu preserva o decoder e nao chama isto. */
 void BgmNext(void);
+
+/* Scope synchronous UI/file operations. While at least one scope is active,
+   a small EE helper keeps an already-loaded tracker feeding audsrv without
+   touching the filesystem. Calls may be nested. */
+void BgmIOBegin(void);
+void BgmIOEnd(void);
 
 /* Volume da trilha de menu: 0 = OFF (libera o decoder, nao carrega nem
    consome RAM), 1..100 = liga e toca nesse volume.  Vale para SNES e NES

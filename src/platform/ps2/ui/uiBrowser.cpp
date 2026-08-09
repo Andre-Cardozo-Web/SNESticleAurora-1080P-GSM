@@ -21,6 +21,7 @@
 #include "poly.h"
 #include "uiBrowser.h"
 #include "uiCover.h"
+#include "mainloop_bgm.h"
 #include "mainloop_smb.h"
 #include "mainloop_ui.h"
 
@@ -1529,6 +1530,11 @@ void CBrowserScreen::SetDir(const Char *pDir)
     int hddKind = 0;
     int mmceUnavailable = 0;
 
+	/* dopen/dread, device mount and the final sort are intentionally
+	   synchronous so the browser publishes one consistent list. Let the BGM
+	   helper own only the already-loaded tracker while this thread waits. */
+	BgmIOBegin();
+
 	/* Carga PREGUICOSA do HD interno: ao entrar em hdd0: (ou qualquer
 	   subpasta dele), carrega dev9/ps2atad/ps2hdd/ps2fs AGORA -- nunca no
 	   boot.  Depois traduz o caminho da UI ("hdd0:/PART/...") para o PFS
@@ -1562,7 +1568,10 @@ void CBrowserScreen::SetDir(const Char *pDir)
 	ForceDraw();
 
 	if (mmceUnavailable)
+	{
+		BgmIOEnd();
 		return;
+	}
 
 	if (hddKind == 2)
 	{
@@ -1717,6 +1726,7 @@ void CBrowserScreen::SetDir(const Char *pDir)
 	}
 
 	SortEntries();
+	BgmIOEnd();
 
 }
 
