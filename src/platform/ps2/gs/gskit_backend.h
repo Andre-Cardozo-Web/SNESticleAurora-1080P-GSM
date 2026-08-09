@@ -34,15 +34,11 @@ void GSK_Init(int width, int height,
 
 /* ---- Video mode + display offset (selectable in the Settings screen) ----
  *
- * g_GskVideoMode selects the output the GS is programmed for at GSK_Init.
- * 480i is the safe default; 480p is the
- * progressive mode OPL GSM / HDMI adapters expect natively (no interlace
- * conversion -> no red/green stripe artefact). */
-#define GSK_VIDMODE_240P  0   /* NTSC 256x240 progressive (CRT/AV)             */
-#define GSK_VIDMODE_480I  1   /* NTSC 640x480 interlaced                       */
-#define GSK_VIDMODE_480P  2   /* DTV  640x480 progressive (GSM / HDMI)         */
-#define GSK_VIDMODE_1080I 3   /* DTV  1280x960 4:3 window in a 1080i raster    */
-#define GSK_VIDMODE_COUNT 4
+ * Only the two interlaced outputs are supported. Keep their historical IDs
+ * so existing video.cfg files remain compatible: removed IDs 0 (240p/288p)
+ * and 2 (480p) are rejected and fall back to 480i when settings are loaded. */
+#define GSK_VIDMODE_480I  1   /* NTSC/PAL 640x480 interlaced source            */
+#define GSK_VIDMODE_1080I 3   /* DTV 1280x960 4:3 window in a 1080i raster     */
 
 extern int g_GskVideoMode;    /* one of GSK_VIDMODE_*    */
 extern int g_GskDispOffX;     /* horizontal display offset (0 = centred) */
@@ -58,10 +54,7 @@ void GSK_SetDisplayOffset(int x, int y);
    0 reproduces gsKit's normal output exactly. */
 void GSK_SetOverscan(int percent);
 
-/* Toggle the mode-specific 16:9 presentation live (1 = on, 0 = 4:3).
-   SD/1080i retain their PCRTC horizontal expansion. 480p uses a centred
-   640x360 letterbox because expanding its DISPLAY/MAGH window would exceed
-   the mode's 1440-VCK timing limit and read invalid VRAM. */
+/* Toggle the PCRTC 16:9 presentation live (1 = on, 0 = 4:3). */
 void GSK_SetWidescreen(int on);
 
 /* Tear down and rebuild the GS for the current g_GskVideoMode. The caller

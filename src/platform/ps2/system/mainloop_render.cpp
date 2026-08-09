@@ -96,9 +96,9 @@ void MainLoopRender()
      * through the text (worst in the log and menus, where nothing
      * covers the background).  Clearing to black first costs a single
      * sprite and removes the band entirely.  GSK_ResetFrame now clears
-     * the complete PHYSICAL framebuffer, which also covers the black bars
-     * used by the safe 480p widescreen transform. Keep the Poly state reset
-     * here, but do not queue a duplicate logical-canvas clear. */
+     * the complete PHYSICAL framebuffer, including any overscan borders.
+     * Keep the Poly state reset here, but do not queue a duplicate
+     * logical-canvas clear. */
     PolyTexture(NULL);
     PolyBlend(FALSE);
     PolyColor4f(0.0f, 0.0f, 0.0f, 1.0f);

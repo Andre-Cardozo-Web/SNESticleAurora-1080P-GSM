@@ -77,11 +77,10 @@ On top of the SNES core, the project now also integrates **InfoNES** to bring
 
 **PlayStation 2 platform**
 - gsKit‑based video backend with a **Video Config** screen.
-- Multiple video modes: **480i** (default, universally compatible), **480p**
-  (progressive/component), native **256x240 / 288p** (CRT), and **1080i**
-  with a centred 4:3 viewport, plus screen offset, overscan and widescreen.
-  The 480p widescreen path uses a VRAM-safe 16:9 letterbox instead of
-  overflowing the PS2 DISPLAY/MAGH timing window.
+- Two interlaced video modes: **480i** (default, universally compatible) and
+  **1080i** with a centred 4:3 viewport, plus screen offset, overscan and
+  widescreen. The former 240p/288p and 480p paths were removed to keep the GS
+  setup on the stable 640x480 interlaced framebuffer path.
 - Switchable SNES colour profiles: **Original** (default) and the emulator's
   restored **Composite** YIQ calibration; the choice can be previewed live.
 - **Cover art** in the ROM browser — box art, title screens, gameplay snaps,
@@ -885,9 +884,8 @@ The cumulative notes for the current test version are available in
   not yet connected, so those releases can still miss instruments.
 
 **Video**
-- **240p is not a standard HDMI/DTV mode** — passive PS2→HDMI adapters and most
-  modern TVs will not lock onto it (no signal). The default is **480i**; pick
-  240p in the Video Config screen only on a CRT or a 240p‑capable scaler.
+- The Video Config screen exposes only **480i** and **1080i**. Legacy settings
+  saved as 240p/288p or 480p are migrated automatically to 480i.
 
 > Some bugs only reproduce on **real PS2 hardware** (emulators like NetherSX2 /
 > PCSX2 are more forgiving), which makes them harder to track down.

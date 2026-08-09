@@ -21,18 +21,9 @@
 #include "gskit_backend.h"
 #include "gpprim.h"
 
-/* Legacy logical coordinate space the entire UI was written in.
-
-   The physical framebuffer is deliberately mode-specific:
-     240p/288p : 256x240 (native SNES/NES horizontal samples)
-     480i      : 640x480 (integer 2x vertical scale)
-     480p      : 640x480 (one complete progressive frame)
-     1080i     : 640x480 (PCRTC-scaled 4:3 window)
-
-   Treating 640x448 as universal caused two separate defects: 240p
-   resampled every 256-pixel line to 640 pixels (scroll shimmer and the
-   tiny font from issue #26), while 480p needed 480 rows and made its
-   second framebuffer overlap the old fixed _OutTex address. */
+/* Legacy logical coordinate space the entire UI was written in. Both
+   supported outputs use a 640x480 physical framebuffer; 1080i is scaled by
+   the PCRTC into a centred 1280x960 4:3 window. */
 #define GSK_LOGICAL_W   256
 #define GSK_LOGICAL_H   240
 
@@ -43,7 +34,6 @@
 #define GS_NTSC          2
 #define GS_PAL           3
 #define GS_INTERLACE     1
-#define GS_NONINTERLACE  0
 #endif
 
 static GSGLOBAL *_pGsGlobal = NULL;
@@ -51,17 +41,7 @@ static int       _gsk_initialised = 0;
 static int       _gsk_invalidate_pending = 0;
 
 /* Video mode + display offset (selectable in the Settings screen).
-   Default is 480i (interlaced 60Hz) - the universally-compatible mode
-   that every TV / PS2toHDMI adapter locks onto, and that ran at 60fps.
-
-   IMPORTANT: 240p is NOT a standard HDMI/DTV mode. On a CRT it's perfect,
-   but passive PS2->HDMI adapters and most modern TVs REFUSE to lock onto
-   240p (no signal) -- which is why Adriano only got an image by forcing
-   480p via OPL's GSM. So the safe DEFAULT must be 480i; 240p stays
-   available in the Video Config screen for CRT users. (Commit 05ad652
-   had flipped the default to 240p, contradicting this very comment and
-   breaking image on HDMI setups.)
-   Pick the mode you want in the Video Config screen (it persists). */
+   480i is the safe default and 1080i is the only alternate output. */
 int g_GskVideoMode = GSK_VIDMODE_480I;
 int g_GskDispOffX  = 0;
 int g_GskDispOffY  = 0;
@@ -132,53 +112,11 @@ void GSK_Init(int width, int height,
        check anyway in case a caller passes something else. */
     _pGsGlobal->Mode = (mode == GS_PAL) ? GS_MODE_PAL : GS_MODE_NTSC;
 
-    /* Force interlaced output regardless of what the caller asked for.
-     *
-     * The legacy code defaulted to GS_NONINTERLACED (240p / 288p) because
-     * the original 256x240 framebuffer fit a 240p PCRTC scanout exactly.
-     * That choice falls apart on two of our reported setups:
-     *
-     *   - PS2toHDMI cables / modern TVs:  Most passive adapters refuse
-     *     to lock onto 240p (no signal / black screen) and even active
-     *     ones (Pound HDMI, Hyperkin) often misdetect 240p as 480i and
-     *     deinterlace the wrong way, producing dropped frames or jitter.
-     *   - OPL GSM 480p / 1080i:  GSM rewrites SMODE2 / DISPLAY to a
-     *     progressive mode and computes its DISPLAY adaptation against
-     *     the assumption that the source framebuffer is the standard
-     *     480-line interlaced layout (DH=479).  Driving a 240p source
-     *     through that path gives a half-height picture with red/green
-     *     stripes (the symptom Adriano photographed).
-     *
-     * 480i is the safe lowest-common-denominator: CRTs handle it
-     * natively, every PS2toHDMI cable expects it as the primary input,
-     * and GSM's adaptation tables target it directly. */
+    /* The legacy caller still passes its old interlace argument, but the
+       backend now exposes interlaced modes only and owns this choice. */
     (void)interlace;
     switch (g_GskVideoMode)
     {
-    case GSK_VIDMODE_480P:
-        /* DTV 480p progressive: what OPL GSM / PS2toHDMI expect natively,
-           so the PCRTC does no interlace conversion (no RGB stripes). */
-        _pGsGlobal->Mode      = GS_MODE_DTV_480P;
-        _pGsGlobal->Interlace = GS_NONINTERLACED;
-        _pGsGlobal->Field     = GS_FRAME;
-        _gsk_fb_width         = 640;
-        _gsk_fb_height        = 480;
-        _gsk_vck              = 2;
-        break;
-
-    case GSK_VIDMODE_480I:
-        /* 480i interlaced. 640x480 maps the logical 240 lines by an exact
-           2x factor, removing the fractional 240 -> 448 resample visible
-           during vertical scrolling. PAL emits the same 480-line source
-           centred in its 576-line raster. Overscan remains user-adjustable. */
-        _pGsGlobal->Mode      = _gsk_DetectTvMode();
-        _pGsGlobal->Interlace = GS_INTERLACED;
-        _pGsGlobal->Field     = GS_FIELD;
-        _gsk_fb_width         = 640;
-        _gsk_fb_height        = 480;
-        _gsk_vck              = 4;
-        break;
-
     case GSK_VIDMODE_1080I:
         /* A full 1920x1080 RGBA framebuffer cannot fit in the PS2's 4 MiB
            VRAM. Use a 640x480 source and let the PCRTC double it vertically.
@@ -193,24 +131,16 @@ void GSK_Init(int width, int height,
         _gsk_vck              = 1;
         break;
 
-    case GSK_VIDMODE_240P:
+    case GSK_VIDMODE_480I:
     default:
-        /* NTSC 256x240 progressive (PAL consoles emit 256x240 inside a
-           centred 288p raster). This is the native sample grid used by the
-           SNES/NES renderer: no 256 -> 640 digital resample, so horizontal
-           scrolling stays stable and the bitmap font is magnified by the
-           PCRTC together with the rest of the image.
-
-           240p e' PROGRESSIVO, igual ao 480p: precisa de GS_FRAME (FFMD=1)
-           para o PCRTC ler TODA linha do framebuffer numa varredura unica.
-           Com GS_FIELD (FFMD=0) o PCRTC le linha-sim/linha-nao (modo de
-           campo, so' faz sentido em entrelacado), resultando em sinal
-           quebrado / sem lock / imagem pela metade no PS2 real. */
-        _pGsGlobal->Mode      = _gsk_DetectTvMode();  /* NTSC 240p / PAL 288p (50Hz) */
-        _pGsGlobal->Interlace = GS_NONINTERLACED;
-        _pGsGlobal->Field     = GS_FRAME;
-        _gsk_fb_width         = 256;
-        _gsk_fb_height        = 240;
+        /* Unsupported or removed saved values are normalised to 480i. PAL
+           consoles emit the same source centred in their interlaced raster. */
+        g_GskVideoMode        = GSK_VIDMODE_480I;
+        _pGsGlobal->Mode      = _gsk_DetectTvMode();
+        _pGsGlobal->Interlace = GS_INTERLACED;
+        _pGsGlobal->Field     = GS_FIELD;
+        _gsk_fb_width         = 640;
+        _gsk_fb_height        = 480;
         _gsk_vck              = 4;
         break;
     }
@@ -335,32 +265,13 @@ void GSK_Init(int width, int height,
 
 }
 
-/* Map the 256x240 application canvas onto the selected framebuffer.
-
-   480p cannot perform the old "anamorphic" trick in DISPLAY/MAGH: its
-   valid horizontal timing window is 1440 VCK, while keeping all 640
-   source pixels and multiplying MAGH by 4/3 asks the PCRTC for 1920 VCK.
-   StartX then becomes negative and wraps to 4095, which NetherSX2 reports
-   as 256x480 and real hardware reads as a torn/repeated framebuffer.
-
-   In that one mode, preserve the standard 640x480 signal and present an
-   exact 16:9 image by using 640x360 centred vertically (letterbox). This
-   retains every source pixel, never reads outside VRAM and can be toggled
-   live. Other modes retain their already-tested PCRTC widescreen path. */
+/* Map the 256x240 application canvas onto the common 640x480 framebuffer. */
 static void _GskApplyRenderTransform(void)
 {
     float sx = (float)_gsk_fb_width / (float)GSK_LOGICAL_W;
     float sy = (float)_gsk_fb_height / (float)GSK_LOGICAL_H;
-    float ox = 0.0f;
-    float oy = 0.0f;
 
-    if (g_GskWidescreen && _gsk_active_mode == GSK_VIDMODE_480P)
-    {
-        sy *= 0.75f; /* 4:3 canvas -> 16:9 without horizontal over-read */
-        oy  = (float)_gsk_fb_height * 0.125f;
-    }
-
-    GPPrimSetTransform(sx, sy, ox, oy);
+    GPPrimSetTransform(sx, sy, 0.0f, 0.0f);
 }
 
 static void _GskApplyDisplay(void)
@@ -394,12 +305,8 @@ static void _GskApplyDisplay(void)
        the horizontal magnification (MAGH) and the display width (DW)
        together, while still reading the SAME framebuffer pixels.  This
        is the anamorphic path -- on a 16:9 TV the wider picture fills the
-       screen; on a 4:3 TV it overscans the left/right edges.
-
-       480p is deliberately excluded: its safe fallback is handled by
-       _GskApplyRenderTransform() above because a 4/3 MAGH expansion does
-       not fit in that mode's timing window. */
-    if (g_GskWidescreen && _gsk_active_mode != GSK_VIDMODE_480P)
+       screen; on a 4:3 TV it overscans the left/right edges. */
+    if (g_GskWidescreen)
     {
         int magh1  = magh + 1;
         int srcpix = magh1 ? dw / magh1 : dw;
@@ -594,9 +501,7 @@ void GSK_ResetFrame(void)
     *p_data++ = (u64)GS_REG_COLCLAMP;
 
     /* Clear the complete PHYSICAL framebuffer, not only the transformed
-       256x240 canvas. This is required for the 480p widescreen letterbox:
-       otherwise the 60-pixel borders retain stale pixels from a previous
-       frame or from the former 4:3 transform. */
+       256x240 canvas, so overscan borders never retain stale pixels. */
     {
         u8 previous_alpha = gs->PrimAlphaEnable;
         gs->PrimAlphaEnable = GS_SETTING_OFF;

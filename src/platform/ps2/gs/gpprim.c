@@ -39,9 +39,7 @@ static int       _gpprim_curTexValid = 0;
  * The original UI and SNES blit are authored in a 256x240 space. The
  * selected mode owns the physical framebuffer:
  *
- *   240p/288p  256x240  -> 1x/1x, native samples (no digital rescale)
- *   480i        640x480  -> 2.5x/2x
- *   480p/1080i  640x480  -> 2.5x/2x
+ *   480i/1080i  640x480  -> 2.5x/2x
  *
  * Centralising that transform here avoids mode-specific coordinates in
  * every menu. It applies only to destination positions; texture UVs stay
@@ -181,8 +179,8 @@ float GPPrimGetOffsetY(void) { return _gpprim_offset_y; }
 
 /* Same as GPPrimTexRect but positions are taken as PHYSICAL framebuffer
    coordinates (no logical->physical scale applied). UVs are unscaled.
-   The font uses this for exact 1x glyphs in native 240p and exact 2x
-   glyphs in the higher modes, avoiding fractional NEAREST sampling. */
+   The font uses this for exact 2x glyphs in both supported modes, avoiding
+   fractional NEAREST sampling. */
 void GPPrimTexRectAbs(u32 x1, u32 y1, u32 u1, u32 v1,
                       u32 x2, u32 y2, u32 u2, u32 v2,
                       u32 z, u32 colour, unsigned abe)

@@ -126,14 +126,14 @@ extern "C" void DLog(const char *fmt, ...);
    That was safe for the old 640x448/480i layout, whose two RGBA32 buffers
    ended at 0x230000, but NOT for any 640x480 mode: the second buffer ends
    at 0x258000. _OutTex therefore overwrote the last 96 KiB of every other
-   480p framebuffer, producing the repeating bands and alternate-frame
-   flicker reported in issue #19. 480i now also uses 480 rows for exact 2x
-   vertical scaling and is protected by this same dynamic allocation.
+   640x480 framebuffer, producing repeating bands and alternate-frame
+   flicker. Both supported interlaced modes use 480 source rows and are
+   protected by this dynamic allocation.
 
    Keep every allocation 8 KiB aligned because _OutTex and the blender
    temporary surface are also used as FRAME targets (FRAME.FBP units).
    gsKit has already reserved the active mode's FB0/FB1 when this helper
-   runs, so the same layout remains valid for 240p, 480i, 480p and 1080i. */
+   runs, so the same layout remains valid for 480i and 1080i. */
 #define MAINLOOP_VRAM_FRAME_ALIGN   8192U
 #define MAINLOOP_OUT_TEX_BYTES      (256U * 256U * 4U)
 /* Highest blender address is base + 0x200 TBP (temporary 256px RGBA
@@ -253,7 +253,7 @@ Bool MainLoopInit()
     ProfInit(128 * 1024);
     #endif
 	// BOOTLOG("[boot] GS_InitGraph()\n");
-	GS_InitGraph(GS_NTSC,GS_NONINTERLACE);
+	GS_InitGraph(GS_NTSC,GS_INTERLACE);
 	dispx = MAINLOOP_DISPX;
 	dispy = MAINLOOP_DISPY;
 	// BOOTLOG("[boot] GS_SetDispMode()\n");
@@ -361,13 +361,13 @@ _AudMix = new AudMixBuffer(32000, TRUE);
 	 * advancing the counter the loop never returns -- an infinite hang
 	 * on the very first frame.
 	 *
-	 * That is exactly what happens under OPL's GSM (and passive
-	 * PS2toHDMI cables) forcing 480p: GSM takes over the vsync path to
+	 * That can happen under an external OPL GSM override: GSM takes over
+	 * the vsync path to
 	 * re-program the PCRTC every field, the app's VRcount stops
 	 * incrementing, and the boot freezes on a black screen full of
 	 * leftover-VRAM colour bars -- the symptom Adriano photographed.
 	 * Without GSM the VBlank fires normally and the old loop completed,
-	 * which is why the bug only showed up with GSM / progressive output.
+	 * which is why the bug only showed up when an external mode was forced.
 	 *
 	 * Fix: use the non-blocking TestVRstart() and cap the wait with a
 	 * usleep-based wall-clock ceiling, so a stalled / hijacked VBlank

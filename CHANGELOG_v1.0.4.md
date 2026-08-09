@@ -17,16 +17,13 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 - Expandido o core **SuperFX/GSU**, incluindo conjunto de instruções, pipeline,
   cache de código, acesso à ROM/RAM e caminho gráfico `PLOT`/`RPIX`.
+- O backend de vídeo foi reduzido aos modos entrelaçados **480i** e **1080i**;
+  os caminhos instáveis de 240p/288p e 480p foram removidos do GS e do menu.
 - Corrigida a causa de corrupção e flicker da **Issue #19**: texturas do
-  emulador não usam mais endereços fixos que podiam sobrepor o framebuffer de
-  480p.
-- Refeito o dimensionamento de **240p/288p, 480i, 480p e 1080i**, com
-  framebuffer adequado para cada modo.
-- Corrigida a fonte pequena/comprimida de **240p** relatada na **Issue #26**.
-- A fonte de 240p ganhou um atlas próprio para CRT, com traços verticais de
-  duas scanlines; 480i, 480p e 1080i mantêm o desenho original em 2x.
-- Corrigido o widescreen quebrado de **480p** com uma apresentação `16:9 Safe`
-  que não ultrapassa a janela válida do PCRTC nem lê VRAM fora do framebuffer.
+  emulador não usam mais endereços fixos que podiam sobrepor um framebuffer
+  físico de 640x480.
+- 480i e 1080i compartilham framebuffer 640x480, fonte em 2x e o mesmo caminho
+  de overscan/widescreen, reduzindo estados especiais no renderer.
 - Adicionados perfis de cor SNES **Original** e **Composite**, selecionáveis e
   salvos nas configurações.
 - Removido o limite prático de **255/256 itens** do navegador e do CDFS de ISO.
@@ -91,6 +88,23 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   prender o menu, a música e o carregamento de ROM.
 - A paleta antiga e excessivamente saturada do InfoNES foi substituída pela
   paleta NTSC 2C02 padrão do **Mesen2**, preservada em RGBA8.
+
+---
+
+## Revisão r16: somente 480i e 1080i
+
+- Removidos da tela Video Config os modos `240p/288p (CRT)` e `480p`. A opção
+  de vídeo agora alterna diretamente entre `480i (default)` e `1080i`.
+- Eliminados do backend os dois casos progressivos, incluindo framebuffer
+  256x240, `GS_FRAME`, modo DTV 480p, letterbox `16:9 Safe` e parâmetros VCK
+  exclusivos. O primeiro boot também solicita interlace desde `GS_InitGraph`.
+- O atlas dilatado exclusivo de CRT/240p foi removido; ambos os modos restantes
+  usam a fonte original com escala inteira 2x sobre o framebuffer 640x480.
+- Os IDs persistidos de 480i (`1`) e 1080i (`3`) foram preservados para não
+  quebrar `video.cfg`. Configurações antigas com ID 0 (240p/288p), ID 2 (480p)
+  ou um valor inválido caem automaticamente no 480i seguro.
+- 480i continua sendo o padrão. 1080i mantém o viewport centralizado 1280x960
+  em 4:3 e as opções de offset, overscan e widescreen continuam disponíveis.
 
 ---
 
@@ -981,10 +995,7 @@ parte do caminho executado.
 
 ## Pontos que ainda exigem teste comunitário
 
-- Confirmar 240p/288p e a fonte em CRT real, especialmente nas revisões FAT e
-  Slim citadas nas Issues #19 e #26.
-- Confirmar 480p normal e `16:9 Safe` em componente, PS2-to-HDMI, GSM, OPL e
-  NetherSX2.
+- Confirmar 480i em NTSC/PAL, adaptadores PS2-to-HDMI e NetherSX2.
 - Confirmar a proporção 4:3 e a opção widescreen em 1080i em diferentes TVs.
 - Abrir `cdfs:/ROMS/`, subpastas e uma ISO com mais de 256 ROMs.
 - Repetir a navegação em `mass0:`, `mass1:`, `mc0:`, `mc1:`, `smb:`, MMCE e

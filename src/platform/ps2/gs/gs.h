@@ -96,7 +96,6 @@
 
 
 #define GS_INTERLACE	1
-#define GS_NONINTERLACE	0
 #define GS_PAL			3
 #define GS_NTSC			2
 
@@ -252,5 +251,4 @@ typedef struct {
 #define DMA_ID_END		0x07
 
 #endif /* _HW1_H_ */
-
 

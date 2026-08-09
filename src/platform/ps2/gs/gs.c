@@ -29,7 +29,7 @@
 /* Captured by GS_InitGraph / GS_SetDispMode and consumed by
    GS_SetEnv, since gsKit needs the full setup in one shot. */
 static int _gs_mode      = GS_NTSC;
-static int _gs_interlace = GS_NONINTERLACE;
+static int _gs_interlace = GS_INTERLACE;
 static int _gs_dispx     = 0;
 static int _gs_dispy     = 0;
 static int _gs_width     = 256;
