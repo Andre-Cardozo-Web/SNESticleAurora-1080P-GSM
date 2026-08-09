@@ -1335,172 +1335,6 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 	return nObjLine;
 }
 
-#if SNDBG_LOG
-static Uint32 _ObjCountBits8(Uint32 v)
-{
-	v &= 0xFF;
-	v = v - ((v >> 1) & 0x55);
-	v = (v & 0x33) + ((v >> 2) & 0x33);
-	return (v + (v >> 4)) & 0x0F;
-}
-#endif
-
-#define OBJPIXEL(_x)	\
-	if (uMask0 & (0x1<<_x)) {pDest8[_x] = pObj->uData[_x]; }
-
-static void _RenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,  const SnesRenderObj8T *pObjLine, Int32 nObjLine,  const SNMaskT *pWindow, SNMaskT *pMask, SNMaskT *pAddSubMask, Bool bAddSubMask)
-{
-	Uint32 ObjMask[8 + 8];
-	SNMaskT *pObjMask;	
-
-	if (nObjLine <= 0 ) return;
-
-	PROF_ENTER("_RenderOBJPlanar");
-
-	// create objmask used for clipping
-	ObjMask[ 0] = 0xFFFFFFFF;
-	ObjMask[ 1] = 0xFFFFFFFF;
-	ObjMask[ 2] = 0xFFFFFFFF;
-	ObjMask[ 3] = 0xFFFFFFFF;
-	ObjMask[12] = 0xFFFFFFFF;
-	ObjMask[13] = 0xFFFFFFFF;
-	ObjMask[14] = 0xFFFFFFFF;
-	ObjMask[15] = 0xFFFFFFFF;
-
-	// get pointer to objmask
-	pObjMask = (SNMaskT *)&ObjMask[4];
-
-	// OBJMask = mask & ~window
-	// OBJmask are the pixels that are masked by the window
-	if (pWindow)
-	{
-		SNMaskCopy(pObjMask, pWindow);
-	} else
-	{
-		SNMaskClear(pObjMask);
-	}
-
-	if (pMask)
-	{
-		// mask visible obj pixels
-		SNMaskOR(pObjMask, pObjMask, pMask);
-	}
-
-	while (--nObjLine >= 0)
-	{
-		const SnesRenderObj8T *pObj;
-		Int32 iPosX;
-
-		pObj = pObjLine + nObjLine;
-
-		iPosX = pObj->iPosX;
-
-		// clip OBJ
-		if (iPosX > -8 && iPosX < 256 && pObj->uData[SNPPU_BGPLANE_OPAQUE]!=0)
-//		if (pObj->uData[SNPPU_BGPLANE_OPAQUE]!=0)
-		{
-			SNMaskT *pDest;
-			Uint8 *pDest8;
-			Uint32 uShift, uInvShift;
-			Uint32 uMask0, uMask1;
-			Uint32 uObjMask0, uObjMask1;
-
-			pDest8    = pLine8 + iPosX;
-			pDest    = (SNMaskT *)&pLine->uMask32[iPosX >> 5];
-			pObjMask = (SNMaskT *)&ObjMask[4 + (iPosX >> 5)];
-
-			uShift    = iPosX & 0x1F;
-			uInvShift = 32 - uShift;
-
-#if SNDBG_LOG
-			g_DbgObjCandidatePixels += _ObjCountBits8(pObj->uData[SNPPU_BGPLANE_OPAQUE]);
-#endif
-
-			// get opacity bits from obj
-			if (!uShift)
-			{
-				uMask0  = pObj->uData[SNPPU_BGPLANE_OPAQUE];
-				uMask1  = 0;
-			} else
-			{
-				uMask0  = 
-				uMask1  = pObj->uData[SNPPU_BGPLANE_OPAQUE];
-				uMask0 <<= uShift;
-				uMask1 >>= uInvShift;
-			}
-
-			// get objmask window
-			uObjMask0 = pObjMask->uMask32[0];
-			uObjMask1 = pObjMask->uMask32[1];
-
-			// prevent future lower priority obj from rendering, even if this obj is behind a bg!!
-			pObjMask->uMask32[0] |= uMask0;
-			pObjMask->uMask32[1] |= uMask1;
-
-			
-			// mask obj behind bg
-			switch (pObj->uPri)
-			{
-			case 0:		// masked behind layer 1+2+3
-				uObjMask0 |= pDest[SNPPU_BGPLANE_LAYER0].uMask32[0] | pDest[SNPPU_BGPLANE_LAYER1].uMask32[0];
-				uObjMask1 |= pDest[SNPPU_BGPLANE_LAYER0].uMask32[1] | pDest[SNPPU_BGPLANE_LAYER1].uMask32[1];
-				break;
-			case 1:		// masked behind layer 2+3
-				uObjMask0 |= pDest[SNPPU_BGPLANE_LAYER1].uMask32[0];
-				uObjMask1 |= pDest[SNPPU_BGPLANE_LAYER1].uMask32[1];
-				break;
-			case 2:		// masked behind layer 3 only
-				uObjMask0 |= pDest[SNPPU_BGPLANE_LAYER0].uMask32[0] & pDest[SNPPU_BGPLANE_LAYER1].uMask32[0];
-				uObjMask1 |= pDest[SNPPU_BGPLANE_LAYER0].uMask32[1] & pDest[SNPPU_BGPLANE_LAYER1].uMask32[1];
-				break;
-			case 3:		// in front of all layers
-				break;
-			}
-			
-			// mask obj
-			uMask0 &= ~uObjMask0;
-			uMask1 &= ~uObjMask1;
-
-			// prevent future lower priority obj from rendering if an obj pixel has been rendered
-			//pObjMask->uMask32[0] |= uMask0;
-			//pObjMask->uMask32[1] |= uMask1;
-
-			if ((bAddSubMask&1) && ((pObj->uPal|bAddSubMask)&0x4))
-			{
-				pAddSubMask->uMask32[(iPosX >> 5) + 0] |= uMask0;
-				pAddSubMask->uMask32[(iPosX >> 5) + 1] |= uMask1;
-			} else
-			{
-				pAddSubMask->uMask32[(iPosX >> 5) + 0] &= ~uMask0;
-				pAddSubMask->uMask32[(iPosX >> 5) + 1] &= ~uMask1;
-			}
-
-			uMask0>>=uShift;
-			uMask1<<=uInvShift;
-			uMask0|=uMask1;
-
-#if SNDBG_LOG
-			g_DbgObjDrawnPixels += _ObjCountBits8(uMask0);
-#endif
-
-			OBJPIXEL(0);
-			OBJPIXEL(1);
-			OBJPIXEL(2);
-			OBJPIXEL(3);
-			OBJPIXEL(4);
-			OBJPIXEL(5);
-			OBJPIXEL(6);
-			OBJPIXEL(7);
-		}
-	}
-
-	PROF_LEAVE("_RenderOBJPlanar");
-}
-
-
-
-
-
 static void _ClearLinePlanar(SNMaskT *pPlanes, Int32 nPlanes)
 {
 	Int32 iPlane;
@@ -1692,7 +1526,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 #if SNDBG_LOG
 		Uint32 _tObjB = ProfCtrGetCycle();
 #endif
-		_RenderOBJ8(pMain8, pMain, ObjLine, nObjLine,  (tmw&SNESPPU_MASK_OBJ) ? &pBGWindow[4] : NULL, bBG3Pri ? &BG3Pri : NULL, 
+		_SnesPPURenderOBJ8(pMain8, pMain, ObjLine, nObjLine,  (tmw&SNESPPU_MASK_OBJ) ? &pBGWindow[4] : NULL, bBG3Pri ? &BG3Pri : NULL,
 			pMainAddSubMask, (cgadsub & 0x10) ? 1 : 0);
 #if SNDBG_LOG
 		g_TmgCycObj += ProfCtrGetCycle() - _tObjB;
@@ -1735,7 +1569,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 #if SNDBG_LOG
 		Uint32 _tObjC = ProfCtrGetCycle();
 #endif
-		_RenderOBJ8(pSub8, pSub, ObjLine, nObjLine,  (tsw&SNESPPU_MASK_OBJ) ? &pBGWindow[4] : NULL, bBG3Pri ? &BG3Pri : NULL, 
+		_SnesPPURenderOBJ8(pSub8, pSub, ObjLine, nObjLine,  (tsw&SNESPPU_MASK_OBJ) ? &pBGWindow[4] : NULL, bBG3Pri ? &BG3Pri : NULL,
 			pSubAddSubMask, 4|1);
 #if SNDBG_LOG
 		g_TmgCycObj += ProfCtrGetCycle() - _tObjC;

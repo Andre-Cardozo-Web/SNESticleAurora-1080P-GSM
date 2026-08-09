@@ -42,6 +42,31 @@ static Int8 _SNDma_MDMAInc[4] =
 	1, 0, -1, 0
 };
 
+#if SNDBG_LOG
+struct SNDmaOAMCaptureT
+{
+	Bool Active;
+	Uint32 Frame;
+	Uint32 SourceHash;
+	Uint32 Bytes;
+	Uint16 StartAddress;
+	Uint8 Channel;
+};
+
+static SNDmaOAMCaptureT _SNDmaOAMCapture;
+
+static Uint32 _SNDmaHashBytes(const Uint8 *pData, Uint32 nBytes)
+{
+	Uint32 h = 2166136261u;
+	while (nBytes-- > 0)
+	{
+		h ^= *pData++;
+		h *= 16777619u;
+	}
+	return h;
+}
+#endif
+
 
 
 Uint8 SnesDMAC::Read8(Uint32 uChan, Uint32 uAddr)
@@ -206,6 +231,35 @@ void SnesDMAC::SetMDMAEnable(Uint8 uData)
 				(unsigned)uBytes, (unsigned)pChan->bbadx,
 				(unsigned)pRegs->oamaddr.w, (unsigned)pRegs->vmaddr.w,
 				(unsigned)pRegs->cgadd.w, (unsigned)(Uint8)pRegs->vmain);
+
+			/* Snapshot the complete WRAM OAM mirror before its DMA. At channel
+			   completion we hash physical OAM too, proving whether corruption
+			   happened before or inside the $2104 transfer path. */
+			if (!(pChan->dmapx & 0x80) && uMode == 0 &&
+			    pChan->bbadx == 0x04 && iDelta == 1 &&
+			    uBytes == sizeof(SnesOAMT))
+			{
+				Uint32 uAddr = ((Uint32)pChan->a1bx << 16) | pChan->a1tx;
+				Uint32 uHash = 2166136261u;
+				Uint32 i;
+				for (i = 0; i < uBytes; i++)
+				{
+					uHash ^= SNCPUPeek8(m_pCPU,
+						((Uint32)pChan->a1bx << 16) |
+						((pChan->a1tx + i) & 0xFFFF));
+					uHash *= 16777619u;
+				}
+				_SNDmaOAMCapture.Active = TRUE;
+				_SNDmaOAMCapture.Frame = g_DbgCaptureFrameNo;
+				_SNDmaOAMCapture.SourceHash = uHash;
+				_SNDmaOAMCapture.Bytes = uBytes;
+				_SNDmaOAMCapture.StartAddress = pRegs->oamaddr.w;
+				_SNDmaOAMCapture.Channel = (Uint8)uChan;
+				DLog("[snes-oam-dma] f=%u ch=%u src=%06X bytes=%u start=%04X source-hash=%08X",
+					(unsigned)g_DbgCaptureFrameNo, (unsigned)uChan,
+					(unsigned)uAddr, (unsigned)uBytes,
+					(unsigned)pRegs->oamaddr.w, (unsigned)uHash);
+			}
 		}
 
 		if ((iDelta > 0 && uBytes > 0x10000u - pChan->a1tx) ||
@@ -624,6 +678,25 @@ void SnesDMAC::ProcessMDMAChFast(Uint32 uChan)
     // are we done?
     if (pChan->dasx == 0)
     {
+#if SNDBG_LOG
+		if (_SNDmaOAMCapture.Active &&
+		    _SNDmaOAMCapture.Frame == g_DbgCaptureFrameNo &&
+		    _SNDmaOAMCapture.Channel == uChan)
+		{
+			Uint32 uDestHash = _SNDmaHashBytes(
+				(const Uint8 *)m_pPPU->GetOAM(), sizeof(SnesOAMT));
+			Bool bComparable =
+				(_SNDmaOAMCapture.StartAddress & 0x3FF) == 0 &&
+				_SNDmaOAMCapture.Bytes == sizeof(SnesOAMT);
+			DLog("[snes-oam-dma] f=%u ch=%u dest-hash=%08X comparable=%u match=%u end=%04X",
+				(unsigned)g_DbgCaptureFrameNo, (unsigned)uChan,
+				(unsigned)uDestHash, (unsigned)bComparable,
+				(unsigned)(bComparable &&
+					uDestHash == _SNDmaOAMCapture.SourceHash),
+				(unsigned)m_pPPU->GetRegs()->oamaddr.w);
+			_SNDmaOAMCapture.Active = FALSE;
+		}
+#endif
         // clear channel enable bit
         m_MDMAEnable &= ~(1 << uChan);
     }

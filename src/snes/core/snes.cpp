@@ -52,6 +52,7 @@ Uint32 g_DbgObjTiles = 0;
 Uint32 g_DbgObjOpaqueTiles = 0;
 Uint32 g_DbgObjCandidatePixels = 0;
 Uint32 g_DbgObjDrawnPixels = 0;
+Uint32 g_DbgObjClippedTiles = 0;
 Uint32 g_DbgObjEmptyLines = 0;
 Uint32 g_DbgObjRangeLimitLines = 0;
 Uint32 g_DbgObjLimitLines = 0;
@@ -1568,8 +1569,9 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 				(unsigned)g_DbgObjOamRefs, (unsigned)g_DbgObjTiles,
 				(unsigned)g_DbgObjOpaqueTiles, (unsigned)g_DbgObjEmptyLines,
 				(unsigned)g_DbgObjRangeLimitLines, (unsigned)g_DbgObjLimitLines);
-			DLog("[snes-obj] pixels candidate/drawn=%u/%u | regs obsel=%02X tm=%02X ts=%02X first=%u",
+			DLog("[snes-obj] pixels candidate/drawn=%u/%u edge-tiles=%u | regs obsel=%02X tm=%02X ts=%02X first=%u",
 				(unsigned)g_DbgObjCandidatePixels, (unsigned)g_DbgObjDrawnPixels,
+				(unsigned)g_DbgObjClippedTiles,
 				(unsigned)g_DbgObjOBSEL, (unsigned)g_DbgObjTM,
 				(unsigned)g_DbgObjTS, (unsigned)g_DbgObjPriority);
 			{
@@ -1640,6 +1642,7 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 			g_DbgObjOpaqueTiles = 0;
 			g_DbgObjCandidatePixels = 0;
 			g_DbgObjDrawnPixels = 0;
+			g_DbgObjClippedTiles = 0;
 			g_DbgObjEmptyLines = 0;
 			g_DbgObjRangeLimitLines = 0;
 			g_DbgObjLimitLines = 0;

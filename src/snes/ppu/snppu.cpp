@@ -291,6 +291,37 @@ static Uint32 _MapOAMAddress(Uint32 uAddress)
 	return (uAddress < 0x200) ? uAddress : 0x200 | (uAddress & 0x1F);
 }
 
+#if SNDBG_LOG
+static void _TraceOAMAddressWrite(Uint32 uPort, Uint8 uData,
+	Uint16 uOldAddress, Uint16 uOldBase, const SnesPPURegsT *pRegs)
+{
+	static Uint32 s_uFrame = (Uint32)-1;
+	static Uint32 s_uWrites = 0;
+
+	if (!g_DbgCaptureActive)
+		return;
+
+	if (s_uFrame != g_DbgCaptureFrameNo)
+	{
+		s_uFrame = g_DbgCaptureFrameNo;
+		s_uWrites = 0;
+	}
+
+	/* Jogos normalmente escrevem o par uma vez por frame. O limite evita
+	   transformar um caso patologico em milhares de linhas de diagnostico. */
+	if (s_uWrites < 12)
+	{
+		DLog("[snes-oam-reg] f=%u port=%04X data=%02X addr=%04X>%04X base=%04X>%04X first=%u",
+			(unsigned)g_DbgCaptureFrameNo, (unsigned)uPort,
+			(unsigned)uData, (unsigned)uOldAddress,
+			(unsigned)pRegs->oamaddr.w, (unsigned)uOldBase,
+			(unsigned)pRegs->oamaddrlatch.w,
+			(unsigned)pRegs->oampri.w);
+	}
+	s_uWrites++;
+}
+#endif
+
 void SnesPPU::UpdateOAMPriority()
 {
 	Uint16 uOldPriority = m_Regs.oampri.w;
@@ -445,25 +476,42 @@ void SnesPPU::Write8(Uint32 uAddr, Uint8 uData)
 
 	case 0x2102:	// oamaddl (oam address low)
 	{
-		// $2102 altera apenas os oito bits baixos do endereco em palavras.
-		// Preserve tanto OAMADDH.0 (bit 9) quanto a rotacao de prioridade.
-		m_Regs.oamaddr.w = (m_Regs.oamaddr.w & 0x8200) |
-		                       ((Uint16)uData << 1);
+#if SNDBG_LOG
+		Uint16 uOldAddress = m_Regs.oamaddr.w;
+		Uint16 uOldBase = m_Regs.oamaddrlatch.w;
+#endif
+
+		/* $2102/$2103 formam um endereco BASE separado do endereco interno
+		   que $2104/$2138 incrementam. Escrever qualquer metade recarrega o
+		   endereco interno a partir das duas ultimas metades gravadas. Usar
+		   o endereco ja incrementado aqui desloca a OAM quando um jogo muda
+		   apenas uma metade; esse e' o caso historico do Final Fight 2. */
+		m_Regs.oamaddrlatch.w =
+			(m_Regs.oamaddrlatch.w & 0x8200) | ((Uint16)uData << 1);
+		m_Regs.oamaddr.w = m_Regs.oamaddrlatch.w;
 		m_OAMLatch = 0;
 		UpdateOAMPriority();
-
-		m_Regs.oamaddrlatch.w = m_Regs.oamaddr.w;
+#if SNDBG_LOG
+		_TraceOAMAddressWrite(uAddr, uData, uOldAddress, uOldBase, &m_Regs);
+#endif
 		break;
 	}
 	case 0x2103:	// oamaddh (oam address high)
 	{
-		m_Regs.oamaddr.w = (m_Regs.oamaddr.w & 0x01FE) |
-		                       ((uData & 0x01) << 9) |
-		                       ((uData & 0x80) << 8);
+#if SNDBG_LOG
+		Uint16 uOldAddress = m_Regs.oamaddr.w;
+		Uint16 uOldBase = m_Regs.oamaddrlatch.w;
+#endif
+
+		m_Regs.oamaddrlatch.w =
+			(m_Regs.oamaddrlatch.w & 0x01FE) |
+			((uData & 0x01) << 9) | ((uData & 0x80) << 8);
+		m_Regs.oamaddr.w = m_Regs.oamaddrlatch.w;
 		m_OAMLatch = 0;
 		UpdateOAMPriority();
-
-		m_Regs.oamaddrlatch.w = m_Regs.oamaddr.w;
+#if SNDBG_LOG
+		_TraceOAMAddressWrite(uAddr, uData, uOldAddress, uOldBase, &m_Regs);
+#endif
 		break;
 	}
 

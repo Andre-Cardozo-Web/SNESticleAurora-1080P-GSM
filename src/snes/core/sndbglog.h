@@ -58,6 +58,7 @@ extern Uint32 g_DbgObjTiles;
 extern Uint32 g_DbgObjOpaqueTiles;
 extern Uint32 g_DbgObjCandidatePixels;
 extern Uint32 g_DbgObjDrawnPixels;
+extern Uint32 g_DbgObjClippedTiles;
 extern Uint32 g_DbgObjEmptyLines;
 extern Uint32 g_DbgObjRangeLimitLines;
 extern Uint32 g_DbgObjLimitLines;

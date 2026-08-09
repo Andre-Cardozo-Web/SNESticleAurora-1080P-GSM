@@ -24,6 +24,34 @@ static void Check(const char *pName, int nGot, int nExpected)
     }
 }
 
+static void CheckFill(const char *pName, const Uint8 *pData, int nBytes,
+                      Uint8 uExpected)
+{
+    int i;
+    for (i = 0; i < nBytes; i++)
+    {
+        if (pData[i] != uExpected)
+        {
+            std::printf("FAIL %s[%d]: %02X != %02X\n", pName, i,
+                        (unsigned)pData[i], (unsigned)uExpected);
+            g_Failures++;
+            return;
+        }
+    }
+}
+
+static void InitRenderTile(SnesRenderObj8T *pObj, Int32 iPosX)
+{
+    int i;
+    std::memset(pObj, 0, sizeof(*pObj));
+    pObj->iPosX = (Int16)iPosX;
+    pObj->uPri = 3;
+    pObj->uPal = 4;
+    for (i = 0; i < 8; i++)
+        pObj->uData[i] = (Uint8)(0x40 + i);
+    pObj->uData[SNPPU_BGPLANE_OPAQUE] = 0xFF;
+}
+
 int main()
 {
     SnesRenderObjT objs[4];
@@ -76,6 +104,87 @@ int main()
 	Check("normal tile column 3", _SnesPPUOBJSourceColumn(3, 32, FALSE), 3);
 	Check("hflip left fetches right", _SnesPPUOBJSourceColumn(0, 32, TRUE), 3);
 	Check("hflip right fetches left", _SnesPPUOBJSourceColumn(3, 32, TRUE), 0);
+
+    // Tiles parcialmente fora da tela nao podem tocar os buffers vizinhos.
+    // Final Fight 2 mantem OBJ em X negativo durante o gameplay.
+    {
+        Uint8 guardedLine[256 + 16];
+        Uint8 *pLine8 = guardedLine + 8;
+        SNMaskT planes[SNPPU_BGPLANE_NUM];
+        SNMaskT guardedAddSub[3];
+        SnesRenderObj8T obj;
+
+        std::memset(guardedLine, 0xCD, sizeof(guardedLine));
+        std::memset(pLine8, 0, 256);
+        std::memset(planes, 0, sizeof(planes));
+        std::memset(guardedAddSub, 0xA5, sizeof(guardedAddSub));
+        std::memset(&guardedAddSub[1], 0, sizeof(SNMaskT));
+        InitRenderTile(&obj, -7);
+
+        _SnesPPURenderOBJ8(pLine8, planes, &obj, 1, NULL, NULL,
+                           &guardedAddSub[1], 1);
+        Check("left clip visible pixel", pLine8[0], 0x47);
+        Check("left clip next pixel untouched", pLine8[1], 0x00);
+        Check("left clip add/sub", guardedAddSub[1].uMask32[0], 0x00000001);
+        CheckFill("left line guard before", guardedLine, 8, 0xCD);
+        CheckFill("left line guard after", guardedLine + 264, 8, 0xCD);
+        CheckFill("left mask guard before", (const Uint8 *)&guardedAddSub[0],
+                  sizeof(SNMaskT), 0xA5);
+        CheckFill("left mask guard after", (const Uint8 *)&guardedAddSub[2],
+                  sizeof(SNMaskT), 0xA5);
+
+        std::memset(guardedLine, 0xCD, sizeof(guardedLine));
+        std::memset(pLine8, 0, 256);
+        std::memset(planes, 0, sizeof(planes));
+        std::memset(guardedAddSub, 0xA5, sizeof(guardedAddSub));
+        std::memset(&guardedAddSub[1], 0, sizeof(SNMaskT));
+        InitRenderTile(&obj, 255);
+
+        _SnesPPURenderOBJ8(pLine8, planes, &obj, 1, NULL, NULL,
+                           &guardedAddSub[1], 1);
+        Check("right clip visible pixel", pLine8[255], 0x40);
+        Check("right clip previous pixel untouched", pLine8[254], 0x00);
+        Check("right clip add/sub", guardedAddSub[1].uMask32[7],
+              (int)0x80000000u);
+        CheckFill("right line guard before", guardedLine, 8, 0xCD);
+        CheckFill("right line guard after", guardedLine + 264, 8, 0xCD);
+        CheckFill("right mask guard before", (const Uint8 *)&guardedAddSub[0],
+                  sizeof(SNMaskT), 0xA5);
+        CheckFill("right mask guard after", (const Uint8 *)&guardedAddSub[2],
+                  sizeof(SNMaskT), 0xA5);
+
+        // Prioridade de BG e janela continuam bloqueando somente o pixel alvo.
+        std::memset(pLine8, 0, 256);
+        std::memset(planes, 0, sizeof(planes));
+        std::memset(&guardedAddSub[1], 0, sizeof(SNMaskT));
+        InitRenderTile(&obj, 10);
+        obj.uPri = 0;
+        planes[SNPPU_BGPLANE_LAYER0].uMask32[0] = 1u << 10;
+        _SnesPPURenderOBJ8(pLine8, planes, &obj, 1, NULL, NULL,
+                           &guardedAddSub[1], 1);
+        Check("BG priority blocks first pixel", pLine8[10], 0x00);
+        Check("BG priority leaves next pixel", pLine8[11], 0x41);
+
+		// The fast path must split an unaligned tile across adjacent words
+		// without changing pixel order or priority masking.
+		std::memset(pLine8, 0, 256);
+		std::memset(planes, 0, sizeof(planes));
+		std::memset(&guardedAddSub[1], 0, sizeof(SNMaskT));
+		InitRenderTile(&obj, 29);
+		obj.uPri = 0;
+		planes[SNPPU_BGPLANE_LAYER0].uMask32[1] = 1u << 1; // x=33
+		_SnesPPURenderOBJ8(pLine8, planes, &obj, 1, NULL, NULL,
+		                   &guardedAddSub[1], 1);
+		Check("word split first pixel", pLine8[29], 0x40);
+		Check("word split last low pixel", pLine8[31], 0x42);
+		Check("word split first high pixel", pLine8[32], 0x43);
+		Check("word split BG priority", pLine8[33], 0x00);
+		Check("word split last pixel", pLine8[36], 0x47);
+		Check("word split add/sub low", guardedAddSub[1].uMask32[0],
+		      (int)0xE0000000u);
+		Check("word split add/sub high", guardedAddSub[1].uMask32[1],
+		      0x0000001D);
+    }
 
     std::printf(g_Failures ? "FAIL (%d)\n" : "PASS\n", g_Failures);
     return g_Failures ? 1 : 0;

@@ -126,6 +126,14 @@ struct SnesRenderObj8T
 	Uint8   uPad[1];
 };
 
+/* Compoe uma scanline de tiles OBJ ja decodificados. Esta rotina fica
+   separada do fetch para que o recorte nas bordas possa ser testado no host
+   (os buffers reais tem exatamente 256 pixels / 8 palavras, sem sentinelas). */
+void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
+	const SnesRenderObj8T *pObjLine, Int32 nObjLine,
+	const SNMaskT *pWindow, const SNMaskT *pMask,
+	SNMaskT *pAddSubMask, Bool bAddSubMask);
+
 
 
 struct SnesRender8pInfoT

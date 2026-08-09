@@ -10,6 +10,7 @@
 #include "rendersurface.h"
 #include "snmask.h"
 #include "prof.h"
+#include "sndbglog.h"
 
 
 
@@ -49,6 +50,203 @@ Bool _SnesPPUOBJTileCountedX(Uint16 uObjectX, Int32 iTileX)
 	   first ordinary off-left tile that counts. */
 	return ((uObjectX & 0x1FF) == 0x100) ||
 	       (iTileX > -8 && iTileX < 256);
+}
+
+
+#if SNDBG_LOG
+static Uint32 _ObjCountBits8(Uint32 v)
+{
+	v &= 0xFF;
+	v = v - ((v >> 1) & 0x55);
+	v = (v & 0x33) + ((v >> 2) & 0x33);
+	return (v + (v >> 4)) & 0x0F;
+}
+#endif
+
+
+void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
+	const SnesRenderObj8T *pObjLine, Int32 nObjLine,
+	const SNMaskT *pWindow, const SNMaskT *pMask,
+	SNMaskT *pAddSubMask, Bool bAddSubMask)
+{
+	SNMaskT ObjMask;
+	Int32 iWord;
+
+	if (nObjLine <= 0)
+		return;
+
+	PROF_ENTER("_RenderOBJPlanar");
+
+	/* Os buffers de destino possuem exatamente oito palavras. O renderer
+	   antigo criava guardas somente para ObjMask, mas ainda formava ponteiros
+	   antes de pLine8/pLine e escrevia pAddSubMask[-1] ou [8] quando um tile
+	   cruzava x=0/255. Final Fight 2 usa OBJ em x negativo durante o gameplay.
+
+	   Tiles inteiramente visiveis continuam no caminho de mascara por palavra
+	   (o caso quente). Somente os dois recortes de borda usam o caminho por
+	   pixel, evitando tanto o acesso fora do buffer quanto uma regressao de
+	   desempenho para todos os OBJ da scanline. */
+	for (iWord = 0; iWord < 8; iWord++)
+	{
+		Uint32 uMask = pWindow ? pWindow->uMask32[iWord] : 0;
+		if (pMask)
+			uMask |= pMask->uMask32[iWord];
+		ObjMask.uMask32[iWord] = uMask;
+	}
+
+	while (--nObjLine >= 0)
+	{
+		const SnesRenderObj8T *pObj = pObjLine + nObjLine;
+		Uint32 uOpaque = pObj->uData[SNPPU_BGPLANE_OPAQUE];
+
+		if (!uOpaque || pObj->iPosX <= -8 || pObj->iPosX >= 256)
+			continue;
+
+#if SNDBG_LOG
+		g_DbgObjCandidatePixels += _ObjCountBits8(uOpaque);
+#endif
+
+		if (pObj->iPosX >= 0 && pObj->iPosX <= 248)
+		{
+			Uint32 uShift = pObj->iPosX & 31;
+			Uint32 uInvShift = 32 - uShift;
+			Uint32 uMask0 = uOpaque << uShift;
+			Uint32 uMask1 = uShift ? (uOpaque >> uInvShift) : 0;
+			Uint32 uBlocked0;
+			Uint32 uBlocked1;
+			Uint32 uVisible;
+			Uint8 *pDest8 = pLine8 + pObj->iPosX;
+
+			iWord = pObj->iPosX >> 5;
+			uBlocked0 = ObjMask.uMask32[iWord];
+			uBlocked1 = uMask1 ? ObjMask.uMask32[iWord + 1] : 0;
+
+			/* Um OBJ de maior prioridade impede os seguintes mesmo quando o
+			   proprio pixel fica atras de BG, igual ao caminho planar antigo. */
+			ObjMask.uMask32[iWord] |= uMask0;
+			if (uMask1)
+				ObjMask.uMask32[iWord + 1] |= uMask1;
+
+			switch (pObj->uPri)
+			{
+			case 0:
+				uBlocked0 |= pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord] |
+				             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord];
+				if (uMask1)
+					uBlocked1 |= pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord + 1] |
+					             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord + 1];
+				break;
+			case 1:
+				uBlocked0 |= pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord];
+				if (uMask1)
+					uBlocked1 |= pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord + 1];
+				break;
+			case 2:
+				uBlocked0 |= pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord] &
+				             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord];
+				if (uMask1)
+					uBlocked1 |= pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord + 1] &
+					             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord + 1];
+				break;
+			case 3:
+				break;
+			}
+
+			uMask0 &= ~uBlocked0;
+			uMask1 &= ~uBlocked1;
+
+			if (pAddSubMask)
+			{
+				if ((bAddSubMask & 1) && ((pObj->uPal | bAddSubMask) & 0x4))
+				{
+					pAddSubMask->uMask32[iWord] |= uMask0;
+					if (uMask1)
+						pAddSubMask->uMask32[iWord + 1] |= uMask1;
+				} else
+				{
+					pAddSubMask->uMask32[iWord] &= ~uMask0;
+					if (uMask1)
+						pAddSubMask->uMask32[iWord + 1] &= ~uMask1;
+				}
+			}
+
+			uVisible = uMask0 >> uShift;
+			if (uShift)
+				uVisible |= uMask1 << uInvShift;
+			uVisible &= 0xFF;
+
+#if SNDBG_LOG
+			g_DbgObjDrawnPixels += _ObjCountBits8(uVisible);
+#endif
+			if (uVisible & 0x01) pDest8[0] = pObj->uData[0];
+			if (uVisible & 0x02) pDest8[1] = pObj->uData[1];
+			if (uVisible & 0x04) pDest8[2] = pObj->uData[2];
+			if (uVisible & 0x08) pDest8[3] = pObj->uData[3];
+			if (uVisible & 0x10) pDest8[4] = pObj->uData[4];
+			if (uVisible & 0x20) pDest8[5] = pObj->uData[5];
+			if (uVisible & 0x40) pDest8[6] = pObj->uData[6];
+			if (uVisible & 0x80) pDest8[7] = pObj->uData[7];
+		} else
+		{
+			Int32 iPixel;
+#if SNDBG_LOG
+			g_DbgObjClippedTiles++;
+#endif
+			for (iPixel = 0; iPixel < 8; iPixel++)
+			{
+				Int32 iX;
+				Uint32 uBit;
+				Uint32 uBlocked;
+
+				if (!(uOpaque & (1u << iPixel)))
+					continue;
+
+				iX = pObj->iPosX + iPixel;
+				if ((Uint32)iX >= 256u)
+					continue;
+
+				iWord = iX >> 5;
+				uBit = 1u << (iX & 31);
+				uBlocked = ObjMask.uMask32[iWord] & uBit;
+				ObjMask.uMask32[iWord] |= uBit;
+
+				switch (pObj->uPri)
+				{
+				case 0:
+					uBlocked |= (pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord] |
+					             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord]) & uBit;
+					break;
+				case 1:
+					uBlocked |= pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord] & uBit;
+					break;
+				case 2:
+					uBlocked |= (pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord] &
+					             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord]) & uBit;
+					break;
+				case 3:
+					break;
+				}
+
+				if (uBlocked)
+					continue;
+
+				if (pAddSubMask)
+				{
+					if ((bAddSubMask & 1) && ((pObj->uPal | bAddSubMask) & 0x4))
+						pAddSubMask->uMask32[iWord] |= uBit;
+					else
+						pAddSubMask->uMask32[iWord] &= ~uBit;
+				}
+
+				pLine8[iX] = pObj->uData[iPixel];
+#if SNDBG_LOG
+				g_DbgObjDrawnPixels++;
+#endif
+			}
+		}
+	}
+
+	PROF_LEAVE("_RenderOBJPlanar");
 }
 
 

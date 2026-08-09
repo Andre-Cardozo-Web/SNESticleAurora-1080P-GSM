@@ -26,6 +26,9 @@
 #include "sndbglog.h"
 
 extern "C" {
+#if SNDBG_LOG
+#include "miniz.h"
+#endif
 #include "miniz_compat.h"
 }
 
@@ -256,6 +259,9 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	int nRomBytes = 0;
 	Uint8 *pBuffer = _RomData;
 	Int32 nBufferBytes = sizeof(_RomData);
+#if SNDBG_LOG
+	Uint32 uRomCRC = 0;
+#endif
 
 	// load rom data from disk into our buffer
 	if (eType == MAINLOOP_ENTRYTYPE_GZ)
@@ -294,6 +300,12 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	{
 		return FALSE;
 	}
+
+#if SNDBG_LOG
+	/* Hash the bytes exactly as they came from disk/archive, before a ROM
+	   parser removes a copier header or deinterleaves the image. */
+	uRomCRC = (Uint32)mz_crc32(MZ_CRC32_INIT, pBuffer, (size_t)nRomBytes);
+#endif
 
     /* Parsers receive the exact byte count, so clearing all 8 MiB before
        every launch was redundant. Keep only a small zero guard for old
@@ -448,8 +460,8 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 		}
 
 #if SNDBG_LOG
-		DLog("[rom] file='%s' bytes=%d title='%s' mapper='%s'",
-			_RomName, (int)nRomBytes,
+		DLog("[rom] file='%s' bytes=%d crc32=%08X title='%s' mapper='%s'",
+			_RomName, (int)nRomBytes, (unsigned)uRomCRC,
 			pRomTitle ? pRomTitle : "<none>",
 			pRomMapper ? pRomMapper : "<none>");
 #endif

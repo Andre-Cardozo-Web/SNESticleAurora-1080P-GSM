@@ -44,6 +44,26 @@ int main()
 	ppu.Write8(0x2103, 0x01);
 	ppu.Write8(0x2102, 0x12);
 	Check("OAMADDL preserves bit 9", ppu.GetRegs()->oamaddr.w, 0x224);
+	Check("OAM base preserves bit 9", ppu.GetRegs()->oamaddrlatch.w, 0x224);
+
+	// The base written through $2102/$2103 is not the current address that
+	// $2104 advances. Writing either address register reloads the current
+	// address from the two last register halves.
+	ppu.Write8(0x2103, 0x00);
+	ppu.Write8(0x2102, 0x20);
+	ppu.WriteOAMDATA(0x11);
+	ppu.WriteOAMDATA(0x22);
+	Check("OAM current advances away from base", ppu.GetRegs()->oamaddr.w, 0x42);
+	Check("OAM base does not advance", ppu.GetRegs()->oamaddrlatch.w, 0x40);
+	ppu.Write8(0x2103, 0x80);
+	Check("OAMADDH reloads base low bits", ppu.GetRegs()->oamaddr.w, 0x8040);
+	Check("OAMADDH updates base", ppu.GetRegs()->oamaddrlatch.w, 0x8040);
+	Check("OAMADDH reloads first object", ppu.GetRegs()->oampri.w, 0x10);
+	ppu.WriteOAMDATA(0x33);
+	ppu.WriteOAMDATA(0x44);
+	ppu.EndFrame();
+	Check("VBlank reloads OAM base", ppu.GetRegs()->oamaddr.w, 0x8040);
+	Check("VBlank reloads first object", ppu.GetRegs()->oampri.w, 0x10);
 
 	// Low OAM commits an even/odd pair only when the odd byte arrives.
 	ppu.Write8(0x2103, 0x00);
