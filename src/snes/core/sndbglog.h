@@ -81,9 +81,8 @@ extern Uint32 g_DbgDMAWraps;
 extern Uint32 g_DbgDMAMaxBytes;
 extern Uint32 g_DbgDMAModes[8];
 
-// A cada cinco segundos uma build diagnostica captura OAM completa e alguns
-// scanlines OBJ. Assim o log continua pequeno, mas contem os dados necessarios
-// para reproduzir o endereco de tile usado pelo renderer.
+// Periodicamente uma build diagnostica captura dois scanlines OBJ e suas
+// fontes em VRAM. O dump e' pequeno para nao bloquear o SIO do NetherSX2.
 extern Bool   g_DbgCaptureActive;
 extern Uint32 g_DbgCaptureFrameNo;
 #endif

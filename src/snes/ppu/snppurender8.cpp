@@ -1165,7 +1165,7 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 	Int32 nObjLine = 0;
 #if SNDBG_LOG
 	Bool bTrace = g_DbgCaptureActive &&
-		(iLine == 72 || iLine == 112 || iLine == 152 || iLine == 192);
+		(iLine == 112 || iLine == 160);
 	if (bTrace)
 		DLog("[snes-obj-trace] f=%u line=%d selected=%d base/name=%04X/%04X",
 			(unsigned)g_DbgCaptureFrameNo, (int)iLine, (int)nObjList,
@@ -1235,15 +1235,6 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 			Uint32 uLastAddr = 0;
 			Int32 iTraceTile;
 
-			DLog("[snes-obj-trace] f=%u line=%d idx=%u xy=%d/%u wh=%u/%u tile=%03X row=%X yoff=%u pal/pri=%u/%u h/vxor=%u/%u",
-				(unsigned)g_DbgCaptureFrameNo, (int)iLine,
-				(unsigned)pObjList[nObjList], (int)ObjX,
-				(unsigned)pObj->uPosY, (unsigned)pObj->uWidth,
-				(unsigned)pObj->uHeight, (unsigned)pObj->uTile,
-				(unsigned)uRow, (unsigned)uYoff, (unsigned)pObj->uPal,
-				(unsigned)pObj->uPri, (unsigned)pObj->bHFlip,
-				(unsigned)pObj->uVXOR);
-
 			for (iTraceTile = 0; iTraceTile < (pObj->uWidth >> 3);
 			     iTraceTile++)
 			{
@@ -1266,9 +1257,14 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 				uTraceHash = (uTraceHash ^ uWord0) * 16777619u;
 				uTraceHash = (uTraceHash ^ uWord8) * 16777619u;
 			}
-			DLog("[snes-obj-vram] f=%u line=%d idx=%u addr first/last=%04X/%04X rowhash=%08X",
+			DLog("[snes-obj-trace] f=%u line=%d idx=%u xy=%d/%u wh=%u/%u tile/row/yoff=%03X/%X/%u pal/pri/h/vx=%u/%u/%u/%u addr=%04X..%04X vhash=%08X",
 				(unsigned)g_DbgCaptureFrameNo, (int)iLine,
-				(unsigned)pObjList[nObjList], (unsigned)uFirstAddr,
+				(unsigned)pObjList[nObjList], (int)ObjX,
+				(unsigned)pObj->uPosY, (unsigned)pObj->uWidth,
+				(unsigned)pObj->uHeight, (unsigned)pObj->uTile,
+				(unsigned)uRow, (unsigned)uYoff, (unsigned)pObj->uPal,
+				(unsigned)pObj->uPri, (unsigned)pObj->bHFlip,
+				(unsigned)pObj->uVXOR, (unsigned)uFirstAddr,
 				(unsigned)uLastAddr, (unsigned)uTraceHash);
 		}
 #endif

@@ -102,26 +102,6 @@ static Uint32 SnesDbgHash32(const void *pData, Uint32 nBytes)
 	return h;
 }
 
-static void SnesDbgDumpOAM(const SnesOAMT *pOAM, Uint32 uFrame,
-	                       const char *pPhase)
-{
-	const Uint8 *p = (const Uint8 *)pOAM;
-	Uint32 uOffset;
-
-	for (uOffset = 0; uOffset < sizeof(*pOAM); uOffset += 16)
-	{
-		DLog("[snes-oam] f=%u phase=%s off=%03X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
-			(unsigned)uFrame, pPhase, (unsigned)uOffset,
-			(unsigned)p[uOffset +  0], (unsigned)p[uOffset +  1],
-			(unsigned)p[uOffset +  2], (unsigned)p[uOffset +  3],
-			(unsigned)p[uOffset +  4], (unsigned)p[uOffset +  5],
-			(unsigned)p[uOffset +  6], (unsigned)p[uOffset +  7],
-			(unsigned)p[uOffset +  8], (unsigned)p[uOffset +  9],
-			(unsigned)p[uOffset + 10], (unsigned)p[uOffset + 11],
-			(unsigned)p[uOffset + 12], (unsigned)p[uOffset + 13],
-			(unsigned)p[uOffset + 14], (unsigned)p[uOffset + 15]);
-	}
-}
 #endif
 
 
@@ -1313,16 +1293,10 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 		(g_DbgCaptureFrameNo % (SNDBG_FRAME_PERIOD * 5u)) == 0;
 	if (g_DbgCaptureActive)
 	{
-		DLog("[snes-capture] begin f=%u (OAM pre/post + OBJ trace + profiler)",
+		DLog("[snes-capture] begin f=%u (light OBJ/DMA trace)",
 			(unsigned)g_DbgCaptureFrameNo);
-		SnesDbgDumpOAM(m_PPU.GetOAM(), g_DbgCaptureFrameNo, "pre");
-#if PROF_ENABLED
-		/* A captura automatica evita o antigo L2+R2, que abria o menu antes
-		   de o frame do jogo ser executado e produzia um perfil vazio. */
-		ProfStartProfile(1);
-#endif
 	}
-	// --- timing: marca inicio do frame depois do dump diagnostico ---
+	// --- timing: marca inicio do frame ---
 	g_TmgFrameStart  = ProfCtrGetCycle();
 	g_TmgCycM7  = 0;
 	g_TmgCycObj = 0;
@@ -1544,7 +1518,6 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 				(unsigned)pr->oamaddr.w, (unsigned)pr->oamaddrlatch.w,
 				(unsigned)pr->oampri.w, (unsigned)(Uint8)pr->vmain,
 				(unsigned)pr->vmaddr.w, (unsigned)pr->cgadd.w);
-			SnesDbgDumpOAM(m_PPU.GetOAM(), g_TmgFrameNo, "post");
 			DLog("[snes-capture] end f=%u", (unsigned)g_TmgFrameNo);
 		}
 		if (g_TmgWinFrames >= SNDBG_FRAME_PERIOD)

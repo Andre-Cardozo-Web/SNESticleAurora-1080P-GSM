@@ -250,7 +250,9 @@ Bool MainLoopInit()
 {
 //    assert(0);
     #if PROF_ENABLED
-    ProfInit(128 * 1024);
+    /* Bound the log to 32K entries. The old 128K allocation used about
+       2.5 MiB and could fail in packed builds on the 32 MiB PS2. */
+    ProfInit(32 * 1024);
     #endif
 	// BOOTLOG("[boot] GS_InitGraph()\n");
 	GS_InitGraph(GS_NTSC,GS_INTERLACE);
