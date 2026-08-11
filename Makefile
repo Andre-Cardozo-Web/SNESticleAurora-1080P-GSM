@@ -11,6 +11,7 @@ BUILD_ERROR_FILE ?= $(BUILD_META_DIR)/error.list
 BUILD_WARN_FILE ?= $(BUILD_META_DIR)/warn.list
 BUILD_OK_FILE ?= $(BUILD_META_DIR)/ok.list
 BUILD_META_DIR ?= $(OBJ_DIR)/.meta
+BUILD_CONFIG_FILE ?= $(BUILD_META_DIR)/compile-mode.txt
 BUILD_TOTAL ?= $(words $(OBJS))
 # VERBOSE=1 mostra a mensagem de warning/erro COMPLETA (sem o corte de
 # 58 colunas do resumo) e despeja o log inteiro do compilador em
@@ -622,6 +623,22 @@ check-env: ensure-ps2dev
 $(OBJ_DIR):
 	@mkdir -p "$(OBJ_DIR)"
 
+# Make does not normally notice when a command-line define changes.  In
+# particular, an ELF built once with SNES_DIAGNOSTICS=1 could keep the heavy
+# per-pixel/per-instruction counters when the next plain `make iso` reused its
+# objects.  Update this marker only when the compile mode changes; every
+# object depends on it, so returning to the normal mode really recompiles with
+# SNDBG_LOG=0 while identical consecutive builds remain incremental.
+.PHONY: FORCE_COMPILE_MODE
+FORCE_COMPILE_MODE:
+
+$(BUILD_CONFIG_FILE): FORCE_COMPILE_MODE | $(OBJ_DIR)
+	@mkdir -p "$(BUILD_META_DIR)"; \
+	mode='SNES_DIAGNOSTICS=$(SNES_DIAGNOSTICS) PROFILE=$(PROFILE) DSP4_CAPTURE=$(DSP4_CAPTURE) DSP4_STUB=$(DSP4_STUB)'; \
+	if [ ! -f "$@" ] || [ "$$(cat "$@")" != "$$mode" ]; then \
+		printf '%s\n' "$$mode" > "$@"; \
+	fi
+
 $(PKG_DIR):
 	@mkdir -p "$(PKG_DIR)"
 
@@ -762,6 +779,8 @@ define RUN_COMPILE
 	fi
 endef
 $(OBJ_DIR)/platform/ps2/system/embedded_irx.o: $(EMBED_HEADERS)
+
+$(OBJS): $(BUILD_CONFIG_FILE)
 
 $(OBJ_DIR)/%.o: src/%.c | $(OBJ_DIR)
 	$(call RUN_COMPILE,CC,$<,$(EE_CC) $(CFLAGS) $(DEPFLAGS) $(INCS) -c "$<" -o "$@")

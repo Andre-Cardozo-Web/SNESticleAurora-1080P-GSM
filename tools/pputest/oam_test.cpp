@@ -29,11 +29,84 @@ static void Check(const char *pName, int nGot, int nExpected)
 	}
 }
 
+static void CheckVRAMBlockEquivalence()
+{
+	static const Uint8 vmainValues[] =
+	{
+		0x00, 0x01, 0x02, 0x04, 0x08, 0x0C,
+		0x80, 0x81, 0x82, 0x84, 0x88, 0x8C
+	};
+	static const Uint16 startValues[] =
+	{
+		0x0000, 0x001F, 0x00FF, 0x1234, 0x7FFE, 0x7FFF
+	};
+	Uint8 data[517];
+	Uint32 seed = 0x65816;
+	int i, j, n;
+
+	for (i = 0; i < (int)sizeof(data); i++)
+	{
+		seed = seed * 1664525u + 1013904223u;
+		data[i] = (Uint8)(seed >> 24);
+	}
+
+	for (i = 0; i < (int)(sizeof(vmainValues) / sizeof(vmainValues[0])); i++)
+	for (j = 0; j < (int)(sizeof(startValues) / sizeof(startValues[0])); j++)
+	for (n = 1; n <= 517; n += (n < 17 ? 1 : 37))
+	{
+		SnesPPU reference;
+		SnesPPU candidate;
+		TestRender referenceRender;
+		TestRender candidateRender;
+		int k;
+
+		reference.SetPPURender(&referenceRender);
+		referenceRender.SetPPU(&reference);
+		candidate.SetPPURender(&candidateRender);
+		candidateRender.SetPPU(&candidate);
+		reference.Reset();
+		candidate.Reset();
+
+		reference.Write8(0x2115, vmainValues[i]);
+		candidate.Write8(0x2115, vmainValues[i]);
+		reference.Write8(0x2116, (Uint8)startValues[j]);
+		candidate.Write8(0x2116, (Uint8)startValues[j]);
+		reference.Write8(0x2117, (Uint8)(startValues[j] >> 8));
+		candidate.Write8(0x2117, (Uint8)(startValues[j] >> 8));
+
+		for (k = 0; k < n; k++)
+		{
+			if (k & 1)
+				reference.WriteVMDATAH(data[k]);
+			else
+				reference.WriteVMDATAL(data[k]);
+		}
+		candidate.WriteVMDATABlock(data, n);
+
+		if (std::memcmp(reference.GetVramPtr(0), candidate.GetVramPtr(0),
+		                SNESPPU_VRAM_NUMWORDS * sizeof(Uint16)) != 0 ||
+		    reference.GetRegs()->vmaddr.w != candidate.GetRegs()->vmaddr.w ||
+		    reference.GetRegs()->vmreadlatch.w != candidate.GetRegs()->vmreadlatch.w)
+		{
+			std::printf("FAIL VRAM block equivalence: vmain=%02X start=%04X bytes=%d addr=%04X/%04X latch=%04X/%04X\n",
+			            (unsigned)vmainValues[i], (unsigned)startValues[j], n,
+			            (unsigned)reference.GetRegs()->vmaddr.w,
+			            (unsigned)candidate.GetRegs()->vmaddr.w,
+			            (unsigned)reference.GetRegs()->vmreadlatch.w,
+			            (unsigned)candidate.GetRegs()->vmreadlatch.w);
+			g_Failures++;
+			return;
+		}
+	}
+}
+
 int main()
 {
 	SnesPPU ppu;
 	TestRender render;
 	Uint8 *pOAM;
+
+	CheckVRAMBlockEquivalence();
 
 	ppu.SetPPURender(&render);
 	render.SetPPU(&ppu);

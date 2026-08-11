@@ -863,9 +863,11 @@ The cumulative notes for the current test version are available in
   but did not fix the reported gameplay scene by itself. r17 removes a GIF-DMA
   race that let the GS read a scanline while the CPU reused its source buffer,
   preserves DMA mode phase across a 64 KiB bank wrap and aligns mirrored OBJ
-  tile-fetch order with the 34-tile hardware limit. OAM/VRAM burst paths also
-  avoid per-byte overhead. These paths have host coverage, but the original
-  scene still needs a PS2/NetherSX2 retest before it is considered fixed.
+  tile-fetch order with the 34-tile hardware limit. r18 additionally fixes the
+  65816's 24-bit bus wrap after official vectors exposed indexed reads past
+  `$FF:FFFF` landing in an empty page. OAM/VRAM burst paths and the CPU wrap
+  have host coverage, but the original scene still needs a PS2/NetherSX2
+  retest before it is considered fixed.
 - Some large / special‑chip titles may still freeze or misbehave.
 - **SuperFX (GSU)** is experimental in v1.0.4: r15 corrects cache-window
   rotation, executable RAM banks `$60-$7F`, byte MMIO and the hot loop, but

@@ -606,6 +606,11 @@ void SnesSystem::MapMem(SNRomMappingE eRomMapping, Uint32 uFlags)
 			break;
 	}
 
+	/* Indexed/16-bit accesses can transiently carry past $FFFFFF.  Publish
+	   bank $00 into the overflow page after every cartridge/system override
+	   has been installed, preserving the 24-bit bus wrap in the ASM core. */
+	SNCPUMirror24BitBus(&m_Cpu);
+
 
 
 #if CODE_DEBUG

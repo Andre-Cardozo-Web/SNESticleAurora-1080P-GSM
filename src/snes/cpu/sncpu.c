@@ -20,6 +20,8 @@
 static Int32 _SNCPUDefaultExecuteFunc(SNCpuT *pCpu);
 static Uint8 SNCPU_TRAPFUNC _SNCPUDefaultRead(SNCpuT *pCpu, Uint32 Addr);
 static void SNCPU_TRAPFUNC _SNCPUDefaultWrite(SNCpuT *pCpu, Uint32 Addr, Uint8 Data);
+static Uint8 SNCPU_TRAPFUNC _SNCPUWrap24Read(SNCpuT *pCpu, Uint32 Addr);
+static void SNCPU_TRAPFUNC _SNCPUWrap24Write(SNCpuT *pCpu, Uint32 Addr, Uint8 Data);
 
 
 //
@@ -229,6 +231,44 @@ void SNCPUSetRomSpeed(SNCpuT *pCpu, Uint32 Addr, Uint32 Size, Uint32 uCycles)
 		iBank++;
 		nBanks--;
 	}
+}
+
+/* Effective addresses such as $FF:FFFF,X may carry into $100:xxxx before
+   reaching the memory helpers.  The 65816 has only a 24-bit address bus, so
+   that carry wraps to bank $00.  SNCPU_MEM_SIZE deliberately reserves one
+   extra 64 KiB for this case; mirror the eight bank descriptors for $00 here
+   so the hot ASM memory path gets the wrap without adding a mask to every
+   read/write. */
+void SNCPUMirror24BitBus(SNCpuT *pCpu)
+{
+	Uint32 i;
+	const Uint32 uBusBytes = 0x1000000;
+	const Uint32 iMirror = uBusBytes >> SNCPU_BANK_SHIFT;
+	const Uint32 nBanks = 0x10000 >> SNCPU_BANK_SHIFT;
+
+	for (i = 0; i < nBanks; i++)
+	{
+		pCpu->Bank[iMirror + i] = pCpu->Bank[i];
+		if (pCpu->Bank[iMirror + i].pMem)
+			pCpu->Bank[iMirror + i].pMem -= uBusBytes;
+		else
+			pCpu->Bank[iMirror + i].pReadTrapFunc = _SNCPUWrap24Read;
+
+		/* ROM and I/O descriptors can have a direct read pointer but still use
+		   their write trap.  Route every trapped overflow write through the
+		   wrapped address as well. */
+		pCpu->Bank[iMirror + i].pWriteTrapFunc = _SNCPUWrap24Write;
+	}
+}
+
+static Uint8 SNCPU_TRAPFUNC _SNCPUWrap24Read(SNCpuT *pCpu, Uint32 Addr)
+{
+	return SNCPURead8(pCpu, Addr & 0xFFFFFF);
+}
+
+static void SNCPU_TRAPFUNC _SNCPUWrap24Write(SNCpuT *pCpu, Uint32 Addr, Uint8 Data)
+{
+	SNCPUWrite8(pCpu, Addr & 0xFFFFFF, Data);
 }
 
 

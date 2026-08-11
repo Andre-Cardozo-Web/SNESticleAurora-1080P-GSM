@@ -2,7 +2,7 @@
 
 Changelog acumulado da versão 1.0.4, comparado com a tag **v1.0.3**.
 
-Data deste pacote de teste: **9 de agosto de 2026**
+Data deste pacote de teste: **11 de agosto de 2026**
 
 Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
@@ -88,6 +88,35 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   prender o menu, a música e o carregamento de ROM.
 - A paleta antiga e excessivamente saturada do InfoNES foi substituída pela
   paleta NTSC 2C02 padrão do **Mesen2**, preservada em RGBA8.
+
+---
+
+## Revisão r18: wrap real do 65816 e build normal sem diagnóstico residual
+
+- A comparação com o Mesen e uma bancada diferencial descartou os dois
+  suspeitos anteriores: o DMA de 544 bytes chega idêntico da WRAM à OAM e o
+  caminho em bloco de `$2118/$2119` produz a mesma VRAM, endereço e latch que
+  as escritas alternadas byte a byte em todos os modos de `VMAIN` testados.
+- Foi encontrada uma diferença reproduzível no 65816: endereços efetivos que
+  carregavam além de `$FF:FFFF` acessavam a página extra vazia do core, embora
+  o barramento físico de 24 bits deva voltar para `$00:0000`. A página extra de
+  64 KiB agora espelha os oito descritores do banco `$00`, inclusive MMIO e
+  writes presos em trap, que recebem o endereço já limitado a 24 bits.
+- Os casos de `LDA abs,X` e `LDA abs,Y` que cruzam o limite passaram de falhas
+  reproduzíveis para **10.000/10.000** vetores oficiais em cada opcode. Uma
+  rodada adicional de 440 mil vetores nativos de load/store deixou apenas os
+  casos já conhecidos do executor C quando a própria instrução começa em
+  `$FFFD/$FFFE`; o núcleo ASM do PS2 preserva o banco do PC nesse caminho.
+- `tools/cputest` ganhou uma bancada host para o espelho de leitura, escrita e
+  MMIO de 24 bits, além do adaptador para os vetores oficiais do 65816.
+- O `Makefile` agora guarda o modo de compilação. Ao voltar de
+  `SNES_DIAGNOSTICS=1` ou `PROFILE=1` para um `make iso` normal, todos os
+  objetos afetados são recompilados com os contadores desligados. Builds
+  normais consecutivas continuam incrementais.
+- Esta é uma correção de CPU comprovada e um candidato novo para os tiles de
+  personagens corrompidos. A cena de Final Fight 2 continua **pendente de
+  confirmação visual no NetherSX2/PS2**; não é anunciada como resolvida sem o
+  reteste da ROM.
 
 ---
 
