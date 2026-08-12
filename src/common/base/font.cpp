@@ -13,7 +13,9 @@
 extern "C" {
 #include "gs.h"
 #include "gpprim.h"
+#include "gskit_backend.h"
 #include "gpfifo.h"
+
 };
 
 #define FIXED4(_x) ((Int32)((_x)*16.0f))
@@ -101,6 +103,30 @@ static Int32 _FontDrawChar(FontCharT *pFontChar, float fX, float fY, float z1, U
     y1 = ((Uint32)FIXED4(py1)) & 0xFFFF;
 
 	GPPrimTexRectAbs(x0, y0, u0, v0, x1, y1, u1, v1, 10, uColor, 1);
+
+    /*
+     * Temporary 240p font hack:
+     * the rightmost glyph column is lost by the current rasterisation.
+     * Draw that source column over the penultimate physical column
+     * instead of extending the glyph to the right.
+     */
+    if (GPPrimGetScaleX() == 1.0f && GPPrimGetScaleY() == 1.0f)
+    {
+        Uint32 lastU0 = ((pFontChar->u1 - 1) << 4);
+        Uint32 lastU1 = (pFontChar->u1 << 4);
+
+        Uint32 lastX0 = ((Uint32)FIXED4(px1 - 1.0f)) & 0xFFFF;
+        Uint32 lastX1 = ((Uint32)FIXED4(px1)) & 0xFFFF;
+
+        GPPrimTexRectAbs(
+            lastX0, y0,
+            lastU0, v0,
+            lastX1, y1,
+            lastU1, v1,
+            10, uColor, 1
+        );
+    }
+
 
     /* advance in LOGICAL units: physical glyph width + 2px gap */
     return _FontAdvLogical(width * FONT_DRAW_SCALE + 2);

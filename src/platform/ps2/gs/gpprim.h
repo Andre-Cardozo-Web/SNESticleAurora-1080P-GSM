@@ -3,6 +3,9 @@
 #define _GPPRIM_H
 
 #include <tamtypes.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 void GPPrimRect(unsigned x1, unsigned y1, unsigned c1, unsigned x2, unsigned y2, unsigned c2, unsigned z, unsigned abe);
 void GPPrimEnableZBuf(void);
@@ -32,5 +35,7 @@ float GPPrimGetOffsetY(void);
  * same as GPPrimTexRect).  Used by the font to draw glyphs at an exact
  * integer multiple of the atlas for crisp, uniform letters. */
 void GPPrimTexRectAbs(u32 x1, u32 y1, u32 u1, u32 v1, u32 x2, u32 y2, u32 u2, u32 v2, u32 z, u32 colour, unsigned abe);
-
+#ifdef __cplusplus
+}
+#endif
 #endif

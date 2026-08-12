@@ -37,6 +37,7 @@ void GSK_Init(int width, int height,
  * Only the two interlaced outputs are supported. Keep their historical IDs
  * so existing video.cfg files remain compatible: removed IDs 0 (240p/288p)
  * and 2 (480p) are rejected and fall back to 480i when settings are loaded. */
+#define GSK_VIDMODE_240P  0   /* NTSC/PAL 256x240 progressive (CRT/AV)        */
 #define GSK_VIDMODE_480I  1   /* NTSC/PAL 640x480 interlaced source            */
 #define GSK_VIDMODE_1080I 3   /* DTV 1280x960 4:3 window in a 1080i raster     */
 

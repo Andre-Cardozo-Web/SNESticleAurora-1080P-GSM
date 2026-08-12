@@ -156,11 +156,12 @@ void VideoSettingsLoad(void)
 		if (cfg.mmceenable == 1 && cfg.mx4sioenable == 1)
 			cfg.mx4sioenable = 0;
 
-		/* IDs 0 (240p/288p) and 2 (480p) existed through video.cfg v17.
-		   They are deliberately unsupported now and migrate to safe 480i;
-		   the historical IDs for 480i/1080i remain unchanged. */
-		g_GskVideoMode = (cfg.mode == GSK_VIDMODE_1080I)
-		               ? GSK_VIDMODE_1080I : GSK_VIDMODE_480I;
+		if (cfg.mode == GSK_VIDMODE_240P ||
+		    cfg.mode == GSK_VIDMODE_480I ||
+		    cfg.mode == GSK_VIDMODE_1080I)
+			g_GskVideoMode = cfg.mode;
+		else
+			g_GskVideoMode = GSK_VIDMODE_480I;
 
 		if (cfg.offx >= -64 && cfg.offx <= 64) g_GskDispOffX = cfg.offx;
 		if (cfg.offy >= -64 && cfg.offy <= 64) g_GskDispOffY = cfg.offy;
@@ -253,6 +254,7 @@ typedef struct
 
 static const VideoModeChoiceT _VideoModes[] =
 {
+	{ GSK_VIDMODE_240P,  "240p/288p (CRT)" },
 	{ GSK_VIDMODE_480I,  "480i (default)" },
 	{ GSK_VIDMODE_1080I, "1080i" }
 };
