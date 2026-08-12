@@ -240,13 +240,19 @@ void InfoNES_LoadFrame(void)
  * never set it so InfoNES_HSync never breaks out of InfoNES_Cycle on
  * QUIT.  Menu return is handled by _MainLoopInputProcess instead.
  */
+
+static Bool s_TurboPhase = FALSE;
+
 static DWORD MapSnesToNes(Uint16 snes)
 {
     DWORD nes = 0;
     if (snes == EMUSYS_DEVICE_DISCONNECTED) return 0;
 
-    if (snes & (SNESIO_JOY_B | SNESIO_JOY_X))      nes |= 0x01; /* A=jump */
-    if (snes & (SNESIO_JOY_A | SNESIO_JOY_Y))      nes |= 0x02; /* B=run  */
+if (snes & SNESIO_JOY_B)                       nes |= 0x01; /* Cross -> A */
+if (snes & SNESIO_JOY_Y)                       nes |= 0x02; /* Square -> B */
+
+if ((snes & SNESIO_JOY_X) && s_TurboPhase)     nes |= 0x02; /* Triangle -> turbo B */
+if ((snes & SNESIO_JOY_A) && s_TurboPhase)     nes |= 0x01; /* Circle -> turbo A */
     if (snes &  SNESIO_JOY_SELECT)                  nes |= 0x04; /* SELECT */
     if (snes &  SNESIO_JOY_START)                   nes |= 0x08; /* START  */
     if (snes &  SNESIO_JOY_UP)                      nes |= 0x10;
@@ -258,6 +264,7 @@ static DWORD MapSnesToNes(Uint16 snes)
 
 void InfoNES_PadState( DWORD *pdwPad1, DWORD *pdwPad2, DWORD *pdwSystem )
 {
+    s_TurboPhase = !s_TurboPhase;
     Emu::SysInputT *pInput = g_pNesInputState;
     DWORD p1 = 0, p2 = 0;
 
