@@ -34,6 +34,7 @@
 #define GS_NTSC          2
 #define GS_PAL           3
 #define GS_INTERLACE     1
+#define GS_NONINTERLACED  0
 #endif
 
 static GSGLOBAL *_pGsGlobal = NULL;
@@ -129,6 +130,23 @@ void GSK_Init(int width, int height,
         _gsk_fb_width         = 640;
         _gsk_fb_height        = 480;
         _gsk_vck              = 1;
+        break;
+
+    case GSK_VIDMODE_240P:
+        /*
+         * NTSC 256x240 progressive / PAL 256x240 inside a 288p raster.
+         *
+         * This is the native SNES/NES sample grid.  Keep the framebuffer
+         * at 256x240 so the renderer's logical 256x240 canvas remains 1:1.
+         *
+         * Progressive output requires GS_FRAME rather than GS_FIELD.
+         */
+        _pGsGlobal->Mode      = _gsk_DetectTvMode();
+        _pGsGlobal->Interlace = GS_NONINTERLACED;
+        _pGsGlobal->Field     = GS_FRAME;
+        _gsk_fb_width         = 256;
+        _gsk_fb_height        = 240;
+        _gsk_vck              = 4;
         break;
 
     case GSK_VIDMODE_480I:
