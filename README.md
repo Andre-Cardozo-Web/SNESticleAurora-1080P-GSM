@@ -866,8 +866,14 @@ The cumulative notes for the current test version are available in
   tile-fetch order with the 34-tile hardware limit. r18 additionally fixes the
   65816's 24-bit bus wrap after official vectors exposed indexed reads past
   `$FF:FFFF` landing in an empty page. OAM/VRAM burst paths and the CPU wrap
-  have host coverage, but the original scene still needs a PS2/NetherSX2
-  retest before it is considered fixed.
+  have host coverage. r19 audits every 65816 opcode in emulation/native mode,
+  fixes stack/direct-page/decimal/interrupt corner cases and aligns DMA/HDMA
+  timing with MesenCE/Mesen2. The original scene still needs a PS2/NetherSX2 retest
+  before it is considered fixed.
+- **Wild Guns** — r19 implements the documented 24-clock NMI delay after MDMA
+  and corrects the HDMA state machine/mode 5. The full-screen flicker reported
+  after character selection still needs confirmation on the same NetherSX2
+  setup before the issue is marked fixed.
 - Some large / special‑chip titles may still freeze or misbehave.
 - **SuperFX (GSU)** is experimental in v1.0.4: r15 corrects cache-window
   rotation, executable RAM banks `$60-$7F`, byte MMIO and the hot loop, but
@@ -923,6 +929,12 @@ tools/         host‑side test harnesses (chip + OBJ verification)
 
 
 - **[iaddis/SNESticle](https://github.com/iaddis/SNESticle)** — Icer Addis, the original emulator.
+- **[nesdev-org/MesenCE](https://github.com/nesdev-org/MesenCE)** — current
+  Mesen2-derived reference for 65816, interrupt and SNES DMA/HDMA behavior
+  used by the r19 audit.
+- **[SingleStepTests/65816](https://github.com/SingleStepTests/65816)** —
+  complete per-opcode state, memory and bus-cycle vectors used by
+  `tools/cputest`.
 - **[ZSNES Team](https://www.zsnes.com)** — zsKnight, _Demo_, pagefault, Nach; their GPLv2 DSP‑4 HLE (`chips/dsp4emu.c`) is ported here as `src/snes/core/dsp4emu.*` (Top Gear 3000 support).
 - **[tmaul/SNESticle](https://github.com/tmaul/SNESticle)** — many later improvements.
 - **[Wolf3s/SNESticle](https://github.com/Wolf3s/SNESticle)** — fork used as one of the bases for this repository.

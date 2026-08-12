@@ -75,27 +75,59 @@
 //
 
 
-#define SNCPU_SUBCYCLES(_nCycles)			pCpu->Cycles-=(_nCycles)*SNCPU_CYCLE_FAST;
-#define SNCPU_SUBCYCLESSLOW(_nCycles)		pCpu->Cycles-=(_nCycles)*SNCPU_CYCLE_SLOW;
-#define SNCPU_SUBMEMCYCLES(_Addr, _nBytes)	pCpu->Cycles -= pCpu->Bank[(_Addr) >> SNCPU_BANK_SHIFT].uBankCycle * (_nBytes);
+#if defined(SNCPU_TEST) && SNCPU_TEST
+#define SNCPU_TESTCYCLES(_nCycles) pCpu->uTestCycles += (_nCycles);
+#else
+#define SNCPU_TESTCYCLES(_nCycles)
+#endif
 
-#define SNCPU_FETCH8(_Reg)  _Reg=_SNCPUFetch8(pCpu, rPC);  rPC++;  
-#define SNCPU_FETCH16(_Reg) _Reg=_SNCPUFetch16(pCpu, rPC); rPC+=2; 
-#define SNCPU_FETCH24(_Reg) _Reg=_SNCPUFetch24(pCpu, rPC); rPC+=3; 
+#define SNCPU_SUBCYCLES(_nCycles) \
+	do { \
+		pCpu->Cycles-=(_nCycles)*SNCPU_CYCLE_FAST; \
+		SNCPU_TESTCYCLES(_nCycles) \
+	} while (0);
+#define SNCPU_SUBCYCLESSLOW(_nCycles) \
+	do { \
+		pCpu->Cycles-=(_nCycles)*SNCPU_CYCLE_SLOW; \
+		SNCPU_TESTCYCLES(_nCycles) \
+	} while (0);
+#define SNCPU_SUBMEMCYCLES(_Addr, _nBytes) \
+	do { \
+		pCpu->Cycles -= pCpu->Bank[(_Addr) >> SNCPU_BANK_SHIFT].uBankCycle * (_nBytes); \
+		SNCPU_TESTCYCLES(_nBytes) \
+	} while (0);
+
+#define SNCPU_INC_PC(_Bytes) \
+	rPC = (rPC & 0xFF0000) | ((rPC + (_Bytes)) & 0xFFFF);
+#define SNCPU_FETCH8(_Reg)  _Reg=_SNCPUFetch8(pCpu, rPC);  SNCPU_INC_PC(1)
+#define SNCPU_FETCH16(_Reg) _Reg=_SNCPUFetch16(pCpu, rPC); SNCPU_INC_PC(2)
+#define SNCPU_FETCH24(_Reg) _Reg=_SNCPUFetch24(pCpu, rPC); SNCPU_INC_PC(3)
 
 #define SNCPU_WRITE8(_Addr, _Data)  _SNCPUWrite8(pCpu, _Addr, _Data);  
 #define SNCPU_WRITE16(_Addr, _Data) _SNCPUWrite16(pCpu, _Addr, _Data); 
+#define SNCPU_WRITE16_WRAP16(_Addr, _Data) \
+	_SNCPUWrite16Wrap16(pCpu, _Addr, _Data);
 
 #define SNCPU_READ8(_Addr, _x)  _x = _SNCPURead8(pCpu, _Addr);  
 #define SNCPU_READ16(_Addr, _x) _x = _SNCPURead16(pCpu, _Addr); 
 #define SNCPU_READ24(_Addr, _x) _x = _SNCPURead24(pCpu, _Addr); 
+#define SNCPU_READ16_WRAP16(_Addr, _x) _x = _SNCPURead16Wrap16(pCpu, _Addr);
+#define SNCPU_READ24_WRAP16(_Addr, _x) _x = _SNCPURead24Wrap16(pCpu, _Addr);
+#define SNCPU_READ16_DP(_Addr, _x) _x = _SNCPURead16DP(pCpu, _Addr, R_DPMASK);
+#define SNCPU_READ16_DPX(_Addr, _x) \
+	_x = _SNCPURead16Wrap16(pCpu, _Addr);
 
 #define SNCPU_PUSH8(_Data)	_SNCPUPush8(pCpu, _Data);  
 #define SNCPU_PUSH16(_Data)	_SNCPUPush16(pCpu, _Data); 
 #define SNCPU_PUSH24(_Data)	_SNCPUPush24(pCpu, _Data); 
+#define SNCPU_PUSH16_RAW(_Data) _SNCPUPush16Raw(pCpu, _Data);
+#define SNCPU_PUSH24_RAW(_Data) _SNCPUPush24Raw(pCpu, _Data);
 #define SNCPU_POP8(_x)	_x = _SNCPUPop8(pCpu);  
+#define SNCPU_POP8_RAW(_x) _x = _SNCPUPop8Raw(pCpu);
 #define SNCPU_POP16(_x)	_x = _SNCPUPop16(pCpu); 
 #define SNCPU_POP24(_x)	_x = _SNCPUPop24(pCpu); 
+#define SNCPU_POP16_RAW(_x) _x = _SNCPUPop16Raw(pCpu);
+#define SNCPU_POP24_RAW(_x) _x = _SNCPUPop24Raw(pCpu);
 
 
 //
@@ -149,7 +181,7 @@
 #define SNCPU_GETI(_x, _imm) _x = _imm;
 
 #define SNCPU_GET_DP(_x) _x = R_DP;
-#define SNCPU_SET_DP(_x) R_DP = _x;
+#define SNCPU_SET_DP(_x) R_DP = _x; SNCPU_UPDATE_DPMASK();
 
 #define SNCPU_GET_DB(_x) _x = R_DB;
 #define SNCPU_SET_DB(_x) R_DB = _x;
@@ -157,9 +189,8 @@
 #define SNCPU_GET_PC(_x) _x = R_PC;
 
 #define SNCPU_SET_PC16(_Addr)	\
-		R_PC--;					\
 		R_PC&= ~0xFFFF;			\
-		R_PC|= _Addr;
+		R_PC|= (_Addr) & 0xFFFF;
 
 #define SNCPU_SET_PC24(_Addr)	\
 		R_PC= _Addr & 0xFFFFFF;
@@ -181,7 +212,7 @@
 #define SNCPU_GETFLAG_E(_x)  _x = pCpu->Regs.rE;
 
 #define SNCPU_SETFLAG_I() R_P |= SNCPU_FLAG_I;
-#define SNCPU_CLRFLAG_I() R_P &= ~SNCPU_FLAG_I; SNCPU_CHECKIRQ();
+#define SNCPU_CLRFLAG_I() R_P &= ~SNCPU_FLAG_I; SNCPU_CHECKIRQ(1);
 #define SNCPU_SETFLAG_D() R_P |= SNCPU_FLAG_D;
 #define SNCPU_CLRFLAG_D() R_P &= ~SNCPU_FLAG_D;
 #define SNCPU_SETFLAGI_V(__V) R_P &= ~SNCPU_FLAG_V; R_P |= ((__V) & 1) << 6;
@@ -191,22 +222,67 @@
 // flag pack/unpack
 //
 
+/* In emulation mode, indexed direct-page addressing wraps in the selected
+   page only when DL is zero.  Pack the page base in the upper half and the
+   arithmetic mask in the lower half so the hot opcode path needs no branch. */
+#define SNCPU_UPDATE_DPMASK()							\
+	do {											\
+		if (pCpu->Regs.rE && !(R_DP & 0x00FF))			\
+			R_DPMASK = ((Uint32)(R_DP & 0xFF00) << 16) | 0x00FF; \
+		else										\
+			R_DPMASK = (R_DP & 0x00FF ?				\
+				((Uint32)SNCPU_CYCLE_FAST << 16) : 0) | 0xFFFF; \
+	} while (0);
+
+#define SNCPU_WRAP_DP_INDEX(_Addr)						\
+	do {											\
+		(_Addr) = ((_Addr) & (R_DPMASK & 0xFFFF)) |	\
+			((R_DPMASK >> 16) & 0xFF00);			\
+	} while (0);
+
+#define SNCPU_DP_PENALTY()							\
+	do {											\
+		Uint32 _dpCycles = (R_DPMASK >> 16) & 0xFF;	\
+		pCpu->Cycles -= _dpCycles;					\
+		if (_dpCycles) SNCPU_TESTCYCLES(1)			\
+	} while (0);
+
+#define SNCPU_INDEX_READ_PENALTY(_Base, _Index)			\
+	do {											\
+		if (!(R_P & SNCPU_FLAG_X) ||					\
+			((((_Base) + (_Index)) ^ (_Base)) & 0xFF00)) \
+			SNCPU_SUBCYCLES(1);					\
+	} while (0);
+
 #define SNCPU_SETFLAG_E(_E)								\
-	pCpu->Regs.rE = _E;									\
+	pCpu->Regs.rE = (_E) ? 1 : 0;						\
 	if (pCpu->Regs.rE)									\
 	{													\
-		uOpcodeMod		= SNCPU_OPCODE_E;				\
+		uOpcodeMod = SNCPU_OPCODE_E;					\
 		R_P |= (SNCPU_FLAG_M | SNCPU_FLAG_X);			\
+		pCpu->Regs.rX.b.h = 0;							\
+		pCpu->Regs.rY.b.h = 0;							\
 		pCpu->Regs.rS.b.h = 1;							\
-		R_DP			= 0;							\
-		R_DPMASK		= 0x00FF;						\
 	} else												\
 	{													\
 		uOpcodeMod = (R_P << 4) & 0x300;				\
-		R_DPMASK    = 0xFFFF;							\
-	}
+	}												\
+	SNCPU_UPDATE_DPMASK();
 
-#define	SNCPU_CHECKIRQ()	
+#define SNCPU_CHECKIRQ(_TailCycles)                         \
+	do {                                                     \
+		if ((pCpu->uSignal & SNCPU_SIGNAL_IRQ) &&             \
+			!(R_P & SNCPU_FLAG_I))                             \
+		{                                                     \
+			Int32 nRemain = pCpu->Cycles -                     \
+				(_TailCycles) * SNCPU_CYCLE_FAST;               \
+			if (nRemain > 0)                                   \
+			{                                                   \
+				pCpu->nAbortCycles = nRemain;                    \
+				pCpu->Cycles = 0;                                \
+			}                                                   \
+		}                                                     \
+	} while (0);
 		
 
 
@@ -215,8 +291,7 @@
 	fZ = (R_P & SNCPU_FLAG_Z) ^ SNCPU_FLAG_Z;	\
 	fN = (R_P << 8);							\
 	if (R_P&SNCPU_FLAG_X) {pCpu->Regs.rX.b.h = 0; pCpu->Regs.rY.b.h = 0;} \
-	SNCPU_SETFLAG_E(pCpu->Regs.rE);	\
-	SNCPU_CHECKIRQ()
+	SNCPU_SETFLAG_E(pCpu->Regs.rE);
 
 
 #define SNCPU_PACKFLAGS()								\
@@ -258,7 +333,11 @@
 			if ( ~(_Target ^ _Src) & (_Target ^ _Dest) & 0x80 )	\
 					R_P |= SNCPU_FLAG_V;		\
 			else	R_P &= ~SNCPU_FLAG_V;		\
-			if (R_P & SNCPU_FLAG_D)	_Dest = _SNCpuDecimalADC8((fC&1), _Target, _Src);				\
+			if (R_P & SNCPU_FLAG_D) {						\
+				_Dest = _SNCpuDecimalADC8((fC&1), _Target, _Src); \
+				if (_Dest & 0x200) R_P |= SNCPU_FLAG_V;	\
+				else R_P &= ~SNCPU_FLAG_V;				\
+			}										\
 		}
 
 #define SNCPU_ADC16(_Dest,_Src)					\
@@ -268,7 +347,11 @@
 			if ( ~(_Target ^ _Src) & (_Target ^ _Dest) & 0x8000 )	\
 					R_P |= SNCPU_FLAG_V;		\
 			else	R_P &= ~SNCPU_FLAG_V;		\
-			if (R_P & SNCPU_FLAG_D)	_Dest = _SNCpuDecimalADC16((fC&1),_Target, _Src);				\
+			if (R_P & SNCPU_FLAG_D) {						\
+				_Dest = _SNCpuDecimalADC16((fC&1), _Target, _Src); \
+				if (_Dest & 0x20000) R_P |= SNCPU_FLAG_V;	\
+				else R_P &= ~SNCPU_FLAG_V;				\
+			}										\
 		}
 
 #define SNCPU_SBC8(_Dest,_Src)					\
@@ -298,83 +381,110 @@
 		SNCPU_FETCH8(iRel);			\
 		if (_bTest)					\
 			{							\
+			Uint32 uOldPC = rPC;		\
 			iRel <<=24;				\
 			iRel >>=24;				\
-			rPC+= iRel;				\
+			rPC = (rPC & 0xFF0000) |	\
+				((rPC + iRel) & 0xFFFF); \
 			SNCPU_SUBCYCLES(1);		\
+			if (fE && ((uOldPC ^ rPC) & 0xFF00)) \
+				SNCPU_SUBCYCLES(1);	\
 			}							\
 		}
 
 #include "sndebug.h"
 
-static Uint32 _SNCpuDecimalADC8(Uint32 uDest, Uint32 uTarget, Uint32 uSrc)
+Uint32 _SNCpuDecimalADC8(Uint32 uDest, Uint32 uTarget, Uint32 uSrc)
 {
-	uDest += (uTarget&0x0F) + (uSrc&0x0F);
-	if (uDest >=0x000A) {uDest-=0x000A; uDest&=0x000F; uDest+=0x0010;}
+	Uint32 uResult;
+	Uint32 uOverflow;
 
-	uDest += (uTarget&0xF0) + (uSrc&0xF0);
-	if (uDest >=0x00A0) {uDest-=0x00A0; uDest&=0x00FF; uDest+=0x0100;}
-	return uDest;
+	uResult = (uTarget & 0x0F) + (uSrc & 0x0F) + (uDest & 1);
+	if (uResult > 0x09)
+		uResult += 0x06;
+	uResult = (uTarget & 0xF0) + (uSrc & 0xF0) +
+		(uResult > 0x0F ? 0x10 : 0) + (uResult & 0x0F);
+	uOverflow = (~(uTarget ^ uSrc) & (uTarget ^ uResult) & 0x80) ?
+		0x200 : 0;
+	if (uResult > 0x9F)
+		uResult += 0x60;
+	return (Uint8)uResult | (uResult > 0xFF ? 0x100 : 0) | uOverflow;
 }
 
-static Uint32 _SNCpuDecimalADC16(Uint32 uDest, Uint32 uTarget, Uint32 uSrc)
+Uint32 _SNCpuDecimalADC16(Uint32 uDest, Uint32 uTarget, Uint32 uSrc)
 {
-	uDest += (uTarget&0x000F) + (uSrc&0x000F);
-	if (uDest >=0x000A) {uDest-=0x000A; uDest&=0x000F; uDest+=0x00010;}
+	Uint32 uResult;
+	Uint32 uOverflow;
 
-	uDest += (uTarget&0x00F0) + (uSrc&0x00F0);
-	if (uDest >=0x00A0) {uDest-=0x00A0; uDest&=0x00FF; uDest+=0x00100;}
-
-	uDest += (uTarget&0x0F00) + (uSrc&0x0F00);
-	if (uDest >=0x0A00) {uDest-=0x0A00; uDest&=0x0FFF; uDest+=0x01000;}
-
-	uDest += (uTarget&0xF000) + (uSrc&0xF000);
-	if (uDest >=0xA000) {uDest-=0xA000; uDest&=0xFFFF; uDest+=0x10000;}
-
-
-	return uDest;
+	uResult = (uTarget & 0x000F) + (uSrc & 0x000F) + (uDest & 1);
+	if (uResult > 0x0009)
+		uResult += 0x0006;
+	uResult = (uTarget & 0x00F0) + (uSrc & 0x00F0) +
+		(uResult > 0x000F ? 0x0010 : 0) + (uResult & 0x000F);
+	if (uResult > 0x009F)
+		uResult += 0x0060;
+	uResult = (uTarget & 0x0F00) + (uSrc & 0x0F00) +
+		(uResult > 0x00FF ? 0x0100 : 0) + (uResult & 0x00FF);
+	if (uResult > 0x09FF)
+		uResult += 0x0600;
+	uResult = (uTarget & 0xF000) + (uSrc & 0xF000) +
+		(uResult > 0x0FFF ? 0x1000 : 0) + (uResult & 0x0FFF);
+	uOverflow = (~(uTarget ^ uSrc) & (uTarget ^ uResult) & 0x8000) ?
+		0x20000 : 0;
+	if (uResult > 0x9FFF)
+		uResult += 0x6000;
+	return (Uint16)uResult | (uResult > 0xFFFF ? 0x10000 : 0) | uOverflow;
 }
 
-static Uint32 _SNCpuDecimalSBC8(Uint32 uDest, Uint32 uTarget, Uint32 uSrc)
+Uint32 _SNCpuDecimalSBC8(Uint32 uDest, Uint32 uTarget, Uint32 uSrc)
 {
-    //int c = uDest;
-    uDest += 0xFFFFFFFF;
-    uSrc^=0xFF;
-	uDest += (uTarget&0x0F) - (uSrc&0x0F);
-    if (uDest >=0x000A) {uDest+=0x000A; uDest&=0x000F; uDest-=0x00010;}
+	Int32 iResult;
+	Uint32 uEncoded;
 
-	uDest += (uTarget&0xF0) - (uSrc&0xF0);
-    if (uDest >=0x00A0) {uDest+=0x00A0; uDest&=0x00FF; uDest-=0x00100;}
+	/* uSrc is already one's-complemented by the opcode, matching the
+	   65C816's binary A + ~M + C subtraction path. */
+	iResult = (Int32)(uTarget & 0x0F) + (Int32)(uSrc & 0x0F) +
+		(Int32)(uDest & 1);
+	if (iResult <= 0x0F)
+		iResult -= 0x06;
+	iResult = (Int32)(uTarget & 0xF0) + (Int32)(uSrc & 0xF0) +
+		(iResult > 0x0F ? 0x10 : 0) + (iResult & 0x0F);
+	if (iResult <= 0xFF)
+		iResult -= 0x60;
 
-    uDest^=0x100;
-    //SnesDebug("SC sbc8 %04X - %04X + %d= %04X\n", uTarget, uSrc, c, uDest);
-	return uDest;
+	uEncoded = (Uint8)iResult;
+	if (iResult > 0xFF)
+		uEncoded |= 0x100;
+	return uEncoded;
 }
 
 
-static Uint32 _SNCpuDecimalSBC16(Uint32 uDest, Uint32 uTarget, Uint32 uSrc)
+Uint32 _SNCpuDecimalSBC16(Uint32 uDest, Uint32 uTarget, Uint32 uSrc)
 {
-    //int c = uDest;
-    uDest += 0xFFFFFFFF;
-    uSrc ^=0xFFFF;
+	Int32 iResult;
+	Uint32 uEncoded;
 
-    uDest += (uTarget&0x000F) - (uSrc&0x000F);
-    if (uDest >=0x000A) {uDest+=0x000A; uDest&=0x000F; uDest-=0x00010;}
+	iResult = (Int32)(uTarget & 0x000F) + (Int32)(uSrc & 0x000F) +
+		(Int32)(uDest & 1);
+	if (iResult <= 0x000F)
+		iResult -= 0x0006;
+	iResult = (Int32)(uTarget & 0x00F0) + (Int32)(uSrc & 0x00F0) +
+		(iResult > 0x000F ? 0x0010 : 0) + (iResult & 0x000F);
+	if (iResult <= 0x00FF)
+		iResult -= 0x0060;
+	iResult = (Int32)(uTarget & 0x0F00) + (Int32)(uSrc & 0x0F00) +
+		(iResult > 0x00FF ? 0x0100 : 0) + (iResult & 0x00FF);
+	if (iResult <= 0x0FFF)
+		iResult -= 0x0600;
+	iResult = (Int32)(uTarget & 0xF000) + (Int32)(uSrc & 0xF000) +
+		(iResult > 0x0FFF ? 0x1000 : 0) + (iResult & 0x0FFF);
+	if (iResult <= 0xFFFF)
+		iResult -= 0x6000;
 
-	uDest += (uTarget&0x00F0) - (uSrc&0x00F0);
-    if (uDest >=0x00A0) {uDest+=0x00A0; uDest&=0x00FF; uDest-=0x00100;}
-
-	uDest += (uTarget&0x0F00) - (uSrc&0x0F00);
-    if (uDest >=0x0A00) {uDest+=0x0A00; uDest&=0x0FFF; uDest-=0x01000;}
-
-	uDest += (uTarget&0xF000) - (uSrc&0xF000);
-    if (uDest >=0xA000) {uDest+=0xA000; uDest&=0xFFFF; uDest-=0x10000;}
-
-    uDest^=0x10000;
-
-    //SnesDebug("SC sbc16 %04X - %04X + %d= %04X\n", uTarget, uSrc, c, uDest);
-
-	return uDest;
+	uEncoded = (Uint16)iResult;
+	if (iResult > 0xFFFF)
+		uEncoded |= 0x10000;
+	return uEncoded;
 }
 
 
@@ -433,6 +543,44 @@ static Uint32 _SNCPURead24(SNCpuT *pCpu, Uint32 Addr)
 	return  uData;
 }
 
+static Uint16 _SNCPURead16Wrap16(SNCpuT *pCpu, Uint32 Addr)
+{
+	Uint32 uAddr1 = (Addr & 0xFF0000) | ((Addr + 1) & 0xFFFF);
+	Uint32 uData;
+	SNCPU_SUBMEMCYCLES(Addr, 1);
+	SNCPU_SUBMEMCYCLES(uAddr1, 1);
+	uData = __SNCPURead8(pCpu, Addr);
+	uData |= __SNCPURead8(pCpu, uAddr1) << 8;
+	return (Uint16)uData;
+}
+
+static Uint32 _SNCPURead24Wrap16(SNCpuT *pCpu, Uint32 Addr)
+{
+	Uint32 uAddr1 = (Addr & 0xFF0000) | ((Addr + 1) & 0xFFFF);
+	Uint32 uAddr2 = (Addr & 0xFF0000) | ((Addr + 2) & 0xFFFF);
+	Uint32 uData;
+	SNCPU_SUBMEMCYCLES(Addr, 1);
+	SNCPU_SUBMEMCYCLES(uAddr1, 1);
+	SNCPU_SUBMEMCYCLES(uAddr2, 1);
+	uData = __SNCPURead8(pCpu, Addr);
+	uData |= __SNCPURead8(pCpu, uAddr1) << 8;
+	uData |= __SNCPURead8(pCpu, uAddr2) << 16;
+	return uData;
+}
+
+static Uint16 _SNCPURead16DP(SNCpuT *pCpu, Uint32 Addr, Uint32 uWrap)
+{
+	Uint32 uMask = uWrap & 0xFFFF;
+	Uint32 uBase = (uWrap >> 16) & 0xFF00;
+	Uint32 uAddr1 = ((Addr + 1) & uMask) | uBase;
+	Uint32 uData;
+	SNCPU_SUBMEMCYCLES(Addr, 1);
+	SNCPU_SUBMEMCYCLES(uAddr1, 1);
+	uData = __SNCPURead8(pCpu, Addr);
+	uData |= __SNCPURead8(pCpu, uAddr1) << 8;
+	return (Uint16)uData;
+}
+
 
 
 
@@ -467,20 +615,26 @@ static Uint8 _SNCPUFetch8(SNCpuT *pCpu, Uint32 Addr)
 
 static Uint16 _SNCPUFetch16(SNCpuT *pCpu, Uint32 Addr)
 {
-	Uint32 uData;
-	SNCPU_SUBMEMCYCLES(Addr,2); 
+	Uint32 uData, uAddr1;
+	uAddr1 = (Addr & 0xFF0000) | ((Addr + 1) & 0xFFFF);
+	SNCPU_SUBMEMCYCLES(Addr,1);
+	SNCPU_SUBMEMCYCLES(uAddr1,1);
 	uData =  __SNCPUFetch8(pCpu, Addr);
-	uData|= (__SNCPUFetch8(pCpu, Addr+1)<<8);
+	uData|= (__SNCPUFetch8(pCpu, uAddr1)<<8);
 	return  uData;
 }
 
 static Uint32 _SNCPUFetch24(SNCpuT *pCpu, Uint32 Addr)
 {
-	Uint32 uData;
-	SNCPU_SUBMEMCYCLES(Addr,3); 
+	Uint32 uData, uAddr1, uAddr2;
+	uAddr1 = (Addr & 0xFF0000) | ((Addr + 1) & 0xFFFF);
+	uAddr2 = (Addr & 0xFF0000) | ((Addr + 2) & 0xFFFF);
+	SNCPU_SUBMEMCYCLES(Addr,1);
+	SNCPU_SUBMEMCYCLES(uAddr1,1);
+	SNCPU_SUBMEMCYCLES(uAddr2,1);
 	uData = (__SNCPUFetch8(pCpu, Addr+0) << 0);
-	uData|= (__SNCPUFetch8(pCpu, Addr+1) << 8);
-	uData|= (__SNCPUFetch8(pCpu, Addr+2) << 16);
+	uData|= (__SNCPUFetch8(pCpu, uAddr1) << 8);
+	uData|= (__SNCPUFetch8(pCpu, uAddr2) << 16);
 	return  uData;
 }
 
@@ -519,6 +673,15 @@ static void  _SNCPUWrite16(SNCpuT *pCpu, Uint32 Addr, Uint16 Data)
 	SNCPU_SUBMEMCYCLES(Addr,2); 
 	__SNCPUWrite8(pCpu, Addr + 0, Data >> 0);
 	__SNCPUWrite8(pCpu, Addr + 1, Data >> 8);
+}
+
+static void _SNCPUWrite16Wrap16(SNCpuT *pCpu, Uint32 Addr, Uint16 Data)
+{
+	Uint32 uAddr1 = (Addr & 0xFF0000) | ((Addr + 1) & 0xFFFF);
+	SNCPU_SUBMEMCYCLES(Addr, 1);
+	SNCPU_SUBMEMCYCLES(uAddr1, 1);
+	__SNCPUWrite8(pCpu, Addr, Data);
+	__SNCPUWrite8(pCpu, uAddr1, Data >> 8);
 }
 
 
@@ -580,6 +743,80 @@ static Uint32 _SNCPUPop24(SNCpuT *pCpu)
 	uData =  _SNCPUPop8(pCpu);
 	uData|= (_SNCPUPop8(pCpu)<<8);
 	uData|= (_SNCPUPop8(pCpu)<<16);
+	return uData;
+}
+
+/* Some 65C816 instructions perform a multi-byte stack transfer with the
+   native 16-bit stack pointer even while E=1, and only restore page $01 after
+   the complete transfer.  PHD/PLD, PEA/PEI/PER, JSL/RTL and indexed-indirect
+   JSR use these raw helpers. */
+static void _SNCPURestrictStack(SNCpuT *pCpu)
+{
+	if (pCpu->Regs.rE)
+		pCpu->Regs.rS.w = 0x0100 | (pCpu->Regs.rS.w & 0x00FF);
+}
+
+static Uint8 _SNCPUPop8Raw(SNCpuT *pCpu)
+{
+	Uint8 uData;
+	pCpu->Regs.rS.w++;
+	SNCPU_SUBCYCLESSLOW(1);
+	uData = __SNCPURead8(pCpu, pCpu->Regs.rS.w);
+	_SNCPURestrictStack(pCpu);
+	return uData;
+}
+
+static void _SNCPUPush16Raw(SNCpuT *pCpu, Uint16 Data)
+{
+	SNCPU_SUBCYCLESSLOW(1);
+	__SNCPUWrite8(pCpu, pCpu->Regs.rS.w, Data >> 8);
+	pCpu->Regs.rS.w--;
+	SNCPU_SUBCYCLESSLOW(1);
+	__SNCPUWrite8(pCpu, pCpu->Regs.rS.w, Data & 0xFF);
+	pCpu->Regs.rS.w--;
+	_SNCPURestrictStack(pCpu);
+}
+
+static void _SNCPUPush24Raw(SNCpuT *pCpu, Uint32 Data)
+{
+	SNCPU_SUBCYCLESSLOW(1);
+	__SNCPUWrite8(pCpu, pCpu->Regs.rS.w, Data >> 16);
+	pCpu->Regs.rS.w--;
+	SNCPU_SUBCYCLESSLOW(1);
+	__SNCPUWrite8(pCpu, pCpu->Regs.rS.w, Data >> 8);
+	pCpu->Regs.rS.w--;
+	SNCPU_SUBCYCLESSLOW(1);
+	__SNCPUWrite8(pCpu, pCpu->Regs.rS.w, Data);
+	pCpu->Regs.rS.w--;
+	_SNCPURestrictStack(pCpu);
+}
+
+static Uint16 _SNCPUPop16Raw(SNCpuT *pCpu)
+{
+	Uint32 uData;
+	pCpu->Regs.rS.w++;
+	SNCPU_SUBCYCLESSLOW(1);
+	uData = __SNCPURead8(pCpu, pCpu->Regs.rS.w);
+	pCpu->Regs.rS.w++;
+	SNCPU_SUBCYCLESSLOW(1);
+	uData |= __SNCPURead8(pCpu, pCpu->Regs.rS.w) << 8;
+	_SNCPURestrictStack(pCpu);
+	return (Uint16)uData;
+}
+
+static Uint32 _SNCPUPop24Raw(SNCpuT *pCpu)
+{
+	Uint32 uData;
+	pCpu->Regs.rS.w++;
+	SNCPU_SUBCYCLESSLOW(1);
+	uData = __SNCPURead8(pCpu, pCpu->Regs.rS.w);
+	pCpu->Regs.rS.w++;
+	SNCPU_SUBCYCLESSLOW(1);
+	uData |= __SNCPURead8(pCpu, pCpu->Regs.rS.w) << 8;
+	pCpu->Regs.rS.w++;
+	SNCPU_SUBCYCLESSLOW(1);
+	uData |= __SNCPURead8(pCpu, pCpu->Regs.rS.w) << 16;
+	_SNCPURestrictStack(pCpu);
 	return uData;
 }
 
@@ -718,7 +955,7 @@ Int32 SNCPUExecute_C(SNCpuT *pCpu)
 		if (t1&SNCPU_FLAG_Z) fZ = 1;
 		if (t1&SNCPU_FLAG_N) fN = 0;
 		SNCPU_SETFLAG_E(pCpu->Regs.rE);
-		SNCPU_CHECKIRQ();
+		SNCPU_CHECKIRQ(1);
 
 		SNCPU_SUBCYCLES(1);
 		break;
@@ -886,23 +1123,30 @@ Int32 SNCPUExecute_C(SNCpuT *pCpu)
 
 		// WAI
 	SNCPU_OP_ALL(0xCB)
-		if (!(pCpu->uSignal & SNCPU_SIGNAL_IRQ))
+		if (!(pCpu->uSignal & (SNCPU_SIGNAL_IRQ | SNCPU_SIGNAL_NMIEDGE)))
 		{
 			// set waiting signal
 			pCpu->uSignal |= SNCPU_SIGNAL_WAI;
-			R_PC -= 1;
-			pCpu->Cycles = 0;
+			/* Architectural PC already points at the next instruction. */
 		} else
 		{
 			pCpu->uSignal &= ~SNCPU_SIGNAL_WAI;
 		}
-		SNCPU_SUBCYCLES(2);
+		SNCPU_SUBCYCLES(3);
+		if (pCpu->uSignal & SNCPU_SIGNAL_WAI)
+			pCpu->Cycles = 0;
+		break;
+
+		// STP: only reset can restart the processor.
+	SNCPU_OP_ALL(0xDB)
+		pCpu->uSignal |= SNCPU_SIGNAL_STP;
+		SNCPU_SUBCYCLES(3);
+		pCpu->Cycles = 0;
 		break;
 
 	SNCPU_OP_ALL(0x42)
 		Uint32 uDestBank __attribute__((unused));
 		SNCPU_FETCH8(uDestBank);
-		SNCPU_SUBCYCLES(2);
 		break;
 		default:	// unimplemented opcode
 			SNCPU_SUBCYCLES(1);
@@ -916,4 +1160,3 @@ Int32 SNCPUExecute_C(SNCpuT *pCpu)
 
 	return 0;
 }
-

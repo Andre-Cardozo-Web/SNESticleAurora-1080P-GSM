@@ -36,6 +36,11 @@ static Uint8	_SNDma_MDMATransfer[8][4]=
 	{0,0,1,1},
 };
 
+static Uint8 _SNDma_HDMABytes[8] =
+{
+	1, 2, 2, 4, 4, 4, 2, 4
+};
+
 
 static Int8 _SNDma_MDMAInc[4] = 
 {
@@ -299,6 +304,9 @@ void SnesDMAC::SetHDMAEnable(Uint8 uData)
 {
 	// confirm:
 	// ghouls and ghosts enabled hdma mid-frame
+	/* $420C keeps the programmed enable bits.  A channel that already read
+	   its zero terminator stays stopped until the next frame, even if $420C
+	   is written again (Mesen/Snes9x keep a separate ended-channel mask). */
 	m_HDMAEnable = uData;
 }
 
@@ -351,7 +359,11 @@ void SnesDMAC::ProcessMDMAChRead(Uint32 uChan)
         // decrement cpu clock cycles
         SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW * 1);
 	}
-	while (pChan->dasx!=0 && (m_pCPU->Cycles > 0));
+	/* Finish the four-byte B-bus pattern once a slice starts.  Otherwise a
+	   scheduler boundary after byte 1/2/3 restarts the next slice at phase 0
+	   and corrupts reverse DMA modes 1, 3, 4, 5 and 7. */
+	while (pChan->dasx != 0 &&
+		(m_pCPU->Cycles > 0 || (iTransfer & 3) != 0));
 
     // are we done?
     if (pChan->dasx == 0)
@@ -712,179 +724,103 @@ void SnesDMAC::ProcessMDMAChFast(Uint32 uChan)
 void SnesDMAC::BeginHDMA()
 {
 	Uint8 uEnabled = m_HDMAEnable;
+	m_HDMAEnded = 0;
+	m_HDMADoTransfer = uEnabled ? 0xFF : 0;
 
-	for (Uint32 uChan=0; uChan < SNESDMAC_CHANNEL_NUM; uChan++)
+	if (!uEnabled)
+		return;
+
+	/* Mesen: HDMA initialization has one 8-clock global overhead, then
+	   initializes every enabled channel before the first scanline transfer. */
+	SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW);
+
+	for (Uint32 uChan = 0; uChan < SNESDMAC_CHANNEL_NUM; uChan++)
 	{
-		// did a channel go from off to on?
-		if (uEnabled & (1<<uChan))
-		{
-			SnesDMAChT *pChan = &m_Channels[uChan];
+		Uint8 uMask = (Uint8)(1 << uChan);
+		SnesDMAChT *pChan;
+		Bool bStopped;
+		Uint8 uLow;
 
-			// set table address
-			pChan->a2ax = pChan->a1tx;
-			pChan->ntlrx = 0;
+		if (!(uEnabled & uMask))
+			continue;
+
+		pChan = &m_Channels[uChan];
+		pChan->a2ax = pChan->a1tx;
+		pChan->ntlrx = SNCPURead8(m_pCPU,
+			(Uint16)pChan->a2ax | (pChan->a1bx << 16));
+		SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW);
+		pChan->a2ax++;
+
+		bStopped = pChan->ntlrx == 0;
+		if (bStopped)
+			m_HDMAEnded |= uMask;
+
+		if (pChan->dmapx & 0x40)
+		{
+			uLow = SNCPURead8(m_pCPU,
+				(Uint16)pChan->a2ax | (pChan->a1bx << 16));
+			SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW);
+			pChan->a2ax++;
+
+			if (bStopped)
+			{
+				/* Hardware's terminal-channel oddity treats the one byte as
+				   the high half of the otherwise-unused indirect address. */
+				pChan->dasx = (Uint16)uLow << 8;
+			}
+			else
+			{
+				pChan->dasx = uLow | (SNCPURead8(m_pCPU,
+					(Uint16)pChan->a2ax | (pChan->a1bx << 16)) << 8);
+				SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW);
+				pChan->a2ax++;
+			}
 		}
 	}
 }
 
-Uint32 SnesDMAC::ProcessHDMACh(Uint32 uChan)
+void SnesDMAC::ProcessHDMACh(Uint32 uChan)
 {
 	SnesDMAChT *pChan;
-	Uint8 uData;
+	Uint8 *pTransfer;
+	Uint32 uMode;
+	Uint32 nBytes;
 
 	assert(uChan < SNESDMAC_CHANNEL_NUM);
 	pChan = &m_Channels[uChan];
+	uMode = pChan->dmapx & 7;
+	nBytes = _SNDma_HDMABytes[uMode];
+	pTransfer = _SNDma_MDMATransfer[uMode];
 
-	// are we done with current run?
-	if ((pChan->ntlrx&0x7F) == 0)
+	for (Uint32 i = 0; i < nBytes; i++)
 	{
-		// fetch next count byte
-		pChan->ntlrx = SNCPURead8(m_pCPU, pChan->a2ax | (pChan->a1bx << 16));
-		SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW * 1);
+		Uint32 uAddrA;
+		Uint32 uAddrB = 0x2100 |
+			(Uint8)(pChan->bbadx + pTransfer[i]);
+		Uint8 uData;
 
-
-		if (pChan->ntlrx == 0)
-		{
-			// done with dma
-			return 1; 
-		}
-
-		// decrement line count (0x80 -> 127)
-		pChan->ntlrx--;
-
-		// increment table address
-		pChan->a2ax++;
-
-		// indirect addressing?
 		if (pChan->dmapx & 0x40)
-		{
-			// fetch 16-bit address
-			pChan->dasx = SNCPURead16(m_pCPU, pChan->a2ax | (pChan->a1bx << 16));
-			SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW * 2);
+			uAddrA = (pChan->dasbx << 16) | pChan->dasx;
+		else
+			uAddrA = (pChan->a1bx << 16) | pChan->a2ax;
 
-			// increment table address
-			pChan->a2ax+=2;
-
-		} else
+		if (pChan->dmapx & 0x80)
 		{
-			// data address is same as table address
-			pChan->dasx = pChan->a2ax;
-			pChan->dasbx= pChan->a1bx;
+			uData = SNCPURead8(m_pCPU, uAddrB);
+			SNCPUWrite8(m_pCPU, uAddrA, uData);
+		}
+		else
+		{
+			uData = SNCPURead8(m_pCPU, uAddrA);
+			SNCPUWrite8(m_pCPU, uAddrB, uData);
 		}
 
-	} else
-	{
-		pChan->ntlrx--;
-		if (pChan->ntlrx < 0x80)
-		{
-			// skip line
-			return 0;
-		}
+		if (pChan->dmapx & 0x40)
+			pChan->dasx++;
+		else
+			pChan->a2ax++;
+		SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW);
 	}
-
-
-
-	switch (pChan->dmapx & 7)
-	{
-	case 0:	// 1 address				(1)
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+0) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2100 + pChan->bbadx, uData);
-		pChan->dasx+=1;
-
-		// confirm: dead on
-		SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW * 1  + SNCPU_CYCLE_FAST * 3 - 1 - 8 -4 -1);
-		break;
-
-	case 1: // 2 address				(l,h) (2)
-	case 5:
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+0) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2100 + pChan->bbadx, uData);
-
-		SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW + SNCPU_CYCLE_FAST);
-
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+1) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2101 + pChan->bbadx, uData);
-		pChan->dasx+=2;
-
-		SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW + SNCPU_CYCLE_FAST);
-
-		// confirm: dead on
-		//SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW * 2 + SNCPU_CYCLE_FAST * 3 - 2);
-		break;
-
-	case 2: // write twice				(l,l) (1)
-	case 6:
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+0) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2100 + pChan->bbadx, uData);
-
-		SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW + SNCPU_CYCLE_FAST);
-
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+1) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2100 + pChan->bbadx, uData);
-
-		SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW + SNCPU_CYCLE_FAST);
-
-		pChan->dasx+=2;
-
-		// confirm: dead on
-		//SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW * 2 + SNCPU_CYCLE_FAST * 3 - 2);
-		break;
-
-	case 3: // 2 address write twice	(llhh)(2)
-	case 7:
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+0) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2100 + pChan->bbadx, uData);
-		SNCPUConsumeCycles(m_pCPU, 12);
-
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+1) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2100 + pChan->bbadx, uData);
-		SNCPUConsumeCycles(m_pCPU, 12);
-
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+2) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2101 + pChan->bbadx, uData);
-		SNCPUConsumeCycles(m_pCPU, 12);
-
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+3) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2101 + pChan->bbadx, uData);
-		SNCPUConsumeCycles(m_pCPU, 12);
-		pChan->dasx+=4;
-
-		// confirm: dead on
-		//SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW * 4  + SNCPU_CYCLE_FAST * 3 - 1 );
-		break;
-
-	case 4: // 4 address				(lhlh)(4)
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+0) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2100 + pChan->bbadx, uData);
-		SNCPUConsumeCycles(m_pCPU, 12);
-
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+1) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2101 + pChan->bbadx, uData);
-		SNCPUConsumeCycles(m_pCPU, 12);
-
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+2) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2102 + pChan->bbadx, uData);
-		SNCPUConsumeCycles(m_pCPU, 12);
-
-		uData = SNCPURead8(m_pCPU, (pChan->dasx+3) | (pChan->dasbx << 16));
-		SNCPUWrite8(m_pCPU, 0x2103 + pChan->bbadx, uData);
-		SNCPUConsumeCycles(m_pCPU, 12);
-		pChan->dasx+=4;
-
-		// confirm: dead on
-//		SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW * 4  + SNCPU_CYCLE_FAST * 3 - 1);
-		break;
-	}
-
-
-	if (!(pChan->dmapx & 0x40))
-	{
-		// increment table address as well
-		pChan->a2ax=pChan->dasx;
-	} 
-
-	// continue dma
-	return 0;
 }
 
 
@@ -913,21 +849,81 @@ void SnesDMAC::ProcessMDMA()
 
 void SnesDMAC::ProcessHDMA()
 {
-	Uint8 uEnable;
-	Uint32 uChan;
+	Uint8 uActive = m_HDMAEnable & ~m_HDMAEnded;
 
-	uEnable = m_HDMAEnable;
-	uChan = 0;
+	if (!uActive)
+		return;
 
-	while (uEnable)
+	/* Mesen performs every channel's data phase first, followed by every
+	   channel's counter/table phase.  Interleaving those phases changes both
+	   B-bus side effects and the point at which IRQ/NMI can be observed. */
+	SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW);
+	for (Uint32 uChan = 0; uChan < SNESDMAC_CHANNEL_NUM; uChan++)
 	{
-		if (uEnable&1)
-		{
-			// process channel
+		Uint8 uMask = (Uint8)(1 << uChan);
+		if ((uActive & uMask) && (m_HDMADoTransfer & uMask))
 			ProcessHDMACh(uChan);
+	}
+
+	for (Uint32 uChan = 0; uChan < SNESDMAC_CHANNEL_NUM; uChan++)
+	{
+		Uint8 uMask = (Uint8)(1 << uChan);
+		SnesDMAChT *pChan;
+		Uint8 uNewCounter;
+
+		if (!(uActive & uMask))
+			continue;
+
+		pChan = &m_Channels[uChan];
+		pChan->ntlrx--;
+		if (pChan->ntlrx & 0x80)
+			m_HDMADoTransfer |= uMask;
+		else
+			m_HDMADoTransfer &= ~uMask;
+
+		/* The S-CPU performs this table read on every active scanline.  Its
+		   value is discarded until the seven-bit line counter reaches zero. */
+		uNewCounter = SNCPURead8(m_pCPU,
+			(Uint16)pChan->a2ax | (pChan->a1bx << 16));
+		SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW);
+
+		if ((pChan->ntlrx & 0x7F) == 0)
+		{
+			pChan->ntlrx = uNewCounter;
+			pChan->a2ax++;
+
+			if (pChan->dmapx & 0x40)
+			{
+				Uint8 uHigherMask = (Uint8)~((1u << (uChan + 1)) - 1u);
+				Bool bLastActive =
+					!((m_HDMAEnable & ~m_HDMAEnded) & uHigherMask);
+				Uint8 uLow;
+
+				uLow = SNCPURead8(m_pCPU,
+					(Uint16)pChan->a2ax | (pChan->a1bx << 16));
+				SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW);
+				pChan->a2ax++;
+
+				if (uNewCounter == 0 && bLastActive)
+				{
+					/* The last terminating indirect channel fetches only one
+					   address byte and places it in the high half. */
+					pChan->dasx = (Uint16)uLow << 8;
+				}
+				else
+				{
+					pChan->dasx = uLow | (SNCPURead8(m_pCPU,
+						(Uint16)pChan->a2ax |
+						(pChan->a1bx << 16)) << 8);
+					SNCPUConsumeCycles(m_pCPU, SNCPU_CYCLE_SLOW);
+					pChan->a2ax++;
+				}
+			}
+
+			if (uNewCounter == 0)
+				m_HDMAEnded |= uMask;
+			m_HDMADoTransfer |= uMask;
 		}
-		uEnable>>=1;
-		uChan++;
 	}
 }
 
@@ -936,4 +932,6 @@ void SnesDMAC::Reset()
 	memset(m_Channels, 0xFF, sizeof(m_Channels));
 	m_MDMAEnable = 0;
 	m_HDMAEnable = 0;
+	m_HDMAEnded = 0;
+	m_HDMADoTransfer = 0;
 }

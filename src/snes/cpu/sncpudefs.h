@@ -32,7 +32,9 @@
 // cpu signals (external pins)
 #define SNCPU_SIGNAL_NMI		0x80
 #define SNCPU_SIGNAL_NMIEDGE	0x40
-#define SNCPU_SIGNAL_RDY		0x20
+/* Internal stopped state.  The old core reserved this bit for RDY but never
+   implemented that external pin, so STP can use it without changing SNCpuT. */
+#define SNCPU_SIGNAL_STP		0x20
 #define SNCPU_SIGNAL_RESET		0x10
 #define SNCPU_SIGNAL_DMA		0x08
 #define SNCPU_SIGNAL_IRQ		0x04
@@ -50,6 +52,5 @@
 #define SNCPU_CYCLE_FAST (6)
 
 #endif
-
 
 

@@ -94,6 +94,7 @@ void SNCPUReset(SNCpuT *pCpu, Bool bHardReset)
 
 	// no IRQ
 	pCpu->uSignal = 0;
+	pCpu->uNmiDmaDelay = 0;
 
 	// set cpu flags to default state
 	pCpu->Regs.rP  = SNCPU_FLAG_M | SNCPU_FLAG_X |  SNCPU_FLAG_I;
@@ -535,8 +536,7 @@ void SNCPUNMI(SNCpuT *pCpu)
 	// are we stopped at a WAI instruction?
 	if (pCpu->uSignal & SNCPU_SIGNAL_WAI)
 	{
-		// skip it
-		pCpu->Regs.rPC++;
+		/* WAI has already advanced PC to the following instruction. */
 		pCpu->uSignal &= ~SNCPU_SIGNAL_WAI;
 	}
 
@@ -560,13 +560,24 @@ void SNCPUNMI(SNCpuT *pCpu)
 	}
 
 	pCpu->Regs.rP &= ~(SNCPU_FLAG_D);
+	pCpu->Regs.rP |= SNCPU_FLAG_I;
 
-	SNCPUConsumeCycles(pCpu, SNCPU_CYCLE_SLOW * 6 + SNCPU_CYCLE_FAST * 2);
+	SNCPUConsumeCycles(pCpu,
+		SNCPU_CYCLE_SLOW * (pCpu->Regs.rE ? 5 : 6) +
+		SNCPU_CYCLE_FAST * 2);
 }
 
 
 void SNCPUIRQ(SNCpuT *pCpu)
 {
+	/* Any asserted IRQ releases WAI, even when I masks entry into the IRQ
+	   handler.  The old placement inside the !I block could leave the CPU
+	   asleep forever on a masked interrupt. */
+	if (pCpu->uSignal & SNCPU_SIGNAL_WAI)
+	{
+		pCpu->uSignal &= ~SNCPU_SIGNAL_WAI;
+	}
+
 	if (!(pCpu->Regs.rP & SNCPU_FLAG_I))
 	{
 #if SNES_DEBUG
@@ -575,14 +586,6 @@ void SNCPUIRQ(SNCpuT *pCpu)
 #endif
 
         
-        // are we stopped at a WAI instruction?
-		if (pCpu->uSignal & SNCPU_SIGNAL_WAI)
-		{
-			// skip it
-			pCpu->Regs.rPC++;
-			pCpu->uSignal &= ~SNCPU_SIGNAL_WAI;
-		}
-
 		if (pCpu->Regs.rE)
 		{
 			// emulation
@@ -605,7 +608,9 @@ void SNCPUIRQ(SNCpuT *pCpu)
 		pCpu->Regs.rP &= ~(SNCPU_FLAG_D);
 		pCpu->Regs.rP |= SNCPU_FLAG_I;
 
-		SNCPUConsumeCycles(pCpu, SNCPU_CYCLE_SLOW * 6 + SNCPU_CYCLE_FAST * 2);
+		SNCPUConsumeCycles(pCpu,
+			SNCPU_CYCLE_SLOW * (pCpu->Regs.rE ? 5 : 6) +
+			SNCPU_CYCLE_FAST * 2);
 	}
 }
 
@@ -806,7 +811,7 @@ void SNCPUSignalNMI(SNCpuT *pCpu, Uint32 bEnable)
     // NMIs are edge triggered. 
     // If the signal transitions from 0 -> 1 then the NMIEDGE flag becomes set.
     // When NMIEDGE is set, a cpu nmi will trigger with a one instruction delay.
-    // If the NMI signal is set to 0, NMIEDGE is cleared.
+    // Lowering the input does not cancel an edge already latched by the CPU.
     // 
 	if (bEnable)
 	{
@@ -814,13 +819,18 @@ void SNCPUSignalNMI(SNCpuT *pCpu, Uint32 bEnable)
 		{
 			// trigger NMI on lo->hi transition
 			pCpu->uSignal |= SNCPU_SIGNAL_NMIEDGE;
+			/* On the S-CPU, an NMI edge captured while MDMA owns the bus is
+			   held until DMA ends, followed by a 24-30 master-clock recovery
+			   delay.  Wild Guns depends on this ordering. */
+			if (pCpu->uSignal & SNCPU_SIGNAL_DMA)
+				pCpu->uNmiDmaDelay = 24;
             // if we're currently running abort so NMI can happen now
 			SNCPUAbort(pCpu);
 		}
 		pCpu->uSignal |= SNCPU_SIGNAL_NMI;
 	} else
 	{
-		pCpu->uSignal &= ~(SNCPU_SIGNAL_NMI | SNCPU_SIGNAL_NMIEDGE);
+		pCpu->uSignal &= ~SNCPU_SIGNAL_NMI;
 	}
 }
 

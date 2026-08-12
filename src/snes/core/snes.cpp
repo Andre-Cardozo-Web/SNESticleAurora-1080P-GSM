@@ -1068,6 +1068,15 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
 
     while (m_Cpu.Cycles > 0)
     {
+		/* STP ignores IRQ/NMI and remains halted until reset.  Consume the
+		   scheduler budget so the PPU and APU keep advancing. */
+		if ((m_Cpu.uSignal & SNCPU_SIGNAL_STP) &&
+			!(m_Cpu.uSignal & SNCPU_SIGNAL_RESET))
+		{
+			m_Cpu.Cycles = 0;
+			break;
+		}
+
         // process signal
         if (m_Cpu.uSignal & (SNCPU_SIGNAL_IRQ | SNCPU_SIGNAL_NMIEDGE | SNCPU_SIGNAL_RESET | SNCPU_SIGNAL_DMA))
         {
@@ -1118,13 +1127,54 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
             } else
             if (m_Cpu.uSignal & SNCPU_SIGNAL_NMIEDGE)
             {
-                // execute one instruction here first
-                if (!(m_Cpu.uSignal & SNCPU_SIGNAL_WAI))
-                {
-                    SNCPUExecuteOne(&m_Cpu);
-                }
+				if (m_Cpu.uNmiDmaDelay)
+				{
+					/* An NMI captured while MDMA owns the bus is released 24-30
+					   master clocks after DMA.  Run ordinary CPU work during that
+					   window, as the hardware does, and carry a partial delay into
+					   the next scheduler slice when necessary. */
+					Int32 nStartCycles = m_Cpu.Cycles;
+					if (m_Cpu.uSignal & SNCPU_SIGNAL_WAI)
+					{
+						Int32 nDelay = m_Cpu.uNmiDmaDelay;
+						if (nDelay > m_Cpu.Cycles) nDelay = m_Cpu.Cycles;
+						SNCPUConsumeCycles(&m_Cpu, nDelay);
+					}
+					else
+					{
+						while (m_Cpu.Cycles > 0 &&
+							(nStartCycles - m_Cpu.Cycles) < m_Cpu.uNmiDmaDelay &&
+							!(m_Cpu.uSignal & SNCPU_SIGNAL_DMA))
+						{
+							SNCPUExecuteOne(&m_Cpu);
+						}
+					}
 
-                // perform nmi
+					Int32 nElapsed = nStartCycles - m_Cpu.Cycles;
+					if (nElapsed >= m_Cpu.uNmiDmaDelay)
+						m_Cpu.uNmiDmaDelay = 0;
+					else if (nElapsed > 0)
+						m_Cpu.uNmiDmaDelay -= (Uint8)nElapsed;
+
+					if (m_Cpu.uNmiDmaDelay ||
+						(m_Cpu.uSignal & SNCPU_SIGNAL_DMA))
+						continue;
+				}
+				else
+				{
+					/* The S-CPU sees the vblank NMI edge around H=6 and enters
+					   the vector after the instruction then in progress. */
+					if (!(m_Cpu.uSignal & SNCPU_SIGNAL_WAI))
+					{
+						SNCPUExecuteOne(&m_Cpu);
+						if (m_Cpu.uSignal & SNCPU_SIGNAL_DMA)
+						{
+							m_Cpu.uNmiDmaDelay = 24;
+							continue;
+						}
+					}
+				}
+
                 SNCPUNMI(&m_Cpu);
                 // clear NMI edge signal
                 m_Cpu.uSignal&= ~SNCPU_SIGNAL_NMIEDGE;
@@ -1194,12 +1244,12 @@ void SnesSystem::ExecuteLine()
 			if (m_IO.m_Regs.nmitimen & 0x10)
 			{
 				// calculate cycle time to perform h-irq
-				nHIRQCycles = m_IO.m_Regs.htime.w * 4;
+				nHIRQCycles = SNES_HIRQ_CYCLES(m_IO.m_Regs.htime.w);
 
 			} else
 			{
 				// trigger at beginning of line
-				nHIRQCycles = 0;
+				nHIRQCycles = SNES_VIRQ_CYCLES;
 			}
 		}
 	} else
@@ -1207,7 +1257,7 @@ void SnesSystem::ExecuteLine()
 	if (m_IO.m_Regs.nmitimen & 0x10)
 	{
 		// calculate cycle time to perform h-irq
-		nHIRQCycles = m_IO.m_Regs.htime.w * 4;
+		nHIRQCycles = SNES_HIRQ_CYCLES(m_IO.m_Regs.htime.w);
 	}
 
 #if SNDBG_LOG

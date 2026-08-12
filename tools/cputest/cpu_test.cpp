@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -59,6 +60,165 @@ static bool Check24BitBusWrap(SNCpuT *cpu, Uint8 *memory)
 	return ok;
 }
 
+static bool CheckInterruptSemantics(SNCpuT *cpu, Uint8 *memory)
+{
+	bool ok = true;
+
+	/* Emulation NMI: two-byte PC + status, I set, D cleared, 7 cycles. */
+	memory[SNCPU_VECTORE_NMI] = 0x34;
+	memory[SNCPU_VECTORE_NMI + 1] = 0x12;
+	cpu->Regs.rPC = 0x12ABCD;
+	cpu->Regs.rS.w = 0x01FF;
+	cpu->Regs.rP = SNCPU_FLAG_M | SNCPU_FLAG_X | SNCPU_FLAG_D | SNCPU_FLAG_C;
+	cpu->Regs.rE = 1;
+	cpu->uSignal = 0;
+	cpu->Cycles = 1000;
+	SNCPUNMI(cpu);
+	ok &= cpu->Regs.rPC == 0x001234;
+	ok &= cpu->Regs.rS.w == 0x01FC;
+	ok &= memory[0x01FF] == 0xAB && memory[0x01FE] == 0xCD;
+	ok &= memory[0x01FD] == (SNCPU_FLAG_M | SNCPU_FLAG_D | SNCPU_FLAG_C);
+	ok &= (cpu->Regs.rP & (SNCPU_FLAG_I | SNCPU_FLAG_D)) == SNCPU_FLAG_I;
+	ok &= cpu->Cycles == 1000 - (5 * SNCPU_CYCLE_SLOW + 2 * SNCPU_CYCLE_FAST);
+
+	/* Native IRQ: bank + PC + status, 8 cycles. */
+	memory[SNCPU_VECTOR_IRQ] = 0x78;
+	memory[SNCPU_VECTOR_IRQ + 1] = 0x56;
+	cpu->Regs.rPC = 0x56ABCD;
+	cpu->Regs.rS.w = 0x0200;
+	cpu->Regs.rP = SNCPU_FLAG_D | SNCPU_FLAG_C;
+	cpu->Regs.rE = 0;
+	cpu->uSignal = SNCPU_SIGNAL_IRQ;
+	cpu->Cycles = 1000;
+	SNCPUIRQ(cpu);
+	ok &= cpu->Regs.rPC == 0x005678;
+	ok &= cpu->Regs.rS.w == 0x01FC;
+	ok &= memory[0x0200] == 0x56 && memory[0x01FF] == 0xAB;
+	ok &= memory[0x01FE] == 0xCD && memory[0x01FD] == (SNCPU_FLAG_D | SNCPU_FLAG_C);
+	ok &= (cpu->Regs.rP & (SNCPU_FLAG_I | SNCPU_FLAG_D)) == SNCPU_FLAG_I;
+	ok &= cpu->Cycles == 1000 - (6 * SNCPU_CYCLE_SLOW + 2 * SNCPU_CYCLE_FAST);
+
+	/* An asserted but masked IRQ still releases WAI without taking a vector. */
+	/* The architectural PC has already advanced past WAI while halted. */
+	cpu->Regs.rPC = 0x008001;
+	cpu->Regs.rS.w = 0x01AA;
+	cpu->Regs.rP = SNCPU_FLAG_M | SNCPU_FLAG_X | SNCPU_FLAG_I;
+	cpu->Regs.rE = 1;
+	cpu->uSignal = SNCPU_SIGNAL_IRQ | SNCPU_SIGNAL_WAI;
+	cpu->Cycles = 1000;
+	SNCPUIRQ(cpu);
+	ok &= cpu->Regs.rPC == 0x008001;
+	ok &= cpu->Regs.rS.w == 0x01AA;
+	ok &= !(cpu->uSignal & SNCPU_SIGNAL_WAI);
+	ok &= cpu->Cycles == 1000;
+
+	/* Clearing RDNMI or disabling NMI lowers the input line, but must not
+	   cancel an edge which the CPU has already latched. */
+	cpu->uSignal = 0;
+	SNCPUSignalNMI(cpu, 1);
+	ok &= (cpu->uSignal & (SNCPU_SIGNAL_NMI | SNCPU_SIGNAL_NMIEDGE)) ==
+		(SNCPU_SIGNAL_NMI | SNCPU_SIGNAL_NMIEDGE);
+	SNCPUSignalNMI(cpu, 0);
+	ok &= !(cpu->uSignal & SNCPU_SIGNAL_NMI);
+	ok &= (cpu->uSignal & SNCPU_SIGNAL_NMIEDGE) != 0;
+
+	/* WAI and STP are four-cycle instructions and leave architectural PC
+	   pointing at the following opcode.  IRQ wakes WAI without an extra PC
+	   increment; STP records a reset-only halt. */
+	const Uint32 haltPc = 0x008100;
+	memory[haltPc] = 0xCB;
+	cpu->Regs.rPC = haltPc;
+	cpu->Regs.rP = SNCPU_FLAG_M | SNCPU_FLAG_X | SNCPU_FLAG_I;
+	cpu->Regs.rE = 1;
+	cpu->uSignal = 0;
+	cpu->Cycles = 1000;
+	cpu->uTestCycles = 0;
+	SNCPUExecuteOne(cpu);
+	ok &= cpu->Regs.rPC == haltPc + 1;
+	ok &= (cpu->uSignal & SNCPU_SIGNAL_WAI) != 0;
+	ok &= cpu->uTestCycles == 4;
+	SNCPUSignalIRQ(cpu, 1);
+	SNCPUIRQ(cpu);
+	ok &= cpu->Regs.rPC == haltPc + 1;
+	ok &= !(cpu->uSignal & SNCPU_SIGNAL_WAI);
+
+	memory[haltPc] = 0xDB;
+	cpu->Regs.rPC = haltPc;
+	cpu->uSignal = 0;
+	cpu->Cycles = 1000;
+	cpu->uTestCycles = 0;
+	SNCPUExecuteOne(cpu);
+	ok &= cpu->Regs.rPC == haltPc + 1;
+	ok &= (cpu->uSignal & SNCPU_SIGNAL_STP) != 0;
+	ok &= cpu->uTestCycles == 4;
+
+	/* An IRQ already asserted while I=1 must be taken immediately after CLI
+	   unmasks it, not after the interpreter burns the rest of its scanline. */
+	memory[haltPc] = 0x58; /* CLI */
+	memory[haltPc + 1] = 0xEA;
+	cpu->Regs.rPC = haltPc;
+	cpu->Regs.rP = SNCPU_FLAG_M | SNCPU_FLAG_X | SNCPU_FLAG_I;
+	cpu->Regs.rE = 1;
+	cpu->uSignal = SNCPU_SIGNAL_IRQ;
+	cpu->Cycles = 100;
+	cpu->uTestCycles = 0;
+	SNCPUExecute(cpu);
+	ok &= cpu->Regs.rPC == haltPc + 1;
+	ok &= !(cpu->Regs.rP & SNCPU_FLAG_I);
+	ok &= cpu->Cycles == 100 - 2 * SNCPU_CYCLE_FAST;
+	ok &= cpu->uTestCycles == 2;
+
+	memory[SNCPU_VECTORE_NMI] = memory[SNCPU_VECTORE_NMI + 1] = 0;
+	memory[SNCPU_VECTOR_IRQ] = memory[SNCPU_VECTOR_IRQ + 1] = 0;
+	memory[0x01FD] = memory[0x01FE] = memory[0x01FF] = memory[0x0200] = 0;
+	memory[haltPc] = memory[haltPc + 1] = 0;
+	cpu->uSignal = 0;
+	std::printf("interrupt semantics: %s\n", ok ? "PASS" : "FAIL");
+	return ok;
+}
+
+static bool CheckBlockMove(SNCpuT *cpu, Uint8 *memory)
+{
+	bool ok = true;
+	const Uint32 pc = 0x008000;
+
+	memory[pc + 0] = 0x54; /* MVN destination, source */
+	memory[pc + 1] = 0x02;
+	memory[pc + 2] = 0x01;
+	memory[0x01FFFE] = 0x11;
+	memory[0x01FFFF] = 0x22;
+	memory[0x010000] = 0x33;
+	cpu->Regs.rPC = pc;
+	cpu->Regs.rA.w = 2; /* A+1 bytes */
+	cpu->Regs.rX.w = 0xFFFE;
+	cpu->Regs.rY.w = 0x0100;
+	cpu->Regs.rS.w = 0x01FF;
+	cpu->Regs.rP = SNCPU_FLAG_M; /* native, 16-bit indexes */
+	cpu->Regs.rE = 0;
+	cpu->uSignal = 0;
+	cpu->Cycles = 1000;
+
+	for (unsigned i = 0; i < 3; i++)
+	{
+		cpu->uTestCycles = 0;
+		SNCPUExecuteOne(cpu);
+		ok &= cpu->uTestCycles == 7;
+		ok &= (cpu->Regs.rPC & 0xFFFFFF) == (i == 2 ? pc + 3 : pc);
+	}
+	ok &= cpu->Regs.rA.w == 0xFFFF;
+	ok &= cpu->Regs.rX.w == 0x0001 && cpu->Regs.rY.w == 0x0103;
+	ok &= cpu->Regs.rDB == 0x020000;
+	ok &= memory[0x020100] == 0x11;
+	ok &= memory[0x020101] == 0x22;
+	ok &= memory[0x020102] == 0x33;
+
+	memory[pc + 0] = memory[pc + 1] = memory[pc + 2] = 0;
+	memory[0x01FFFE] = memory[0x01FFFF] = memory[0x010000] = 0;
+	memory[0x020100] = memory[0x020101] = memory[0x020102] = 0;
+	std::printf("interruptible MVN: %s\n", ok ? "PASS" : "FAIL");
+	return ok;
+}
+
 static unsigned ParseNumber(const std::string &text)
 {
 	return (unsigned)std::strtoul(text.c_str(), NULL, 10);
@@ -108,6 +268,36 @@ static bool CheckRam(const Uint8 *memory, const std::string &spec)
 	return true;
 }
 
+static void ClearRam(Uint8 *memory, const std::string &spec)
+{
+	std::vector<std::string> pairs;
+	Split(spec, ';', pairs);
+	for (size_t i = 0; i < pairs.size(); i++)
+	{
+		size_t equals = pairs[i].find('=');
+		if (equals != std::string::npos)
+			memory[ParseNumber(pairs[i].substr(0, equals)) & 0xFFFFFF] = 0;
+	}
+}
+
+static std::string TestGroup(const std::string &name)
+{
+	std::istringstream input(name);
+	std::string opcode;
+	std::string mode;
+	input >> opcode >> mode;
+	return opcode + "." + mode;
+}
+
+struct TestStats
+{
+	unsigned Tests;
+	unsigned StateFailures;
+	unsigned CycleFailures;
+
+	TestStats() : Tests(0), StateFailures(0), CycleFailures(0) {}
+};
+
 int main(int argc, char **argv)
 {
 	const unsigned maxFailures = argc > 1 ? ParseNumber(argv[1]) : 20;
@@ -116,6 +306,8 @@ int main(int argc, char **argv)
 	std::string line;
 	unsigned tests = 0;
 	unsigned failures = 0;
+	unsigned cycleFailures = 0;
+	std::map<std::string, TestStats> stats;
 
 	if (!memory)
 		return 2;
@@ -129,13 +321,18 @@ int main(int argc, char **argv)
 		std::free(memory);
 		return 1;
 	}
+	if (!CheckInterruptSemantics(&cpu, memory) || !CheckBlockMove(&cpu, memory))
+	{
+		std::free(memory);
+		return 1;
+	}
 
 	while (std::getline(std::cin, line))
 	{
 		std::vector<std::string> field;
 		std::vector<Uint32> touched;
 		Split(line, '\t', field);
-		if (field.size() != 23)
+		if (field.size() != 23 && field.size() != 24)
 		{
 			std::fprintf(stderr, "bad input: got %u fields\n", (unsigned)field.size());
 			return 2;
@@ -153,6 +350,7 @@ int main(int argc, char **argv)
 		cpu.Regs.rE = (Uint8)ParseNumber(field[10]);
 		cpu.uSignal = 0;
 		cpu.Cycles = 1000;
+		cpu.uTestCycles = 0;
 		SNCPUExecuteOne(&cpu);
 
 		bool ok =
@@ -168,27 +366,59 @@ int main(int argc, char **argv)
 			cpu.Regs.rE == ParseNumber(field[20]) &&
 			CheckRam(memory, field[22]);
 
+		const bool cyclesOk = field.size() != 24 ||
+			cpu.uTestCycles == ParseNumber(field[23]);
+		TestStats &group = stats[TestGroup(field[0])];
 		tests++;
+		group.Tests++;
 		if (!ok)
 		{
 			failures++;
+			group.StateFailures++;
 			if (failures <= maxFailures)
 			{
-				std::printf("FAIL %s got pc=%02X:%04X s=%04X p=%02X a=%04X x=%04X y=%04X db=%02X d=%04X e=%u\n",
+				std::printf("FAIL %s got pc=%02X:%04X s=%04X p=%02X a=%04X x=%04X y=%04X db=%02X d=%04X e=%u; expected pc=%02X:%04X s=%04X p=%02X a=%04X x=%04X y=%04X db=%02X d=%04X e=%u\n",
 					field[0].c_str(), (unsigned)(cpu.Regs.rPC >> 16) & 0xFF,
 					(unsigned)cpu.Regs.rPC & 0xFFFF, (unsigned)cpu.Regs.rS.w,
 					(unsigned)cpu.Regs.rP, (unsigned)cpu.Regs.rA.w,
 					(unsigned)cpu.Regs.rX.w, (unsigned)cpu.Regs.rY.w,
 					(unsigned)(cpu.Regs.rDB >> 16) & 0xFF,
-					(unsigned)cpu.Regs.rDP, (unsigned)cpu.Regs.rE);
+					(unsigned)cpu.Regs.rDP, (unsigned)cpu.Regs.rE,
+					ParseNumber(field[19]), ParseNumber(field[11]),
+					ParseNumber(field[12]), ParseNumber(field[13]),
+					ParseNumber(field[14]), ParseNumber(field[15]),
+					ParseNumber(field[16]), ParseNumber(field[17]),
+					ParseNumber(field[18]), ParseNumber(field[20]));
+			}
+		}
+		if (!cyclesOk)
+		{
+			cycleFailures++;
+			group.CycleFailures++;
+			if (cycleFailures <= maxFailures)
+			{
+				std::printf("CYCLES %s got=%u expected=%u\n",
+					field[0].c_str(), (unsigned)cpu.uTestCycles,
+					ParseNumber(field[23]));
 			}
 		}
 
-		for (size_t i = 0; i < touched.size(); i++)
-			memory[touched[i]] = 0;
+		ClearRam(memory, field[21]);
+		ClearRam(memory, field[22]);
 	}
 
-	std::printf("CPU tests: %u, failures: %u\n", tests, failures);
+	for (std::map<std::string, TestStats>::const_iterator it = stats.begin();
+		it != stats.end(); ++it)
+	{
+		if (it->second.StateFailures || it->second.CycleFailures)
+		{
+			std::printf("SUMMARY %s tests=%u state=%u cycles=%u\n",
+				it->first.c_str(), it->second.Tests,
+				it->second.StateFailures, it->second.CycleFailures);
+		}
+	}
+	std::printf("CPU tests: %u, state failures: %u, cycle failures: %u\n",
+		tests, failures, cycleFailures);
 	std::free(memory);
-	return failures ? 1 : 0;
+	return (failures || cycleFailures) ? 1 : 0;
 }

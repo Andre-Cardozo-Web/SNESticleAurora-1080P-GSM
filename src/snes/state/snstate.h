@@ -31,6 +31,8 @@ struct SNStateDMACT
 	SnesDMAChT	m_Channels[SNESDMAC_CHANNEL_NUM];
 	Uint8		m_MDMAEnable;
 	Uint8		m_HDMAEnable;
+	Uint8		m_HDMAEnded;
+	Uint8		m_HDMADoTransfer;
 };
 
 

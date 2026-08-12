@@ -47,6 +47,8 @@ private:
 	SnesDMAChT	                m_Channels[SNESDMAC_CHANNEL_NUM];
 	Uint8		                m_MDMAEnable;
 	Uint8		                m_HDMAEnable;		// hdma channel enable
+	Uint8		                m_HDMAEnded;		// channels stopped for this frame
+	Uint8		                m_HDMADoTransfer;	// repeat/first-line transfer latch
 
 	SNCpu_t	*                   m_pCPU;
 	SnesPPU	*                   m_pPPU;
@@ -55,7 +57,7 @@ private:
 	void                        TransferData(SnesDMAChT *pChan, Uint8 *pData, Int32 nBytes);
 	void                        ProcessMDMAChRead(Uint32 uChan);
 	void                        ProcessMDMAChFast(Uint32 uChan);
-	Uint32                      ProcessHDMACh(Uint32 uChan);
+	void                        ProcessHDMACh(Uint32 uChan);
 
     //Uint32 ProcessMDMACh(Uint32 uChan);
 };

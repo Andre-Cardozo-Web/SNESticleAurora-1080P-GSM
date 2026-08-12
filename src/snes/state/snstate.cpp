@@ -99,6 +99,7 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
 	m_Cpu.Counter[3] = pState->CPU.Counter[3];
 	m_Cpu.nAbortCycles = 0;
 	m_Cpu.uSignal    = pState->CPU.uSignal;
+	m_Cpu.uNmiDmaDelay = 0;
 
 	m_Spc.Regs = pState->SPC.Regs;
 	m_Spc.Cycles = pState->SPC.Cycles;
@@ -167,6 +168,8 @@ void SNSpcIO::RestoreState(struct SNStateSPCIOT *pState)
 void SnesDMAC::SaveState(struct SNStateDMACT *pState)
 {
 	pState->m_HDMAEnable = m_HDMAEnable;
+	pState->m_HDMAEnded = m_HDMAEnded;
+	pState->m_HDMADoTransfer = m_HDMADoTransfer;
 	pState->m_MDMAEnable = m_MDMAEnable;
 	memcpy(pState->m_Channels, m_Channels, sizeof(pState->m_Channels));
 }
@@ -174,6 +177,8 @@ void SnesDMAC::SaveState(struct SNStateDMACT *pState)
 void SnesDMAC::RestoreState(struct SNStateDMACT *pState)
 {
 	m_HDMAEnable = pState->m_HDMAEnable;
+	m_HDMAEnded = pState->m_HDMAEnded;
+	m_HDMADoTransfer = pState->m_HDMADoTransfer;
 	m_MDMAEnable = pState->m_MDMAEnable;
 	memcpy(m_Channels, pState->m_Channels, sizeof(m_Channels));
 }
@@ -246,4 +251,3 @@ void SNStateCompare(SnesStateT *pStateA, SnesStateT *pStateB)
     _SNStateMemDiff("DMAC", (Uint8 *)&pStateA->DMAC, (Uint8 *)&pStateB->DMAC, sizeof(pStateA->DMAC));
 
 }
-
