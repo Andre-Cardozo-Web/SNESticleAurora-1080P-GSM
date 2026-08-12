@@ -145,25 +145,19 @@ void MainLoopRender()
 
         PolyBlend(FALSE);
         PolyTexture(&_OutTex);
-//        PolyUV(0,0,256,240);
         PolyUV(0,0,256,240);
 		PolyColor4f(fColor, fColor, fColor, 1.0f);
-//		PolyColor4f(0.50f, 0.50f, 0.50f, 1.0f);
 
 
                 if (g_GskVideoMode == GSK_VIDMODE_240P && _pSystem == _pNes)
         {
-            /*
-             * InfoNES 240p overscan compensation.
-             *
-             * Keep the full 256x240 NES framebuffer and its aspect ratio,
-             * but display it at a uniform 7/8 scale:
-             *
-             *     256x240 -> 224x210
-             *
-             * This provides 16px horizontal margins and 15px vertical
-             * margins without changing the image geometry.
-             */
+/*
+ * InfoNES 240p overscan compensation.
+ *
+ * Keep the NES framebuffer at its native 256x240 size and
+ * preserve a 1:1 pixel mapping. Only reposition the image
+ * to compensate for CRT overscan.
+ */
 PolyRect(0.0f, 5.0f, 256.0f, 240.0f);
         }
         else
