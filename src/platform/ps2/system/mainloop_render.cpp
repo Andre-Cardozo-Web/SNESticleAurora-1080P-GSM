@@ -145,13 +145,25 @@ void MainLoopRender()
 
         PolyBlend(FALSE);
         PolyTexture(&_OutTex);
-//        PolyUV(0,0,256,240);
         PolyUV(0,0,256,240);
 		PolyColor4f(fColor, fColor, fColor, 1.0f);
-//		PolyColor4f(0.50f, 0.50f, 0.50f, 1.0f);
 
 
-        PolyRect(dx,dy,MAINLOOP_SCREENWIDTH,MAINLOOP_SCREENHEIGHT);
+                if (g_GskVideoMode == GSK_VIDMODE_240P && _pSystem == _pNes)
+        {
+/*
+ * InfoNES 240p overscan compensation.
+ *
+ * Keep the NES framebuffer at its native 256x240 size and
+ * preserve a 1:1 pixel mapping. Only reposition the image
+ * to compensate for CRT overscan.
+ */
+PolyRect(0.0f, 5.0f, 256.0f, 240.0f);
+        }
+        else
+        {
+            PolyRect(dx,dy,MAINLOOP_SCREENWIDTH,MAINLOOP_SCREENHEIGHT);
+        }
 
         PolyBlend(TRUE);
         //PolyTexture(NULL);
