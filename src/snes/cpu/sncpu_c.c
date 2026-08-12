@@ -110,7 +110,6 @@
 
 #define SNCPU_READ8(_Addr, _x)  _x = _SNCPURead8(pCpu, _Addr);  
 #define SNCPU_READ16(_Addr, _x) _x = _SNCPURead16(pCpu, _Addr); 
-#define SNCPU_READ24(_Addr, _x) _x = _SNCPURead24(pCpu, _Addr); 
 #define SNCPU_READ16_WRAP16(_Addr, _x) _x = _SNCPURead16Wrap16(pCpu, _Addr);
 #define SNCPU_READ24_WRAP16(_Addr, _x) _x = _SNCPURead24Wrap16(pCpu, _Addr);
 #define SNCPU_READ16_DP(_Addr, _x) _x = _SNCPURead16DP(pCpu, _Addr, R_DPMASK);
@@ -244,7 +243,9 @@
 	do {											\
 		Uint32 _dpCycles = (R_DPMASK >> 16) & 0xFF;	\
 		pCpu->Cycles -= _dpCycles;					\
-		if (_dpCycles) SNCPU_TESTCYCLES(1)			\
+		if (_dpCycles) {							\
+			SNCPU_TESTCYCLES(1)					\
+		}									\
 	} while (0);
 
 #define SNCPU_INDEX_READ_PENALTY(_Base, _Index)			\
@@ -530,16 +531,6 @@ static Uint16 _SNCPURead16(SNCpuT *pCpu, Uint32 Addr)
 	SNCPU_SUBMEMCYCLES(Addr,2); 
 	uData =  __SNCPURead8(pCpu, Addr);
 	uData|= (__SNCPURead8(pCpu, Addr+1)<<8);
-	return  uData;
-}
-
-static Uint32 _SNCPURead24(SNCpuT *pCpu, Uint32 Addr)
-{
-	Uint32 uData;
-	SNCPU_SUBMEMCYCLES(Addr,3); 
-	uData = (__SNCPURead8(pCpu, Addr+0) << 0);
-	uData|= (__SNCPURead8(pCpu, Addr+1) << 8);
-	uData|= (__SNCPURead8(pCpu, Addr+2) << 16);
 	return  uData;
 }
 
