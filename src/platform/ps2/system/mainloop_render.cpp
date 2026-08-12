@@ -151,7 +151,25 @@ void MainLoopRender()
 //		PolyColor4f(0.50f, 0.50f, 0.50f, 1.0f);
 
 
-        PolyRect(dx,dy,MAINLOOP_SCREENWIDTH,MAINLOOP_SCREENHEIGHT);
+                if (g_GskVideoMode == GSK_VIDMODE_240P && _pSystem == _pNes)
+        {
+            /*
+             * InfoNES 240p overscan compensation.
+             *
+             * Keep the full 256x240 NES framebuffer and its aspect ratio,
+             * but display it at a uniform 7/8 scale:
+             *
+             *     256x240 -> 224x210
+             *
+             * This provides 16px horizontal margins and 15px vertical
+             * margins without changing the image geometry.
+             */
+PolyRect(0.0f, 5.0f, 256.0f, 240.0f);
+        }
+        else
+        {
+            PolyRect(dx,dy,MAINLOOP_SCREENWIDTH,MAINLOOP_SCREENHEIGHT);
+        }
 
         PolyBlend(TRUE);
         //PolyTexture(NULL);
