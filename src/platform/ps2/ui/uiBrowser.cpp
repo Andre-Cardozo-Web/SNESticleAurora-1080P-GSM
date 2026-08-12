@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <limits.h>
 #include <unistd.h>
+
 #define NEWLIB_PORT_AWARE          /* libera fileXio no port newlib (igual main.cpp) */
 #include <fileXio.h>
 #include <fileXio_rpc.h>   /* HDD APA: fileXioDopen/Dread (listar particoes) */
@@ -24,7 +25,8 @@
 #include "mainloop_bgm.h"
 #include "mainloop_smb.h"
 #include "mainloop_ui.h"
-
+#include "gpprim.h"
+#include "../gs/gskit_backend.h"
 extern "C" {
 #include "mcsave_ee.h"
 };
@@ -256,6 +258,10 @@ static int BrowserOpenDirectory(const Char *pPath)
    embedded ASCII-only m5x7 atlas. */
 #define BROWSER_DIR_PREFIX "> "
 #define BROWSER_DIR_SUFFIX "/"
+
+/* 240p browser alignment: move the complete File Explorer UI
+   16 logical pixels to the right. */
+#define BROWSER_240P_OFFSET_X (16.0f)
 
 /* Width of a single space in the current font, used to size the
    marquee gap. We grab it lazily once per Draw() so the cost is one
@@ -994,9 +1000,31 @@ Bool CBrowserScreen::AddEntry(const Char *pName, BrowserEntryTypeE eType, Int32 
 	return TRUE;
 }
 
+extern int g_GskVideoMode;
+
+
 
 void CBrowserScreen::Draw()
 {
+	/* In 240p the File Explorer needs a 16px horizontal correction.
+	   Preserve the transform that was active when Draw() was entered,
+	   then restore it before returning so all other screens keep
+	   their original coordinates. */
+	const Float32 browserScaleX = GPPrimGetScaleX();
+	const Float32 browserScaleY = GPPrimGetScaleY();
+	const Float32 browserOffsetX = GPPrimGetOffsetX();
+	const Float32 browserOffsetY = GPPrimGetOffsetY();
+
+	if (g_GskVideoMode == GSK_VIDMODE_240P)
+	{
+		GPPrimSetTransform(
+			browserScaleX,
+			browserScaleY,
+			browserOffsetX + BROWSER_240P_OFFSET_X,
+			browserOffsetY
+		);
+	}
+
 	Int32 iEntry;
 	Int32 vx=4, vy = 20;
 	Int32 iLine;
@@ -1394,6 +1422,17 @@ void CBrowserScreen::Draw()
 
 		m_SubMenu.Draw();
 	}
+
+	if (g_GskVideoMode == GSK_VIDMODE_240P)
+	{
+		GPPrimSetTransform(
+			browserScaleX,
+			browserScaleY,
+			browserOffsetX,
+			browserOffsetY
+		);
+	}
+
 }
 
 void CBrowserScreen::Process()
