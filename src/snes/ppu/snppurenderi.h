@@ -33,6 +33,7 @@ public:
 	virtual void EndRender() = 0;
 	virtual void RenderLine(Int32 iLine) = 0;
 	virtual void UpdateVRAM(Uint32 uVramAddr) {};
+	virtual void UpdateVRAMRange(Uint32 uVramAddr, Uint32 nWords) {};
 	virtual void UpdateCGRAM(Uint32 uAddr, Uint16 uData) {};
 };
 

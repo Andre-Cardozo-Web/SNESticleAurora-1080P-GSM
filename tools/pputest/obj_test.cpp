@@ -5,7 +5,6 @@
 #include "types.h"
 #include "snppu.h"
 #include "snppurender.h"
-#include "snppuobjcache.h"
 
 void _DecodeOBJEX(Uint8 *pObjEx, SnesRenderObjT *pObjs, Int32 nObjs,
                   Uint32 uBaseSize);
@@ -110,79 +109,6 @@ int main()
 	Check("normal tile column 3", _SnesPPUOBJSourceColumn(3, 32, FALSE), 3);
 	Check("hflip left fetches right", _SnesPPUOBJSourceColumn(0, 32, TRUE), 3);
 	Check("hflip right fetches left", _SnesPPUOBJSourceColumn(3, 32, TRUE), 0);
-
-	// O cache OBJ deve reutilizar somente endereco+flip+fonte identicos.
-	// Trocas de paleta nao entram na chave; trocas de VRAM sempre falham o hit.
-	{
-		SnesPPUObjRowCacheT cache;
-		Uint32 data0 = 0;
-		Uint32 data1 = 0;
-		Uint32 opaque = 0;
-		Bool changed = TRUE;
-
-		std::memset(&cache, 0, sizeof(cache));
-		Check("OBJ cache entry size", sizeof(SnesPPUObjRowCacheEntryT), 16);
-		Check("OBJ cache bytes", sizeof(cache), 8192);
-		Check("OBJ cache cold miss",
-		      SnesPPUObjRowCacheLookup(&cache, 0x1234, FALSE,
-		          0x44332211, &data0, &data1, &opaque, &changed), FALSE);
-		Check("OBJ cache cold not refresh", changed, FALSE);
-
-		SnesPPUObjRowCacheStore(&cache, 0x1234, FALSE, 0x44332211,
-		                         0x08040201, 0x01020408, 0xA5);
-		Check("OBJ cache hit",
-		      SnesPPUObjRowCacheLookup(&cache, 0x1234, FALSE,
-		          0x44332211, &data0, &data1, &opaque, &changed), TRUE);
-		Check("OBJ cache data0", data0, 0x08040201);
-		Check("OBJ cache data1", data1, 0x01020408);
-		Check("OBJ cache opaque", opaque, 0xA5);
-		Check("OBJ cache palette independent A", data0 | 0x80808080,
-		      (int)0x88848281u);
-		Check("OBJ cache palette independent B", data0 | 0xB0B0B0B0,
-		      (int)0xB8B4B2B1u);
-
-		Check("OBJ cache hflip is separate",
-		      SnesPPUObjRowCacheLookup(&cache, 0x1234, TRUE,
-		          0x44332211, &data0, &data1, &opaque, &changed), FALSE);
-		Check("OBJ cache VRAM refresh miss",
-		      SnesPPUObjRowCacheLookup(&cache, 0x1234, FALSE,
-		          0x44332210, &data0, &data1, &opaque, &changed), FALSE);
-		Check("OBJ cache VRAM refresh detected", changed, TRUE);
-		SnesPPUObjRowCacheStore(&cache, 0x1234, FALSE, 0x44332210,
-		                         0x03030303, 0x04040404, 0x3C);
-		Check("OBJ cache refreshed hit",
-		      SnesPPUObjRowCacheLookup(&cache, 0x1234, FALSE,
-		          0x44332210, &data0, &data1, &opaque, &changed), TRUE);
-		Check("OBJ cache refreshed data", data0, 0x03030303);
-		Check("OBJ cache refreshed opaque", opaque, 0x3C);
-
-		// Uma colisao direta deve expulsar a entrada, nunca parecer um hit.
-		{
-			Uint32 address;
-			Uint32 baseKey = SnesPPUObjRowCacheKey(0x1234, FALSE);
-			Uint32 baseIndex = SnesPPUObjRowCacheIndex(baseKey);
-			for (address = 0; address < 0x8000; address++)
-			{
-				Uint32 key = SnesPPUObjRowCacheKey(address, FALSE);
-				if (key != baseKey &&
-				    SnesPPUObjRowCacheIndex(key) == baseIndex)
-					break;
-			}
-			Check("OBJ cache collision found", address < 0x8000, TRUE);
-			SnesPPUObjRowCacheStore(&cache, address, FALSE, 0x44332210,
-			                         0x05050505, 0x06060606, 0x5A);
-			Check("OBJ cache collision evicts",
-			      SnesPPUObjRowCacheLookup(&cache, 0x1234, FALSE,
-			          0x44332210, &data0, &data1, &opaque, &changed), FALSE);
-			Check("OBJ cache collision not refresh", changed, FALSE);
-		}
-
-		SnesPPUObjRowCacheStore(&cache, 0x7FFF, TRUE, 0xFFFFFFFF,
-		                         0x01010101, 0x02020202, 0xFF);
-		Check("OBJ cache max key hit",
-		      SnesPPUObjRowCacheLookup(&cache, 0x7FFF, TRUE,
-		          0xFFFFFFFF, &data0, &data1, &opaque, &changed), TRUE);
-	}
 
     // Tiles parcialmente fora da tela nao podem tocar os buffers vizinhos.
     // Final Fight 2 mantem OBJ em X negativo durante o gameplay.

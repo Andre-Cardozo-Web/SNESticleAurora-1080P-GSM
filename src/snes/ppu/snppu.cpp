@@ -144,10 +144,11 @@ void SnesPPU::WriteVMDATALH(Uint8 uDataL, Uint8 uDataH)
 	g_DbgVRAMWrites += 2;
 #endif
 	SnesReg16T *pVram = (SnesReg16T *)m_VRAM;
-	Uint32 uVramAddr;
+	Uint32 uVramAddr, uFirstVramAddr;
 
 	// calculate vram address
 	uVramAddr = _SwizzleVramAddr(m_Regs.vmaddr.w, (m_Regs.vmain >> 2) & 3);
+	uFirstVramAddr = uVramAddr;
 	m_Regs.vmreadlatch.w = m_Regs.vmaddr.w;
 
 	// write to vram
@@ -169,7 +170,9 @@ void SnesPPU::WriteVMDATALH(Uint8 uDataL, Uint8 uDataH)
 	// increment vram addr
 	m_Regs.vmaddr.w += m_Regs.vminc[1];
 
-	m_pRender->UpdateVRAM(uVramAddr);
+	m_pRender->UpdateVRAM(uFirstVramAddr);
+	if (uVramAddr != uFirstVramAddr)
+		m_pRender->UpdateVRAM(uVramAddr);
 }
 
 
@@ -214,7 +217,7 @@ void SnesPPU::WriteVMDATABlock(const Uint8 *pData, Int32 nBytes)
 #if SNDBG_LOG
 		g_DbgVRAMWrites += nWords * 2;
 #endif
-		m_pRender->UpdateVRAM(uFirstPhysical);
+		m_pRender->UpdateVRAMRange(uFirstPhysical, (Uint32)nWords);
 
 		nBytes -= nWords * 2;
 	}
@@ -860,12 +863,22 @@ void SnesPPU::EndFrame()
 
 Bool SnesPPU::EnqueueWrite(Uint32 uLine, Uint32 uAddr, Uint8 uData)
 {
-	return m_Queue.Enqueue(uLine, uAddr, uData);
+	Bool bQueued = m_Queue.Enqueue(uLine, uAddr, uData);
+#if SNDBG_LOG
+	if (bQueued)
+		g_DbgPPUQueuedWrites++;
+	else
+		g_DbgPPUQueueFull++;
+#endif
+	return bQueued;
 }
 
 void SnesPPU::Sync(Uint32 uLine)
 {
 	SNQueueElementT *pElement;
+#if SNDBG_LOG
+	Uint32 uAppliedWrites = 0;
+#endif
 
     // are we rendering?
 	if (!m_bVBlank)
@@ -877,6 +890,9 @@ void SnesPPU::Sync(Uint32 uLine)
 			{
 				// perform write
 				Write8(pElement->uAddr, pElement->uData);
+#if SNDBG_LOG
+				uAppliedWrites++;
+#endif
 			}
 
             // are we within a frame?
@@ -904,7 +920,13 @@ void SnesPPU::Sync(Uint32 uLine)
 	{
 		// perform write
 		Write8(pElement->uAddr, pElement->uData);
+#if SNDBG_LOG
+		uAppliedWrites++;
+#endif
 	}
+#if SNDBG_LOG
+	g_DbgPPUAppliedWrites += uAppliedWrites;
+#endif
 }
 
 void SnesPPU::Reset()
@@ -917,6 +939,7 @@ void SnesPPU::Reset()
 	memset(&m_CGRAM, 0, sizeof(m_CGRAM));
 	memset(&m_VRAM, 0, sizeof(m_VRAM));
 	memset(&m_OAM, 0, sizeof(m_OAM));
+	m_pRender->UpdateVRAMRange(0, SNESPPU_VRAM_NUMWORDS);
 	m_OAMLatch = 0;
 
 	// confirmed:

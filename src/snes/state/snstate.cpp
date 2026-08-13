@@ -198,6 +198,7 @@ void SnesPPU::RestoreState(struct SNStatePPUT *pState)
 	memcpy(m_VRAM,    pState->m_VRAM,  sizeof(m_VRAM));
 	m_OAM = pState->m_OAM;
 	m_OAMLatch = 0;
+	m_pRender->UpdateVRAMRange(0, SNESPPU_VRAM_NUMWORDS);
 	UpdateOAMPriority();
 }
 

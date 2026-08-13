@@ -219,6 +219,7 @@ public:
 	void BeginRender(CRenderSurface *pTarget);
 	void EndRender();
 	void UpdateVRAM(Uint32 uVramAddr);
+	void UpdateVRAMRange(Uint32 uVramAddr, Uint32 nWords);
 	void UpdateCGRAM(Uint32 uAddr, Uint16 uData);
 };
 

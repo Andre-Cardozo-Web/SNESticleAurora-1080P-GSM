@@ -887,6 +887,11 @@ void SnesDMAC::ProcessHDMA()
 	if (!uActive)
 		return;
 
+#if SNDBG_LOG
+	Uint32 _tHDMAData = ProfCtrGetCycle();
+	g_DbgHDMALines++;
+#endif
+
 	/* Mesen performs every channel's data phase first, followed by every
 	   channel's counter/table phase.  Interleaving those phases changes both
 	   B-bus side effects and the point at which IRQ/NMI can be observed. */
@@ -895,8 +900,18 @@ void SnesDMAC::ProcessHDMA()
 	{
 		Uint8 uMask = (Uint8)(1 << uChan);
 		if ((uActive & uMask) && (m_HDMADoTransfer & uMask))
+		{
+#if SNDBG_LOG
+			g_DbgHDMATransferChannels++;
+#endif
 			ProcessHDMACh(uChan);
+		}
 	}
+
+#if SNDBG_LOG
+	g_TmgCycHDMAData += ProfCtrGetCycle() - _tHDMAData;
+	Uint32 _tHDMATable = ProfCtrGetCycle();
+#endif
 
 	for (Uint32 uChan = 0; uChan < SNESDMAC_CHANNEL_NUM; uChan++)
 	{
@@ -906,6 +921,10 @@ void SnesDMAC::ProcessHDMA()
 
 		if (!(uActive & uMask))
 			continue;
+
+#if SNDBG_LOG
+		g_DbgHDMAActiveChannels++;
+#endif
 
 		pChan = &m_Channels[uChan];
 		pChan->ntlrx--;
@@ -958,6 +977,9 @@ void SnesDMAC::ProcessHDMA()
 			m_HDMADoTransfer |= uMask;
 		}
 	}
+#if SNDBG_LOG
+	g_TmgCycHDMATable += ProfCtrGetCycle() - _tHDMATable;
+#endif
 }
 
 void SnesDMAC::Reset()

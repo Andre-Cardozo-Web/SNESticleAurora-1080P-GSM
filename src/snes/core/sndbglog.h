@@ -29,6 +29,10 @@
 #define SNPPU_OBJ_CACHE 1
 #endif
 
+#ifndef SNPPU_BG_CACHE
+#define SNPPU_BG_CACHE 0
+#endif
+
 #if SNDBG_DEEP && !SNDBG_LOG
 #undef SNDBG_LOG
 #define SNDBG_LOG 1
@@ -58,6 +62,19 @@ extern Uint32 g_TmgCycHDMA;  // HDMA por scanline
 extern Uint32 g_TmgCycAPU;   // execucao SPC700
 extern Uint32 g_TmgCycMix;   // mixer DSP de audio
 extern Uint32 g_TmgCycBlend; // composicao final main/sub da PPU
+extern Uint32 g_TmgCycPPUSync;    // SyncPPU completo (fila + render, inclusivo)
+extern Uint32 g_TmgCycBGInfo;     // decodificacao dos registradores de BG
+extern Uint32 g_TmgCycBGOffset;   // busca de offset-per-tile (modos 2/4)
+extern Uint32 g_TmgCycBGMap;      // busca/cache de entradas do tilemap
+extern Uint32 g_TmgCycBGChr;      // decodificacao das linhas de tiles BG
+extern Uint32 g_TmgCycBGMain;     // composicao dos BGs na tela principal
+extern Uint32 g_TmgCycBGSub;      // composicao/limpeza da subtela
+extern Uint32 g_TmgCycColorMath;  // criacao das mascaras de color math
+extern Uint32 g_TmgCycObjUpdate;  // decode OAM + visibilidade por scanline
+extern Uint32 g_TmgCycObjFetch;   // fetch/decode das linhas OBJ
+extern Uint32 g_TmgCycObjDraw;    // composicao OBJ main/sub
+extern Uint32 g_TmgCycHDMAData;   // fase de transferencia dos canais HDMA
+extern Uint32 g_TmgCycHDMATable;  // contador/tabela dos canais HDMA
 
 // Totais da janela atual (60 frames), alimentados pela PPU/render.
 extern Uint32 g_DbgOAMWrites;
@@ -69,6 +86,11 @@ extern Uint32 g_DbgObjTiles;
 extern Uint32 g_DbgObjCacheHits;
 extern Uint32 g_DbgObjCacheMisses;
 extern Uint32 g_DbgObjCacheRefreshes;
+extern Uint32 g_DbgBGCacheHits;
+extern Uint32 g_DbgBGCacheMisses;
+extern Uint32 g_DbgBGCacheRefreshes;
+extern Uint32 g_DbgChrCacheInvalidations;
+extern Uint32 g_DbgAudioSamples;
 extern Uint32 g_DbgObjOpaqueTiles;
 extern Uint32 g_DbgObjCandidatePixels;
 extern Uint32 g_DbgObjDrawnPixels;
@@ -99,6 +121,15 @@ extern Uint32 g_DbgHDMAScrollBytes;
 extern Uint32 g_DbgHDMACGRAMBytes;
 extern Uint32 g_DbgHDMAWindowColorBytes;
 extern Uint32 g_DbgHDMAOtherBytes;
+extern Uint32 g_DbgPPUQueuedWrites;
+extern Uint32 g_DbgPPUAppliedWrites;
+extern Uint32 g_DbgPPUQueueFull;
+extern Uint32 g_DbgHDMALines;
+extern Uint32 g_DbgHDMAActiveChannels;
+extern Uint32 g_DbgHDMATransferChannels;
+extern Uint32 g_DbgBGActiveLayers;
+extern Uint32 g_DbgBGMapReloads;
+extern Uint32 g_DbgBGChrRows;
 
 // Periodicamente uma build diagnostica captura dois scanlines OBJ e suas
 // fontes em VRAM. O dump e' pequeno para nao bloquear o SIO do NetherSX2.

@@ -9,6 +9,7 @@
 #include "mixbuffer.h"
 #include "sntiming.h"
 #include "snspcdefs.h"
+#include "sndbglog.h"
 extern "C" {
 #include "snspcbrr.h"
 };
@@ -1332,6 +1333,9 @@ void SNSpcDspMixFull::Mix(CMixBuffer *pMixBuf)
 
 	// get number of samples needed to mix
 	nTotalSamples = pMixBuf->GetOutputSamples();
+#if SNDBG_LOG
+	g_DbgAudioSamples += (Uint32)nTotalSamples;
+#endif
 
 	// build envelope lookup tables based on sample rate
 	if (nSampleRate!=m_nSampleRate)
@@ -1621,4 +1625,3 @@ void SNSpcDspMixSilent::Mix(CMixBuffer *pMixBuf)
 		}
 	}
 }
-

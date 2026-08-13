@@ -4,6 +4,7 @@
 #include "prof.h"
 #include "mixbuffer.h"
 #include "audmixbuffer.h"
+#include "audframeschedule.h"
 #include <string.h>
 
 extern "C" {
@@ -50,6 +51,7 @@ void AudMixBuffer::Reset()
     m_iPrevSample[1] = 0;
     m_nOutSamples = 0;
     m_uLastOutput = 0;
+    m_uFrameSamplePhase = 0;
     memset(m_OutData, 0, sizeof(m_OutData));
 }
 
@@ -65,45 +67,28 @@ void AudMixBuffer::GetFormat(Uint32 *puSampleRate, Uint32 *pnSampleBits, Uint32 
 Int32 AudMixBuffer::GetOutputSamples()
 {
     Int32 nSamples;
-    Int32 nRaw;
 
     if (!Aud_IsInitialized())
     {
         return 0;
     }
 
-    PROF_ENTER("Aud_Available");
-
     /*
-     * Ask the audsrv backend how many sample-frames the IOP ring
-     * buffer can accept RIGHT NOW.  This replaces the old formula
-     *     nRaw = 4 * 800 - Aud_Buffered();
-     * which assumed the ring buffer held exactly 3200 frames.
-     * audsrv uses a 20480-byte (5120-frame) ring, and
-     * audsrv_queued() can report a non-zero initial occupancy
-     * even before any audio is enqueued, so the old formula
-     * chronically under-produced audio (~424 samples/frame
-     * instead of the ~533 needed at 32 kHz / 60 fps).
+     * Audio acompanha TEMPO EMULADO, nao o espaco livre do ring do IOP.
+     * Consultar Aud_Available() fazia um quadro lento encontrar o ring mais
+     * vazio e misturar 1064..1069 amostras em vez de 532..536. Esse trabalho
+     * extra tornava o quadro seguinte ainda mais lento (feedback positivo) e
+     * tambem avancava o DSP por mais tempo do que um frame do SNES.
      *
-     * Aud_Available() -> audsrv_available() / 4  gives the
-     * real free space.  We cap at 3200 so a single frame never
-     * tries to mix more than the old worst-case, keeping EE CPU
-     * load bounded.
+     * O core atual executa 262 linhas a 60 quadros. Distribua exatamente uma
+     * taxa de audio por esses quadros, em blocos multiplos de quatro exigidos
+     * pelo conversor 2:3. Em 32 kHz a sequencia e' 532, 532, 536; ao fim de
+     * 60 quadros a soma e' 32000. Se o EE realmente nao sustentar 60 fps, o
+     * audsrv pode ter underrun, mas nunca tentamos "pagar a divida" dobrando
+     * o custo do mixer no proximo quadro.
      */
-    nRaw = Aud_Available();
-    if (nRaw > 4 * 800) nRaw = 4 * 800;
-    nRaw &= ~3;
-    if (nRaw < 0) nRaw = 0;
-
-    switch (m_uSampleRate)
-    {
-        case 48000: nSamples = nRaw;                break;
-        case 32000: nSamples = (nRaw / 6) * 4;      break;
-        case 24000: nSamples = (nRaw / 8) * 4;      break;
-        default:    nSamples = 0;                   break;
-    }
-
-    PROF_LEAVE("Aud_Available");
+    nSamples = AudFrameScheduleNext(&m_uFrameSamplePhase,
+                                    m_uSampleRate, 60, 4);
 
     m_uLastOutput  = nSamples;
     return nSamples;

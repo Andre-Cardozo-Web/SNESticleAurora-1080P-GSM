@@ -11,6 +11,7 @@
 #include "snmask.h"
 #include "snmaskop.h"
 #include "prof.h"
+#include "sndbglog.h"
 
 
 
@@ -409,6 +410,9 @@ Uint32 SnesPPURender::FetchBG(SnesBGInfoT *pBGInfo, struct SnesRenderTileT *pTil
 
 		if (uVramAddr != (uOldVramAddr&0xFFFF))
 		{
+#if SNDBG_LOG
+			g_DbgBGMapReloads++;
+#endif
 			// get pointers to screens
 			_GetScreenPtrs(pScreen, m_pPPU, pBGInfo->uScrAddr, pBGInfo->uScrSize);
 
@@ -438,6 +442,9 @@ Uint32 SnesPPURender::FetchBG(SnesBGInfoT *pBGInfo, struct SnesRenderTileT *pTil
 
 		if (uVramAddr != (uOldVramAddr&0xFFFF))
 		{
+#if SNDBG_LOG
+			g_DbgBGMapReloads++;
+#endif
 			// get pointers to screens
 			_GetScreenPtrs(pScreen, m_pPPU, pBGInfo->uScrAddr, pBGInfo->uScrSize);
 
@@ -474,6 +481,10 @@ Uint32 SnesPPURender::FetchBGOffset(SnesBGInfoT *pBGInfo, struct SnesRenderTileT
 		// no fetching
 		return 0;
 	}
+
+#if SNDBG_LOG
+	g_DbgBGMapReloads++;
+#endif
 
 	// perform BG line caching
 	switch(pBGInfo->uChrSize)

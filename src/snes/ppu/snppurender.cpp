@@ -7,6 +7,7 @@
 #include "console.h"
 #include "snppu.h"
 #include "snppurender.h"
+#include "snppuchrcache.h"
 #include "rendersurface.h"
 #include "snmask.h"
 #include "snmaskop.h"
@@ -231,7 +232,11 @@ static Bool bPrint = TRUE;
             UpdateOBJVisibility(pRenderInfo->uObjY, pRenderInfo->uObjSize, pRegs->oampri.w, SNESPPU_OBJ_NUM);
             PROF_LEAVE("UpdateOBJVisibility");
 #if SNDBG_LOG
-			g_TmgCycObj += ProfCtrGetCycle() - _tObjUpdate;
+			{
+				Uint32 _dObjUpdate = ProfCtrGetCycle() - _tObjUpdate;
+				g_TmgCycObj += _dObjUpdate;
+				g_TmgCycObjUpdate += _dObjUpdate;
+			}
 #endif
 
 			m_UpdateFlags &= ~SNESPPURENDER_UPDATE_OBJ;
@@ -262,6 +267,10 @@ static Bool bPrint = TRUE;
 
 		// render line
 		RenderLine8(iLine, pRenderInfo);
+
+#if SNDBG_LOG
+		Uint32 _tColorMath = ProfCtrGetCycle();
+#endif
 
 #if CODE_PLATFORM == CODE_PS2
 		/* If no main-screen source is selected by CGADSUB, the sub screen and
@@ -334,8 +343,9 @@ static Bool bPrint = TRUE;
 			}
 		}
 
-        // perform color blending of main+sub
+		// perform color blending of main+sub
 #if SNDBG_LOG
+		g_TmgCycColorMath += ProfCtrGetCycle() - _tColorMath;
 		Uint32 _tBlend = ProfCtrGetCycle();
 #endif
         m_pBlend->Exec(
@@ -434,12 +444,15 @@ void SnesPPURender::EndRender()
 
 void SnesPPURender::UpdateVRAM(Uint32 uVramAddr)
 {
-	(void)uVramAddr;
+	UpdateVRAMRange(uVramAddr, 1);
+}
 
-	/* VRAM writes normally arrive as a DMA burst. Set bits only; the next
-	   rendered scanline performs one cache invalidation for the entire burst.
-	   OBJ pixels are fetched directly from VRAM and do not need a separate
-	   decoded-tile cache flush here. */
+void SnesPPURender::UpdateVRAMRange(Uint32 uVramAddr, Uint32 nWords)
+{
+	SnesPPUInvalidateChrCache(uVramAddr, nWords);
+
+	/* O cache CHR ja foi invalidado acima. Estes bits cuidam dos caches
+	   derivados de tilemap/scroll na proxima scanline. */
 	SetUpdateFlags(SNESPPURENDER_UPDATE_BGSCR |
 	               SNESPPURENDER_UPDATE_BGCHR);
 }

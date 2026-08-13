@@ -99,6 +99,28 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 ---
 
+## Revisão r29: Top Gear — ganhos confirmados e renderer estável
+
+- O cache OBJ de 8 KiB foi substituído por um cache físico de CHR 4bpp,
+  indexado diretamente pela VRAM. Os carros que reutilizam a mesma arte não
+  relêem nem decodificam os quatro planos em cada scanline; escritas comuns,
+  DMA, reset e load state invalidam os tiles físicos atingidos.
+- A produção de áudio agora segue o tempo emulado: em 32 kHz / 60 Hz usa a
+  sequência exata **532, 532, 536** amostras. Um frame lento deixa de encontrar
+  o ring vazio e misturar aproximadamente o dobro no frame seguinte, removendo
+  o ciclo de realimentação que ampliava as quedas.
+- O cache BG fica desligado por padrão. No log r28 ele tinha 100% de hits, mas
+  ainda custava mais no EE; desligá-lo reduziu o bloco BG CHR em cerca de 8% e
+  trouxe aproximadamente 2% de ganho total na corrida cheia.
+- O Mode 7 experimental da r28 foi retirado: na abertura giratória ele ficou
+  cerca de 5% mais lento que o caminho anterior. Nenhuma alteração especulativa
+  em HDMA/PPU Sync entrou nesta revisão.
+- Builds normais usam `SNES_DIAGNOSTICS=0`, `SNES_OBJ_CACHE=1` e
+  `SNES_BG_CACHE=0`. A bancada cobre OAM/VRAM, OBJ, cache CHR e o agendamento
+  de áudio; os quatro testes host-side passam.
+
+---
+
 ## Revisão r24: recuperação de estabilidade após a r23
 
 - O reteste da r23 mostrou uma regressão severa no EE: Top Gear caiu para

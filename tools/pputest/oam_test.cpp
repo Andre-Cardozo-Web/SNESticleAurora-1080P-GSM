@@ -8,15 +8,43 @@
 class TestRender : public ISnesPPURender
 {
 public:
+	Uint32 uSingleCalls;
+	Uint32 uRangeCalls;
+	Uint32 uFirstAddress;
+	Uint32 uLastAddress;
+	Uint32 nLastWords;
+
 	TestRender()
 	{
 		m_UpdateFlags = 0;
 		m_pPPU = NULL;
+		ClearStats();
 	}
 
 	void BeginRender(CRenderSurface *) {}
 	void EndRender() {}
 	void RenderLine(Int32) {}
+	void UpdateVRAM(Uint32 uAddress)
+	{
+		if (!uSingleCalls) uFirstAddress = uAddress;
+		uLastAddress = uAddress;
+		uSingleCalls++;
+	}
+	void UpdateVRAMRange(Uint32 uAddress, Uint32 nWords)
+	{
+		uFirstAddress = uAddress;
+		uLastAddress = uAddress;
+		nLastWords = nWords;
+		uRangeCalls++;
+	}
+	void ClearStats()
+	{
+		uSingleCalls = 0;
+		uRangeCalls = 0;
+		uFirstAddress = 0;
+		uLastAddress = 0;
+		nLastWords = 0;
+	}
 };
 
 static int g_Failures;
@@ -287,6 +315,7 @@ int main()
 	{
 		const Uint8 data[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 		ppu.Reset();
+		render.ClearStats();
 		ppu.Write8(0x2115, 0x80); // increment by one after $2119
 		ppu.Write8(0x2116, 0x34);
 		ppu.Write8(0x2117, 0x12);
@@ -296,6 +325,9 @@ int main()
 		Check("VRAM block word 2", ppu.GetVramPtr(0x1236)[0], 0x6655);
 		Check("VRAM block address", ppu.GetRegs()->vmaddr.w, 0x1237);
 		Check("VRAM block read latch", ppu.GetRegs()->vmreadlatch.w, 0x1236);
+		Check("VRAM block range calls", render.uRangeCalls, 1);
+		Check("VRAM block invalidate address", render.uFirstAddress, 0x1234);
+		Check("VRAM block invalidate words", render.nLastWords, 3);
 	}
 
 	// Physical VRAM wraps every $8000 words while VMADDR remains 16-bit.
@@ -328,6 +360,7 @@ int main()
 	{
 		const Uint8 data[] = {0x12, 0x34};
 		ppu.Reset();
+		render.ClearStats();
 		ppu.Write8(0x2115, 0x00); // increment after $2118
 		ppu.Write8(0x2116, 0x30);
 		ppu.Write8(0x2117, 0x00);
@@ -336,6 +369,9 @@ int main()
 		Check("VRAM low-increment high", ppu.GetVramPtr(0x31)[0], 0x3400);
 		Check("VRAM low-increment address", ppu.GetRegs()->vmaddr.w, 0x31);
 		Check("VRAM low-increment latch", ppu.GetRegs()->vmreadlatch.w, 0x31);
+		Check("VRAM low-increment invalidates both", render.uSingleCalls, 2);
+		Check("VRAM low-increment first invalidation", render.uFirstAddress, 0x30);
+		Check("VRAM low-increment last invalidation", render.uLastAddress, 0x31);
 	}
 
 	std::printf(g_Failures ? "FAIL (%d)\n" : "PASS\n", g_Failures);

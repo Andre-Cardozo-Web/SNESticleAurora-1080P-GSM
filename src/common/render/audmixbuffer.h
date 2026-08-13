@@ -16,6 +16,7 @@ class AudMixBuffer : public CMixBuffer
     Int32   m_iPrevSample[2];
     Uint32  m_uSampleRate;
     Bool    m_bAsync;
+    Uint32  m_uFrameSamplePhase;
 
 	Uint32	m_uLastOutput;
 
@@ -26,7 +27,11 @@ class AudMixBuffer : public CMixBuffer
 public:
     AudMixBuffer(Uint32 uSampleRate = 48000, Bool bAsync = FALSE);
 
-    void SetSampleRate(Uint32 uSampleRate) {m_uSampleRate = uSampleRate;}
+    void SetSampleRate(Uint32 uSampleRate)
+    {
+        m_uSampleRate = uSampleRate;
+        m_uFrameSamplePhase = 0;
+    }
 	Uint32 GetLastOutput() {return m_uLastOutput;}
     void Reset();
 
