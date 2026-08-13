@@ -2,7 +2,7 @@
 
 Changelog acumulado da versão 1.0.4, comparado com a tag **v1.0.3**.
 
-Data deste pacote de teste: **12 de agosto de 2026**
+Data deste pacote de teste: **13 de agosto de 2026**
 
 Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
@@ -91,6 +91,69 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - O 65816 e o controlador DMA/HDMA foram auditados contra o **MesenCE/Mesen2** e os
   5,12 milhões de vetores do SingleStepTests; CPU, interrupções, pilha, wrap e
   timing de HDMA receberam correções independentes do renderer de sprites.
+- Os latches de scroll BG/Mode 7 agora seguem o S-PPU; a auditoria de `OBSEL`
+  preserva explicitamente seu endereço efetivo, e o blender evita cópias
+  inteiras da CLUT quando nenhuma — ou somente poucas — cores mudaram.
+
+---
+
+## Revisão r20: First Samurai/Final Fight 3 e custo global EE/GS
+
+- Corrigida uma divergência estrutural nos ports `$210D-$2114`. Scroll
+  horizontal usa bits 3-7 do latch H/V e bits 0-2 de um latch horizontal
+  separado; scroll vertical usa o latch H/V completo, e ambos são limitados a
+  10 bits. O código anterior montava todo write como um par baixo/alto simples.
+  Em jogos que alimentam scroll por HDMA isso pode escolher outro trecho do
+  tilemap a cada scanline, produzindo justamente a fragmentação em faixas
+  observada em First Samurai e Final Fight 3.
+- `$210D/$210E` atualizam também scrolls Mode 7 independentes de 13 bits. O
+  latch Mode 7 passa a ser compartilhado corretamente com `$211B-$2120`
+  (matriz e centro), em vez de cada registrador manter seu próprio byte
+  anterior. Os bits não implementados de `BGNBA` também deixam de alterar a
+  base de caracteres.
+- O endereço OBJ de `OBSEL` foi tornado explícito: o índice permanece com 8
+  bits e seu bit 8 seleciona o deslocamento completo `$1000-$4000`; a base usa
+  todos os três bits de `OBSEL.0-2`. Isso mantém o endereço efetivo da revisão
+  anterior e evita somar a segunda tabela duas vezes durante a auditoria; não
+  é apresentado como uma correção visual. O `OBSEL=62` do log também não é
+  tratado como causa comprovada de First Samurai.
+- A proteção contra a corrida entre CPU e GIF-DMA foi preservada. A área
+  estável do scratchpad continua separando o produtor EE do consumidor GIF,
+  porém a CLUT só é enviada quando CGRAM realmente muda e uma vez no começo de
+  cada quadro. Na chain completa, a cópia normal cai de 1792 para 768 bytes;
+  se HDMA altera uma única cor, são 772 bytes em vez de 1792. Uma carga
+  completa ainda usa um `memcpy`, e o upload integral exigido pelo layout CSM1
+  do GS é preservado.
+- Scanlines sem nenhum alvo em `CGADSUB`, sem clipping da main screen e com
+  brilho 15/15 agora usam uma chain GS direta: só main+paleta são enviados e
+  um único primitivo grava o resultado final. Nesse caso exato, sub/atributos
+  não podem alterar a imagem e deixam de ser compostos ou copiados; o staging
+  dinâmico cai de 768 para 256 bytes. Janela de cor, add/sub, half-color, fade
+  e force blank continuam obrigatoriamente na chain completa.
+- Com brilho SNES em 15/15, o passe final do GS era exatamente uma
+  multiplicação por 1. A chain comum preserva o mesmo estado final, mas deixa
+  de emitir o primitivo desse passe; ela só é reconstruída quando um fade
+  cruza 15/15. Brilhos menores continuam rasterizando o passe original, sem
+  aproximação de cor.
+- O renderer não busca tiles de BG/OBJ que não estejam habilitados nem na main
+  nem na sub screen. Quando a sub screen seleciona fixed color — ou quando
+  `CGADSUB` não possui alvo algum — ela é descartada antes do fetch. Isso
+  remove trabalho invisível de EE sem mudar prioridade, janela ou pixels dos
+  estados que realmente usam esses layers.
+- As duas CLUTs de atributos, constantes durante toda a execução e guardadas
+  numa faixa exclusiva de VRAM, deixam de ser reenviadas a cada quadro. Elas
+  são carregadas uma vez na primeira entrada do renderer SNES.
+- `SNES_DIAGNOSTICS=1` agora é o relatório geral de CPU/PPU/GS de menor
+  impacto. Hashes de OAM/VRAM/CGRAM, validação de staging, captura detalhada
+  de OBJ/DMA e contadores por instrução do GSU ficam em
+  `SNES_DIAGNOSTICS=2`, destinado a capturas curtas. O relatório geral também
+  separa bytes HDMA de scroll/CGRAM/janela-cor e registra os latches de scroll.
+- A bancada host cobre os quatro valores de name-select de `OBSEL`, sequências
+  H/V intercaladas, máscara de 10 bits, scroll Mode 7 e seu latch compartilhado;
+  testes de OBJ e equivalência OAM/VRAM passam. Builds EE de release,
+  diagnóstico geral e diagnóstico profundo também foram validados. First
+  Samurai e Final Fight 3 ainda precisam do reteste visual no NetherSX2/PS2
+  antes de marcar a cena como confirmada.
 
 ---
 
@@ -277,9 +340,9 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
   incorporado ao loop `Run()`, removendo uma chamada C++ por instrução; o
   benchmark host do caminho sintético melhorou cerca de 15% sem aumentar o
   objeto gerado.
-- `SNDBG_LOG` deixa de ficar forçado em toda build. O padrão normal é zero e
-  `make SNES_DIAGNOSTICS=1` recompila os contadores de investigação quando um
-  log detalhado for necessário.
+- `SNDBG_LOG` deixa de ficar forçado em toda build. O padrão normal é zero;
+  `make SNES_DIAGNOSTICS=1` recompila o relatório geral e o nível 2 habilita
+  os contadores profundos quando uma captura detalhada for necessária.
 - A bancada host passa com os diagnósticos ligados e desligados: 17.960 vetores
   aritméticos, além de pipeline, MMIO, cache rotacionado, PBR em `$60`, RAM,
   branches e `PLOT/RPIX`, todos sem falhas.

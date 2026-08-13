@@ -47,7 +47,7 @@ static Int8 _SNDma_MDMAInc[4] =
 	1, 0, -1, 0
 };
 
-#if SNDBG_LOG
+#if SNDBG_DEEP
 struct SNDmaOAMCaptureT
 {
 	Bool Active;
@@ -225,6 +225,7 @@ void SnesDMAC::SetMDMAEnable(Uint8 uData)
 		if (uBytes > g_DbgDMAMaxBytes)
 			g_DbgDMAMaxBytes = uBytes;
 
+		#if SNDBG_DEEP
 		if (g_DbgCaptureActive)
 		{
 			const SnesPPURegsT *pRegs = m_pPPU->GetRegs();
@@ -266,6 +267,7 @@ void SnesDMAC::SetMDMAEnable(Uint8 uData)
 					(unsigned)pRegs->oamaddr.w, (unsigned)uHash);
 			}
 		}
+		#endif
 
 		if ((iDelta > 0 && uBytes > 0x10000u - pChan->a1tx) ||
 		    (iDelta < 0 && uBytes > (Uint32)pChan->a1tx + 1u))
@@ -690,7 +692,7 @@ void SnesDMAC::ProcessMDMAChFast(Uint32 uChan)
     // are we done?
     if (pChan->dasx == 0)
     {
-#if SNDBG_LOG
+#if SNDBG_DEEP
 		if (_SNDmaOAMCapture.Active &&
 		    _SNDmaOAMCapture.Frame == g_DbgCaptureFrameNo &&
 		    _SNDmaOAMCapture.Channel == uChan)
@@ -813,6 +815,19 @@ void SnesDMAC::ProcessHDMACh(Uint32 uChan)
 		{
 			uData = SNCPURead8(m_pCPU, uAddrA);
 			SNCPUWrite8(m_pCPU, uAddrB, uData);
+#if SNDBG_LOG
+			{
+				Uint32 uPort = uAddrB & 0xFF;
+				if (uPort >= 0x0D && uPort <= 0x14)
+					g_DbgHDMAScrollBytes++;
+				else if (uPort == 0x22)
+					g_DbgHDMACGRAMBytes++;
+				else if (uPort >= 0x23 && uPort <= 0x32)
+					g_DbgHDMAWindowColorBytes++;
+				else
+					g_DbgHDMAOtherBytes++;
+			}
+#endif
 		}
 
 		if (pChan->dmapx & 0x40)

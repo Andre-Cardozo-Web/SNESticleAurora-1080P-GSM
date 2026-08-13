@@ -1163,7 +1163,7 @@ static void _RenderBG8(Uint8 *pLine8, SNMaskT *pLine, SNMaskT *pBGPlane, SNMaskT
 static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList, SnesRenderObj8T *pObjLine, Int32 MaxObj8Line, Int32 iLine, Uint32 uBaseAddr, Uint32 uNameSelect, Uint16 *pVram)
 {
 	Int32 nObjLine = 0;
-#if SNDBG_LOG
+#if SNDBG_DEEP
 	Bool bTrace = g_DbgCaptureActive &&
 		(iLine == 112 || iLine == 160);
 	if (bTrace)
@@ -1215,19 +1215,20 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 
 		// SNES OBJ: dentro de um sprite, a COLUNA (nibble baixo) e a LINHA
 		// (nibble alto) do numero do tile avancam SEPARADAMENTE, com wrap
-		// dentro da pagina de 256 tiles (o bit de pagina 0x100 fica fixo).
+		// dentro da tabela de 256 tiles. O bit 8 seleciona a segunda tabela,
+		// cujo deslocamento completo vem de OBSEL; ele nao faz parte de uTile.
 		// Ex.: um 16x16 no tile $0F usa $0F,$00,$1F,$10. O codigo antigo
 		// somava linear (+chry*0x10 e pTile4++), estourando os nibbles e
 		// embaralhando sprites grandes que cruzam essas fronteiras (bug
 		// classico em Final Fight 2 e afins).
 		{
-		Uint32 uPage = pObj->uTile & 0x100;
+		Bool bSecondTable = (pObj->uTile & 0x100) != 0;
 		Uint32 uRow  = ((pObj->uTile >> 4) + (ObjY >> 3)) & 0x0F;
 		Uint32 uCol0 = pObj->uTile & 0x0F;
 		Uint32 uYoff = ObjY & 7;
 		Int32  iTileX = 0;
 
-#if SNDBG_LOG
+#if SNDBG_DEEP
 		if (bTrace)
 		{
 			Uint32 uTraceHash = 2166136261u;
@@ -1240,13 +1241,13 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 			{
 				Int32 iSource = _SnesPPUOBJSourceColumn(iTraceTile,
 					pObj->uWidth, pObj->bHFlip);
-				Uint32 uTraceTile = uPage | (uRow << 4) |
+				Uint32 uTraceTile = (uRow << 4) |
 					((uCol0 + iSource) & 0x0F);
 				Uint32 uTraceAddr = uBaseAddr + uTraceTile * 16;
 				Uint32 uWord0;
 				Uint32 uWord8;
 
-				if (uTraceTile & 0x100)
+				if (bSecondTable)
 					uTraceAddr += uNameSelect;
 				uTraceAddr = (uTraceAddr & 0x7FFF) + uYoff;
 				if (!iTraceTile)
@@ -1276,9 +1277,9 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 				Int32 iCol = _SnesPPUOBJSourceColumn(iTileX,
 				                                           pObj->uWidth,
 				                                           pObj->bHFlip);
-				uTile = uPage | (uRow << 4) | ((uCol0 + iCol) & 0x0F);
+				uTile = (uRow << 4) | ((uCol0 + iCol) & 0x0F);
 				uTileAddr = uBaseAddr + uTile * 16;
-				if (uTile & 0x100)
+				if (bSecondTable)
 					uTileAddr += uNameSelect;
 				pTile4 = (SnesPPUTile4T *)(pVram + ((uTileAddr & 0x7FFF) + uYoff));
 				// get palette bits
@@ -1359,6 +1360,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	Uint32 cgadsub =  (pRegs->cgadsub & 0x3F);
 	Uint8 ts = (pRegs->ts & _ts);
 	Uint8 tsw = pRegs->tsw & _tsw;
+	Uint8 uFetchLayers;
 	Bool bRendered;
 
 	SNMaskT *pMain = pRenderInfo->Main;
@@ -1369,6 +1371,13 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
     Uint8  *pMain8 = pRenderInfo->BlendInfo.uMain8;
     Uint8  *pSub8 = pRenderInfo->BlendInfo.uSub8;
 
+	/* Fixed-color math never samples the sub screen.  With no CGADSUB target,
+	   color math cannot affect a pixel at all.  Apply both facts before
+	   tile/OBJ fetch so disabled layers do no invisible EE work. */
+	if (!(pRegs->cgwsel & 0x02) || cgadsub == 0)
+		ts = 0;
+	uFetchLayers = tm | ts;
+
 	PROF_ENTER("DecodeBGInfo");
 	DecodeBGInfo(BGInfo);
 	PROF_LEAVE("DecodeBGInfo");
@@ -1378,21 +1387,30 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 #if SNDBG_LOG
 	Uint32 _tObjA = ProfCtrGetCycle();
 #endif
-	nObjLine = _FetchOBJ(m_Objs, m_ObjLine[iLine], m_nObjLine[iLine], ObjLine, SNPPU_MAXOBJCHR, iLine, (pRegs->obsel & 7) << 13, ((pRegs->obsel>>3) & 3) << 12, m_pPPU->GetVramPtr(0));
+	if (uFetchLayers & SNESPPU_MASK_OBJ)
+		nObjLine = _FetchOBJ(m_Objs, m_ObjLine[iLine], m_nObjLine[iLine],
+			ObjLine, SNPPU_MAXOBJCHR, iLine, (pRegs->obsel & 7) << 13,
+			_SnesPPUOBJNameSelect(pRegs->obsel), m_pPPU->GetVramPtr(0));
+	else
+		nObjLine = 0;
 #if SNDBG_LOG
 	g_TmgCycObj += ProfCtrGetCycle() - _tObjA;
 	{
+		Bool _objEnabled = ((tm | ts) & SNESPPU_MASK_OBJ) != 0;
+		#if SNDBG_DEEP
 		Int32 _i;
 		Uint32 _opaque = 0;
-		Bool _objEnabled = ((tm | ts) & SNESPPU_MASK_OBJ) != 0;
 		for (_i = 0; _i < nObjLine; _i++)
 			if (ObjLine[_i].uData[SNPPU_BGPLANE_OPAQUE] != 0) _opaque++;
+		#endif
 
 		if (_objEnabled) g_DbgObjEnabledLines++;
 		g_DbgObjOamRefs += m_nObjLine[iLine];
 		g_DbgObjTiles += nObjLine;
+		#if SNDBG_DEEP
 		g_DbgObjOpaqueTiles += _opaque;
 		if (_objEnabled && nObjLine > 0 && _opaque == 0) g_DbgObjEmptyLines++;
+		#endif
 		if (m_nObjLine[iLine] >= SNPPU_MAXOBJ) g_DbgObjRangeLimitLines++;
 		if (nObjLine >= SNPPU_MAXOBJCHR) g_DbgObjLimitLines++;
 		g_DbgObjOBSEL = pRegs->obsel;
@@ -1410,7 +1428,8 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 		Uint16 *pOffset = NULL;
 		Uint32 uOffsetOR = 0;
 
-		if ((pRegs->bgmode&7)==2 || (pRegs->bgmode&7)==4)
+		if (((pRegs->bgmode&7)==2 || (pRegs->bgmode&7)==4) &&
+		    (uFetchLayers & (SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2)))
 		{
 			pOffset = pRenderInfo->BGOffset;
 
@@ -1420,6 +1439,12 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 
 		for (iBG=0; iBG <= 3; iBG++)
 		{
+			if (!(uFetchLayers & (1 << iBG)))
+			{
+				uBGFlags[iBG] = 0;
+				continue;
+			}
+
 			// is offset enabled for this BG layer?
 			if (uOffsetOR & (0x2000 << iBG))
 			{
@@ -1472,7 +1497,10 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 #if SNDBG_LOG
 		Uint32 _tM7 = ProfCtrGetCycle();
 #endif
-		_FetchMode7((Uint8 *)pRenderInfo->BGPlanes[0], m_pPPU, iLine, &pRenderInfo->BGPlanes[0][SNPPU_BGPLANE_PRI], &pRenderInfo->BGPlanes[0][SNPPU_BGPLANE_OPAQUE]);
+		if (uFetchLayers & (SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2))
+			_FetchMode7((Uint8 *)pRenderInfo->BGPlanes[0], m_pPPU, iLine,
+				&pRenderInfo->BGPlanes[0][SNPPU_BGPLANE_PRI],
+				&pRenderInfo->BGPlanes[0][SNPPU_BGPLANE_OPAQUE]);
 #if SNDBG_LOG
 		g_TmgCycM7 += ProfCtrGetCycle() - _tM7;
 #endif
@@ -1540,7 +1568,6 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	} else
 	{
 		// coloradd/sub fixed color only
-		ts = 0;
 		SNMaskSet(pSubAddSubMask);           //all pixels are 1/2!
 	}
 
@@ -1889,8 +1916,8 @@ static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPrio
 	pVram = (Uint8 *)pPPU->GetVramPtr(0);
 
 	// get x/y scroll position
-	x1 = pRegs->bg1hofs.w;
-	y1 = pRegs->bg1vofs.w;
+	x1 = pRegs->m7hofs.w;
+	y1 = pRegs->m7vofs.w;
 
 	// sign extend to 13-bit
 	x1<<= 32- 13; x1>>= 32- 13;

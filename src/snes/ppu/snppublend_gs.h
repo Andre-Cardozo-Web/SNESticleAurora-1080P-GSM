@@ -35,7 +35,18 @@ struct SNPPUBlendColorCalibT
 class SNPPUBlendGS : public ISNPPUBlend
 {
     SNPPUDmaListT m_DmaList _ALIGN(16);
+    SNPPUDmaListT m_DmaListWithPalette _ALIGN(16);
     SNPPUBlendInfoT *m_pDmaBlendInfo;
+    Bool m_bPaletteDirty;
+    Bool m_bAttribPalettesUploaded;
+    Bool m_bDmaListHasIntensity;
+	Bool m_bDmaListDirectMain;
+	Uint32 m_uPaletteDirty[8];
+	Uint32 m_nPaletteDirty;
+
+	void MarkPaletteEntryDirty(Uint32 uAddr);
+	void MarkPaletteAllDirty();
+	Uint32 CopyDirtyPalette(PaletteT *pDest, const PaletteT *pSource);
 
 public:
     SNPPUBlendGS(Uint32 uVramAddr, Uint32 uOutAddr);

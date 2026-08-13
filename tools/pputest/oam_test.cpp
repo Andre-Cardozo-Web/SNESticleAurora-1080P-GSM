@@ -100,6 +100,53 @@ static void CheckVRAMBlockEquivalence()
 	}
 }
 
+static void CheckScrollAndMode7Latches()
+{
+	SnesPPU ppu;
+	TestRender render;
+
+	ppu.SetPPURender(&render);
+	render.SetPPU(&ppu);
+
+	// Horizontal scroll keeps a separate 3-bit latch and is 10-bit wide.
+	ppu.Reset();
+	ppu.Write8(0x210F, 0x34);
+	ppu.Write8(0x210F, 0xFF);
+	Check("BG H scroll latch/mask", ppu.GetRegs()->bg2hofs.w, 0x334);
+
+	// Vertical scroll consumes the shared H/V latch, not the H-only latch.
+	ppu.Reset();
+	ppu.Write8(0x210F, 0x5A);
+	ppu.Write8(0x2110, 0x02);
+	Check("BG V shared latch", ppu.GetRegs()->bg2vofs.w, 0x25A);
+
+	// A vertical write changes bits 3-7 used by the next H write, while the
+	// low three bits still come from the previous horizontal write.
+	ppu.Reset();
+	ppu.Write8(0x210F, 0xA5);
+	ppu.Write8(0x2110, 0x3C);
+	ppu.Write8(0x2111, 0x02);
+	Check("BG interleaved H/V latches", ppu.GetRegs()->bg3hofs.w, 0x23D);
+
+	// $210D/$210E update both ordinary BG1 scroll and the independent
+	// 13-bit Mode 7 scroll registers.
+	ppu.Reset();
+	ppu.Write8(0x210D, 0x34);
+	ppu.Write8(0x210D, 0x12);
+	Check("BG1 H scroll from $210D", ppu.GetRegs()->bg1hofs.w, 0x234);
+	Check("Mode 7 H scroll from $210D", ppu.GetRegs()->m7hofs.w, 0x1234);
+
+	// All Mode 7 ports share one byte latch, including BG1 scroll and the
+	// matrix/centre registers.
+	ppu.Reset();
+	ppu.Write8(0x210D, 0x34);
+	ppu.Write8(0x211B, 0x12);
+	Check("Mode 7 shared latch matrix", ppu.GetRegs()->m7a.w, 0x1234);
+	ppu.Write8(0x210E, 0x05);
+	Check("Mode 7 shared latch scroll", ppu.GetRegs()->m7vofs.w, 0x0512);
+	Check("BG1 V has independent latch", ppu.GetRegs()->bg1vofs.w, 0x0134);
+}
+
 int main()
 {
 	SnesPPU ppu;
@@ -107,6 +154,7 @@ int main()
 	Uint8 *pOAM;
 
 	CheckVRAMBlockEquivalence();
+	CheckScrollAndMode7Latches();
 
 	ppu.SetPPURender(&render);
 	render.SetPPU(&ppu);

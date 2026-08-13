@@ -870,6 +870,11 @@ The cumulative notes for the current test version are available in
   fixes stack/direct-page/decimal/interrupt corner cases and aligns DMA/HDMA
   timing with MesenCE/Mesen2. The original scene still needs a PS2/NetherSX2 retest
   before it is considered fixed.
+- **First Samurai / Final Fight 3** — r20 replaces the old low/high-pair
+  approximation for `$210D-$2114` with the S-PPU's separate horizontal,
+  shared H/V and Mode 7 latches. This directly targets the per-scanline
+  tilemap fragmentation visible in the reported captures, but the affected
+  scenes still require a PS2/NetherSX2 visual retest before being marked fixed.
 - **Wild Guns** — r19 implements the documented 24-clock NMI delay after MDMA
   and corrects the HDMA state machine/mode 5. The full-screen flicker reported
   after character selection still needs confirmation on the same NetherSX2

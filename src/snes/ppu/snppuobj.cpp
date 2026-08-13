@@ -53,7 +53,7 @@ Bool _SnesPPUOBJTileCountedX(Uint16 uObjectX, Int32 iTileX)
 }
 
 
-#if SNDBG_LOG
+#if SNDBG_DEEP
 static Uint32 _ObjCountBits8(Uint32 v)
 {
 	v &= 0xFF;
@@ -102,7 +102,7 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 		if (!uOpaque || pObj->iPosX <= -8 || pObj->iPosX >= 256)
 			continue;
 
-#if SNDBG_LOG
+#if SNDBG_DEEP
 		g_DbgObjCandidatePixels += _ObjCountBits8(uOpaque);
 #endif
 
@@ -175,7 +175,7 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 				uVisible |= uMask1 << uInvShift;
 			uVisible &= 0xFF;
 
-#if SNDBG_LOG
+#if SNDBG_DEEP
 			g_DbgObjDrawnPixels += _ObjCountBits8(uVisible);
 #endif
 			if (uVisible & 0x01) pDest8[0] = pObj->uData[0];
@@ -189,7 +189,7 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 		} else
 		{
 			Int32 iPixel;
-#if SNDBG_LOG
+#if SNDBG_DEEP
 			g_DbgObjClippedTiles++;
 #endif
 			for (iPixel = 0; iPixel < 8; iPixel++)
@@ -239,7 +239,7 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 				}
 
 				pLine8[iX] = pObj->uData[iPixel];
-#if SNDBG_LOG
+#if SNDBG_DEEP
 				g_DbgObjDrawnPixels++;
 #endif
 			}

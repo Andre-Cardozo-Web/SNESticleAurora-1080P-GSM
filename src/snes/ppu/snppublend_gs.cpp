@@ -46,6 +46,10 @@ struct SNPPUGSDiagT
 	Uint32 SyncCycles;
 	Uint32 CopyCycles;
 	Uint32 KickCycles;
+	Uint32 CopyBytes;
+	Uint32 PaletteUploads;
+	Uint32 IntensityLines;
+	Uint32 DirectMainLines;
 	Uint32 StageMismatch;
 	Uint32 CopyMismatch;
 	Uint32 SourceHash;
@@ -56,6 +60,7 @@ struct SNPPUGSDiagT
 
 static SNPPUGSDiagT _SNPPUGSDiag;
 
+#if SNDBG_DEEP
 static Uint32 _SNPPUGSSample(const SNPPUBlendInfoT *pInfo,
 	                          Uint32 *pSamples)
 {
@@ -94,6 +99,7 @@ static void _SNPPUGSValidateStage(const SNPPUBlendInfoT *pInfo)
 		}
 	}
 }
+#endif
 #endif
 
 #define SNPPUBLEND_PAL32 (TRUE)
@@ -155,6 +161,73 @@ static void _PlanarTo3(Uint8 *pDest, SNMaskT *pSrc0, SNMaskT *pSrc1, SNMaskT *pS
 
 }
 
+void SNPPUBlendGS::MarkPaletteEntryDirty(Uint32 uAddr)
+{
+	Uint32 uWord = (uAddr >> 5) & 7;
+	Uint32 uBit = 1u << (uAddr & 31);
+
+	if (!(m_uPaletteDirty[uWord] & uBit))
+	{
+		m_uPaletteDirty[uWord] |= uBit;
+		m_nPaletteDirty++;
+	}
+	m_bPaletteDirty = TRUE;
+}
+
+void SNPPUBlendGS::MarkPaletteAllDirty()
+{
+	Int32 iWord;
+
+	for (iWord = 0; iWord < 8; iWord++)
+		m_uPaletteDirty[iWord] = 0xFFFFFFFFu;
+	m_nPaletteDirty = 256;
+	m_bPaletteDirty = TRUE;
+}
+
+Uint32 SNPPUBlendGS::CopyDirtyPalette(PaletteT *pDest,
+	                                  const PaletteT *pSource)
+{
+	Uint32 uCopiedBytes = 0;
+	Int32 iWord;
+
+	if (!m_bPaletteDirty)
+		return 0;
+
+	/* A complete CGRAM upload is cheaper as one burst.  HDMA gradients, on
+	   the other hand, commonly alter only one or two entries per scanline;
+	   copying the whole 1 KiB CLUT there was pure EE work. */
+	if (m_nPaletteDirty >= 64)
+	{
+		memcpy(pDest, pSource, sizeof(*pDest));
+		uCopiedBytes = sizeof(*pDest);
+	}
+	else
+	{
+		for (iWord = 0; iWord < 8; iWord++)
+		{
+			Uint32 uBits = m_uPaletteDirty[iWord];
+			while (uBits)
+			{
+				Uint32 uBit = (Uint32)__builtin_ctz(uBits);
+				Uint32 uAddr = (Uint32)iWord * 32 + uBit;
+#if SNPPUBLEND_PAL32
+				pDest->Color32[uAddr] = pSource->Color32[uAddr];
+				uCopiedBytes += sizeof(pDest->Color32[0]);
+#else
+				pDest->Color16[uAddr] = pSource->Color16[uAddr];
+				uCopiedBytes += sizeof(pDest->Color16[0]);
+#endif
+				uBits &= uBits - 1;
+			}
+		}
+	}
+
+	memset(m_uPaletteDirty, 0, sizeof(m_uPaletteDirty));
+	m_nPaletteDirty = 0;
+	m_bPaletteDirty = FALSE;
+	return uCopiedBytes;
+}
+
 #if SNPPUBLEND_PAL32
 
 void SNPPUBlendGS::UpdatePaletteEntry(SNPPUBlendInfoT *pInfo, Uint32 uAddr, Uint32 uData, Uint32 uIntensity)
@@ -171,7 +244,11 @@ void SNPPUBlendGS::UpdatePaletteEntry(SNPPUBlendInfoT *pInfo, Uint32 uAddr, Uint
 	// swap 8 and 0x10 of addr
 	uAddr = (uAddr & ~0x18) | ((uAddr & 0x10) >> 1) | ((uAddr & 0x08) << 1);
 
-	pPal->Color32[uAddr] = uData;
+	if (pPal->Color32[uAddr] != uData)
+	{
+		pPal->Color32[uAddr] = uData;
+		MarkPaletteEntryDirty(uAddr);
+	}
 }
 
 void SNPPUBlendGS::UpdatePalette(SNPPUBlendInfoT *pInfo, Uint16 *pCGRam, Uint32 uIntensity)
@@ -191,6 +268,7 @@ void SNPPUBlendGS::UpdatePalette(SNPPUBlendInfoT *pInfo, Uint16 *pCGRam, Uint32 
 		// set palette entry (with alpha set)
 		pPal->Color32[uAddr] = SNPPUColorConvert15to32(pCGRam[iEntry]) | 0x80000000;
 	}
+	MarkPaletteAllDirty();
 
 	PROF_LEAVE("SNPPUBlendUpdatePalette");
 }
@@ -221,7 +299,11 @@ void SNPPUBlendGS::UpdatePaletteEntry(SNPPUBlendInfoT *pInfo, Uint32 uAddr, Uint
 	{
 		uData |= 0x8000;
 	} 
-	pPal->Color16[uAddr] = uData;
+	if (pPal->Color16[uAddr] != uData)
+	{
+		pPal->Color16[uAddr] = uData;
+		MarkPaletteEntryDirty(uAddr);
+	}
 }
 
 void SNPPUBlendGS::UpdatePalette(SNPPUBlendInfoT *pInfo, Uint16 *pCGRam, Uint32 uIntensity)
@@ -238,6 +320,7 @@ void SNPPUBlendGS::UpdatePalette(SNPPUBlendInfoT *pInfo, Uint16 *pCGRam, Uint32 
 		// set palette entry (with alpha set)
 		pPal->Color16[iEntry] = pCGRam[iEntry] | 0x8000;
 	}
+	MarkPaletteAllDirty();
 
 	PROF_LEAVE("SNPPUBlendUpdatePalette");
 }
@@ -359,14 +442,15 @@ void SNPPUBlendGS::Begin(CRenderSurface *pTarget)
 		return;
 	}
 
-    /* Fase 3 narrow: the two attrib-pal uploads in Begin() are the
-       only constant uploads on the SNES blender path (the four uploads
-       inside _SNPPUBlendBuildList are dynamic - they sit inside the
-       per-scanline GIF chain via REF tags so they pick up live PPU
-       data on every kick). Routing the constants through gsKit's
-       texture-send helper instead of the hand-rolled REF chain keeps
-       them inside gsKit's queue and frees us from one slot in the
-       legacy gslist double-buffer.
+	/* The audio mixer may reuse scratchpad between frames.  Refresh the
+	   staged CLUT on the first rendered line even when CGRAM did not change. */
+	MarkPaletteAllDirty();
+
+    /* These two attribute CLUTs never change and live in a VRAM range
+       reserved exclusively for the SNES blender.  Upload them once for the
+       lifetime of the renderer instead of spending two transfers per frame.
+       The dynamic uploads inside _SNPPUBlendBuildList still use REF tags so
+       they pick up the current staged scanline on every kick.
 
        The legacy _GPFifoUploadTexture took TBP in bytes (it divides
        by 256 internally to encode BITBLTBUF.DBP); GPPrimUploadTexture
@@ -382,21 +466,25 @@ void SNPPUBlendGS::Begin(CRenderSurface *pTarget)
        bytes past the end of _SNPPUBlend_AttribMainPal are unused by
        the blender (TEXCLUT only reads the first eight entries) so
        the over-read is benign and matches pre-Fase-3 behaviour. */
-    GPPrimUploadTexture(
-         m_DmaList.uAttribMainPal,
-         64, 0, 0,
-         GS_PSMCT32,
-         _SNPPUBlend_AttribMainPal,
-         16,
-         16);
+    if (!m_bAttribPalettesUploaded)
+    {
+        GPPrimUploadTexture(
+             m_DmaList.uAttribMainPal,
+             64, 0, 0,
+             GS_PSMCT32,
+             _SNPPUBlend_AttribMainPal,
+             16,
+             16);
 
-    GPPrimUploadTexture(
-         m_DmaList.uAttribSubPal,
-         64, 0, 0,
-         GS_PSMCT32,
-         _SNPPUBlend_AttribSubPal,
-         16,
-         16);
+        GPPrimUploadTexture(
+             m_DmaList.uAttribSubPal,
+             64, 0, 0,
+             GS_PSMCT32,
+             _SNPPUBlend_AttribSubPal,
+             16,
+             16);
+        m_bAttribPalettesUploaded = TRUE;
+    }
 
 
     GSGifTagOpenAD();
@@ -431,8 +519,10 @@ void SNPPUBlendGS::End()
 		DmaSyncGIF();
 		_SNPPUGSDiag.SyncCycles += ProfCtrGetCycle() - uStart;
 		_SNPPUGSDiag.SyncCalls++;
+		#if SNDBG_DEEP
 		_SNPPUGSValidateStage(
 			(const SNPPUBlendInfoT *)SNPPU_DMA_BLENDINFO_ADDR);
+		#endif
 		_SNPPUGSDiag.HasExpected = FALSE;
 	}
 #else
@@ -469,19 +559,26 @@ void SNPPUBlendGS::End()
 	{
 		Uint32 uLines = _SNPPUGSDiag.Lines ? _SNPPUGSDiag.Lines : 1;
 		Uint32 uSync = _SNPPUGSDiag.SyncCalls ? _SNPPUGSDiag.SyncCalls : 1;
-		DLog("[snes-gs] frames/lines=%u/%u avgcyc sync/copy/kick=%u/%u/%u mismatch stage/copy=%u/%u",
+		DLog("[snes-gs] frames/lines=%u/%u avgcyc sync/copy/kick=%u/%u/%u avg-copy-bytes=%u pal-uploads=%u intensity-lines=%u direct-main-lines=%u",
 			(unsigned)_SNPPUGSDiag.Frames, (unsigned)_SNPPUGSDiag.Lines,
 			(unsigned)(_SNPPUGSDiag.SyncCycles / uSync),
 			(unsigned)(_SNPPUGSDiag.CopyCycles / uLines),
 			(unsigned)(_SNPPUGSDiag.KickCycles / uLines),
+			(unsigned)(_SNPPUGSDiag.CopyBytes / uLines),
+			(unsigned)_SNPPUGSDiag.PaletteUploads,
+			(unsigned)_SNPPUGSDiag.IntensityLines,
+			(unsigned)_SNPPUGSDiag.DirectMainLines);
+		#if SNDBG_DEEP
+		DLog("[snes-gs-deep] mismatch stage/copy=%u/%u",
 			(unsigned)_SNPPUGSDiag.StageMismatch,
 			(unsigned)_SNPPUGSDiag.CopyMismatch);
-		DLog("[snes-gs] sampled cpu/stage hash=%08X/%08X blendbytes=%u renderbytes=%u stage=%08X",
+		DLog("[snes-gs-deep] sampled cpu/stage hash=%08X/%08X blendbytes=%u renderbytes=%u stage=%08X",
 			(unsigned)_SNPPUGSDiag.SourceHash,
 			(unsigned)_SNPPUGSDiag.StageHash,
 			(unsigned)sizeof(SNPPUBlendInfoT),
 			(unsigned)sizeof(SnesRender8pInfoT),
 			(unsigned)SNPPU_DMA_BLENDINFO_ADDR);
+		#endif
 		memset(&_SNPPUGSDiag, 0, sizeof(_SNPPUGSDiag));
 	}
 #endif
@@ -492,15 +589,24 @@ void SNPPUBlendGS::End()
 
 
 
-static void _SNPPUBlendBuildList(SNPPUDmaListT *pList, SNPPUBlendInfoT *pInfo, Uint32 uOutAddr)
+static void _SNPPUBlendBuildList(SNPPUDmaListT *pList,
+	SNPPUBlendInfoT *pInfo, Uint32 uOutAddr, Bool bUploadPalette,
+	Bool bApplyIntensity, Bool bDirectMain)
 {
     PaletteT *pPal = pInfo->Pal;
+
+	pList->pFixedColor = NULL;
+	pList->pAddSub = NULL;
+	pList->pIntensity = NULL;
+	pList->pXYOffset = NULL;
 
     // begin dma list
     GSListBegin(pList->Data, sizeof(pList->Data) / sizeof(Uint128), NULL);
 
     GSDmaCntOpen();
 
+	if (bUploadPalette)
+	{
 	#if SNPPUBLEND_PAL32
 	// upload as 16x16 psmct32 for use as csm1
     _GPFifoUploadTexture(
@@ -517,9 +623,10 @@ static void _SNPPUBlendBuildList(SNPPUDmaListT *pList, SNPPUBlendInfoT *pInfo, U
          256, 0, 0, 
          GS_PSMCT16, 
          (void *)(((Uint32)pPal) | 0x80000000), 
-         256, 
-         1);
+		 256,
+		 1);
 	#endif
+	}
 
 
     _GPFifoUploadTexture(
@@ -529,6 +636,37 @@ static void _SNPPUBlendBuildList(SNPPUDmaListT *pList, SNPPUBlendInfoT *pInfo, U
          (void *)(((Uint32)pInfo->uMain8) | 0x80000000), 
          256, 
          1);
+
+	if (bDirectMain)
+	{
+		/* No CGADSUB target and no main-screen color clipping: the SNES
+		   result is exactly the palette-expanded main screen.  Write it to
+		   the output in one primitive instead of constructing temp main/sub
+		   colors and two attribute masks that can no longer affect a pixel. */
+		GSGifTagOpenAD();
+		GSGifRegAD(GS_REG_TEXFLUSH, 0);
+		GSGifRegAD(GS_REG_FRAME_1,
+			GS_SET_FRAME((uOutAddr/0x20), 256/64, GS_PSMCT32, 0));
+#if SNPPUBLEND_PAL32
+		GSGifRegAD(GS_REG_TEX0_1,
+			GS_SET_TEX0(pList->uInputAddr, 256/64, GS_PSMT8, 8, 3,
+				1, 0, pList->uPalAddr, GS_PSMCT32, 0, 0, 1));
+#else
+		GSGifRegAD(GS_REG_TEX0_1,
+			GS_SET_TEX0(pList->uInputAddr, 256/64, GS_PSMT8, 8, 3,
+				1, 0, pList->uPalAddr, GS_PSMCT16, 1, 0, 1));
+#endif
+		pList->pXYOffset = (Uint64 *)GSListGetUncachedPtr();
+		GSGifRegAD(GS_REG_XYOFFSET_1, 0);
+		GSGifTagCloseAD();
+
+		_SNPPURenderTexLine(0, 0, 0x80808080, 0);
+
+		GSDmaCntClose();
+		GSDmaEnd();
+		GSListEnd();
+		return;
+	}
 
     _GPFifoUploadTexture(
          pList->uInputAddr * 0x100, 
@@ -653,14 +791,19 @@ static void _SNPPUBlendBuildList(SNPPUDmaListT *pList, SNPPUBlendInfoT *pInfo, U
     // render out32 += sub32 * attrib
     _SNPPURenderTexLine(0, 1, 0x80808080, 1);
 
+    /* Preserve the GS state left by the legacy chain even when brightness is
+       full.  Only the mathematically redundant drawing primitive is omitted. */
     GSGifTagOpenAD();
     GSGifRegAD(GS_REG_ALPHA_1,GS_SET_ALPHA(1,2,0,2, 0x80 ));
     pList->pIntensity = (Uint64 *)GSListGetUncachedPtr();
     GSGifRegAD(GS_REG_RGBAQ, 0);
     GSGifTagCloseAD();
 
-    // render out32 *= intensity
-    _SNPPURenderLine(0, 1);
+    if (bApplyIntensity)
+    {
+        // render out32 *= intensity
+        _SNPPURenderLine(0, 1);
+    }
 
     // close current dma cnt
     GSDmaCntClose();
@@ -679,8 +822,18 @@ static void _SNPPUBlendBuildList(SNPPUDmaListT *pList, SNPPUBlendInfoT *pInfo, U
 #if 1
 
 
-static void _SNPPUBlendSetParm(SNPPUDmaListT *pList, Int32 iLine, Uint32 uFixedColor16, Bool bAddSub, Uint32 uIntensity)
+static void _SNPPUBlendSetParm(SNPPUDmaListT *pList, Int32 iLine,
+	Uint32 uFixedColor16, Bool bAddSub, Uint32 uIntensity,
+	Bool bDirectMain)
 {
+	if (bDirectMain)
+	{
+		*pList->pXYOffset =
+			GS_SET_XYOFFSET(0x8000, 0x8000 - (iLine << 4));
+		__asm__ __volatile__ ("sync.l");
+		return;
+	}
+
     *pList->pFixedColor = SNPPUColorConvert15to32(uFixedColor16);
     *pList->pXYOffset   = GS_SET_XYOFFSET(0x8000, 0x8000 - (iLine<<4)  );
     *pList->pIntensity  = (uIntensity * 0x80 / 15) << 24;
@@ -703,8 +856,15 @@ static void _SNPPUBlendSetParm(SNPPUDmaListT *pList, Int32 iLine, Uint32 uFixedC
 SNPPUBlendGS::SNPPUBlendGS(Uint32 uVramAddr, Uint32 uOutAddr)
 {
     SNPPUDmaListT *pList = &m_DmaList;
+    SNPPUDmaListT *pPaletteList = &m_DmaListWithPalette;
 
     m_pDmaBlendInfo = NULL;
+	memset(m_uPaletteDirty, 0, sizeof(m_uPaletteDirty));
+	m_nPaletteDirty = 0;
+	MarkPaletteAllDirty();
+    m_bAttribPalettesUploaded = FALSE;
+    m_bDmaListHasIntensity = FALSE;
+	m_bDmaListDirectMain = FALSE;
 
     pList->uPalAddr        = uVramAddr + 0x000;
     pList->uInputAddr      = uVramAddr + 0x080 ;
@@ -713,6 +873,15 @@ SNPPUBlendGS::SNPPUBlendGS(Uint32 uVramAddr, Uint32 uOutAddr)
     pList->uTempAddr       = uVramAddr + 0x200 ;
 
 	pList->uOutAddr = uOutAddr;
+
+	/* Both chains render identically.  The larger one refreshes the CLUT;
+	   the normal per-line chain reuses it and avoids 1 KiB of GS traffic. */
+	pPaletteList->uPalAddr       = pList->uPalAddr;
+	pPaletteList->uInputAddr     = pList->uInputAddr;
+	pPaletteList->uAttribMainPal = pList->uAttribMainPal;
+	pPaletteList->uAttribSubPal  = pList->uAttribSubPal;
+	pPaletteList->uTempAddr      = pList->uTempAddr;
+	pPaletteList->uOutAddr       = pList->uOutAddr;
 
 #if SNDBG_LOG
 	DLog("[snes-gs-layout] vram blend/out=%X/%X scratch render/stage=%08X/%08X bytes=%u/%u",
@@ -727,23 +896,16 @@ void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor3
 {
 	SNPPUBlendInfoT *pDmaInfo =
 		(SNPPUBlendInfoT *)SNPPU_DMA_BLENDINFO_ADDR;
+	SNPPUDmaListT *pExecList;
+	Bool bUploadPalette;
+	Bool bApplyIntensity = uIntensity < 15;
+	Bool bDirectMain = pColorMask == NULL && !bApplyIntensity;
+	Uint32 uPaletteCopyBytes;
 
 	if (!m_pTarget)
 	{
 		return;
 	}
-
-    if (m_pDmaBlendInfo != pInfo)
-    {
-		/* REF tags must point at the stable staging copy, never at the
-		   scanline buffer that RenderLine8 is about to reuse. */
-        _SNPPUBlendBuildList(&m_DmaList, pDmaInfo, m_DmaList.uOutAddr);
-
-        // flush cache
-        FlushCache(0);
-
-        m_pDmaBlendInfo = pInfo;
-    }
 
     if (pColorMask)
     {
@@ -760,22 +922,80 @@ void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor3
 		DmaSyncGIF();
 		_SNPPUGSDiag.SyncCycles += ProfCtrGetCycle() - uStart;
 		_SNPPUGSDiag.SyncCalls++;
+		#if SNDBG_DEEP
 		_SNPPUGSValidateStage(pDmaInfo);
+		#endif
 	}
 #else
     DmaSyncGIF();
 #endif
     PROF_LEAVE("SNPPUGS");
 
-	/* The previous GIF chain is done with the staging area now. Snapshot
-	   palette, main, sub and attributes before launching this scanline. */
+    if (m_pDmaBlendInfo != pInfo ||
+        m_bDmaListHasIntensity != bApplyIntensity ||
+		m_bDmaListDirectMain != bDirectMain)
+    {
+		/* The sync above makes it safe to rebuild a list when a fade crosses
+		   brightness 15.  REF tags always point at the stable staging copy,
+		   never at the scanline buffer that RenderLine8 is about to reuse. */
+		_SNPPUBlendBuildList(&m_DmaList, pDmaInfo,
+		                      m_DmaList.uOutAddr, FALSE, bApplyIntensity,
+		                      bDirectMain);
+		_SNPPUBlendBuildList(&m_DmaListWithPalette, pDmaInfo,
+		                      m_DmaListWithPalette.uOutAddr, TRUE,
+		                      bApplyIntensity, bDirectMain);
+
+        // flush cache
+        FlushCache(0);
+
+        m_pDmaBlendInfo = pInfo;
+        m_bDmaListHasIntensity = bApplyIntensity;
+		m_bDmaListDirectMain = bDirectMain;
+    }
+
+	/* The previous GIF chain is done with the staging area now.  Main, sub
+	   and attributes change every line; the 1 KiB CLUT is copied and sent
+	   only when CGRAM changed (and once after Begin because scratchpad is
+	   shared between frames). */
+	bUploadPalette = m_bPaletteDirty;
 #if SNDBG_LOG
 	{
 		Uint32 uStart = ProfCtrGetCycle();
+		#if SNDBG_DEEP
 		Uint32 uSourceHash;
 		Uint32 uStageHash;
-		memcpy(pDmaInfo, pInfo, sizeof(*pDmaInfo));
+		#endif
+		uPaletteCopyBytes = CopyDirtyPalette(pDmaInfo->Pal, pInfo->Pal);
+		memcpy(pDmaInfo->uMain8, pInfo->uMain8, sizeof(pDmaInfo->uMain8));
+		if (!bDirectMain)
+		{
+			memcpy(pDmaInfo->uSub8, pInfo->uSub8, sizeof(pDmaInfo->uSub8));
+			memcpy(pDmaInfo->uAttrib8, pInfo->uAttrib8, sizeof(pDmaInfo->uAttrib8));
+		}
+#if SNDBG_DEEP
+		else
+		{
+			/* Keep full staging validation meaningful in the intrusive build. */
+			memcpy(pDmaInfo->uSub8, pInfo->uSub8, sizeof(pDmaInfo->uSub8));
+			memcpy(pDmaInfo->uAttrib8, pInfo->uAttrib8, sizeof(pDmaInfo->uAttrib8));
+		}
+#endif
 		_SNPPUGSDiag.CopyCycles += ProfCtrGetCycle() - uStart;
+		_SNPPUGSDiag.CopyBytes += sizeof(pDmaInfo->uMain8);
+		if (!bDirectMain)
+			_SNPPUGSDiag.CopyBytes += sizeof(pDmaInfo->uSub8) +
+				sizeof(pDmaInfo->uAttrib8);
+#if SNDBG_DEEP
+		else
+			_SNPPUGSDiag.CopyBytes += sizeof(pDmaInfo->uSub8) +
+				sizeof(pDmaInfo->uAttrib8);
+#endif
+		if (bUploadPalette)
+		{
+			_SNPPUGSDiag.CopyBytes += uPaletteCopyBytes;
+			_SNPPUGSDiag.PaletteUploads++;
+		}
+		#if SNDBG_DEEP
 		uSourceHash = _SNPPUGSSample(pInfo, NULL);
 		uStageHash = _SNPPUGSSample(pDmaInfo, _SNPPUGSDiag.Expected);
 		if (uSourceHash != uStageHash)
@@ -785,15 +1005,25 @@ void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor3
 		_SNPPUGSDiag.StageHash =
 			(_SNPPUGSDiag.StageHash << 5) ^ uStageHash ^ (Uint32)iLine;
 		_SNPPUGSDiag.HasExpected = TRUE;
+		#endif
 	}
 #else
-	memcpy(pDmaInfo, pInfo, sizeof(*pDmaInfo));
+	uPaletteCopyBytes = CopyDirtyPalette(pDmaInfo->Pal, pInfo->Pal);
+	(void)uPaletteCopyBytes;
+	memcpy(pDmaInfo->uMain8, pInfo->uMain8, sizeof(pDmaInfo->uMain8));
+	if (!bDirectMain)
+	{
+		memcpy(pDmaInfo->uSub8, pInfo->uSub8, sizeof(pDmaInfo->uSub8));
+		memcpy(pDmaInfo->uAttrib8, pInfo->uAttrib8, sizeof(pDmaInfo->uAttrib8));
+	}
 #endif
+	pExecList = bUploadPalette ? &m_DmaListWithPalette : &m_DmaList;
 
     PROF_ENTER("SNPPUBlendExec");
 
     // set parameters of dma-list
-    _SNPPUBlendSetParm(&m_DmaList, iLine, uFixedColor32, bAddSub, uIntensity);
+    _SNPPUBlendSetParm(pExecList, iLine, uFixedColor32, bAddSub,
+		uIntensity, bDirectMain);
 
     PROF_LEAVE("SNPPUBlendExec");
 
@@ -801,12 +1031,16 @@ void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor3
 #if SNDBG_LOG
 	{
 		Uint32 uStart = ProfCtrGetCycle();
-		DmaExecGIFChain(m_DmaList.Data);
+		DmaExecGIFChain(pExecList->Data);
 		_SNPPUGSDiag.KickCycles += ProfCtrGetCycle() - uStart;
 		_SNPPUGSDiag.Lines++;
+		if (bApplyIntensity)
+			_SNPPUGSDiag.IntensityLines++;
+		if (bDirectMain)
+			_SNPPUGSDiag.DirectMainLines++;
 	}
 #else
-    DmaExecGIFChain(m_DmaList.Data);
+    DmaExecGIFChain(pExecList->Data);
 #endif
 
 }

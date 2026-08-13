@@ -150,6 +150,13 @@ struct SnesPPURegsT
 	SnesReg16FT		        opvct;
 	SnesReg8T		        stat77;
 	SnesReg8T		        stat78;
+
+	/* Internal PPU write latches.  Keep these at the end so the offsets of
+	   the long-standing public register image remain stable. */
+	SnesReg8T              bghofslo;  // low 3 bits used only by BGxHOFS
+	SnesReg8T              m7latch;   // shared by $210D/$210E and $211B-$2120
+	SnesReg16T             m7hofs;
+	SnesReg16T             m7vofs;
 };
 
 class SnesPPU

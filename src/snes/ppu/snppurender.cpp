@@ -211,6 +211,7 @@ static Bool bPrint = TRUE;
 	} else
 	{
 		SNMaskT ColorMask[3];
+		Bool bDirectMain = FALSE;
 
 		if (m_UpdateFlags & SNESPPURENDER_UPDATE_PAL)
 		{
@@ -262,62 +263,75 @@ static Bool bPrint = TRUE;
 		// render line
 		RenderLine8(iLine, pRenderInfo);
 
+#if CODE_PLATFORM == CODE_PS2
+		/* If no main-screen source is selected by CGADSUB, the sub screen and
+		   all add/sub masks are mathematically unable to change the result.
+		   With main clipping disabled and brightness at 15, the GS can expand
+		   the indexed main line directly into the output texture. */
+		bDirectMain = (pRegs->cgadsub & 0x3F) == 0 &&
+		              (pRegs->cgwsel & 0xC0) == 0 &&
+		              m_pPPU->GetIntensity() == 15;
+#endif
+
 		// determine color window mask for main screen
 		// 0 = disabled (masked)
         // 1 = enabled
-		switch ((pRegs->cgwsel >> 6) & 3)
+		if (!bDirectMain)
 		{
-		case 0:	// all the time
-			SNMaskSet(&ColorMask[0]);
-			break;
-		case 1: // inside color window
-			SNMaskCopy(&ColorMask[0], &pRenderInfo->BGWindow[SNPPU_BGWINDOW_COLOR]); 
-			break;
-		case 2:	// outside color window
-			SNMaskNOT(&ColorMask[0], &pRenderInfo->BGWindow[SNPPU_BGWINDOW_COLOR]);
-			break;
-		case 3: // confirmed: never.
-		default:
-			SNMaskClear(&ColorMask[0]);
-			break;
-		}
+			switch ((pRegs->cgwsel >> 6) & 3)
+			{
+			case 0:	// all the time
+				SNMaskSet(&ColorMask[0]);
+				break;
+			case 1: // inside color window
+				SNMaskCopy(&ColorMask[0], &pRenderInfo->BGWindow[SNPPU_BGWINDOW_COLOR]);
+				break;
+			case 2:	// outside color window
+				SNMaskNOT(&ColorMask[0], &pRenderInfo->BGWindow[SNPPU_BGWINDOW_COLOR]);
+				break;
+			case 3: // confirmed: never.
+			default:
+				SNMaskClear(&ColorMask[0]);
+				break;
+			}
 
-		// determine color window mask for sub screen
-		// 0 = disabled (masked)
-        // 1 = enabled
-		switch ((pRegs->cgwsel >> 4) & 3)
-		{
-		case 0:	// enabled all the time (only when add/sub layers of main screen are opaque)
-			SNMaskCopy(&ColorMask[1], &pRenderInfo->MainAddSubMask);
-			break;
-		case 1: // inside color window
-			SNMaskAND(&ColorMask[1], &pRenderInfo->MainAddSubMask, &pRenderInfo->BGWindow[SNPPU_BGWINDOW_COLOR]);
-			break;
-		case 2:	// outside color window
-			SNMaskANDN(&ColorMask[1], &pRenderInfo->MainAddSubMask, &pRenderInfo->BGWindow[SNPPU_BGWINDOW_COLOR]);
-			break;
-		case 3: // confirmed: never
-		default:
-			SNMaskClear(&ColorMask[1]);
-			break;
-		}
+			// determine color window mask for sub screen
+			// 0 = disabled (masked)
+			// 1 = enabled
+			switch ((pRegs->cgwsel >> 4) & 3)
+			{
+			case 0:	// enabled all the time (only when add/sub layers of main screen are opaque)
+				SNMaskCopy(&ColorMask[1], &pRenderInfo->MainAddSubMask);
+				break;
+			case 1: // inside color window
+				SNMaskAND(&ColorMask[1], &pRenderInfo->MainAddSubMask, &pRenderInfo->BGWindow[SNPPU_BGWINDOW_COLOR]);
+				break;
+			case 2:	// outside color window
+				SNMaskANDN(&ColorMask[1], &pRenderInfo->MainAddSubMask, &pRenderInfo->BGWindow[SNPPU_BGWINDOW_COLOR]);
+				break;
+			case 3: // confirmed: never
+			default:
+				SNMaskClear(&ColorMask[1]);
+				break;
+			}
 
-		// determine pixels that are subject to 1/2 color add/sub
-		// these are the:
-		//      layers of the mainscreen that are set in the cgadsub register that are not obscured by color window
-		//      ANDed with the enabled pixels of the subscreen (opaque, fixed color, and windowed)
-		// Quoth: "in the back color constant area on the sub screen, it does not	become 1/2"
-		// there will never be a case where 1/2 is applied to a main or subscreen color that has been masked by color window
-		if (pRegs->cgadsub & 0x40)
-		{
-			// 0 = disabled
-			// 1 = 1/2 add sub enabled
-			SNMaskAND(&ColorMask[2], &pRenderInfo->SubAddSubMask, &ColorMask[1]); 
-			SNMaskAND(&ColorMask[2], &ColorMask[2], &ColorMask[0]); 
-		} else
-		{
-			// 1/2 disabled
-			SNMaskClear(&ColorMask[2]);
+			// determine pixels that are subject to 1/2 color add/sub
+			// these are the:
+			//      layers of the mainscreen that are set in the cgadsub register that are not obscured by color window
+			//      ANDed with the enabled pixels of the subscreen (opaque, fixed color, and windowed)
+			// Quoth: "in the back color constant area on the sub screen, it does not	become 1/2"
+			// there will never be a case where 1/2 is applied to a main or subscreen color that has been masked by color window
+			if (pRegs->cgadsub & 0x40)
+			{
+				// 0 = disabled
+				// 1 = 1/2 add sub enabled
+				SNMaskAND(&ColorMask[2], &pRenderInfo->SubAddSubMask, &ColorMask[1]);
+				SNMaskAND(&ColorMask[2], &ColorMask[2], &ColorMask[0]);
+			} else
+			{
+				// 1/2 disabled
+				SNMaskClear(&ColorMask[2]);
+			}
 		}
 
         // perform color blending of main+sub
@@ -328,7 +342,7 @@ static Bool bPrint = TRUE;
             pBlendInfo,
             iLine,
             pRegs->coldata,
-            ColorMask,
+			bDirectMain ? NULL : ColorMask,
             (pRegs->cgadsub & 0x80),
             m_pPPU->GetIntensity()
             );

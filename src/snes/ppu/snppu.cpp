@@ -291,7 +291,7 @@ static Uint32 _MapOAMAddress(Uint32 uAddress)
 	return (uAddress < 0x200) ? uAddress : 0x200 | (uAddress & 0x1F);
 }
 
-#if SNDBG_LOG
+#if SNDBG_DEEP
 static void _TraceOAMAddressWrite(Uint32 uPort, Uint8 uData,
 	Uint16 uOldAddress, Uint16 uOldBase, const SnesPPURegsT *pRegs)
 {
@@ -476,7 +476,7 @@ void SnesPPU::Write8(Uint32 uAddr, Uint8 uData)
 
 	case 0x2102:	// oamaddl (oam address low)
 	{
-#if SNDBG_LOG
+	#if SNDBG_DEEP
 		Uint16 uOldAddress = m_Regs.oamaddr.w;
 		Uint16 uOldBase = m_Regs.oamaddrlatch.w;
 #endif
@@ -491,14 +491,14 @@ void SnesPPU::Write8(Uint32 uAddr, Uint8 uData)
 		m_Regs.oamaddr.w = m_Regs.oamaddrlatch.w;
 		m_OAMLatch = 0;
 		UpdateOAMPriority();
-#if SNDBG_LOG
+	#if SNDBG_DEEP
 		_TraceOAMAddressWrite(uAddr, uData, uOldAddress, uOldBase, &m_Regs);
 #endif
 		break;
 	}
 	case 0x2103:	// oamaddh (oam address high)
 	{
-#if SNDBG_LOG
+	#if SNDBG_DEEP
 		Uint16 uOldAddress = m_Regs.oamaddr.w;
 		Uint16 uOldBase = m_Regs.oamaddrlatch.w;
 #endif
@@ -509,7 +509,7 @@ void SnesPPU::Write8(Uint32 uAddr, Uint8 uData)
 		m_Regs.oamaddr.w = m_Regs.oamaddrlatch.w;
 		m_OAMLatch = 0;
 		UpdateOAMPriority();
-#if SNDBG_LOG
+	#if SNDBG_DEEP
 		_TraceOAMAddressWrite(uAddr, uData, uOldAddress, uOldBase, &m_Regs);
 #endif
 		break;
@@ -560,36 +560,52 @@ void SnesPPU::Write8(Uint32 uAddr, Uint8 uData)
 		m_Regs.bg34nba = uData;
 		break;
 
-	case 0x210D:	// bg1hofs 
-		m_Regs.bg1hofs.w = (uData << 8) | m_Regs.bgofslo;
+	case 0x210D:	// m7hofs + bg1hofs
+		/* Mode 7 has its own 13-bit scroll and shares one byte latch with
+		   every Mode 7 matrix/centre register. */
+		m_Regs.m7hofs.w = ((uData << 8) | m_Regs.m7latch) & 0x1FFF;
+		m_Regs.m7latch = uData;
+		/* Horizontal BG scroll combines bits 3-7 from the common H/V latch
+		   with bits 0-2 from the previous horizontal write. */
+		m_Regs.bg1hofs.w = ((uData << 8) |
+			(m_Regs.bgofslo & 0xF8) | (m_Regs.bghofslo & 0x07)) & 0x03FF;
 		m_Regs.bgofslo = uData;
+		m_Regs.bghofslo = uData;
 		break;
-	case 0x210E:	// bg1vofs 
-		m_Regs.bg1vofs.w = (uData << 8) | m_Regs.bgofslo;
+	case 0x210E:	// m7vofs + bg1vofs
+		m_Regs.m7vofs.w = ((uData << 8) | m_Regs.m7latch) & 0x1FFF;
+		m_Regs.m7latch = uData;
+		m_Regs.bg1vofs.w = ((uData << 8) | m_Regs.bgofslo) & 0x03FF;
 		m_Regs.bgofslo = uData;
 		break;
 	case 0x210F:	// bg2hofs 
-		m_Regs.bg2hofs.w = (uData << 8) | m_Regs.bgofslo;
+		m_Regs.bg2hofs.w = ((uData << 8) |
+			(m_Regs.bgofslo & 0xF8) | (m_Regs.bghofslo & 0x07)) & 0x03FF;
 		m_Regs.bgofslo = uData;
+		m_Regs.bghofslo = uData;
 		break;
 	case 0x2110:	// bg2vofs 
-		m_Regs.bg2vofs.w = (uData << 8) | m_Regs.bgofslo;
+		m_Regs.bg2vofs.w = ((uData << 8) | m_Regs.bgofslo) & 0x03FF;
 		m_Regs.bgofslo = uData;
 		break;
 	case 0x2111:	// bg3hofs 
-		m_Regs.bg3hofs.w = (uData << 8) | m_Regs.bgofslo;
+		m_Regs.bg3hofs.w = ((uData << 8) |
+			(m_Regs.bgofslo & 0xF8) | (m_Regs.bghofslo & 0x07)) & 0x03FF;
 		m_Regs.bgofslo = uData;
+		m_Regs.bghofslo = uData;
 		break;
 	case 0x2112:	// bg3vofs 
-		m_Regs.bg3vofs.w = (uData << 8) | m_Regs.bgofslo;
+		m_Regs.bg3vofs.w = ((uData << 8) | m_Regs.bgofslo) & 0x03FF;
 		m_Regs.bgofslo = uData;
 		break;
 	case 0x2113:	// bg4hofs 
-		m_Regs.bg4hofs.w = (uData << 8) | m_Regs.bgofslo;
+		m_Regs.bg4hofs.w = ((uData << 8) |
+			(m_Regs.bgofslo & 0xF8) | (m_Regs.bghofslo & 0x07)) & 0x03FF;
 		m_Regs.bgofslo = uData;
+		m_Regs.bghofslo = uData;
 		break;
 	case 0x2114:	// bg4vofs 
-		m_Regs.bg4vofs.w = (uData << 8) | m_Regs.bgofslo;
+		m_Regs.bg4vofs.w = ((uData << 8) | m_Regs.bgofslo) & 0x03FF;
 		m_Regs.bgofslo = uData;
 		break;
 
@@ -631,24 +647,30 @@ void SnesPPU::Write8(Uint32 uAddr, Uint8 uData)
 		break;
 
 	case 0x211B:	// m7a
-		m_Regs.m7a.Write8LoHi(uData);
+		m_Regs.m7a.w = (uData << 8) | m_Regs.m7latch;
+		m_Regs.m7latch = uData;
 		UpdateMatMul();
 		break;
 	case 0x211C:	// m7b
-		m_Regs.m7b.Write8LoHi(uData);
+		m_Regs.m7b.w = (uData << 8) | m_Regs.m7latch;
+		m_Regs.m7latch = uData;
 		UpdateMatMul();
 		break;
 	case 0x211D:	// m7c
-		m_Regs.m7c.Write8LoHi(uData);
+		m_Regs.m7c.w = (uData << 8) | m_Regs.m7latch;
+		m_Regs.m7latch = uData;
 		break;
 	case 0x211E:	// m7d
-		m_Regs.m7d.Write8LoHi(uData);
+		m_Regs.m7d.w = (uData << 8) | m_Regs.m7latch;
+		m_Regs.m7latch = uData;
 		break;
 	case 0x211F:	// m7x
-		m_Regs.m7x.Write8LoHi(uData);
+		m_Regs.m7x.w = (uData << 8) | m_Regs.m7latch;
+		m_Regs.m7latch = uData;
 		break;
 	case 0x2120:	// m7y
-		m_Regs.m7y.Write8LoHi(uData);
+		m_Regs.m7y.w = (uData << 8) | m_Regs.m7latch;
+		m_Regs.m7latch = uData;
 		break;
 
 	case 0x2121:	// cgadd (color address)

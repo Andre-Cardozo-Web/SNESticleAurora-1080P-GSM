@@ -176,7 +176,7 @@ Uint8 SNGSU::RamReadByte(Uint32 uAddr) const
 void SNGSU::RamWriteByte(Uint32 uAddr, Uint8 v)
 {
     if (!m_pRam || !m_uRamSize) return;
-#if SNDBG_LOG
+#if SNDBG_DEEP
     m_Diag.RamWrites++;
 #endif
     if ((m_uRamSize & m_uRamMask) == 0)
@@ -224,7 +224,7 @@ Uint8 SNGSU::CodeRead(Uint16 pc)
         Uint32 line = cacheOffset >> 4;
         if (!(m_CacheValid & ((Uint32)1 << line)))
         {
-#if SNDBG_LOG
+#if SNDBG_DEEP
             m_Diag.CacheMisses++;
 #endif
             Uint16 base = (Uint16)(m_CBR + (line << 4));
@@ -233,7 +233,7 @@ Uint8 SNGSU::CodeRead(Uint16 pc)
                 m_Cache[(line << 4) + i] = RawCodeRead((Uint16)(base + i));
             m_CacheValid |= (Uint32)1 << line;
         }
-#if SNDBG_LOG
+#if SNDBG_DEEP
         else
         {
             m_Diag.CacheHits++;
@@ -506,7 +506,7 @@ void SNGSU::PixFlushAll()
 
 void SNGSU::Plot()
 {
-#if SNDBG_LOG
+#if SNDBG_DEEP
     m_Diag.Plots++;
 #endif
     Uint8 x = (Uint8)(m_R[1] & 0xFF);
@@ -549,7 +549,7 @@ void SNGSU::Plot()
 
 Uint16 SNGSU::Rpix()
 {
-#if SNDBG_LOG
+#if SNDBG_DEEP
     m_Diag.Rpix++;
 #endif
     PixFlushAll();                    // RPIX espera ambos antes de ler a RAM
@@ -583,7 +583,7 @@ void SNGSU::ColorWrite(Uint8 src)
 
 SNGSU_ALWAYS_INLINE void SNGSU::Step()
 {
-#if SNDBG_LOG
+#if SNDBG_DEEP
     m_Diag.Instructions++;
     m_Diag.CurrentJobInstructions++;
     if (m_Diag.CurrentJobInstructions > m_Diag.MaxJobInstructions)
@@ -851,7 +851,7 @@ SNGSU_ALWAYS_INLINE void SNGSU::Step()
         case 0x0E: take = !m_bOV;             break;   // BVC
         case 0x0F: take =  m_bOV;             break;   // BVS
         }
-#if SNDBG_LOG
+#if SNDBG_DEEP
         m_Diag.Branches++;
         if (take) m_Diag.BranchesTaken++;
 #endif
@@ -863,7 +863,7 @@ SNGSU_ALWAYS_INLINE void SNGSU::Step()
         m_R[12] = (Uint16)(m_R[12] - 1);
         SetZSfromWord(m_R[12]);
         if (m_R[12] != 0) { m_R[15] = m_R[13]; m_PCModified = TRUE; }
-#if SNDBG_LOG
+#if SNDBG_DEEP
         m_Diag.Branches++;
         if (m_R[12] != 0) m_Diag.BranchesTaken++;
 #endif
@@ -892,7 +892,7 @@ SNGSU_ALWAYS_INLINE void SNGSU::Step()
     }
     else if (op >= 0x98 && op <= 0x9D)        // JMP Rn / LJMP Rn (delay slot)
     {
-#if SNDBG_LOG
+#if SNDBG_DEEP
         m_Diag.Jumps++;
 #endif
         if (m_bAlt1) {                         // LJMP: R15=Rsreg, PBR=Rn

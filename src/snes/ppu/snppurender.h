@@ -81,6 +81,13 @@ struct SnesRenderObjT
 Bool _SnesPPUOBJVisibleX(Uint16 uPosX, Uint8 uWidth);
 Bool _SnesPPUOBJTileCountedX(Uint16 uObjectX, Int32 iTileX);
 
+_INLINE Uint32 _SnesPPUOBJNameSelect(Uint8 uOBSEL)
+{
+	/* OBSEL bits 3-4 encode offsets $1000, $2000, $3000 and $4000
+	   (in VRAM words).  Zero is not one of the hardware choices. */
+	return (((Uint32)(uOBSEL >> 3) & 3) + 1) << 12;
+}
+
 _INLINE Int32 _SnesPPUOBJSourceColumn(Int32 iTileX, Uint8 uWidth,
 	                                  Bool bHFlip)
 {
