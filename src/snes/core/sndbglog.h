@@ -25,6 +25,10 @@
 #define SNDBG_DEEP 0
 #endif
 
+#ifndef SNPPU_OBJ_CACHE
+#define SNPPU_OBJ_CACHE 1
+#endif
+
 #if SNDBG_DEEP && !SNDBG_LOG
 #undef SNDBG_LOG
 #define SNDBG_LOG 1
@@ -62,6 +66,9 @@ extern Uint32 g_DbgCGRAMWrites;
 extern Uint32 g_DbgObjEnabledLines;
 extern Uint32 g_DbgObjOamRefs;
 extern Uint32 g_DbgObjTiles;
+extern Uint32 g_DbgObjCacheHits;
+extern Uint32 g_DbgObjCacheMisses;
+extern Uint32 g_DbgObjCacheRefreshes;
 extern Uint32 g_DbgObjOpaqueTiles;
 extern Uint32 g_DbgObjCandidatePixels;
 extern Uint32 g_DbgObjDrawnPixels;

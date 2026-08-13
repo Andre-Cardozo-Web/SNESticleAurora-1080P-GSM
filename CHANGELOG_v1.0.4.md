@@ -99,6 +99,52 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 ---
 
+## Revisão r23: Top Gear sem thrashing de OBJ e Mode 7 em uma passagem
+
+- O reteste da r22 mostrou por que o cache de 8 KiB quase não ajudava o grid
+  cheio: eram apenas **21.180 hits para 132.900 misses** por janela, com zero
+  refresh de VRAM. A arte estava estável; as 512 entradas diretas é que se
+  expulsavam continuamente. O cache agora possui um slot exato para cada uma
+  das 4096 combinações tabela/tile/linha de OBJ, sem hash nem colisões.
+- A linha fica guardada sem paleta e na orientação normal. H-flip apenas
+  inverte os oito bytes já decodificados, portanto carros com outra paleta ou
+  espelhados reutilizam o mesmo slot. Os quatro bytes-fonte continuam sendo
+  conferidos em todo acesso; os 48 KiB não sacrificam correção em animação,
+  DMA, mudança de `OBSEL`, pause ou load state.
+- O efeito giratório antes do Start foi isolado separadamente: ele muda para
+  Mode 7 e faz HDMA de matriz/paleta em cada scanline, levando o fetch Mode 7
+  sozinho a cerca de 39% do tempo medido. O novo caminho conserva em
+  registrador o último tile do mapa e produz pixels, prioridade e opacidade em
+  uma única passagem de blocos de oito, evitando releitura do mapa e a antiga
+  varredura posterior de 256 pixels.
+- Uma regressão host compara pixels e máscaras do Mode 7 novo com o algoritmo
+  anterior em **4.120** combinações de repetição, tile 0, backdrop, EXTBG,
+  matrizes e coordenadas dentro/fora da área. A bancada OBJ também percorre os
+  4096 índices para provar que não existe colisão lógica. O ganho final e os
+  60 FPS ainda dependem do reteste desta ISO no PS2/emulador.
+
+---
+
+## Revisão r22: cache seguro de sprites para Top Gear
+
+- O log de **Top Gear** isolou a queda da largada cheia no fetch de OBJ: com
+  todos os carros, o renderer decodificava cerca de 154 mil linhas de tiles
+  por segundo, contra 37 mil quando o grid esvaziava, embora OAM, HDMA e IRQs
+  da tela dividida continuassem praticamente iguais.
+- O renderer agora mantém um cache direto de 8 KiB para linhas 4bpp de OBJ.
+  Ele guarda pixels sem paleta, permitindo que vários carros reutilizem a
+  mesma arte com cores diferentes. Cada acesso ainda compara os quatro bytes
+  originais da VRAM, impedindo sprites antigos depois de animação, DMA, mapa,
+  pause ou load state.
+- A ordem de fetch, prioridade, H/V-flip e limites reais de 32 OBJ/34 tiles
+  não foram alterados. `SNES_OBJ_CACHE=0` permite comparação A/B, e
+  `SNES_DIAGNOSTICS=1` registra hit/miss/refresh para medir o ganho no PS2.
+- A bancada host cobre cold miss, hit, H-flip separado, troca de VRAM, paleta
+  independente e o maior endereço possível. Top Gear 1/2 ainda dependem do
+  reteste na largada cheia antes de afirmar 60 FPS estáveis.
+
+---
+
 ## Revisão r21: ordem de endereço/dados na DMA de VRAM
 
 - O log profundo de First Samurai isolou transferências frequentes em DMA modo

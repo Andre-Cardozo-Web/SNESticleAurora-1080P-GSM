@@ -49,6 +49,9 @@ Uint32 g_DbgCGRAMWrites = 0;
 Uint32 g_DbgObjEnabledLines = 0;
 Uint32 g_DbgObjOamRefs = 0;
 Uint32 g_DbgObjTiles = 0;
+Uint32 g_DbgObjCacheHits = 0;
+Uint32 g_DbgObjCacheMisses = 0;
+Uint32 g_DbgObjCacheRefreshes = 0;
 Uint32 g_DbgObjOpaqueTiles = 0;
 Uint32 g_DbgObjCandidatePixels = 0;
 Uint32 g_DbgObjDrawnPixels = 0;
@@ -1633,6 +1636,10 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 				(unsigned)g_DbgCGRAMWrites, (unsigned)g_DbgObjEnabledLines,
 				(unsigned)g_DbgObjOamRefs, (unsigned)g_DbgObjTiles,
 				(unsigned)g_DbgObjRangeLimitLines, (unsigned)g_DbgObjLimitLines);
+			DLog("[snes-obj-cache] enabled=%u hit/miss/refresh=%u/%u/%u",
+				(unsigned)SNPPU_OBJ_CACHE, (unsigned)g_DbgObjCacheHits,
+				(unsigned)g_DbgObjCacheMisses,
+				(unsigned)g_DbgObjCacheRefreshes);
 			#if SNDBG_DEEP
 			DLog("[snes-obj-deep] opaque/empty=%u/%u pixels candidate/drawn=%u/%u edge-tiles=%u | regs obsel=%02X tm=%02X ts=%02X first=%u",
 				(unsigned)g_DbgObjOpaqueTiles, (unsigned)g_DbgObjEmptyLines,
@@ -1698,6 +1705,15 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 					(unsigned)(Uint8)pr->bgofslo,
 					(unsigned)(Uint8)pr->bghofslo,
 					(unsigned)(Uint8)pr->m7latch);
+				if ((pr->bgmode & 7) == 7)
+				{
+					DLog("[snes-m7] sel/setini=%02X/%02X matrix a/b/c/d=%04X/%04X/%04X/%04X center=%04X/%04X",
+						(unsigned)(Uint8)pr->m7sel,
+						(unsigned)(Uint8)pr->setini,
+						(unsigned)pr->m7a.w, (unsigned)pr->m7b.w,
+						(unsigned)pr->m7c.w, (unsigned)pr->m7d.w,
+						(unsigned)pr->m7x.w, (unsigned)pr->m7y.w);
+				}
 			}
 			#if SNDBG_DEEP
 			DLog("[snes-gsu] ins=%u start/stop/abort/wd=%u/%u/%u/%u max=%u cur=%u plot/rpix=%u/%u ramw=%u",
@@ -1740,6 +1756,9 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 			g_DbgObjEnabledLines = 0;
 			g_DbgObjOamRefs = 0;
 			g_DbgObjTiles = 0;
+			g_DbgObjCacheHits = 0;
+			g_DbgObjCacheMisses = 0;
+			g_DbgObjCacheRefreshes = 0;
 			g_DbgObjOpaqueTiles = 0;
 			g_DbgObjCandidatePixels = 0;
 			g_DbgObjDrawnPixels = 0;

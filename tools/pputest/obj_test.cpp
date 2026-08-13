@@ -5,6 +5,7 @@
 #include "types.h"
 #include "snppu.h"
 #include "snppurender.h"
+#include "snppuobjcache.h"
 
 void _DecodeOBJEX(Uint8 *pObjEx, SnesRenderObjT *pObjs, Int32 nObjs,
                   Uint32 uBaseSize);
@@ -109,6 +110,95 @@ int main()
 	Check("normal tile column 3", _SnesPPUOBJSourceColumn(3, 32, FALSE), 3);
 	Check("hflip left fetches right", _SnesPPUOBJSourceColumn(0, 32, TRUE), 3);
 	Check("hflip right fetches left", _SnesPPUOBJSourceColumn(3, 32, TRUE), 0);
+
+	// O cache OBJ possui um slot exato para cada tabela/tile/linha logica.
+	// Trocas de paleta/flip nao duplicam o slot; troca de VRAM sempre falha.
+	{
+		SnesPPUObjRowCacheT cache;
+		Uint32 data0 = 0;
+		Uint32 data1 = 0;
+		Bool changed = TRUE;
+
+		std::memset(&cache, 0, sizeof(cache));
+		Check("OBJ cache entry size", sizeof(SnesPPUObjRowCacheEntryT), 12);
+		Check("OBJ cache bytes", sizeof(cache), 49152);
+		Check("OBJ cache cold miss",
+		      SnesPPUObjRowCacheLookup(&cache, FALSE, 0x34, 4,
+		          0x44332211, &data0, &data1, &changed), FALSE);
+		Check("OBJ cache cold not refresh", changed, FALSE);
+
+		SnesPPUObjRowCacheStore(&cache, FALSE, 0x34, 4, 0x44332211,
+		                         0x08040201, 0x01020408);
+		Check("OBJ cache hit",
+		      SnesPPUObjRowCacheLookup(&cache, FALSE, 0x34, 4,
+		          0x44332211, &data0, &data1, &changed), TRUE);
+		Check("OBJ cache data0", data0, 0x08040201);
+		Check("OBJ cache data1", data1, 0x01020408);
+		Check("OBJ cache palette independent A", data0 | 0x80808080,
+		      (int)0x88848281u);
+		Check("OBJ cache palette independent B", data0 | 0xB0B0B0B0,
+		      (int)0xB8B4B2B1u);
+		Check("OBJ row H-flip low",
+		      (Uint32)SnesPPUObjRowHFlip64(0x0807060504030201ULL),
+		      (int)0x05060708u);
+		Check("OBJ row H-flip high",
+		      (Uint32)(SnesPPUObjRowHFlip64(0x0807060504030201ULL) >> 32),
+		      (int)0x01020304u);
+
+		Check("OBJ cache VRAM refresh miss",
+		      SnesPPUObjRowCacheLookup(&cache, FALSE, 0x34, 4,
+		          0x44332210, &data0, &data1, &changed), FALSE);
+		Check("OBJ cache VRAM refresh detected", changed, TRUE);
+		SnesPPUObjRowCacheStore(&cache, FALSE, 0x34, 4, 0x44332210,
+		                         0x03030303, 0x04040404);
+		Check("OBJ cache refreshed hit",
+		      SnesPPUObjRowCacheLookup(&cache, FALSE, 0x34, 4,
+		          0x44332210, &data0, &data1, &changed), TRUE);
+		Check("OBJ cache refreshed data", data0, 0x03030303);
+
+		// Todos os 4096 enderecos logicos devem ser unicos e consecutivos.
+		{
+			Uint8 seen[SNPPU_OBJ_ROW_CACHE_ENTRIES];
+			Uint32 table, tile, row;
+			Uint32 unique = 0;
+			Bool collision = FALSE;
+
+			std::memset(seen, 0, sizeof(seen));
+			for (table = 0; table < 2; table++)
+			{
+				for (tile = 0; tile < 256; tile++)
+				{
+					for (row = 0; row < 8; row++)
+					{
+						Uint32 index = SnesPPUObjRowCacheIndex(
+							table != 0, tile, row);
+						if (index >= SNPPU_OBJ_ROW_CACHE_ENTRIES || seen[index])
+							collision = TRUE;
+						else
+						{
+							seen[index] = 1;
+							unique++;
+						}
+					}
+				}
+			}
+			Check("OBJ cache no logical collision", collision, FALSE);
+			Check("OBJ cache all logical slots", unique,
+			      SNPPU_OBJ_ROW_CACHE_ENTRIES);
+		}
+
+		// Um vizinho e a segunda tabela nao podem expulsar o slot anterior.
+		SnesPPUObjRowCacheStore(&cache, FALSE, 0x35, 4, 0x11111111,
+		                         0x01010101, 0x02020202);
+		SnesPPUObjRowCacheStore(&cache, TRUE, 0x34, 4, 0x22222222,
+		                         0x05050505, 0x06060606);
+		Check("OBJ cache neighbor keeps original",
+		      SnesPPUObjRowCacheLookup(&cache, FALSE, 0x34, 4,
+		          0x44332210, &data0, &data1, &changed), TRUE);
+		Check("OBJ cache max index",
+		      SnesPPUObjRowCacheIndex(TRUE, 0xFF, 7),
+		      SNPPU_OBJ_ROW_CACHE_ENTRIES - 1);
+	}
 
     // Tiles parcialmente fora da tela nao podem tocar os buffers vizinhos.
     // Final Fight 2 mantem OBJ em X negativo durante o gameplay.
