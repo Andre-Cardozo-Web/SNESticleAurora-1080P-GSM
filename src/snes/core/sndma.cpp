@@ -47,6 +47,18 @@ static Int8 _SNDma_MDMAInc[4] =
 	1, 0, -1, 0
 };
 
+void SnesDMAWritePPUPort(SnesPPU *pPPU, Uint32 uPort, Uint8 uData)
+{
+	assert(pPPU != NULL);
+	assert((uPort & 0xFF) < 0x40);
+
+	/* The caller has already synchronized the scanline write queue at MDMA
+	   start.  Do not re-enter SNCPUWrite8 here: it would enqueue address and
+	   control registers while the optimized data ports below take effect
+	   immediately, reversing the byte order observed by the PPU. */
+	pPPU->Write8(0x2100 + (uPort & 0xFF), uData);
+}
+
 #if SNDBG_DEEP
 struct SNDmaOAMCaptureT
 {
@@ -505,8 +517,8 @@ void SnesDMAC::TransferData(SnesDMAChT *pChan, Uint8 *pData, Int32 nBytes)
 			// fetch data byte
 			uData = pData[iTransfer];
 
-			// get address to write to (b-bus)
-			uAddr = pChan->bbadx + pTransfer[iTransfer & 3];
+			// get address to write to (8-bit b-bus, wrapping at $21FF)
+			uAddr = (pChan->bbadx + pTransfer[iTransfer & 3]) & 0xFF;
 			iTransfer++;
 
 			switch (uAddr)
@@ -525,8 +537,14 @@ void SnesDMAC::TransferData(SnesDMAChT *pChan, Uint8 *pData, Int32 nBytes)
 				break;
 
 			default:
-				// write byte
-				SNCPUWrite8(m_pCPU, 0x2100 + uAddr, uData);
+				/* PPU MDMA bytes must bypass the normal per-scanline write
+				   queue.  First Samurai uses mode 4 at BBAD=$16, producing
+				   $2116,$2117,$2118,$2119 groups; queuing only the first
+				   two made every tile word land at a stale VRAM address. */
+				if (uAddr < 0x40)
+					SnesDMAWritePPUPort(m_pPPU, uAddr, uData);
+				else
+					SNCPUWrite8(m_pCPU, 0x2100 + uAddr, uData);
 			}
 			nBytes--;
 		}

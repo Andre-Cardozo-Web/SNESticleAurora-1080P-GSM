@@ -2,6 +2,7 @@
 #include <cstring>
 
 #include "types.h"
+#include "sndma.h"
 #include "snppu.h"
 
 class TestRender : public ISnesPPURender
@@ -147,6 +148,37 @@ static void CheckScrollAndMode7Latches()
 	Check("BG1 V has independent latch", ppu.GetRegs()->bg1vofs.w, 0x0134);
 }
 
+static void CheckMode4VRAMAddressDataDMA()
+{
+	SnesPPU ppu;
+	TestRender render;
+	/* DMA mode 4 at BBAD=$16 repeats VMADDL, VMADDH, VMDATAL,
+	   VMDATAH.  First Samurai uses this command stream for scattered
+	   tilemap updates. */
+	static const Uint8 commands[] =
+	{
+		0x34, 0x12, 0xAA, 0xBB,
+		0x78, 0x56, 0xCC, 0xDD
+	};
+	static const Uint8 ports[] = {0x16, 0x17, 0x18, 0x19};
+	int i;
+
+	ppu.SetPPURender(&render);
+	render.SetPPU(&ppu);
+	ppu.Reset();
+	ppu.Write8(0x2115, 0x80); // increment by one after $2119
+	ppu.Write8(0x2116, 0x55);
+	ppu.Write8(0x2117, 0x55);
+
+	for (i = 0; i < (int)sizeof(commands); i++)
+		SnesDMAWritePPUPort(&ppu, ports[i & 3], commands[i]);
+
+	Check("mode4 first addressed word", ppu.GetVramPtr(0x1234)[0], 0xBBAA);
+	Check("mode4 second addressed word", ppu.GetVramPtr(0x5678)[0], 0xDDCC);
+	Check("mode4 stale address untouched", ppu.GetVramPtr(0x5555)[0], 0x0000);
+	Check("mode4 final address", ppu.GetRegs()->vmaddr.w, 0x5679);
+}
+
 int main()
 {
 	SnesPPU ppu;
@@ -155,6 +187,7 @@ int main()
 
 	CheckVRAMBlockEquivalence();
 	CheckScrollAndMode7Latches();
+	CheckMode4VRAMAddressDataDMA();
 
 	ppu.SetPPURender(&render);
 	render.SetPPU(&ppu);

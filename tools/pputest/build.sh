@@ -14,6 +14,7 @@ ROOT=../..
     -I "$ROOT/src/common/debug" \
     -I "$ROOT/src/snes/ppu" \
     -I "$ROOT/src/snes/core" \
+    -I "$ROOT/src/snes/cpu" \
     -I "$ROOT/src/snes" \
     -I "$ROOT/src" \
     obj_test.cpp "$ROOT/src/snes/ppu/snppuobj.cpp" -o obj_test
@@ -26,8 +27,10 @@ ROOT=../..
     -I "$ROOT/src/common/debug" \
     -I "$ROOT/src/snes/ppu" \
     -I "$ROOT/src/snes/core" \
+    -I "$ROOT/src/snes/cpu" \
     -I "$ROOT/src/snes" \
     -I "$ROOT/src" \
-    oam_test.cpp "$ROOT/src/snes/ppu/snppu.cpp" -o oam_test
+    oam_test.cpp "$ROOT/src/snes/ppu/snppu.cpp" \
+    "$ROOT/src/snes/core/sndma.cpp" -o oam_test
 
 echo "OK -> ./obj_test && ./oam_test"

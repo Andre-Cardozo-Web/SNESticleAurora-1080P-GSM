@@ -8,6 +8,13 @@ class SNSDD1;
 
 #define SNESDMAC_CHANNEL_NUM 8
 
+/* MDMA starts only after SnesSystem has synchronized the queued PPU writes.
+   Bytes sent to B-bus PPU ports must then be committed immediately and in
+   transfer order; routing some ports back through the scanline queue can make
+   $2118/$2119 data overtake $2116/$2117 address writes.  This small entry
+   point is also exercised by the host-side mode-4 regression test. */
+void SnesDMAWritePPUPort(SnesPPU *pPPU, Uint32 uPort, Uint8 uData);
+
 struct SnesDMAChT
 {
 	Uint8	dmapx;

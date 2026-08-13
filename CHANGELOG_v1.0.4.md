@@ -94,6 +94,29 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - Os latches de scroll BG/Mode 7 agora seguem o S-PPU; a auditoria de `OBSEL`
   preserva explicitamente seu endereço efetivo, e o blender evita cópias
   inteiras da CLUT quando nenhuma — ou somente poucas — cores mudaram.
+- DMA modo 4 para `$2116-$2119` agora mantém a ordem imediata entre endereço e
+  dados de VRAM, impedindo que uploads intercalados usem um `VMADDR` antigo.
+
+---
+
+## Revisão r21: ordem de endereço/dados na DMA de VRAM
+
+- O log profundo de First Samurai isolou transferências frequentes em DMA modo
+  4 com `BBAD=$16`: cada grupo escreve `$2116`, `$2117`, `$2118` e `$2119`, ou
+  seja, troca o endereço da VRAM e grava uma palavra nesse novo endereço.
+- Antes da DMA, a fila por scanline da CPU era sincronizada corretamente. Já
+  dentro da transferência, os bytes de `$2116/$2117` voltavam para essa fila,
+  enquanto `$2118/$2119` usavam o caminho rápido imediato. Com isso, os dados
+  ultrapassavam o endereço e eram gravados no `VMADDR` anterior, explicando o
+  tilemap em mosaico com sprites e HUD ainda reconhecíveis.
+- Escritas MDMA destinadas aos registradores PPU `$2100-$213F` agora são
+  aplicadas imediatamente e na ordem da transferência. Portas APU/WRAM e o
+  caminho HDMA permanecem inalterados.
+- A bancada host ganhou uma regressão específica de modo 4 que alterna dois
+  endereços e duas palavras: confirma os dados em `$1234` e `$5678`, preserva
+  a posição antiga e verifica o `VMADDR` final. Testes de PPU/OBJ passam e os
+  ELFs EE de release e diagnóstico profundo foram compilados. A correção ainda
+  depende do reteste visual no NetherSX2/PS2 antes de ser marcada confirmada.
 
 ---
 
