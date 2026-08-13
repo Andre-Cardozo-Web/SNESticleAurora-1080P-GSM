@@ -8,7 +8,6 @@
 #include "console.h"
 #include "snppu.h"
 #include "snppurender.h"
-#include "snppumode7.h"
 #include "snppuobjcache.h"
 #include "rendersurface.h"
 #include "snmask.h"
@@ -26,7 +25,7 @@ static SnesPPUObjRowCacheT _SnesPPU_ObjRowCache _ALIGN(64);
 #endif
 
 
-#if  !SNPPURENDER_CHR64 
+#if  !SNPPURENDER_CHR64
 
 static Uint32 _SnesPPU_Tile2PalLookup[16]=
 {
@@ -383,7 +382,7 @@ static void _FetchCHR2(Uint16 *pVram, Uint32 uBaseAddr, SnesRenderTileT *pTiles,
 		pMask++;
 
 		// get palette bits
-		uTile0  = 
+		uTile0  =
 		uTile1  = _SnesPPU_Tile2PalLookup[pTiles->uPal];
 
 		// decode tile
@@ -454,7 +453,7 @@ static void _FetchCHR4(Uint16 *pVram, Uint32 uBaseAddr, SnesRenderTileT *pTiles,
 		pMask++;
 
 		// get palette bits
-		uTile0  = 
+		uTile0  =
 		uTile1  = _SnesPPU_Tile4PalLookup[pTiles->uPal];
 
 		// decode tile
@@ -778,7 +777,7 @@ static void _RenderBGData_O(Uint8 *pLine8, Uint8 *pSrc8, SNMaskT *pBGMask, Uint3
 	__asm__ (
 		"mtsab      %0,0     \n"
 		: : "r" (pSrc8)
-		);    
+		);
 
 	while (nTiles > 0)
 	{
@@ -794,7 +793,7 @@ static void _RenderBGData_O(Uint8 *pLine8, Uint8 *pSrc8, SNMaskT *pBGMask, Uint3
 			:
 			: "r" (pLine8)
 			: "memory"
-			);    
+			);
 
 		if (uMask)
 		{
@@ -852,7 +851,7 @@ static void _RenderBGData(Uint8 *pLine8, Uint8 *pSrc8, SNMaskT *pBGMask, Uint32 
     __asm__ (
     	"mtsab      %0,0     \n"
     	: : "r" (pSrc8)
-     );    
+     );
 
 	while (nTiles > 0)
 	{
@@ -912,7 +911,7 @@ static void _RenderBGData(Uint8 *pLine8, Uint8 *pSrc8, SNMaskT *pBGMask, Uint32 
 #else
 
 #define RENDERBGPIXEL(_y,_x)\
-	if (uMask&(1<<(_x))) pLine8[_x] = (_y) >> (_x*8); 
+	if (uMask&(1<<(_x))) pLine8[_x] = (_y) >> (_x*8);
 
 static void _RenderBGData(Uint8 *pLine8, Uint8 *pSrc8, SNMaskT *pBGMask, Uint32 uScrollX, Int32 nTiles)
 {
@@ -944,19 +943,19 @@ static void _RenderBGData(Uint8 *pLine8, Uint8 *pSrc8, SNMaskT *pBGMask, Uint32 
 
 				if (uMask==0xFF)
 				{
-					((Uint32 *)pLine8)[0] = t0; 
-					((Uint32 *)pLine8)[1] = t2; 
+					((Uint32 *)pLine8)[0] = t0;
+					((Uint32 *)pLine8)[1] = t2;
 					pLine8+=8;
 				} else
 				{
-					if (uMask&(1<<0)) pLine8[0] = t0 >> (0*8); 
-					if (uMask&(1<<1)) pLine8[1] = t0 >> (1*8); 
-					if (uMask&(1<<2)) pLine8[2] = t0 >> (2*8); 
-					if (uMask&(1<<3)) pLine8[3] = t0 >> (3*8); 
-					if (uMask&(1<<4)) pLine8[4] = t2 >> (0*8); 
-					if (uMask&(1<<5)) pLine8[5] = t2 >> (1*8); 
-					if (uMask&(1<<6)) pLine8[6] = t2 >> (2*8); 
-					if (uMask&(1<<7)) pLine8[7] = t2 >> (3*8); 
+					if (uMask&(1<<0)) pLine8[0] = t0 >> (0*8);
+					if (uMask&(1<<1)) pLine8[1] = t0 >> (1*8);
+					if (uMask&(1<<2)) pLine8[2] = t0 >> (2*8);
+					if (uMask&(1<<3)) pLine8[3] = t0 >> (3*8);
+					if (uMask&(1<<4)) pLine8[4] = t2 >> (0*8);
+					if (uMask&(1<<5)) pLine8[5] = t2 >> (1*8);
+					if (uMask&(1<<6)) pLine8[6] = t2 >> (2*8);
+					if (uMask&(1<<7)) pLine8[7] = t2 >> (3*8);
 					pLine8+=8;
 				}
 			}  else
@@ -981,7 +980,7 @@ static void _RenderBGData(Uint8 *pLine8, Uint8 *pSrc8, SNMaskT *pBGMask, Uint32 
 			if (uMask)
 			{
 				t0 = ((Uint32 *)pSrc8)[0];
-				t1 = 
+				t1 =
 				t2 = ((Uint32 *)pSrc8)[1];
 				t3 = ((Uint32 *)pSrc8)[2];
 				pSrc8+=8;
@@ -996,18 +995,18 @@ static void _RenderBGData(Uint8 *pLine8, Uint8 *pSrc8, SNMaskT *pBGMask, Uint32 
 
 				if (uMask==0xFF)
 				{
-					((Uint32 *)pLine8)[0] = t0; 
+					((Uint32 *)pLine8)[0] = t0;
 					((Uint32 *)pLine8)[1] = t2; pLine8+=8;
 				} else
 				{
-					if (uMask&(1<<0)) pLine8[0] = t0 >> (0*8); 
-					if (uMask&(1<<1)) pLine8[1] = t0 >> (1*8); 
-					if (uMask&(1<<2)) pLine8[2] = t0 >> (2*8); 
-					if (uMask&(1<<3)) pLine8[3] = t0 >> (3*8); 
-					if (uMask&(1<<4)) pLine8[4] = t2 >> (0*8); 
-					if (uMask&(1<<5)) pLine8[5] = t2 >> (1*8); 
-					if (uMask&(1<<6)) pLine8[6] = t2 >> (2*8); 
-					if (uMask&(1<<7)) pLine8[7] = t2 >> (3*8); 
+					if (uMask&(1<<0)) pLine8[0] = t0 >> (0*8);
+					if (uMask&(1<<1)) pLine8[1] = t0 >> (1*8);
+					if (uMask&(1<<2)) pLine8[2] = t0 >> (2*8);
+					if (uMask&(1<<3)) pLine8[3] = t0 >> (3*8);
+					if (uMask&(1<<4)) pLine8[4] = t2 >> (0*8);
+					if (uMask&(1<<5)) pLine8[5] = t2 >> (1*8);
+					if (uMask&(1<<6)) pLine8[6] = t2 >> (2*8);
+					if (uMask&(1<<7)) pLine8[7] = t2 >> (3*8);
 					pLine8+=8;
 				}
 			}  else
@@ -1111,7 +1110,7 @@ static void _RenderBG8(Uint8 *pLine8, SNMaskT *pLine, SNMaskT *pBGPlane, SNMaskT
 			break;
 
 		case 5:
-			// lo = 01 
+			// lo = 01
 			SNMaskANDN(&BGMask, &BGMask, &pLine[SNPPU_BGPLANE_LAYER1]);
 			SNMaskOR(&BGMask, &BGMask, pBGPri);
 
@@ -1230,23 +1229,17 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 		Uint32 uTileAddr;
 		Uint32 uPlane0, uPlane1, uPlane2, uPlane3;
 		Uint32 uTile0, uTile1, uOpaque;
-		#if !SNPPU_OBJ_CACHE
 		SnesChrLookupT *pLookup;
-		#endif
 		Uint8 *pHFlip;
 		Uint32 uTile;
 
 		if (pObj->bHFlip)
 		{
-			#if !SNPPU_OBJ_CACHE
 			pLookup = &_SnesPPU_PlaneLookup[1];
-			#endif
 			pHFlip  = _SnesPPU_HFlipLookup[0];
 		} else
 		{
-			#if !SNPPU_OBJ_CACHE
 			pLookup = &_SnesPPU_PlaneLookup[0];
-			#endif
 			pHFlip  = _SnesPPU_HFlipLookup[1];
 		}
 
@@ -1337,8 +1330,8 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 					Bool bSourceChanged = FALSE;
 
 					if (SnesPPUObjRowCacheLookup(&_SnesPPU_ObjRowCache,
-						bSecondTable, uTile, uYoff, uSource, &uTile0,
-						&uTile1, &bSourceChanged))
+						uRowAddr, pObj->bHFlip, uSource, &uTile0,
+						&uTile1, &uOpaque, &bSourceChanged))
 					{
 #if SNDBG_LOG
 						uCacheHits++;
@@ -1349,23 +1342,12 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 						uCacheMisses++;
 						if (bSourceChanged) uCacheRefreshes++;
 #endif
-						/* O cache guarda uma unica orientacao canonica. */
-						_DecodeOBJRow4(&_SnesPPU_PlaneLookup[0],
-							_SnesPPU_HFlipLookup[1], uPlane0, uPlane1,
+						_DecodeOBJRow4(pLookup, pHFlip, uPlane0, uPlane1,
 							uPlane2, uPlane3, &uTile0, &uTile1, &uOpaque);
 						SnesPPUObjRowCacheStore(&_SnesPPU_ObjRowCache,
-							bSecondTable, uTile, uYoff, uSource, uTile0,
-							uTile1);
+							uRowAddr, pObj->bHFlip, uSource, uTile0,
+							uTile1, uOpaque);
 					}
-
-					if (pObj->bHFlip)
-					{
-						Uint64 uRowData = ((Uint64)uTile1 << 32) | uTile0;
-						uRowData = SnesPPUObjRowHFlip64(uRowData);
-						uTile0 = (Uint32)uRowData;
-						uTile1 = (Uint32)(uRowData >> 32);
-					}
-					uOpaque = pHFlip[uPlane0 | uPlane1 | uPlane2 | uPlane3];
 				}
 #else
 				// decode tile
@@ -1441,9 +1423,9 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 
 	SNMaskT *pMain = pRenderInfo->Main;
 	SNMaskT *pSub = pRenderInfo->Sub;
-	SNMaskT *pBGWindow = pRenderInfo->BGWindow; 
-    SNMaskT *pMainAddSubMask = &pRenderInfo->MainAddSubMask; 
-	SNMaskT *pSubAddSubMask = &pRenderInfo->SubAddSubMask; 
+	SNMaskT *pBGWindow = pRenderInfo->BGWindow;
+    SNMaskT *pMainAddSubMask = &pRenderInfo->MainAddSubMask;
+	SNMaskT *pSubAddSubMask = &pRenderInfo->SubAddSubMask;
     Uint8  *pMain8 = pRenderInfo->BlendInfo.uMain8;
     Uint8  *pSub8 = pRenderInfo->BlendInfo.uSub8;
 
@@ -1547,7 +1529,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 			{
 				Uint8 TempMask[2][SNPPU_BGPLANE_SIZE];
 
-				// fetch bg tile data 
+				// fetch bg tile data
 				#if SNPPURENDER_CHR64
 				_FetchCHR_64((Uint8 *)pRenderInfo->BGPlanes[iBG], m_pPPU, &BGInfo[iBG], pRenderInfo->Tiles[iBG], 33, iLine, TempMask[0], (uBGFlags[iBG]&SNPPU_BGFLAGS_OFFSET));
 				#else
@@ -1608,7 +1590,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 
 	bBG3Pri = (pRegs->bgmode&8) && (tm & SNESPPU_MASK_BG3) && ((pRegs->bgmode&7)==1);
 
-	// clear main screen 
+	// clear main screen
 	SNMaskClear(&pMain[SNPPU_BGPLANE_PLANE7]);
 	SNMaskClear(&pMain[SNPPU_BGPLANE_LAYER0]);
 	SNMaskClear(&pMain[SNPPU_BGPLANE_LAYER1]);
@@ -1650,7 +1632,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	// do fancy BG3 priority stuff?
 	bBG3Pri = (pRegs->bgmode&8) && (ts & SNESPPU_MASK_BG3) && ((pRegs->bgmode&7)==1);;
 
-	// clear Sub screen 
+	// clear Sub screen
 	SNMaskClear(&pSub[SNPPU_BGPLANE_PLANE7]);
 	SNMaskClear(&pSub[SNPPU_BGPLANE_LAYER0]);
 	SNMaskClear(&pSub[SNPPU_BGPLANE_LAYER1]);
@@ -1697,18 +1679,299 @@ void RenderLine8Mode7(Int32 iLine,  SnesRender8pInfoT *pRenderInfo)
 
 
 
-/* Fetch, prioridade e opacidade de Mode 7 sao produzidos juntos pelos
-   helpers testaveis de snppumode7.h. */
+static void _FetchMode7_Repeat(Uint8 *pLine, Int32 nPixels, Uint8 *pVram, Int32 x, Int32 y, Int32 dx, Int32 dy)
+{
+	Int32 x2,y2;
+	Uint32 uTileAddr;
+	Uint32 uChrAddr;
+	Uint8 uChrData;
+
+	while (nPixels >0)
+	{
+		// do matrix multiply
+		x2 = x >> 8;
+		y2 = y >> 8;
+
+		// increment x/y
+		x+=dx;
+		y+=dy;
+
+		// wrap
+		x2&=0x3FF;
+		y2&=0x3FF;
+
+		// get tile address
+		uTileAddr = ((y2>>3)<<7) | (x2>>3);
+		uTileAddr &= 0x3FFF;
+
+		// fetch chr address
+		uChrAddr = pVram[uTileAddr * 2 + 0];
+
+		// offset into pixel of tile
+		uChrAddr <<=6;
+		uChrAddr += (x2 & 7);
+		uChrAddr += (y2 & 7) << 3;
+
+		// fetch chr data
+		uChrData = pVram[uChrAddr * 2 + 1];
+
+		nPixels--;
+		pLine[0] = uChrData;
+		pLine++;
+	}
+}
+
+static void _FetchMode7_Clamp(Uint8 *pLine, Int32 nPixels, Uint8 *pVram, Int32 x, Int32 y, Int32 dx, Int32 dy)
+{
+	Int32 x2,y2;
+	Uint32 uTileAddr;
+	Uint32 uChrAddr;
+	Uint8 uChrData;
+
+	while (nPixels >0)
+	{
+		// do matrix multiply
+		x2 = x >> 8;
+		y2 = y >> 8;
+
+		// increment x/y
+		x+=dx;
+		y+=dy;
+
+		// get tile address
+		uTileAddr = ((y2>>3)<<7) | (x2>>3);
+		uTileAddr &= 0x3FFF;
+
+		// fetch chr address
+		uChrAddr = pVram[uTileAddr * 2 + 0];
+
+		if ((x2|y2) >> 10)	uChrAddr = 0;
+
+		// offset into pixel of tile
+		uChrAddr <<=6;
+		uChrAddr += (x2 & 7);
+		uChrAddr += (y2 & 7) << 3;
+
+		// fetch chr data
+		uChrData = pVram[uChrAddr * 2 + 1];
+
+		nPixels--;
+		pLine[0] = uChrData;
+		pLine++;
+	}
+}
+
+static void _FetchMode7_Black(Uint8 *pLine, Int32 nPixels, Uint8 *pVram, Int32 x, Int32 y, Int32 dx, Int32 dy)
+{
+	Int32 x2,y2;
+	Uint32 uTileAddr;
+	Uint32 uChrAddr;
+	Uint8 uChrData;
+
+	while (nPixels >0)
+	{
+		// do matrix multiply
+		x2 = x >> 8;
+		y2 = y >> 8;
+
+		// increment x/y
+		x+=dx;
+		y+=dy;
+
+		// get tile address
+		uTileAddr = ((y2>>3)<<7) | (x2>>3);
+		uTileAddr &= 0x3FFF;
+
+		// fetch chr address
+		uChrAddr = pVram[uTileAddr * 2 + 0];
+
+		// offset into pixel of tile
+		uChrAddr <<=6;
+		uChrAddr += (x2 & 7);
+		uChrAddr += (y2 & 7) << 3;
+
+		// fetch chr data
+		uChrData = pVram[uChrAddr * 2 + 1];
+
+		if ((x2|y2) >> 10)	uChrData = 0;
+
+		nPixels--;
+		pLine[0] = uChrData;
+		pLine++;
+	}
+}
+
+#if 0
+static void _FetchMode7Priority(Uint8 *pPriority, Uint8 *pLine, Int32 nPixels)
+{
+	Uint8 uPriority =0;
+
+	while (nPixels > 0)
+	{
+		Uint8 uData;
+		uData = pLine[0];
+
+		uPriority >>= 1;
+		uPriority  |= uData & 0x80;
+
+		if (!(nPixels & 7))
+		{
+			*pPriority++ = uPriority;
+			uPriority = 0;
+		}
+
+		pLine[0] = uData & 0x7F;
+
+		pLine++;
+		nPixels--;
+	}
+}
+#else
+
+static void _FetchMode7Priority(Uint8 *pPriority, Uint8 *pLine, Int32 nPixels)
+{
+	Uint64 uMask64;
+	Uint64 *pLine64 = (Uint64 *)pLine;
+
+	uMask64 = 0x8080808080808080;
+
+	while (nPixels > 0)
+	{
+		Uint64 uData64;
+		Uint64 uPriority = 0;
+		Uint64 uPri64;
+
+		// fetch 8 pixels
+		uData64 = pLine64[0];
+
+		// get priority bits
+		uPri64 = uData64 & uMask64;
+
+		uPriority|= (uPri64 >> ( 0x00 + 7)) << 0;
+		uPriority|= (uPri64 >> ( 0x08 + 7)) << 1;
+		uPriority|= (uPri64 >> ( 0x10 + 7)) << 2;
+		uPriority|= (uPri64 >> ( 0x18 + 7)) << 3;
+		uPriority|= (uPri64 >> ( 0x20 + 7)) << 4;
+		uPriority|= (uPri64 >> ( 0x28 + 7)) << 5;
+		uPriority|= (uPri64 >> ( 0x30 + 7)) << 6;
+		uPriority|= (uPri64 >> ( 0x38 + 7)) << 7;
+
+		// remove priority bits
+		uData64 |= uMask64;
+		uData64 ^= uMask64;
+
+		// store priority
+		pPriority[0] = (Uint8)uPriority;
+		pPriority++;
+
+		// store line data
+		pLine64[0] = uData64;
+		pLine64++;
+
+		nPixels-=8;
+	}
+}
+
+#endif
+
+#if CODE_PLATFORM == CODE_PS2
+static void _FetchMode7Opaque(Uint8 *pMask, Uint8 *pLine, Int32 nPixels)
+{
+	Uint64 uMask64;
+	Uint64 *pLine64 = (Uint64 *)pLine;
+	Uint64 uZero;
+	Uint64 uOne;
+
+	uMask64 = 0x8080808080808080;
+	uZero	= 0x0000000000000000;
+	uOne    = 0xFFFFFFFFFFFFFFFF;
+
+	while (nPixels > 0)
+	{
+		Uint64 uData64;
+		Uint64 uOpaque = 0;
+
+		// fetch 8 pixels
+		uData64 = pLine64[0];
+		pLine64++;
+
+		__asm__ (
+			"pceqb      %0,%0,$0        \n"   // %0 = FF or 00
+			: "+r" (uData64)
+			);
+
+		if (uData64==uZero)
+		{
+			pMask[0] = 0xFF;
+			pMask++;
+		} else
+		if (uData64==uOne)
+		{
+			pMask[0] = 0x00;
+			pMask++;
+		} else
+		{
+			// get priority bits
+			uData64 = uData64 & uMask64;
+
+			uOpaque|= (uData64 >> ( 0x00 + 7)) << 0;
+			uOpaque|= (uData64 >> ( 0x08 + 7)) << 1;
+			uOpaque|= (uData64 >> ( 0x10 + 7)) << 2;
+			uOpaque|= (uData64 >> ( 0x18 + 7)) << 3;
+			uOpaque|= (uData64 >> ( 0x20 + 7)) << 4;
+			uOpaque|= (uData64 >> ( 0x28 + 7)) << 5;
+			uOpaque|= (uData64 >> ( 0x30 + 7)) << 6;
+			uOpaque|= (uData64 >> ( 0x38 + 7)) << 7;
+
+			// store priority
+			pMask[0] = (Uint8)(uOpaque^0xFF);
+			pMask++;
+		}
+		nPixels-=8;
+	}
+}
+#else
+
+static void _FetchMode7Opaque(Uint8 *pMask, Uint8 *pLine, Int32 nPixels)
+{
+	Uint64 *pLine64 = (Uint64 *)pLine;
+
+	while (nPixels > 0)
+	{
+		Uint64 uData64;
+		Uint64 uOpaque = 0;
+
+		// fetch 8 pixels
+		uData64 = pLine64[0];
+		pLine64++;
+
+		// on a mips processor this produces several movn instructions
+		uOpaque|= ((uData64 >> 0x00) & 0xFF) ? 1 : 0;
+		uOpaque|= ((uData64 >> 0x08) & 0xFF) ? 2 : 0;
+		uOpaque|= ((uData64 >> 0x10) & 0xFF) ? 4 : 0;
+		uOpaque|= ((uData64 >> 0x18) & 0xFF) ? 8 : 0;
+		uOpaque|= ((uData64 >> 0x20) & 0xFF) ? 16 : 0;
+		uOpaque|= ((uData64 >> 0x28) & 0xFF) ? 32 : 0;
+		uOpaque|= ((uData64 >> 0x30) & 0xFF) ? 64 : 0;
+		uOpaque|= ((uData64 >> 0x38) & 0xFF) ? 128 : 0;
+
+
+		// store priority
+		pMask[0] = (Uint8)uOpaque;
+		pMask++;
+		nPixels-=8;
+	}
+}
+#endif
+
 static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPriority, SNMaskT *pOpaque)
 {
 	const SnesPPURegsT *pRegs = pPPU->GetRegs();
 	Int32 x1, y1,x,y;
 	Int32 m7a,m7b,m7c,m7d,m7x,m7y;
-	Uint16 *pVram;
-	Uint8 *pPriority8 = pPriority ? pPriority->uMask8 : NULL;
-	Bool bExtendedBG = (pRegs->setini & 0x40) != 0;
+	Uint8 *pVram;
 
-	pVram = pPPU->GetVramPtr(0);
+	pVram = (Uint8 *)pPPU->GetVramPtr(0);
 
 	// get x/y scroll position
 	x1 = pRegs->m7hofs.w;
@@ -1745,29 +2008,44 @@ static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPrio
 		m7a = -m7a;
 		m7c = -m7c;
 	}
-	
+
 	if (pRegs->m7sel & 0x2)
 	{
 		x +=  262 * m7b;  // translate to bottom of screen
 		y +=  262 * m7d;
 		m7b = -m7b;
 		m7d = -m7d;
-	} 
+	}
 
 	switch (pRegs->m7sel>>6)
 	{
 	case 0: // screen repetition if outside of screen area
-		SnesPPUMode7FetchRepeat(pLine, pPriority8, pOpaque->uMask8,
-			256, pVram, x, y, m7a, m7c, bExtendedBG);
+		_FetchMode7_Repeat(pLine, 256, pVram, x, y, m7a, m7c);
 		break;
 	case 3: // character 0x00 repetition if outside of screen area
-		SnesPPUMode7FetchClamp(pLine, pPriority8, pOpaque->uMask8,
-			256, pVram, x, y, m7a, m7c, bExtendedBG);
+		_FetchMode7_Clamp(pLine, 256, pVram, x, y, m7a, m7c);
 		break;
 	default:
 	case 2: // outside of the screen area is the back drop screen in single color
-		SnesPPUMode7FetchBlack(pLine, pPriority8, pOpaque->uMask8,
-			256, pVram, x, y, m7a, m7c, bExtendedBG);
+		_FetchMode7_Black(pLine, 256, pVram, x, y, m7a, m7c);
 		break;
 	}
+
+	if (pPriority)
+	{
+		if (pRegs->setini & 0x40)
+		{
+			PROF_ENTER("_FetchMode7Priority");
+			_FetchMode7Priority(pPriority->uMask8, pLine, 256);
+			PROF_LEAVE("_FetchMode7Priority");
+		} else
+		{
+//			SNMaskClear(pPriority);
+			SNMaskSet(pPriority);
+
+		}
+	}
+
+	// no transparency?
+	_FetchMode7Opaque(pOpaque->uMask8, pLine, 256);
 }

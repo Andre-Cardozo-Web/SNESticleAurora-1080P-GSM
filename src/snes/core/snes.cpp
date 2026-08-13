@@ -1705,15 +1705,6 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
 					(unsigned)(Uint8)pr->bgofslo,
 					(unsigned)(Uint8)pr->bghofslo,
 					(unsigned)(Uint8)pr->m7latch);
-				if ((pr->bgmode & 7) == 7)
-				{
-					DLog("[snes-m7] sel/setini=%02X/%02X matrix a/b/c/d=%04X/%04X/%04X/%04X center=%04X/%04X",
-						(unsigned)(Uint8)pr->m7sel,
-						(unsigned)(Uint8)pr->setini,
-						(unsigned)pr->m7a.w, (unsigned)pr->m7b.w,
-						(unsigned)pr->m7c.w, (unsigned)pr->m7d.w,
-						(unsigned)pr->m7x.w, (unsigned)pr->m7y.w);
-				}
 			}
 			#if SNDBG_DEEP
 			DLog("[snes-gsu] ins=%u start/stop/abort/wd=%u/%u/%u/%u max=%u cur=%u plot/rpix=%u/%u ramw=%u",

@@ -33,10 +33,4 @@ ROOT=../..
     oam_test.cpp "$ROOT/src/snes/ppu/snppu.cpp" \
     "$ROOT/src/snes/core/sndma.cpp" -o oam_test
 
-"${CXX:-g++}" -O2 \
-    -DCODE_PLATFORM=1 -DCODE_DEBUG=0 -DCODE_PROFILE=0 -DSNDBG_LOG=0 \
-    -I "$ROOT/src/common/base" \
-    -I "$ROOT/src/snes/ppu" \
-    mode7_test.cpp -o mode7_test
-
-echo "OK -> ./obj_test && ./oam_test && ./mode7_test"
+echo "OK -> ./obj_test && ./oam_test"

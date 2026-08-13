@@ -86,8 +86,8 @@ SNES_DIAGNOSTICS ?= 0
 SNES_DIAG_ENABLED := $(if $(filter-out 0,$(SNES_DIAGNOSTICS)),1,0)
 SNES_DIAG_DEEP := $(if $(filter 2,$(SNES_DIAGNOSTICS)),1,0)
 
-# Cache logico de linhas OBJ: um slot por tabela/tile/linha, sem colisoes, e
-# comparacao dos quatro bytes-fonte da VRAM em todo hit. Deixe 1 para release;
+# Cache seguro de linhas OBJ: reaproveita os pixels 4bpp decodificados, mas
+# confere os quatro bytes-fonte da VRAM em todo hit. Deixe 1 para release;
 # SNES_OBJ_CACHE=0 existe somente para comparacao A/B de desempenho.
 SNES_OBJ_CACHE ?= 1
 

@@ -99,7 +99,23 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 
 ---
 
-## Revisão r23: Top Gear sem thrashing de OBJ e Mode 7 em uma passagem
+## Revisão r24: recuperação de estabilidade após a r23
+
+- O reteste da r23 mostrou uma regressão severa no EE: Top Gear caiu para
+  aproximadamente 76% da velocidade, com uso do EE próximo de 97,5%, além de
+  oscilações percebidas desde a abertura do homebrew.
+- Foram retiradas as duas experiências introduzidas somente na r23: o cache
+  OBJ de 48 KiB e o caminho Mode 7 totalmente desenrolado. O renderer volta
+  exatamente aos caminhos da r22, que haviam sido confirmados como estáveis.
+- O cache OBJ seguro de 8 KiB da r22 continua ativo. Diagnósticos, profiler e
+  capturas DSP-4 permanecem desligados por padrão nas builds release.
+- A otimização de Top Gear voltará em testes A/B separados, uma alteração por
+  build, para medir cache OBJ e Mode 7 independentemente antes de qualquer
+  nova inclusão na versão principal.
+
+---
+
+## Revisão r23 (retirada): cache OBJ ampliado e Mode 7 em uma passagem
 
 - O reteste da r22 mostrou por que o cache de 8 KiB quase não ajudava o grid
   cheio: eram apenas **21.180 hits para 132.900 misses** por janela, com zero
