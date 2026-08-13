@@ -162,7 +162,7 @@ PolyRect(0.0f, 5.0f, 256.0f, 240.0f);
         }
         else
         {
-            PolyRect(dx,dy,MAINLOOP_SCREENWIDTH,MAINLOOP_SCREENHEIGHT);
+PolyRect(0.0f, 7.0f, 256.0f, 240.0f);
         }
 
         PolyBlend(TRUE);
