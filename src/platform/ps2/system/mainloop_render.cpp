@@ -1,8 +1,8 @@
 /* mainloop_render.cpp
  *
  * Hosts MainLoopRender() and the file-static state it needs
- * (_uVblankCycle, the screen-size #defines used to clear / blit the
- * SNES output texture, and the MAINLOOP_DEBUG_GS_TEST hook).
+ * (_uVblankCycle and the screen-size #defines used to clear / blit the
+ * SNES output texture).
  *
  * Extracted from mainloop.cpp during the Batch 3 split. No logic,
  * literal, or attribute change.
@@ -52,19 +52,6 @@ extern "C" {
 
 static Uint32 _uVblankCycle;
 
-
-/* MAINLOOP_DEBUG_GS_TEST: when defined to 1 (-DMAINLOOP_DEBUG_GS_TEST=1
-   in CFLAGS, e.g. `make MAINLOOP_DEBUG_GS_TEST=1`), MainLoopRender()
-   first paints the entire framebuffer solid red before doing anything
-   else. This is the lowest-level GS sanity check possible: if the TV
-   shows red, GS_InitGraph + GS_SetEnv + the GIF/DMA pipeline are all
-   working and any "black screen" symptom is in the menu/browser/font
-   draw path on top. If the TV is still black, the GS itself is
-   misconfigured for the current emulator/console (PMODE / DISPFB /
-   DISPLAY1). */
-#ifndef MAINLOOP_DEBUG_GS_TEST
-#endif
-
 void MainLoopRender()
 {
 	static Uint32 _iFrame=0;
@@ -102,13 +89,6 @@ void MainLoopRender()
     PolyTexture(NULL);
     PolyBlend(FALSE);
     PolyColor4f(0.0f, 0.0f, 0.0f, 1.0f);
-
-#if MAINLOOP_DEBUG_GS_TEST
-    PolyTexture(NULL);
-    PolyBlend(FALSE);
-    PolyColor4f(1.0f, 0.0f, 0.0f, 1.0f);
-    PolyRect(0, 0, MAINLOOP_SCREENWIDTH, MAINLOOP_SCREENHEIGHT);
-#endif
 
 	if (!_MainLoop_BlackScreen)
 	{

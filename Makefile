@@ -64,20 +64,6 @@ PACK       ?= 1
 
 IRX_DIR     ?= $(PS2SDK)/iop/irx
 
-# DEBUG_BOOT_SCREEN: when set to 1 the EE side calls init_scr() in main()
-# and every "[boot] ..." trace point goes to scr_printf() (BIOS debug
-# font, written direct to the GS, no IOP/SIF/host: round-trip needed).
-# In that mode MainLoopInit() also skips its own GS_InitGraph() so the
-# debug screen survives long enough for the user to read it. Set to 0
-# for normal rendering. Override on the make line if needed.
-DEBUG_BOOT_SCREEN ?= 0
-
-# MAINLOOP_DEBUG_GS_TEST: when set to 1, MainLoopRender() paints the
-# whole frame solid red as the first thing every frame. Use to confirm
-# whether the GS pipeline itself is alive (red = OK, still black = GS
-# broken). Override on the make line: `make MAINLOOP_DEBUG_GS_TEST=1`.
-MAINLOOP_DEBUG_GS_TEST ?= 0
-
 # SNES_DIAGNOSTICS=1 enables the low-overhead, once-per-second general
 # CPU/PPU/GS report.  SNES_DIAGNOSTICS=2 also enables deep OBJ/DMA hashes,
 # per-scanline staging validation and per-instruction GSU counters.  Keep the
@@ -125,17 +111,13 @@ CFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) \
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
 	-DSNDBG_LOG=$(SNES_DIAG_ENABLED) -DSNDBG_DEEP=$(SNES_DIAG_DEEP) \
 	-DSNPPU_OBJ_CACHE=$(SNES_OBJ_CACHE) \
-	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE) \
-	-DDEBUG_BOOT_SCREEN=$(DEBUG_BOOT_SCREEN) \
-	-DMAINLOOP_DEBUG_GS_TEST=$(MAINLOOP_DEBUG_GS_TEST)
+	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE)
 
 CXXFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fno-exceptions -fno-rtti -fpermissive \
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
 	-DSNDBG_LOG=$(SNES_DIAG_ENABLED) -DSNDBG_DEEP=$(SNES_DIAG_DEEP) \
 	-DSNPPU_OBJ_CACHE=$(SNES_OBJ_CACHE) \
-	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE) \
-	-DDEBUG_BOOT_SCREEN=$(DEBUG_BOOT_SCREEN) \
-	-DMAINLOOP_DEBUG_GS_TEST=$(MAINLOOP_DEBUG_GS_TEST)
+	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE)
 
 # The official libxmp-lite embedded/core configuration keeps the MOD/XM effect
 # and loop engines while omitting desktop-only depackers and format extras,
@@ -469,7 +451,6 @@ SRCS := \
 	src/common/debug/dbgterm.cpp \
 	src/platform/ps2/system/mainloop_state.cpp \
 	src/platform/ps2/system/mainloop_iop.cpp \
-	src/platform/ps2/system/boot_status.cpp \
 	src/platform/ps2/system/mainloop_net.cpp \
 	src/platform/ps2/system/mainloop_smb.cpp \
 	src/platform/ps2/system/mainloop_ui.cpp \

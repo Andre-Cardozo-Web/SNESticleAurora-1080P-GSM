@@ -99,22 +99,6 @@ void DLog(const char *fmt, ...)
         _dlog_buf[n]   = '\0';
     }
 
-#if DEBUG_BOOT_SCREEN
-    {
-        static int _dlog_scr_inited = 0;
-        if (!_dlog_scr_inited) {
-            extern void init_scr(void);
-            extern void scr_clear(void);
-            init_scr();
-            scr_clear();
-            _dlog_scr_inited = 1;
-        }
-        {
-            extern void scr_printf(const char *fmt, ...);
-            // scr_printf("%s", _dlog_buf);
-        }
-    }
-#endif
     sio_putsn(_dlog_buf);
 }
 

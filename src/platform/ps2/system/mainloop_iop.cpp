@@ -3,11 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "boot_status.h"
-
-#ifndef DEBUG_BOOT_SCREEN
-#define DEBUG_BOOT_SCREEN 0
-#endif
 
 /* BOOTLOG: route through DLog (defined in modules/sjpcm/sjpcm_rpc.c).
    Plain EE printf never reaches PCSX2/NetherSX2's emulator log in this

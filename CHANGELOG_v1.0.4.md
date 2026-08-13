@@ -118,6 +118,9 @@ Versão exibida pelo programa: **SNESticle Revive PS2 v1.0.4**
 - Builds normais usam `SNES_DIAGNOSTICS=0`, `SNES_OBJ_CACHE=1` e
   `SNES_BG_CACHE=0`. A bancada cobre OAM/VRAM, OBJ, cache CHR e o agendamento
   de áudio; os quatro testes host-side passam.
+- Removidos os antigos `DEBUG_BOOT_SCREEN` e `MAINLOOP_DEBUG_GS_TEST`: a tela
+  BIOS já não imprimia conteúdo e o teste vermelho do GS era apenas um gancho
+  temporário. As ferramentas de diagnóstico SNES, profiler e DSP-4 permanecem.
 
 ---
 
