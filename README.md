@@ -1,6 +1,6 @@
 # SNESticleRevive — 240p / Experimental Fork
 
-A fork of ReyFxck/SNESticleRevive focused on 240p CRTs, NES/InfoNES experiments, and my own hardware-specific quirks.
+A fork of ReyFxck/SNESticleRevive focused on 240p CRTs, NES/QuickNES experiments, and my own hardware-specific quirks.
 
 Changes that prove useful or broadly applicable will be pushed to the main version when appropriate, while **updates from the main version will always be merged back into this fork.**
 
