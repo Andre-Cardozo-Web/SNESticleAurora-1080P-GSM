@@ -174,7 +174,8 @@ void SetRegionPAL(Bool bPAL);
 	const SnesPPURegsT *    GetRegs() const                             {return &m_Regs;}
 	SnesOAMT *              GetOAM()                                    {return &m_OAM;}
 	Uint16 *                GetVramPtr(Uint32 uVramAddr)                {return &m_VRAM[uVramAddr & 0x7FFF];}
-	Bool                    IsForceBlank() const                        {return !(m_Regs.inidisp & 0x80);}
+	/* AURORA_SNES_FORCEBLANK_V1: INIDISP bit 7 means forced blank. */
+	Bool                    IsForceBlank() const                        {return (m_Regs.inidisp & 0x80) != 0;}
 	Bool                    InVBlank() const                            {return m_bVBlank;}
 	Uint32                  GetIntensity()  const                       {return m_Regs.inidisp & 0xF;}
 

@@ -69,100 +69,168 @@ void NesRom::Unload()
     m_bLoaded       = FALSE;
 }
 
-Emu::Rom::LoadErrorE NesRom::LoadRom(CDataIO *pFileIO, Uint8 *pBuffer, Uint32 nBufferBytes)
+/* AURORA_NESROM_NES2_GATE_V1
+ *
+ * The SNESticle ROM wrapper validates the image before QuickNES sees it.
+ * Decode NES 2.0 sizes here too, otherwise valid small-ROM images can be
+ * rejected before reaching Nes_Cart::load_ines().
+ */
+static Uint32 _NesRomDecodeNES2Size(
+    Uint8 uLSB, Uint8 uMSBNibble, Uint32 uLinearUnit, Bool *pOK)
+{
+    unsigned long long uBytes;
+
+    if (uMSBNibble != 0x0F)
+    {
+        unsigned long uCount =
+            ((unsigned long)uMSBNibble << 8) | (unsigned long)uLSB;
+        uBytes = (unsigned long long)uCount *
+                 (unsigned long long)uLinearUnit;
+    }
+    else
+    {
+        unsigned uExponent = uLSB >> 2;
+        unsigned uMultiplier = ((unsigned)uLSB & 3u) * 2u + 1u;
+
+        if (uExponent >= 32)
+        {
+            *pOK = FALSE;
+            return 0;
+        }
+
+        uBytes =
+            ((unsigned long long)1 << uExponent) *
+            (unsigned long long)uMultiplier;
+    }
+
+    if (uBytes > 0xFFFFFFFFULL)
+    {
+        *pOK = FALSE;
+        return 0;
+    }
+
+    return (Uint32)uBytes;
+}
+
+Emu::Rom::LoadErrorE NesRom::LoadRom(
+    CDataIO *pFileIO, Uint8 *pBuffer, Uint32 nBufferBytes)
 {
     Unload();
 
     if (!pFileIO)
-    {
         return LOADERROR_OPENFILE;
-    }
 
-    /* Determine size by seeking to the end - CDataIO has no Length(),
-       so we follow the SnesRom::LoadRom pattern (snrom.cpp:423). */
     pFileIO->Seek(0, SEEK_END);
     Uint32 uTotal = (Uint32)pFileIO->GetPos();
     pFileIO->Seek(0, SEEK_SET);
-    if (uTotal < 16)
-    {
-        printf("[NesRom] file is smaller than iNES header (%u bytes)\n", uTotal);
-        return LOADERROR_BADHEADERSIZE;
-    }
 
-    /* Allocate (or accept a caller buffer). We over-allocate a small
-       trailer so InfoNES can read one mapper bank past the end
-       without a special bounds check. */
+    if (uTotal < 16)
+        return LOADERROR_BADHEADERSIZE;
+
     Uint8 *pBuf;
     if (pBuffer && nBufferBytes >= uTotal + 8)
     {
-        pBuf      = pBuffer;
-        m_pRomMem = NULL; /* caller owns the buffer */
+        pBuf = pBuffer;
+        m_pRomMem = NULL;
     }
     else
     {
         m_pRomMem = (Uint8 *)malloc(uTotal + 8);
         if (!m_pRomMem)
-        {
             return LOADERROR_OUTOFSPACE;
-        }
         pBuf = m_pRomMem;
     }
 
-    /* Read the entire file into the buffer in one shot. */
     size_t nRead = pFileIO->Read(pBuf, (Int32)uTotal);
     if (nRead != uTotal)
     {
-        printf("[NesRom] short read: got %u / %u\n", (Uint32)nRead, uTotal);
         Unload();
         return LOADERROR_READFILE;
     }
 
-    /* iNES magic check: "NES\x1A". */
-    if (pBuf[0] != 'N' || pBuf[1] != 'E' || pBuf[2] != 'S' || pBuf[3] != 0x1A)
+    if (pBuf[0] != 'N' || pBuf[1] != 'E' ||
+        pBuf[2] != 'S' || pBuf[3] != 0x1A)
     {
-        printf("[NesRom] bad iNES magic: %02X %02X %02X %02X\n",
-               pBuf[0], pBuf[1], pBuf[2], pBuf[3]);
         Unload();
         return LOADERROR_INVALID;
     }
 
-    /* Parse the rest of the iNES header. */
     m_uPrgRomBanks = pBuf[4];
     m_uChrRomBanks = pBuf[5];
-    m_uFlags6      = pBuf[6];
-    m_uFlags7      = pBuf[7];
-    m_uMapperNo    = (m_uFlags6 >> 4) | (m_uFlags7 & 0xF0);
+    m_uFlags6 = pBuf[6];
+    m_uFlags7 = pBuf[7];
 
-    /* Sanity-check the file size against what the header advertises.
-       trainer (if present) + 16K * PRG banks + 8K * CHR banks. */
-    Uint32 uExpected = 16;
-    if (m_uFlags6 & 0x04) uExpected += 512;             /* trainer */
-    uExpected += (Uint32)m_uPrgRomBanks * 16 * 1024;
-    uExpected += (Uint32)m_uChrRomBanks * 8  * 1024;
+    Bool bNES2 = (m_uFlags7 & 0x0C) == 0x08;
+    Bool bArchaic = !bNES2 &&
+        (pBuf[12] || pBuf[13] || pBuf[14] || pBuf[15]);
 
-    if (uTotal < uExpected)
+    if (bNES2)
     {
-        printf("[NesRom] file (%u) smaller than iNES header expects (%u)\n",
+        m_uMapperNo =
+            (m_uFlags6 >> 4) |
+            (m_uFlags7 & 0xF0) |
+            ((Uint32)(pBuf[8] & 0x0F) << 8);
+    }
+    else
+    {
+        m_uMapperNo =
+            (m_uFlags6 >> 4) |
+            (bArchaic ? 0 : (m_uFlags7 & 0xF0));
+    }
+
+    Uint32 uPrgBytes = 0;
+    Uint32 uChrBytes = 0;
+
+    if (bNES2)
+    {
+        Bool bOK = TRUE;
+        Uint8 uSizeMSB = pBuf[9];
+
+        uPrgBytes = _NesRomDecodeNES2Size(
+            pBuf[4], uSizeMSB & 0x0F, 16 * 1024u, &bOK);
+        uChrBytes = _NesRomDecodeNES2Size(
+            pBuf[5], (uSizeMSB >> 4) & 0x0F, 8 * 1024u, &bOK);
+
+        if (!bOK || uPrgBytes == 0)
+        {
+            Unload();
+            return LOADERROR_BADROMSIZE;
+        }
+    }
+    else
+    {
+        Uint32 uPrgBanks = pBuf[4] ? (Uint32)pBuf[4] : 256u;
+        uPrgBytes = uPrgBanks * 16 * 1024u;
+        uChrBytes = (Uint32)pBuf[5] * 8 * 1024u;
+    }
+
+    unsigned long long uExpected = 16ULL;
+    if (m_uFlags6 & 0x04)
+        uExpected += 512ULL;
+    uExpected += (unsigned long long)uPrgBytes;
+    uExpected += (unsigned long long)uChrBytes;
+
+    if (uExpected > (unsigned long long)uTotal)
+    {
+        printf("[NesRom] file (%u) smaller than header expects (%llu)\n",
                uTotal, uExpected);
         Unload();
         return LOADERROR_BADROMSIZE;
     }
 
-    m_pRomData  = pBuf;
+    m_pRomData = pBuf;
     m_uRomBytes = uTotal;
-
-    /* The iNES title field (if present in archival dumps) lives in
-       bytes 0..F of the "diskdude!" zone at the end of the header.
-       It's almost always all zeros, so we just leave m_szTitle empty
-       for now and let the browser fall back to the filename. */
     m_szTitle[0] = 0;
 
-    snprintf(m_szMapper, sizeof(m_szMapper), "iNES mapper %u", m_uMapperNo);
+    snprintf(m_szMapper, sizeof(m_szMapper),
+             "%s mapper %u",
+             bNES2 ? "NES2" : "iNES",
+             (unsigned)m_uMapperNo);
 
-    printf("[NesRom] loaded: %u PRG / %u CHR banks, mapper %u, %s%s, %u bytes\n",
-           m_uPrgRomBanks, m_uChrRomBanks, m_uMapperNo,
-           HasBatterySRAM() ? "battery " : "",
-           HasTrainer()     ? "trainer"  : "no-trainer",
+    printf("[NesRom] loaded: mapper %u, PRG=%u, CHR=%u, %u bytes\n",
+           (unsigned)m_uMapperNo,
+           (unsigned)uPrgBytes,
+           (unsigned)uChrBytes,
            m_uRomBytes);
 
     m_bLoaded = TRUE;

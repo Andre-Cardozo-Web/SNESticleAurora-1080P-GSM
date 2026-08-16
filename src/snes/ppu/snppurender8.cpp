@@ -1416,8 +1416,17 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 						uRowData = (Uint64)uTile0 | ((Uint64)uTile1 << 32);
 						SnesPPUChrCacheStore4(&_SnesPPU_ChrCache,
 							uRowAddr, uRowData, uOpaque);
+						/* AURORA_HFLIP_MISS_REUSE_V1 */
 						if (pObj->bHFlip)
+						{
+#if SNPPU_CHR_CACHE_HFLIP
+							SnesPPUChrCacheLoad4HFlip(
+								&_SnesPPU_ChrCache,
+								uRowAddr, &uRowData, &uOpaque);
+#else
 							SnesPPUChrCacheFlipRow(&uRowData, &uOpaque);
+#endif
+						}
 					}
 					uTile0 = (Uint32)uRowData;
 					uTile1 = (Uint32)(uRowData >> 32);
