@@ -57,7 +57,7 @@ If the repository was cloned without `--recurse-submodules`, run
 
 **TO BE FIXED:**
 
-* Top Gear (SNES) performance still needs PS2 hardware retesting after the CHR H-flip cache optimization
+* Top Gear (SNES) performance is very slow
 
 **TO BE ADDED:**
 
