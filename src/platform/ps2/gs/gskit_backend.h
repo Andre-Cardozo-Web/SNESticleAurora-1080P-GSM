@@ -58,6 +58,10 @@ void GSK_SetOverscan(int percent);
 /* Toggle the PCRTC 16:9 presentation live (1 = on, 0 = 4:3). */
 void GSK_SetWidescreen(int on);
 
+/* NES/SNES 240p pixel-aspect correction. Keeps the 256-pixel framebuffer
+   untouched and changes only PCRTC horizontal magnification. */
+void GSK_SetNative240pPar(int on);
+
 /* Tear down and rebuild the GS for the current g_GskVideoMode. The caller
    MUST re-upload any textures it owns afterwards (e.g. FontInit). Intended
    to run once at boot after the saved settings are read from the card. */

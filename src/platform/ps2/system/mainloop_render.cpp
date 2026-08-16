@@ -57,6 +57,25 @@ void MainLoopRender()
 	static Uint32 _iFrame=0;
         static int whichdrawbuf = 0;
 
+        /*
+         * NES/SNES 240p: keep the framebuffer strictly 256x240 (1 source
+         * pixel = 1 framebuffer pixel) and correct horizontal size at
+         * the PCRTC level instead. This avoids uneven pixel widths
+         * caused by scaling 256 pixels into a smaller PolyRect.
+         */
+        static int s_native240pPar = -1;
+        int native240pPar =
+            (g_GskVideoMode == GSK_VIDMODE_240P &&
+             (_pSystem == _pNes || _pSystem == _pSnes) &&
+             !_bMenu) ? 1 : 0;
+
+        if (native240pPar != s_native240pPar)
+        {
+            GSK_SetNative240pPar(native240pPar);
+            s_native240pPar = native240pPar;
+        }
+
+
 
     /* Re-anchor FRAME_1 to gsKit's current draw buffer before any
        primitive runs this frame. The legacy GS_SetDrawFB used to do
@@ -138,11 +157,11 @@ void MainLoopRender()
  * preserve a 1:1 pixel mapping. Only reposition the image
  * to compensate for CRT overscan.
  */
-PolyRect(0.0f, 5.0f, 256.0f, 240.0f);
+PolyRect(0.0f, 2.0f, 256.0f, 240.0f);
         }
         else
         {
-PolyRect(0.0f, 7.0f, 256.0f, 240.0f);
+PolyRect(0.0f, 4.0f, 256.0f, 240.0f);
         }
 
         PolyBlend(TRUE);

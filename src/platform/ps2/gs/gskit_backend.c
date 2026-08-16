@@ -52,6 +52,7 @@ static int _gsk_vck         = 4;   /* display-offset VCK units            */
 static int _gsk_fb_width    = 640; /* active FB width                     */
 static int _gsk_fb_height   = 480; /* active FB height                    */
 static int _gsk_active_mode = GSK_VIDMODE_480I; /* mode the GS is in now   */
+static int _gsk_native240p_par = 0;
 
 /* gsKit's computed DISPLAY params, captured after gsKit_init_screen so
    overscan/widescreen can be recomputed from a clean baseline. */
@@ -319,6 +320,39 @@ static void _GskApplyDisplay(void)
         starty = _gsk_base_starty + sy;
     }
 
+    /*
+     * NES/SNES 240p horizontal PAR correction.
+     *
+     * Do NOT scale the 256x240 framebuffer. Instead reduce the PCRTC
+     * horizontal magnification by one integer step while continuing
+     * to scan all 256 framebuffer pixels.
+     *
+     * In NTSC/PAL 240p with a 256-pixel framebuffer gsKit normally
+     * resolves to 11 VCK units per framebuffer pixel (MagH = 10).
+     * Use 10 VCK units (MagH = 9) for native 256-wide gameplay. Every source pixel therefore
+     * remains exactly the same physical width as every other source pixel:
+     * no 256->248 resampling pattern, no uneven columns.
+     */
+    if (_gsk_native240p_par &&
+        _gsk_active_mode == GSK_VIDMODE_240P &&
+        g_GskOverscan == 0 &&
+        _gsk_base_magh > 0)
+    {
+        int old_magh1 = _gsk_base_magh + 1;
+        int new_magh1 = old_magh1 - 1;
+        int srcpix    = _gsk_base_dw / old_magh1;
+        int new_dw    = srcpix * new_magh1;
+
+        /*
+         * Shift native NES/SNES 240p output two logical pixels left.
+         * new_magh1 is 10 here, so 2 source pixels = 20 PCRTC units.
+         * Do this at scanout level so no framebuffer columns are clipped.
+         */
+        startx += (dw - new_dw) / 2 - (2 * new_magh1);
+        dw      = new_dw;
+        magh    = new_magh1 - 1;
+    }
+
     /* Widescreen: stretch the picture horizontally to ~16:9 by raising
        the horizontal magnification (MAGH) and the display width (DW)
        together, while still reading the SAME framebuffer pixels.  This
@@ -370,6 +404,17 @@ void GSK_SetOverscan(int percent)
 void GSK_SetWidescreen(int on)
 {
     g_GskWidescreen = on ? 1 : 0;
+    _GskApplyDisplay();
+}
+
+void GSK_SetNative240pPar(int on)
+{
+    on = on ? 1 : 0;
+
+    if (_gsk_native240p_par == on)
+        return;
+
+    _gsk_native240p_par = on;
     _GskApplyDisplay();
 }
 

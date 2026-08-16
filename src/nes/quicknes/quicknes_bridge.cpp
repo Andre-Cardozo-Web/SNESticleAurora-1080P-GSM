@@ -384,7 +384,9 @@ int QuicknesBridge_GetStateSize(void)
     if (s_StateSize > 0)
         return s_StateSize;
 
-    Mem_Writer writer;
+    /* PS2: avoid expanding Mem_Writer/realloc while probing state size. */
+    static Uint8 s_StateProbe[64 * 1024] __attribute__((aligned(64)));
+    Mem_Writer writer(s_StateProbe, (long)sizeof(s_StateProbe));
     const char *err = s_pEmu->save_state(writer);
     if (err || writer.size() <= 0 || writer.size() > 0x7fffffffL)
     {
