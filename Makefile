@@ -46,9 +46,9 @@ SRC_DIR := $(CURDIR)/src
 OBJ_DIR := $(CURDIR)/build
 PKG_DIR := $(OBJ_DIR)/pkg
 EMBED_DIR := $(OBJ_DIR)/embed
-TARGET        := $(OBJ_DIR)/SNESticle.elf
-TARGET_STRIPPED := $(OBJ_DIR)/SNESticle.stripped.elf
-TARGET_PACKED := $(OBJ_DIR)/SNESticle.packed.elf
+TARGET        := $(OBJ_DIR)/SNESticle_Aurora.elf
+TARGET_STRIPPED := $(OBJ_DIR)/SNESticle_Aurora.stripped.elf
+TARGET_PACKED := $(OBJ_DIR)/SNESticle_Aurora.packed.elf
 BIN2C   ?= $(PS2SDK)/bin/bin2c
 
 # QUICKNES_SNESTICLE_BEGIN
@@ -137,7 +137,7 @@ CXXFLAGS += -DLIBXMP_CORE_PLAYER
 # sem numero ou APP_VERSION=x.y.z para testar uma versao futura.
 # __DATE__/__TIME__ pegariam UTC (3h adiantado no Brasil); por isso a
 # data/hora vem do Makefile com TZ fixo de Brasilia.
-APP_VERSION ?= 1.0.4
+APP_VERSION ?= 1.0.0
 ifeq ($(strip $(APP_VERSION)),)
 VER_SUFFIX      :=
 APP_VERSION_DEF :=
@@ -145,7 +145,7 @@ else
 VER_SUFFIX      := _v$(APP_VERSION)
 APP_VERSION_DEF := -DAPP_VERSION=\"$(APP_VERSION)\"
 endif
-ELF_OUT_NAME := SNESticle_Revive$(VER_SUFFIX)
+ELF_OUT_NAME := SNESticle_Aurora$(VER_SUFFIX)
 BUILD_DATE   := $(shell TZ='America/Sao_Paulo' date '+%Y-%m-%d')
 BUILD_TIME   := $(shell TZ='America/Sao_Paulo' date '+%H:%M:%S')
 VERSION_DEFS := $(APP_VERSION_DEF) -DBUILD_DATE=\"$(BUILD_DATE)\" -DBUILD_TIME=\"$(BUILD_TIME)\"
@@ -917,9 +917,9 @@ packed: $(TARGET_PACKED)
 #   make elf out=<pasta>        # copies SNESticle(.packed).elf -> <pasta>/
 #
 # When PACK=1 (default) both the stripped/unpacked and the packed ELF are
-# copied; the packed one (`SNESticle.packed.elf`, ~490 KB) is the one
+# copied; the packed one (`SNESticle_Aurora.packed.elf`, ~490 KB) is the one
 # you want to ship. The linked ELF with debug symbols remains available as
-# build/SNESticle.elf, but is never copied as a standalone release file.
+# build/SNESticle_Aurora.elf, but is never copied as a standalone release file.
 elf: $(TARGET_STRIPPED) $(if $(filter 1,$(PACK)),$(TARGET_PACKED))
 	@if [ -n "$(strip $(out))" ]; then \
 		mkdir -p "$(out)"; \
@@ -943,7 +943,7 @@ package: check-env $(TARGET_STRIPPED) package-irx
 package-irx: $(TARGET_STRIPPED) | $(PKG_DIR)
 	@set -e; \
 	echo "PKG $(PKG_DIR)"; \
-	cp "$(TARGET_STRIPPED)" "$(PKG_DIR)/SNESticle.elf"; \
+	cp "$(TARGET_STRIPPED)" "$(PKG_DIR)/SNESticle_Aurora.elf"; \
 	copy_sdk() { \
 		f="$$1"; found=""; \
 		for cand in "$$f" "$$(printf '%s' "$$f" | tr '[:upper:]' '[:lower:]')" "$$(printf '%s' "$$f" | tr '[:lower:]' '[:upper:]')"; do \
@@ -1013,7 +1013,7 @@ count:
 #   make iso roms=<pasta> bgm=<pasta> # + soundtracks .mod/.xm (cdfs:/BGM)
 
 ISO_GAME_ID   ?= SLUS_999.99
-ISO_GAME_NAME ?= SNESticle_Revive$(VER_SUFFIX)
+ISO_GAME_NAME ?= SNESticle_Aurora$(VER_SUFFIX)
 ISO_LABEL     ?= SNESTICLE_REVIVE
 ISO_ROOT_DIR  ?= $(OBJ_DIR)/iso_root
 ISO_OUT       ?= $(OBJ_DIR)/$(ISO_GAME_ID).$(ISO_GAME_NAME).iso
@@ -1320,7 +1320,7 @@ help:
 	printf "  make clean                   Delete build folder\n"; \
 	printf "\n"; \
 	printf "$${green}Output commands:$${reset}\n"; \
-	printf "  make OUT=/sdcard             Build and copy SNESticle.elf to OUT\n"; \
+	printf "  make OUT=/sdcard             Build and copy SNESticle_Aurora.elf to OUT\n"; \
 	printf "  make out=/sdcard             Same as OUT=/sdcard\n"; \
 	printf "  make elf OUT=/sdcard         Build ELF/packed ELF and copy to OUT\n"; \
 	printf "  make iso ROMS=/path OUT=/out Build ISO with ROM folder and copy to OUT\n"; \

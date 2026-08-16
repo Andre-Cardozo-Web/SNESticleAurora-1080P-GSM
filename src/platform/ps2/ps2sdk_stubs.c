@@ -8,7 +8,7 @@
  * to build with:
  *
  *     No rule to make target '.../build/platform/ps2/ps2sdk_stubs.o',
- *     needed by '.../build/SNESticle.elf'.  Stop.
+ *     needed by '.../build/SNESticle_Aurora.elf'.  Stop.
  *
  * The build links cleanly with this unit empty (it provided no symbols
  * the rest of the project actually depends on), so it is kept as a

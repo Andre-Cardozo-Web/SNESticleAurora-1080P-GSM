@@ -9,10 +9,10 @@
 static const VersionInfoT _Version_Info = 
 {
 	// application name
-	"SNESticlePS2",
+	"SNESticle Aurora",
 
 	// version
-	{0,3,4},
+	{1,0,0},
 
 	// build type
 	""

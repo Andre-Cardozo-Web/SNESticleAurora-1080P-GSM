@@ -4,7 +4,7 @@
 Todo: 
 Half carry support
 
-Read 16-bit value from dp does not wrap!
+Direct-page 16-bit wrap fixed by SAFE ACCURACY BATCH 2.
 
  
  */
@@ -36,6 +36,34 @@ Read 16-bit value from dp does not wrap!
 
 #define SNSPC_READ8(_Addr, _x)  pCpu->Cycles = nCycles; _x = _SNSPCRead8(pCpu, _Addr);  
 #define SNSPC_READ16(_Addr, _x) pCpu->Cycles = nCycles; _x = _SNSPCRead16(pCpu, _Addr); 
+
+/*
+ * SPC700 direct-page word accesses wrap inside the selected direct page.
+ *
+ * dp=$00FF -> high byte at $0000
+ * dp=$01FF -> high byte at $0100
+ *
+ * Keep ordinary SNSPC_READ16/SNSPC_WRITE16 unchanged for absolute
+ * addressing; these helpers are used only by DP addressing modes.
+ */
+#define SNSPC_READDP16(_Addr, _x) do {                              \
+    Uint32 _snspc_dp_addr = (_Addr);                                \
+    Uint32 _snspc_dp_hi = r_DP | ((_snspc_dp_addr + 1) & 0xFF);    \
+    pCpu->Cycles = nCycles;                                         \
+    (_x)  = _SNSPCRead8(pCpu, _snspc_dp_addr);                      \
+    (_x) |= ((Uint32)_SNSPCRead8(pCpu, _snspc_dp_hi)) << 8;         \
+} while (0)
+
+#define SNSPC_WRITEDP16(_Addr, _Data) do {                           \
+    Uint32 _snspc_dp_addr = (_Addr);                                 \
+    Uint32 _snspc_dp_hi = r_DP | ((_snspc_dp_addr + 1) & 0xFF);     \
+    Uint32 _snspc_dp_data = (_Data);                                 \
+    pCpu->Cycles = nCycles;                                          \
+    _SNSPCWrite8(pCpu, _snspc_dp_addr, (Uint8)_snspc_dp_data);      \
+    _SNSPCWrite8(pCpu, _snspc_dp_hi,                                \
+                 (Uint8)(_snspc_dp_data >> 8));                      \
+} while (0)
+
 
 #define SNSPC_PUSH8(_Data)	_SNSPCPush8(pCpu, _Data);  
 #define SNSPC_PUSH16(_Data)	_SNSPCPush16(pCpu, _Data);  

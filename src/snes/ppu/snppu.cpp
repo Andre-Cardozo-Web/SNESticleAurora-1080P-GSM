@@ -29,8 +29,15 @@ void SnesPPU::WriteCGDATA(Uint8 uData)
 	} else
 	{
 		// upper byte
+		/*
+		 * CGRAM stores 15-bit BGR555 colors.  Bit 7 of the high
+		 * byte written through $2122 is not stored by the PPU.
+		 *
+		 * bsnes models the destination as uint15 and Mesen masks
+		 * this byte with 0x7F as well.
+		 */
 		m_CGRAM[uCGAddr] &= 0x00FF;
-		m_CGRAM[uCGAddr] |= uData << 8;
+		m_CGRAM[uCGAddr] |= (Uint16)(uData & 0x7F) << 8;
 	}
 
 	// increment color address

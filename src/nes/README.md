@@ -1,6 +1,8 @@
 # src/nes/
 
-NES emulation core for SNESticle Revive, based on InfoNES.
+NES emulation subsystem for SNESticle Aurora, based on InfoNES.
+
+SNESticle Aurora is maintained by **itsveenee** and is based on **SNESticle Revive by ReyFxck (Thomas R.)**, with the original SNESticle codebase by **Icer Addis**.
 
 ## Upstream
 

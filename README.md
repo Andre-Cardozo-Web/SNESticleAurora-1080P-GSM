@@ -1,14 +1,18 @@
-# SNESticleRevive — 240p / Experimental Fork
+# SNESticle Aurora 1.0.0
 
-A fork of ReyFxck/SNESticleRevive focused on 240p CRTs, NES/QuickNES experiments, and my own hardware-specific quirks.
+**SNESticle Aurora** is a PlayStation 2 emulator fork maintained by **itsveenee**.
 
-Changes that prove useful or broadly applicable will be pushed to the main version when appropriate, while **updates from the main version will always be merged back into this fork.**
+Aurora is based on **SNESticle Revive by ReyFxck (Thomas R.)**, whose work brought SNESticle back into active development, and ultimately on the original **SNESticle by Icer Addis**.
 
-**Any changes made in this fork are also available to anyone** who wants to cherry-pick, pull, or otherwise incorporate them into the main version or any other fork as they see fit.
+**Huge thanks to ReyFxck** for his work on SNESticle Revive and for providing the foundation from which Aurora was created. **Huge thanks to Icer Addis** for creating the original SNESticle and its codebase.
 
-Original project and credits belong to the respective authors. See LICENSE for licensing and attribution details. **HUGE thanks** to @ReyFxck for his effort put into bringing this emulator back to life!
+Aurora focuses on 240p CRT output, NES/QuickNES integration and experiments, real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
 
-Keep in mind: this fork uses **AI-generated code** but it's always tested by me, and I'm a Human according to reCAPTCHA.
+**Any changes made in SNESticle Aurora are also available to anyone** who wants to cherry-pick, pull, or otherwise incorporate them into SNESticle Revive or any other fork as they see fit.
+
+Project lineage and attribution are documented in [CREDITS.md](CREDITS.md). See LICENSE and the third-party license files for licensing details.
+
+Keep in mind: this project uses **AI-generated code**, but the changes are tested by me, and I'm a Human according to reCAPTCHA.
 
 ---
 
@@ -25,6 +29,7 @@ Keep in mind: this fork uses **AI-generated code** but it's always tested by me,
 * In-game soft reset (L2+SELECT)
 * Famiclone audio option (swap duty cycles)
 * Option to reload the .elf
+
 *(**NOTE**: to find the options above, go to the Video Settings and change to page 2 with the circle button.)*
 
 **TO BE FIXED:**

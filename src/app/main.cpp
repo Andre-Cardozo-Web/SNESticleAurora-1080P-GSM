@@ -104,7 +104,7 @@ void MainSetBootDir(const char *pPath)
 	len = strlen(_Main_BootDir);
 
 	/* Keep everything through the final device/path separator.  A launcher
-	   that only supplies "SNESticle.elf" gives us no directory information;
+	   that only supplies "SNESticle_Aurora.elf" gives us no directory information;
 	   host: is the only safe fallback and is also what ps2link/PCSX2 expose
 	   for a directly loaded ELF. */
 	for (i = len; i > 0; i--)

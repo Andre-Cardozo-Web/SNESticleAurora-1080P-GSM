@@ -351,6 +351,19 @@ static void _GskApplyDisplay(void)
         startx += (dw - new_dw) / 2 - (2 * new_magh1);
         dw      = new_dw;
         magh    = new_magh1 - 1;
+
+        /*
+         * SNESTICLE_NATIVE_240P_Y_BIAS
+         *
+         * Hardware-tested CRT position.
+         * Equivalent to menu Offset Y = +3.
+         *
+         * Unlike horizontal X, gsKit's vertical display offset is
+         * already expressed directly in PCRTC vertical units.
+         * Keep this at scanout level: no framebuffer crop and no
+         * PolyRect/source-coordinate modification.
+         */
+        starty += 3;
     }
 
     /* Widescreen: stretch the picture horizontally to ~16:9 by raising

@@ -33,6 +33,33 @@ static Uint8 _SNPPUBg_Tile16Pos[4][4] =
 
 // BG Fetch 
 
+/*
+ * Move one tile row down in the renderer's abstract SNES tilemap address.
+ *
+ * Layout used by this file:
+ *
+ *     ss yyyyy xxxxx
+ *
+ * Bit 10 selects the horizontal 32x32 screen and bit 11 selects the
+ * vertical 32x32 screen.  Plain `uAddr + 32` is therefore incorrect
+ * when yyyyy == 31: its carry enters the horizontal screen bit.
+ *
+ * Keeping this as an address-space operation lets _GetScreenPtrs()
+ * continue to alias nonexistent screens correctly for 32x32/64x32
+ * maps, while 32x64/64x64 maps can really cross into their lower half.
+ */
+static Uint16 _SNPPUOffsetNextRow(Uint16 uAddr)
+{
+	if (((uAddr >> 5) & 0x1F) != 0x1F)
+		return (Uint16)(uAddr + 0x20);
+
+	/* wrap tile row 31 -> 0 and toggle the vertical screen */
+	uAddr &= (Uint16)~(0x1F << 5);
+	uAddr ^= 0x0800;
+	return uAddr;
+}
+
+
 static Uint32 _FetchOffset(Uint16 uAddr, Uint16 *pOffset, Int32 nTiles, SnesPPUScreenT **ppScreen)
 {
 	Uint16 *pScrData;
@@ -540,6 +567,8 @@ Uint32 SnesPPURender::FetchOffset(SnesBGInfoT *pBGInfo, Uint16 *pOffset, Int32 i
 	{
 	case 0:
 	case 1:
+	case 2:
+	case 3:
 		if (uVramAddr != uOldVramAddr)
 		{
 			// get pointers to screens
@@ -551,7 +580,12 @@ Uint32 SnesPPURender::FetchOffset(SnesBGInfoT *pBGInfo, Uint16 *pOffset, Int32 i
 			if (bVOffset)
 			{
 				// fetch v-offsets
-				uOffsetOR |= _FetchOffset(uVramAddr + 32, pOffset + 1, 32, pScreen);
+				uOffsetOR |= _FetchOffset(
+					_SNPPUOffsetNextRow((Uint16)uVramAddr),
+					pOffset + 1,
+					32,
+					pScreen
+				);
 			}
 
 			uOldVramAddr = uVramAddr;

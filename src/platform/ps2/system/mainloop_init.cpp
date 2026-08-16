@@ -291,10 +291,9 @@ Bool MainLoopInit()
 	ScrPrintf("%s",  pVersionInfo->CopyRight);
 #endif
 
-	/* Boot banner: original SNESticlePS2 title + iaddis copyright
-	   (replaces the #if 0 block above which depended on VersionGetInfo,
-	   itself wrapped in #if 0 inside version.cpp), followed by the
-	   ReyFxck fork credit. */
+	/* Boot banner: SNESticle Aurora identity, followed by explicit
+	   project lineage and thanks to SNESticle Revive maintainer ReyFxck
+	   and original SNESticle author Icer Addis. */
 	/* BUILD_DATE/BUILD_TIME vem do Makefile (TZ Brasilia, p/ nao ficar 3h
 	   adiantado como o __TIME__ em UTC).  APP_VERSION e' opt-in: so' e'
 	   definido se o build passar APP_VERSION=...; sem ele, o banner nao
@@ -306,12 +305,16 @@ Bool MainLoopInit()
 #define BUILD_TIME __TIME__
 #endif
 #ifdef APP_VERSION
-	ScrPrintf("SNESticle Revive v%s   %s  %s", APP_VERSION, BUILD_DATE, BUILD_TIME);
+	ScrPrintf("SNESticle Aurora v%s   %s  %s", APP_VERSION, BUILD_DATE, BUILD_TIME);
 #else
-	ScrPrintf("SNESticle Revive   %s  %s", BUILD_DATE, BUILD_TIME);
+	ScrPrintf("SNESticle Aurora   %s  %s", BUILD_DATE, BUILD_TIME);
 #endif
+	ScrPrintf("Aurora fork by itsveenee");
+	ScrPrintf("Based on SNESticle Revive by ReyFxck");
+	ScrPrintf("Thanks to ReyFxck for reviving SNESticle");
+	ScrPrintf("Original SNESticle by Icer Addis");
+	ScrPrintf("Thanks to Icer Addis for the original");
 	ScrPrintf("Copyright (c) 1997-2004 Icer Addis");
-	ScrPrintf("Forked By ReyFxck - Thomas R. (2026)");
 
 	ScrPrintf("BootPath: %s", MainGetBootPath());
 	ScrPrintf("BootDir: %s", MainGetBootDir());
