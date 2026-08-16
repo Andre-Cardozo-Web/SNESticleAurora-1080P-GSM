@@ -24,12 +24,13 @@ Keep in mind: this fork uses **AI-generated code** but it's always tested by me,
 * Browse SRAM files
 * In-game soft reset (L2+SELECT)
 * Famiclone audio option (swap duty cycles)
+* Option to reload the .elf
 
 *(**NOTE**: to find the options above, go to the Video Settings and change to page 2 with the circle button.)*
 
 **TO BE FIXED:**
 
-* Option to reload the .elf *(currently goes to the Memory Card browser)*
+* Better screen positioning adjustment for each mode and resolution, both for NES and SNES
 
 **TO BE ADDED:**
 
