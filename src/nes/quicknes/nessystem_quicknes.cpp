@@ -12,7 +12,6 @@
 #include "rendersurface.h"
 #include "pixelformat.h"
 #include "nes/quicknes/quicknes_bridge.h"
-#include "nes/fceumm/fceumm_bridge.h"
 
 extern NesRom *_pNesRom;
 
@@ -29,35 +28,6 @@ struct QuicknesStateHeaderT
     Uint32 Reserved[3];
 };
 
-/* AURORA_NES_HYBRID_FCEUMM_V1
- *
- * QuickNES is still the default/fast path. FCEUmm is instantiated only
- * for a cartridge QuickNES rejects. This extends mapper coverage without
- * changing QuickNES execution for already-supported games.
- */
-#define FCEUMM_STATE_MAGIC   0x54534346u /* FCST */
-#define FCEUMM_STATE_VERSION 1u
-
-struct FceummStateHeaderT
-{
-    Uint32 uMagic;
-    Uint32 uVersion;
-    Uint32 nPayloadBytes;
-    Uint32 uFrame;
-    Uint32 uLine;
-    Uint32 Reserved[3];
-};
-
-enum NesBackendE
-{
-    NES_BACKEND_NONE = 0,
-    NES_BACKEND_QUICKNES,
-    NES_BACKEND_FCEUMM
-};
-
-static NesBackendE s_eNesBackend = NES_BACKEND_NONE;
-
-
 NesSystem::NesSystem()
 {
     m_pNesRom = NULL;
@@ -68,15 +38,11 @@ NesSystem::NesSystem()
     m_uFrameTick = 0;
     m_uFrame = 0;
     m_uLine = 0;
-    s_eNesBackend = NES_BACKEND_NONE;
 }
 
 NesSystem::~NesSystem()
 {
     QuicknesBridge_Shutdown();
-    FceummBridge_Shutdown();
-    s_eNesBackend = NES_BACKEND_NONE;
-
     if (m_pCHRRam)
     {
         free(m_pCHRRam);
@@ -90,93 +56,48 @@ void NesSystem::SetRom(Emu::Rom *pRom)
     m_pNesDisk = NULL;
     m_bRomReady = FALSE;
     m_uFrameTick = m_uFrame = m_uLine = 0;
-
     QuicknesBridge_UnloadGame();
-    FceummBridge_UnloadGame();
-    s_eNesBackend = NES_BACKEND_NONE;
 
     if (!pRom)
         return;
-
     if (pRom != _pNesRom)
     {
-        printf("[NesSystem/hybrid] FDS/non-cartridge unsupported\n");
+        printf("[NesSystem/QuickNES] FDS/non-cartridge unsupported\n");
         return;
     }
 
     NesRom *rom = (NesRom *)pRom;
     Uint8 *data = rom->GetData();
     Uint32 bytes = rom->GetBytes();
-
-    if (!data || bytes < 16 ||
-        data[0] != 'N' || data[1] != 'E' ||
+    if (!data || bytes < 16 || data[0] != 'N' || data[1] != 'E' ||
         data[2] != 'S' || data[3] != 0x1a)
     {
-        printf("[NesSystem/hybrid] invalid iNES/NES2 ROM (%u bytes)\n",
-               (unsigned)bytes);
+        printf("[NesSystem/QuickNES] invalid iNES ROM (%u bytes)\n", (unsigned)bytes);
         return;
     }
 
-    /* Fast path: preserve current QuickNES behavior for every ROM it knows. */
-    if (QuicknesBridge_LoadGame(data, (size_t)bytes, NULL))
+    if (!QuicknesBridge_LoadGame(data, (size_t)bytes, NULL))
     {
-        s_eNesBackend = NES_BACKEND_QUICKNES;
-        printf("[NesSystem/hybrid] mapper %u -> QuickNES\n",
-               (unsigned)rom->GetMapperNumber());
-    }
-    else
-    {
-        /* QuickNES can leave its native emulator initialized after a rejected
-         * cart. Unload it before giving the exact same raw image to FCEUmm. */
-        QuicknesBridge_UnloadGame();
-
-        printf("[NesSystem/hybrid] QuickNES rejected mapper %u; trying FCEUmm\n",
-               (unsigned)rom->GetMapperNumber());
-
-        if (!FceummBridge_LoadGame(data, bytes, NULL))
-        {
-            printf("[NesSystem/hybrid] LOAD FAILED in both NES cores\n");
-            return;
-        }
-
-        s_eNesBackend = NES_BACKEND_FCEUMM;
-        printf("[NesSystem/hybrid] mapper %u -> FCEUmm fallback\n",
-               (unsigned)rom->GetMapperNumber());
+        printf("[NesSystem/QuickNES] LOAD FAILED\n");
+        return;
     }
 
     m_pNesRom = rom;
     m_bInitialized = TRUE;
     m_bRomReady = TRUE;
-
-    printf("[NesSystem/hybrid] LOAD OK; backend=%s SRAM=%d\n",
-           s_eNesBackend == NES_BACKEND_QUICKNES ? "QuickNES" : "FCEUmm",
-           GetSRAMBytes());
+    printf("[NesSystem/QuickNES] LOAD OK; SRAM=%d\n", QuicknesBridge_GetSRAMBytes());
 }
 
 void NesSystem::Reset()
 {
     m_uFrameTick = m_uFrame = m_uLine = 0;
-
-    if (!m_bRomReady)
-        return;
-
-    if (s_eNesBackend == NES_BACKEND_QUICKNES)
-        QuicknesBridge_Reset();
-    else if (s_eNesBackend == NES_BACKEND_FCEUMM)
-        FceummBridge_Reset();
+    if (m_bRomReady) QuicknesBridge_Reset();
 }
 
 void NesSystem::SoftReset()
 {
     m_uFrameTick = m_uFrame = m_uLine = 0;
-
-    if (!m_bRomReady)
-        return;
-
-    if (s_eNesBackend == NES_BACKEND_QUICKNES)
-        QuicknesBridge_SoftReset();
-    else if (s_eNesBackend == NES_BACKEND_FCEUMM)
-        FceummBridge_Reset();
+    if (m_bRomReady) QuicknesBridge_SoftReset();
 }
 
 void NesSystem::ExecuteFrame(Emu::SysInputT *pInput,
@@ -185,21 +106,14 @@ void NesSystem::ExecuteFrame(Emu::SysInputT *pInput,
                              ModeE eMode)
 {
     (void)eMode;
-
     if (!m_bRomReady || !pTarget)
     {
-        if (pTarget)
-            DiagnosticPaint(pTarget);
+        if (pTarget) DiagnosticPaint(pTarget);
         ++m_uFrameTick;
         ++m_uFrame;
         return;
     }
-
-    if (s_eNesBackend == NES_BACKEND_QUICKNES)
-        QuicknesBridge_RunFrame(pInput, pTarget, pMixBuf);
-    else if (s_eNesBackend == NES_BACKEND_FCEUMM)
-        FceummBridge_RunFrame(pInput, pTarget, pMixBuf);
-
+    QuicknesBridge_RunFrame(pInput, pTarget, pMixBuf);
     ++m_uFrameTick;
     ++m_uFrame;
     m_uLine = 0;
@@ -207,135 +121,76 @@ void NesSystem::ExecuteFrame(Emu::SysInputT *pInput,
 
 Int32 NesSystem::GetStateSize()
 {
-    if (!m_bRomReady)
-        return 0;
-
-    if (s_eNesBackend == NES_BACKEND_QUICKNES)
-    {
-        Int32 bytes = (Int32)(
-            sizeof(QuicknesStateHeaderT) + QUICKNES_STATE_CAPACITY
-        );
-        return bytes <= (Int32)sizeof(NesStateT) ? bytes : 0;
-    }
-
-    if (s_eNesBackend == NES_BACKEND_FCEUMM)
-    {
-        Int32 payload = FceummBridge_GetStateSize();
-        if (payload <= 0)
-            return 0;
-
-        unsigned long total =
-            sizeof(FceummStateHeaderT) + (unsigned long)payload;
-
-        /* _NesState in mainloop_state.cpp is still a NesStateT. Refuse a
-         * pathological core state rather than ever writing past it. */
-        if (total > sizeof(NesStateT))
-        {
-            printf("[FCEUmm/state] state too large: %lu > %u\n",
-                   total, (unsigned)sizeof(NesStateT));
-            return 0;
-        }
-
-        return (Int32)total;
-    }
-
-    return 0;
+    /*
+     * NesStateT is the legacy InfoNES envelope and is roughly half a
+     * megabyte. QuickNES only needs its compact native snapshot plus
+     * this small frontend header.
+     */
+    return (Int32)(
+        sizeof(QuicknesStateHeaderT) + QUICKNES_STATE_CAPACITY
+    );
 }
 
 void NesSystem::SaveState(void *pState, Int32 nStateBytes)
 {
-    Int32 required = GetStateSize();
-    if (pState && required > 0 && nStateBytes >= required)
+    if (pState && nStateBytes >= GetStateSize())
         SaveState((NesStateT *)pState);
 }
 
 void NesSystem::RestoreState(void *pState, Int32 nStateBytes)
 {
-    Int32 required = GetStateSize();
-    if (pState && required > 0 && nStateBytes >= required)
+    if (pState && nStateBytes == GetStateSize())
         RestoreState((NesStateT *)pState);
 }
 
 void NesSystem::SaveState(NesStateT *pState)
 {
-    if (!pState || !m_bRomReady)
+    if (!pState)
         return;
 
-    if (s_eNesBackend == NES_BACKEND_QUICKNES)
-    {
-        const size_t head = sizeof(QuicknesStateHeaderT);
-        const Int32 stateBytes = (Int32)(
-            head + QUICKNES_STATE_CAPACITY
-        );
+    const size_t head = sizeof(QuicknesStateHeaderT);
+    const Int32 stateBytes = GetStateSize();
 
+    /*
+     * Only clear the QuickNES envelope, not the full legacy NesStateT.
+     */
+    memset(pState, 0, (size_t)stateBytes);
+
+    if (!m_bRomReady)
+        return;
+
+    /*
+     * Serialize exactly once. The bridge returns the actual byte count.
+     */
+    int payload = QuicknesBridge_SaveState(
+        ((Uint8 *)pState) + head,
+        QUICKNES_STATE_CAPACITY
+    );
+
+    if (payload <= 0 || payload > QUICKNES_STATE_CAPACITY)
+    {
         memset(pState, 0, (size_t)stateBytes);
-
-        int payload = QuicknesBridge_SaveState(
-            ((Uint8 *)pState) + head,
-            QUICKNES_STATE_CAPACITY
-        );
-
-        if (payload <= 0 || payload > QUICKNES_STATE_CAPACITY)
-        {
-            memset(pState, 0, (size_t)stateBytes);
-            printf("[QuickNES/state] serialize failed\n");
-            return;
-        }
-
-        QuicknesStateHeaderT h;
-        memset(&h, 0, sizeof(h));
-        h.uMagic = QUICKNES_STATE_MAGIC;
-        h.uVersion = QUICKNES_STATE_VERSION;
-        h.nPayloadBytes = (Uint32)payload;
-        h.uFrame = m_uFrame;
-        h.uLine = m_uLine;
-
-        /* Header LAST: a failed/partial snapshot never looks valid. */
-        memcpy(pState, &h, sizeof(h));
-
-        printf("[QuickNES/state] snapshot committed: native=%d envelope=%d\n",
-               payload, (int)stateBytes);
+        printf("[QuickNES/state] serialize failed\n");
         return;
     }
 
-    if (s_eNesBackend == NES_BACKEND_FCEUMM)
-    {
-        Int32 payload = FceummBridge_GetStateSize();
-        if (payload <= 0)
-            return;
+    QuicknesStateHeaderT h;
+    memset(&h, 0, sizeof(h));
 
-        size_t head = sizeof(FceummStateHeaderT);
-        size_t total = head + (size_t)payload;
+    h.uMagic = QUICKNES_STATE_MAGIC;
+    h.uVersion = QUICKNES_STATE_VERSION;
+    h.nPayloadBytes = (Uint32)payload;
+    h.uFrame = m_uFrame;
+    h.uLine = m_uLine;
 
-        if (total > sizeof(NesStateT))
-        {
-            printf("[FCEUmm/state] state too large\n");
-            return;
-        }
+    /*
+     * Commit the header LAST. Until this memcpy, uMagic remains zero,
+     * so a partial/failed native snapshot cannot look valid.
+     */
+    memcpy(pState, &h, sizeof(h));
 
-        memset(pState, 0, total);
-
-        if (!FceummBridge_SaveState(
-                ((Uint8 *)pState) + head, payload))
-        {
-            memset(pState, 0, total);
-            printf("[FCEUmm/state] serialize failed\n");
-            return;
-        }
-
-        FceummStateHeaderT h;
-        memset(&h, 0, sizeof(h));
-        h.uMagic = FCEUMM_STATE_MAGIC;
-        h.uVersion = FCEUMM_STATE_VERSION;
-        h.nPayloadBytes = (Uint32)payload;
-        h.uFrame = m_uFrame;
-        h.uLine = m_uLine;
-
-        memcpy(pState, &h, sizeof(h));
-
-        printf("[FCEUmm/state] snapshot committed: native=%d envelope=%u\n",
-               payload, (unsigned)total);
-    }
+    printf("[QuickNES/state] snapshot committed: native=%d envelope=%d\n",
+           payload, (int)stateBytes);
 }
 
 Bool NesSystem::RestoreState(NesStateT *pState)
@@ -343,103 +198,43 @@ Bool NesSystem::RestoreState(NesStateT *pState)
     if (!pState || !m_bRomReady)
         return FALSE;
 
-    Uint32 magic = 0;
-    memcpy(&magic, pState, sizeof(magic));
+    QuicknesStateHeaderT h;
+    memcpy(&h, pState, sizeof(h));
 
-    if (s_eNesBackend == NES_BACKEND_QUICKNES)
+    const size_t head = sizeof(h);
+    const size_t stateBytes = (size_t)GetStateSize();
+
+    if (h.uMagic != QUICKNES_STATE_MAGIC ||
+        h.uVersion != QUICKNES_STATE_VERSION ||
+        h.nPayloadBytes == 0 ||
+        h.nPayloadBytes > QUICKNES_STATE_CAPACITY ||
+        head + (size_t)h.nPayloadBytes > stateBytes)
     {
-        if (magic != QUICKNES_STATE_MAGIC)
-            return FALSE;
-
-        QuicknesStateHeaderT h;
-        memcpy(&h, pState, sizeof(h));
-
-        const size_t head = sizeof(h);
-        const size_t stateBytes =
-            head + (size_t)QUICKNES_STATE_CAPACITY;
-
-        if (h.uVersion != QUICKNES_STATE_VERSION ||
-            h.nPayloadBytes == 0 ||
-            h.nPayloadBytes > QUICKNES_STATE_CAPACITY ||
-            head + (size_t)h.nPayloadBytes > stateBytes)
-        {
-            return FALSE;
-        }
-
-        if (!QuicknesBridge_LoadState(
-                ((const Uint8 *)pState) + head,
-                (int)h.nPayloadBytes))
-        {
-            return FALSE;
-        }
-
-        m_uFrame = h.uFrame;
-        m_uLine = h.uLine;
-        m_uFrameTick = h.uFrame;
-        return TRUE;
+        return FALSE;
     }
 
-    if (s_eNesBackend == NES_BACKEND_FCEUMM)
+    if (!QuicknesBridge_LoadState(
+            ((const Uint8 *)pState) + head,
+            (int)h.nPayloadBytes))
     {
-        if (magic != FCEUMM_STATE_MAGIC)
-            return FALSE;
-
-        FceummStateHeaderT h;
-        memcpy(&h, pState, sizeof(h));
-
-        Int32 currentPayload = FceummBridge_GetStateSize();
-        size_t head = sizeof(h);
-
-        if (h.uVersion != FCEUMM_STATE_VERSION ||
-            h.nPayloadBytes == 0 ||
-            currentPayload <= 0 ||
-            h.nPayloadBytes > (Uint32)(sizeof(NesStateT) - head))
-        {
-            return FALSE;
-        }
-
-        if (!FceummBridge_LoadState(
-                ((const Uint8 *)pState) + head,
-                (Int32)h.nPayloadBytes))
-        {
-            return FALSE;
-        }
-
-        m_uFrame = h.uFrame;
-        m_uLine = h.uLine;
-        m_uFrameTick = h.uFrame;
-        return TRUE;
+        return FALSE;
     }
 
-    return FALSE;
+    m_uFrame = h.uFrame;
+    m_uLine = h.uLine;
+    m_uFrameTick = h.uFrame;
+
+    return TRUE;
 }
 
 Int32 NesSystem::GetSRAMBytes()
 {
-    if (!m_bRomReady)
-        return 0;
-
-    if (s_eNesBackend == NES_BACKEND_QUICKNES)
-        return QuicknesBridge_GetSRAMBytes();
-
-    if (s_eNesBackend == NES_BACKEND_FCEUMM)
-        return FceummBridge_GetSRAMBytes();
-
-    return 0;
+    return m_bRomReady ? QuicknesBridge_GetSRAMBytes() : 0;
 }
 
 Uint8 *NesSystem::GetSRAMData()
 {
-    if (!m_bRomReady)
-        return NULL;
-
-    if (s_eNesBackend == NES_BACKEND_QUICKNES)
-        return (Uint8 *)QuicknesBridge_GetSRAMData();
-
-    if (s_eNesBackend == NES_BACKEND_FCEUMM)
-        return FceummBridge_GetSRAMData();
-
-    return NULL;
+    return GetSRAMBytes() > 0 ? (Uint8 *)QuicknesBridge_GetSRAMData() : NULL;
 }
 
 const char *NesSystem::GetString(StringE eString)
@@ -456,9 +251,6 @@ const char *NesSystem::GetString(StringE eString)
 
 Uint32 NesSystem::GetSampleRate()
 {
-    if (s_eNesBackend == NES_BACKEND_FCEUMM)
-        return FceummBridge_GetSampleRate();
-
     return QuicknesBridge_GetSampleRate();
 }
 

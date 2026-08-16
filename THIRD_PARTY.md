@@ -19,4 +19,4 @@ These files must be preserved when redistributing the QuickNES code.
 
 ## Other components
 
-Aurora also contains or integrates third-party components inherited from SNESticle/SNESticle Revive, including InfoNES, FCEUmm, miniz, libxmp-lite and PS2SDK-related libraries. Refer to each component's bundled license and source-file notices.
+Aurora also contains or integrates third-party components inherited from SNESticle/SNESticle Revive, including InfoNES, miniz, libxmp-lite and PS2SDK-related libraries. Refer to each component's bundled license and source-file notices.
