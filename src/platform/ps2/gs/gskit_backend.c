@@ -348,7 +348,7 @@ static void _GskApplyDisplay(void)
          * new_magh1 is 10 here, so 2 source pixels = 20 PCRTC units.
          * Do this at scanout level so no framebuffer columns are clipped.
          */
-        startx += (dw - new_dw) / 2 - (8 * new_magh1);
+        startx += (dw - new_dw) / 2 - (2 * new_magh1);
         dw      = new_dw;
         magh    = new_magh1 - 1;
     }
