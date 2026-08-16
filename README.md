@@ -34,7 +34,8 @@ Keep in mind: this project uses **AI-generated code**, but the changes are teste
 
 **TO BE FIXED:**
 
-...
+* Top Gear (SNES) is very slow
+* Super Mario Bros. 2 (SNES, inside Super Mario All Stars) courtain transition effect not working
 
 **TO BE ADDED:**
 
