@@ -1,10 +1,10 @@
-# SNESticle Aurora 1.0.0
+# SNESticle Aurora 1.0.0 - In development
 
-**SNESticle Aurora** is a PlayStation 2 emulator fork maintained by **itsveenee**.
+**SNESticle Aurora** is a PlayStation 2 emulator fork maintained by **@itsveenee**.
 
-Aurora is based on **SNESticle Revive by ReyFxck (Thomas R.)**, whose work brought SNESticle back into active development, and ultimately on the original **SNESticle by Icer Addis**.
+Aurora is based on **SNESticle Revive by @ReyFxck (Thomas R.)**, whose work brought SNESticle back into active development, and ultimately on the original **SNESticle by Icer Addis**.
 
-**Huge thanks to ReyFxck** for his work on SNESticle Revive and for providing the foundation from which Aurora was created. **Huge thanks to Icer Addis** for creating the original SNESticle and its codebase.
+**Huge thanks to @ReyFxck** for his work on SNESticle Revive and for providing the foundation from which Aurora was created. **Huge thanks to Icer Addis** for creating the original SNESticle and its codebase.
 
 <!-- AURORA_QUICKNES_CREDIT -->
 **QuickNES credit:** NES emulation through QuickNES is based on the **QuickNES core originally by Shay Green**, with the libretro core maintained by **libretro contributors**. Aurora uses `itsveenee/QuickNES_Core` as a pinned Git submodule for its PS2 integration. See [THIRD_PARTY.md](THIRD_PARTY.md) and the license notices inside the QuickNES submodule.
@@ -32,7 +32,8 @@ make
 If the repository was cloned without `--recurse-submodules`, run
 `git submodule update --init --recursive` afterwards.
 
----
+
+## What's new?
 
 **FEATURES ADDED:**
 
@@ -58,6 +59,7 @@ If the repository was cloned without `--recurse-submodules`, run
 **TO BE FIXED:**
 
 * Top Gear (SNES) performance is very slow
+* iNES mapper 206 (and many others)
 
 **TO BE ADDED:**
 
