@@ -9,6 +9,13 @@ namespace Emu { struct SysInputT; }
 class CRenderSurface;
 class CMixBuffer;
 
+/*
+ * Native QuickNES snapshots are currently well below this bound.
+ * Keep a fixed capacity so asking for the state size never needs to
+ * serialize the machine merely to discover the length.
+ */
+enum { QUICKNES_STATE_CAPACITY = 32 * 1024 };
+
 bool QuicknesBridge_Init(void);
 void QuicknesBridge_Shutdown(void);
 bool QuicknesBridge_LoadGame(const void *pData, size_t nBytes, const char *pName);
@@ -20,7 +27,7 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
                              CRenderSurface *pTarget,
                              CMixBuffer *pMixBuf);
 int QuicknesBridge_GetStateSize(void);
-bool QuicknesBridge_SaveState(void *pData, int nBytes);
+int QuicknesBridge_SaveState(void *pData, int nBytes);
 bool QuicknesBridge_LoadState(const void *pData, int nBytes);
 int QuicknesBridge_GetSRAMBytes(void);
 uint8_t *QuicknesBridge_GetSRAMData(void);

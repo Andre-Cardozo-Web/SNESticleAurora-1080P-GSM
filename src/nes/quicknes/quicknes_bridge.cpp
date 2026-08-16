@@ -40,7 +40,6 @@ static bool s_Initialized = false;
 static bool s_GameLoaded  = false;
 static bool s_DutySwap    = false;
 static bool s_TurboPhase  = false;
-static int  s_StateSize   = 0;
 
 /* Reuse one native emulator for the process lifetime. Its constructor does
  * not allocate the cart/audio buffers; those are initialized lazily by
@@ -85,7 +84,6 @@ static void qResetTransient(void)
     s_PendingCount = 0;
     s_PaletteValid = false;
     s_TurboPhase = false;
-    s_StateSize = 0;
 }
 
 static Uint8 qMapPad(Uint16 pad)
@@ -379,45 +377,45 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
 
 int QuicknesBridge_GetStateSize(void)
 {
-    if (!s_GameLoaded)
-        return 0;
-    if (s_StateSize > 0)
-        return s_StateSize;
-
-    /* PS2: avoid expanding Mem_Writer/realloc while probing state size. */
-    static Uint8 s_StateProbe[64 * 1024] __attribute__((aligned(64)));
-    Mem_Writer writer(s_StateProbe, (long)sizeof(s_StateProbe));
-    const char *err = s_pEmu->save_state(writer);
-    if (err || writer.size() <= 0 || writer.size() > 0x7fffffffL)
-    {
-        printf("[QuickNES/native] state-size failed: %s\n",
-               err ? err : "invalid size");
-        return 0;
-    }
-
-    s_StateSize = (int)writer.size();
-    return s_StateSize;
+    /*
+     * Capacity only. Do NOT invoke save_state() here.
+     *
+     * The previous implementation serialized once to determine the
+     * size and then serialized a second time for the actual save.
+     */
+    return s_GameLoaded ? QUICKNES_STATE_CAPACITY : 0;
 }
 
-bool QuicknesBridge_SaveState(void *pData, int nBytes)
+int QuicknesBridge_SaveState(void *pData, int nBytes)
 {
-    if (!s_GameLoaded || !pData || nBytes <= 0)
-        return false;
+    if (!s_GameLoaded || !s_pEmu || !pData || nBytes <= 0)
+        return 0;
 
-    int need = QuicknesBridge_GetStateSize();
-    if (need <= 0 || nBytes < need)
-        return false;
+    if (nBytes > QUICKNES_STATE_CAPACITY)
+        nBytes = QUICKNES_STATE_CAPACITY;
 
+    /*
+     * Exactly one native serialization.
+     *
+     * Mem_Writer is fixed-size here: no realloc, no expanding heap
+     * buffer, and an oversized state fails cleanly.
+     */
     Mem_Writer writer(pData, (long)nBytes);
+
+    printf("[QuickNES/native] save_state begin; capacity=%d\n", nBytes);
+
     const char *err = s_pEmu->save_state(writer);
-    if (err || writer.size() != need)
+    long written = writer.size();
+
+    if (err || written <= 0 || written > nBytes)
     {
         printf("[QuickNES/native] save_state failed: %s (%ld/%d)\n",
-               err ? err : "size changed", writer.size(), need);
-        return false;
+               err ? err : "invalid size", written, nBytes);
+        return 0;
     }
 
-    return true;
+    printf("[QuickNES/native] save_state OK; bytes=%ld\n", written);
+    return (int)written;
 }
 
 bool QuicknesBridge_LoadState(const void *pData, int nBytes)

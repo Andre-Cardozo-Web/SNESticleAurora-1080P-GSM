@@ -584,9 +584,26 @@ static Uint32 _MainLoopStateGetSystemId()
 
 static Uint32 _MainLoopStateGetPayloadBytes()
 {
-    return _pSystem == _pNes
-        ? (Uint32)sizeof(_NesState)
-        : (Uint32)sizeof(_SnesState);
+    if (_pSystem == _pNes)
+    {
+        /*
+         * Let the active NES implementation describe its state envelope.
+         *
+         * InfoNES deliberately returns sizeof(NesStateT), preserving its
+         * existing file format. QuickNES returns its compact native envelope.
+         */
+        Int32 nBytes = _pNes ? _pNes->GetStateSize() : 0;
+
+        if (nBytes > 0 && nBytes <= (Int32)sizeof(_NesState))
+        {
+            return (Uint32)nBytes;
+        }
+
+        /* Defensive compatibility fallback. */
+        return (Uint32)sizeof(_NesState);
+    }
+
+    return (Uint32)sizeof(_SnesState);
 }
 
 static Uint8 *_MainLoopStateGetPayloadData()

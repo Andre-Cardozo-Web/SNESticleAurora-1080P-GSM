@@ -121,71 +121,109 @@ void NesSystem::ExecuteFrame(Emu::SysInputT *pInput,
 
 Int32 NesSystem::GetStateSize()
 {
-    return (Int32)sizeof(NesStateT);
+    /*
+     * NesStateT is the legacy InfoNES envelope and is roughly half a
+     * megabyte. QuickNES only needs its compact native snapshot plus
+     * this small frontend header.
+     */
+    return (Int32)(
+        sizeof(QuicknesStateHeaderT) + QUICKNES_STATE_CAPACITY
+    );
 }
 
 void NesSystem::SaveState(void *pState, Int32 nStateBytes)
 {
-    if (pState && nStateBytes >= (Int32)sizeof(NesStateT))
+    if (pState && nStateBytes >= GetStateSize())
         SaveState((NesStateT *)pState);
 }
 
 void NesSystem::RestoreState(void *pState, Int32 nStateBytes)
 {
-    if (pState && nStateBytes == (Int32)sizeof(NesStateT))
+    if (pState && nStateBytes == GetStateSize())
         RestoreState((NesStateT *)pState);
 }
 
 void NesSystem::SaveState(NesStateT *pState)
 {
-    if (!pState) return;
-    memset(pState, 0, sizeof(*pState));
-    if (!m_bRomReady) return;
+    if (!pState)
+        return;
 
-    int payload = QuicknesBridge_GetStateSize();
     const size_t head = sizeof(QuicknesStateHeaderT);
-    if (payload <= 0 || head + (size_t)payload > sizeof(*pState))
+    const Int32 stateBytes = GetStateSize();
+
+    /*
+     * Only clear the QuickNES envelope, not the full legacy NesStateT.
+     */
+    memset(pState, 0, (size_t)stateBytes);
+
+    if (!m_bRomReady)
+        return;
+
+    /*
+     * Serialize exactly once. The bridge returns the actual byte count.
+     */
+    int payload = QuicknesBridge_SaveState(
+        ((Uint8 *)pState) + head,
+        QUICKNES_STATE_CAPACITY
+    );
+
+    if (payload <= 0 || payload > QUICKNES_STATE_CAPACITY)
     {
-        printf("[QuickNES/state] payload does not fit NesStateT: %d / %u\n",
-               payload, (unsigned)(sizeof(*pState) - head));
+        memset(pState, 0, (size_t)stateBytes);
+        printf("[QuickNES/state] serialize failed\n");
         return;
     }
 
     QuicknesStateHeaderT h;
     memset(&h, 0, sizeof(h));
+
     h.uMagic = QUICKNES_STATE_MAGIC;
     h.uVersion = QUICKNES_STATE_VERSION;
     h.nPayloadBytes = (Uint32)payload;
     h.uFrame = m_uFrame;
     h.uLine = m_uLine;
+
+    /*
+     * Commit the header LAST. Until this memcpy, uMagic remains zero,
+     * so a partial/failed native snapshot cannot look valid.
+     */
     memcpy(pState, &h, sizeof(h));
 
-    if (!QuicknesBridge_SaveState(((Uint8 *)pState) + head, payload))
-    {
-        memset(pState, 0, sizeof(*pState));
-        printf("[QuickNES/state] serialize failed\n");
-    }
+    printf("[QuickNES/state] snapshot committed: native=%d envelope=%d\n",
+           payload, (int)stateBytes);
 }
 
 Bool NesSystem::RestoreState(NesStateT *pState)
 {
-    if (!pState || !m_bRomReady) return FALSE;
+    if (!pState || !m_bRomReady)
+        return FALSE;
+
     QuicknesStateHeaderT h;
     memcpy(&h, pState, sizeof(h));
+
     const size_t head = sizeof(h);
+    const size_t stateBytes = (size_t)GetStateSize();
+
     if (h.uMagic != QUICKNES_STATE_MAGIC ||
         h.uVersion != QUICKNES_STATE_VERSION ||
         h.nPayloadBytes == 0 ||
-        head + (size_t)h.nPayloadBytes > sizeof(*pState))
+        h.nPayloadBytes > QUICKNES_STATE_CAPACITY ||
+        head + (size_t)h.nPayloadBytes > stateBytes)
+    {
         return FALSE;
+    }
 
-    if (!QuicknesBridge_LoadState(((const Uint8 *)pState) + head,
-                                  (int)h.nPayloadBytes))
+    if (!QuicknesBridge_LoadState(
+            ((const Uint8 *)pState) + head,
+            (int)h.nPayloadBytes))
+    {
         return FALSE;
+    }
 
     m_uFrame = h.uFrame;
     m_uLine = h.uLine;
     m_uFrameTick = h.uFrame;
+
     return TRUE;
 }
 
