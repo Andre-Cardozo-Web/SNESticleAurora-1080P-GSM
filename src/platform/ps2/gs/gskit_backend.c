@@ -363,7 +363,7 @@ static void _GskApplyDisplay(void)
          * Keep this at scanout level: no framebuffer crop and no
          * PolyRect/source-coordinate modification.
          */
-        starty += 2;
+        starty += 1;
     }
 
     /* Widescreen: stretch the picture horizontally to ~16:9 by raising
