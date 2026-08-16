@@ -272,8 +272,7 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 		    cfg.fakesramsize == 256 ||
 		    cfg.fakesramsize == 512 ||
 		    cfg.fakesramsize == 1024 ||
-		    cfg.fakesramsize == 2048 ||
-		    cfg.fakesramsize == 4096)
+		    cfg.fakesramsize == 2048)
 		{
 			g_FakeSRAMSize = cfg.fakesramsize;
 		}
@@ -700,12 +699,8 @@ case 15: /* SRAM Size */
             break;
 
         case 2048:
-            g_FakeSRAMSize = (dir > 0) ? 4096 : 1024;
-            break;
-
-        case 4096:
         default:
-            g_FakeSRAMSize = (dir > 0) ? 0 : 2048;
+            g_FakeSRAMSize = (dir > 0) ? 0 : 1024;
             break;
     }
     break;
