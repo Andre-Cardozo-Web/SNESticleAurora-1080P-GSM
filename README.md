@@ -31,7 +31,6 @@ Keep in mind: this fork uses **AI-generated code** but it's always tested by me,
 **TO BE FIXED:**
 
 * Save and load states in QuickNES
-* Better screen positioning adjustment for each mode and resolution, both for NES and SNES
 
 **TO BE ADDED:**
 
