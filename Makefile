@@ -58,6 +58,14 @@ QUICKNES_INC := $(QUICKNES_DIR)/libretro/libretro-common/include
 QUICKNES_NATIVE_INC := $(QUICKNES_DIR)/nes_emu
 # QUICKNES_SNESTICLE_END
 
+# FCEUMM_SNESTICLE_BEGIN
+# Accuracy/mapper fallback. QuickNES remains the default NES backend.
+FCEUMM_DIR ?= $(CURDIR)/src/third_party/fceumm
+FCEUMM_LIB ?= $(FCEUMM_DIR)/fceumm_libretro_ps2.a
+FCEUMM_PREFIX_HDR := $(CURDIR)/src/nes/fceumm/fceumm_symbol_prefix.h
+# FCEUMM_SNESTICLE_END
+
+
 EE_CC ?= $(shell if command -v ee-gcc >/dev/null 2>&1; then echo ee-gcc; elif command -v mips64r5900el-ps2-elf-gcc >/dev/null 2>&1; then echo mips64r5900el-ps2-elf-gcc; elif [ -x "$(PS2DEV)/ee/bin/ee-gcc" ]; then echo "$(PS2DEV)/ee/bin/ee-gcc"; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-gcc" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-gcc"; fi)
 EE_CXX ?= $(shell if command -v ee-g++ >/dev/null 2>&1; then echo ee-g++; elif command -v mips64r5900el-ps2-elf-g++ >/dev/null 2>&1; then echo mips64r5900el-ps2-elf-g++; elif [ -x "$(PS2DEV)/ee/bin/ee-g++" ]; then echo "$(PS2DEV)/ee/bin/ee-g++"; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-g++" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-g++"; fi)
 EE_STRIP ?= $(shell if command -v ee-strip >/dev/null 2>&1; then echo ee-strip; elif command -v mips64r5900el-ps2-elf-strip >/dev/null 2>&1; then echo mips64r5900el-ps2-elf-strip; elif [ -x "$(PS2DEV)/ee/bin/ee-strip" ]; then echo "$(PS2DEV)/ee/bin/ee-strip"; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-strip" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-strip"; fi)
@@ -485,6 +493,7 @@ SRCS := \
 	src/platform/ps2/system/embedded_irx.cpp \
 	src/nes/system/nesrom.cpp \
 	src/nes/quicknes/quicknes_bridge.cpp \
+	src/nes/fceumm/fceumm_bridge.cpp \
 	src/nes/quicknes/nessystem_quicknes.cpp
 
 OBJS := \
@@ -808,8 +817,20 @@ $(QUICKNES_LIB): FORCE_QUICKNES
 		PS2SDK="$(PS2SDK)" \
 		all
 
-$(TARGET): $(OBJS) $(QUICKNES_LIB) | $(OBJ_DIR)
-	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) "$(QUICKNES_LIB)" $(LIBDIRS) $(LIBS))
+
+# AURORA_FCEUMM_BUILD_RULE_V1
+.PHONY: FORCE_FCEUMM
+FORCE_FCEUMM:
+
+$(FCEUMM_LIB): FORCE_FCEUMM $(FCEUMM_PREFIX_HDR)
+	@echo "[FCEUmm] Building mapper fallback core..."
+	@PATH="$$PS2DEV/bin:$$PS2SDK/bin:$$PATH" \
+	$(MAKE) -C "$(FCEUMM_DIR)" -f Makefile.libretro platform=ps2 \
+		CC="$(EE_CC) -include $(FCEUMM_PREFIX_HDR)" \
+		CXX="$(EE_CXX) -include $(FCEUMM_PREFIX_HDR)"
+
+$(TARGET): $(OBJS) $(QUICKNES_LIB) $(FCEUMM_LIB) | $(OBJ_DIR)
+	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) "$(QUICKNES_LIB)" "$(FCEUMM_LIB)" $(LIBDIRS) $(LIBS))
 
 $(TARGET_STRIPPED): $(TARGET)
 	@cp -f "$(TARGET)" "$@"

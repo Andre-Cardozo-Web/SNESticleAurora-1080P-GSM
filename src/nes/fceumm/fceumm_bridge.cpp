@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdint.h>
 
+#include "fceumm_symbol_prefix.h"
 #include "libretro.h"
 
 #include "fceumm_bridge.h"
