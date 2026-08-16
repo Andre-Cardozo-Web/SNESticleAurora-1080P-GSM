@@ -145,6 +145,22 @@ void SNSPCReset(SNSpcT *pCpu, Bool bHardReset)
 	pCpu->Regs.rPC = SNSPCRead16(pCpu, SNSPC_VECTOR_RESET);
 }
 
+/* AURORA_SPC_SOFT_RESET
+ * Restart SPC700 from the IPL ROM without clearing APURAM.
+ */
+void SNSPCSoftReset(SNSpcT *pCpu)
+{
+	SNSPCResetRegs(pCpu);
+	SNSPCResetCounters(pCpu);
+
+	/* Re-enable the IPL ROM while preserving hidden $FFC0-$FFFF RAM. */
+	SNSPCSetRomEnable(pCpu, TRUE);
+
+	/* FALSE preserves APURAM; registers/counters were reset above. */
+	SNSPCReset(pCpu, FALSE);
+}
+
+
 Uint8 SNSPCPeek8(SNSpcT *pCpu, Uint32 uAddr)
 {
 	return pCpu->Mem[uAddr];

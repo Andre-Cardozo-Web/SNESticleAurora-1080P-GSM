@@ -53,6 +53,7 @@ void SNSPCDelete(SNSpcT *pCpu);
 
 void SNSPCResetRegs(SNSpcT *pCpu);
 void SNSPCReset(SNSpcT *pCpu, Bool bHardReset);
+void SNSPCSoftReset(SNSpcT *pCpu);
 
 Uint8 SNSPCPeek8(SNSpcT *pCpu, Uint32 uAddr);
 void SNSPCPeekMem(SNSpcT *pCpu, Uint32 Addr, Uint8 *pBuffer, Uint32 nBytes);

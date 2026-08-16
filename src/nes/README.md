@@ -4,6 +4,21 @@ NES emulation subsystem for SNESticle Aurora, based on InfoNES.
 
 SNESticle Aurora is maintained by **itsveenee** and is based on **SNESticle Revive by ReyFxck (Thomas R.)**, with the original SNESticle codebase by **Icer Addis**.
 
+## QuickNES integration
+
+Aurora also integrates **QuickNES**, originally by **Shay Green**, through
+the libretro QuickNES codebase.
+
+The Aurora integration is pinned at `src/third_party/quicknes`.
+Initialize it with:
+
+```bash
+git submodule update --init --recursive
+```
+
+The integration fork is maintained at `itsveenee/QuickNES_Core`.
+See the submodule's own license and source-file notices.
+
 ## Upstream
 
 This directory contains a copy of [InfoNES](https://github.com/jay-kumogata/InfoNES)

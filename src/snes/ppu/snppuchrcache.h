@@ -4,6 +4,14 @@
 #include <string.h>
 #include "types.h"
 
+/* AURORA_TOPGEAR_HFLIP_CACHE
+ * Cache a pre-flipped copy of decoded 4bpp CHR rows.
+ * Both orientations share the same VRAM validity bitmap.
+ */
+#ifndef SNPPU_CHR_CACHE_HFLIP
+#define SNPPU_CHR_CACHE_HFLIP 1
+#endif
+
 /*
  * Cache fisico de CHR decodificado.
  *
@@ -37,6 +45,12 @@ struct SnesPPUChrCacheT
 
 	Uint64 uData4[SNPPU_CHR4_TILE_COUNT][8];
 	Uint8  uOpaque4[SNPPU_CHR4_TILE_COUNT][8];
+
+#if SNPPU_CHR_CACHE_HFLIP
+	Uint64 uData4HFlip[SNPPU_CHR4_TILE_COUNT][8];
+	Uint8  uOpaque4HFlip[SNPPU_CHR4_TILE_COUNT][8];
+#endif
+
 	Uint8  uValid4[SNPPU_CHR4_TILE_COUNT];
 };
 
@@ -89,10 +103,23 @@ _INLINE Bool SnesPPUChrCacheLookup4(const SnesPPUChrCacheT *pCache,
 	if (!(pCache->uValid4[uTile] & (1u << uRow)))
 		return FALSE;
 
+#if SNPPU_CHR_CACHE_HFLIP
+	if (bHFlip)
+	{
+		*pData = pCache->uData4HFlip[uTile][uRow];
+		*pOpaque = pCache->uOpaque4HFlip[uTile][uRow];
+	}
+	else
+	{
+		*pData = pCache->uData4[uTile][uRow];
+		*pOpaque = pCache->uOpaque4[uTile][uRow];
+	}
+#else
 	*pData = pCache->uData4[uTile][uRow];
 	*pOpaque = pCache->uOpaque4[uTile][uRow];
 	if (bHFlip)
 		SnesPPUChrCacheFlipRow(pData, pOpaque);
+#endif
 	return TRUE;
 }
 
@@ -117,6 +144,13 @@ _INLINE void SnesPPUChrCacheStore4(SnesPPUChrCacheT *pCache,
 
 	pCache->uData4[uTile][uRow] = uData;
 	pCache->uOpaque4[uTile][uRow] = (Uint8)uOpaque;
+
+#if SNPPU_CHR_CACHE_HFLIP
+	pCache->uData4HFlip[uTile][uRow] = SnesPPUChrCacheReverseBytes(uData);
+	pCache->uOpaque4HFlip[uTile][uRow] =
+		SnesPPUChrCacheReverseMask((Uint8)uOpaque);
+#endif
+
 	pCache->uValid4[uTile] |= (Uint8)(1u << uRow);
 }
 

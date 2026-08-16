@@ -34,6 +34,19 @@ Changes developed for SNESticle Aurora may be cherry-picked, pulled, adapted or 
 
 Likewise, Aurora may independently incorporate useful work from related projects when appropriate, without implying that the projects share a release schedule, version series or development direction.
 
+## QuickNES
+
+The NES QuickNES integration in Aurora uses a pinned fork of the
+QuickNES/libretro codebase:
+
+- **Original QuickNES / Nes_Emu:** Shay Green
+- **Libretro QuickNES core:** libretro contributors
+- **Aurora PS2 integration fork:** `itsveenee/QuickNES_Core`
+- **Aurora integration and PS2-specific glue:** Vinícius Nunes (`@itsveenee`)
+
+The QuickNES submodule retains its own license and source-file notices.
+Those notices remain authoritative and must be preserved.
+
 ## Third-party components
 
 SNESticle Aurora includes or integrates third-party components including InfoNES, QuickNES, FCEUmm, miniz, libxmp-lite and others.

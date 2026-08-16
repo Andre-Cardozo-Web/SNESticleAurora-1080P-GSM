@@ -89,6 +89,9 @@ SNES_OBJ_CACHE ?= 1
 # continua disponivel somente para comparacao A/B.
 SNES_BG_CACHE ?= 0
 
+# Cache H-flip 4bpp para reduzir trabalho repetido em sprites
+SNES_CHR_HFLIP_CACHE ?= 1
+
 # Conservative flags to bridge the GCC 3.2 (2003) -> GCC 15.1 (2025)
 # gap in default optimization behavior. The original iaddis source was
 # written assuming the older compiler's much more conservative defaults,
@@ -118,13 +121,15 @@ CFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) \
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
 	-DSNDBG_LOG=$(SNES_DIAG_ENABLED) -DSNDBG_DEEP=$(SNES_DIAG_DEEP) \
 	-DSNPPU_OBJ_CACHE=$(SNES_OBJ_CACHE) \
-	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE)
+	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE) \
+	-DSNPPU_CHR_CACHE_HFLIP=$(SNES_CHR_HFLIP_CACHE)
 
 CXXFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fno-exceptions -fno-rtti -fpermissive \
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
 	-DSNDBG_LOG=$(SNES_DIAG_ENABLED) -DSNDBG_DEEP=$(SNES_DIAG_DEEP) \
 	-DSNPPU_OBJ_CACHE=$(SNES_OBJ_CACHE) \
-	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE)
+	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE) \
+	-DSNPPU_CHR_CACHE_HFLIP=$(SNES_CHR_HFLIP_CACHE)
 
 # The official libxmp-lite embedded/core configuration keeps the MOD/XM effect
 # and loop engines while omitting desktop-only depackers and format extras,

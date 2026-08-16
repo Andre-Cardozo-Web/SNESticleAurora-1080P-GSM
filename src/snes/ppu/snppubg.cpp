@@ -70,10 +70,15 @@ static Uint32 _FetchOffset(Uint16 uAddr, Uint16 *pOffset, Int32 nTiles, SnesPPUS
 	// get pointer to screen data
 	pScrData  =  (Uint16 *)ppScreen[(uAddr >> 10) & 3];
 
-	// store 0 in left offset
+	/* Leftmost visible tile never receives offset-per-tile.
+	 *
+	 * This helper is called independently for the horizontal stream
+	 * (pOffset) and the vertical stream (pOffset + 1).  Clear only
+	 * the current stream: clearing pOffset[1] here would clobber the
+	 * following horizontal entry during the vertical pass.
+	 */
 	pOffset[0] = 0;
-	pOffset[1] = 0;
-	pOffset +=2;
+	pOffset += 2;
 	nTiles--;
 
 	while (nTiles > 0)
@@ -253,7 +258,8 @@ static void _FetchBG8x8Offset(Uint32 uScrollX, Uint32 uScrollY, Int32 iLine, Sne
 
 		if (pOffset[0] & uOffsetMask)
 		{
-			uTileScrollX = pOffset[0] & 0x7FF;
+			uTileScrollX =
+				(uScrollX & 7) | (pOffset[0] & 0x3F8);
 		} else
 		{
 			uTileScrollX = uScrollX;
@@ -261,7 +267,7 @@ static void _FetchBG8x8Offset(Uint32 uScrollX, Uint32 uScrollY, Int32 iLine, Sne
 
 		if (pOffset[1] & uOffsetMask)
 		{
-			uTileScrollY = pOffset[1] & 0x7FF;
+			uTileScrollY = pOffset[1] & 0x3FF;
 		} else
 		{
 			uTileScrollY = uScrollY;
@@ -328,10 +334,11 @@ static void _FetchBG8x8Offset2(Uint32 uScrollX, Uint32 uScrollY, Int32 iLine, Sn
 		{
 			if (pOffset[0] & 0x8000)
 			{
-				uTileScrollY = pOffset[0] & 0x7FF;
+				uTileScrollY = pOffset[0] & 0x3FF;
 			} else
 			{
-				uTileScrollX = pOffset[0] & 0x7FF;
+				uTileScrollX =
+				(uScrollX & 7) | (pOffset[0] & 0x3F8);
 			}
 		} 
 
@@ -499,6 +506,157 @@ Uint32 SnesPPURender::FetchBG(SnesBGInfoT *pBGInfo, struct SnesRenderTileT *pTil
 
 
 
+
+/* SMB2_OPT_16X16_FIX
+ *
+ * Offset-per-tile operates on 8-pixel screen columns even when the
+ * target BG itself uses 16x16 map tiles. Resolve the enclosing 16x16
+ * tilemap entry and then select the appropriate 8x8 quadrant.
+ */
+static void _FetchBG16x16Offset(
+    Uint32 uScrollX,
+    Uint32 uScrollY,
+    Int32 iLine,
+    SnesRenderTileT *pTile,
+    Int32 nTiles,
+    SnesPPUScreenT **ppScreen,
+    Uint16 *pOffset,
+    Uint32 uOffsetMask,
+    Bool bMode4)
+{
+    Uint32 uX = 0;
+
+    PROF_ENTER("_FetchBG16x16Offset");
+
+    while (nTiles > 0)
+    {
+        Uint32 uTileScrollX = uScrollX;
+        Uint32 uTileScrollY = uScrollY;
+
+        Uint32 uTileX;
+        Uint32 uTileY;
+        Uint32 uSubX;
+        Uint32 uSubY;
+        Uint32 uAddr;
+
+        Uint16 uScrData;
+        Uint16 *pScrData;
+
+        Uint32 uTile16;
+        Uint32 uFlip;
+        Uint32 uQuadrant;
+        Uint8 *pSubTile;
+
+        if (bMode4)
+        {
+            /*
+             * Mode 4 stores either H or V in the same offset word.
+             * Bit 15 selects vertical offset.
+             */
+            if (pOffset[0] & uOffsetMask)
+            {
+                if (pOffset[0] & 0x8000)
+                {
+                    uTileScrollY = pOffset[0] & 0x3FF;
+                }
+                else
+                {
+                    uTileScrollX =
+                        (uScrollX & 7) |
+                        (pOffset[0] & 0x3F8);
+                }
+            }
+        }
+        else
+        {
+            /* Mode 2 has independent H and V offset words. */
+
+            if (pOffset[0] & uOffsetMask)
+            {
+                uTileScrollX =
+                    (uScrollX & 7) |
+                    (pOffset[0] & 0x3F8);
+            }
+
+            if (pOffset[1] & uOffsetMask)
+            {
+                uTileScrollY =
+                    pOffset[1] & 0x3FF;
+            }
+        }
+
+        uTileScrollX += uX;
+        uTileScrollY += iLine;
+
+        /*
+         * Tilemap itself is 16x16.
+         */
+        uTileX = (uTileScrollX >> 4) & 63;
+        uTileY = (uTileScrollY >> 4) & 63;
+
+        /*
+         * Renderer works in 8-pixel columns, so determine which
+         * quadrant of the 16x16 tile is needed.
+         */
+        uSubX = (uTileScrollX >> 3) & 1;
+        uSubY = (uTileScrollY >> 3) & 1;
+
+        /*
+         * Abstract screen address:
+         *
+         *   ss yyyyy xxxxx
+         */
+        uAddr  = (uTileX & 0x1F);
+        uAddr |= (uTileY & 0x1F) << 5;
+        uAddr |= (uTileX >> 5) << 10;
+        uAddr |= (uTileY >> 5) << 11;
+
+        pScrData =
+            (Uint16 *)ppScreen[(uAddr >> 10) & 3];
+
+        uScrData =
+            pScrData[uAddr & 0x03FF];
+
+        uTile16 =
+            uScrData & 0x03FF;
+
+        uFlip =
+            (uScrData >> 14) & 3;
+
+        /*
+         * The existing table already describes the four 8x8
+         * quadrants for normal/H/V/HV orientations.
+         */
+        uQuadrant =
+            uSubX | (uSubY << 1);
+
+        pSubTile =
+            _SNPPUBg_Tile16Pos[uFlip ^ uQuadrant];
+
+        pTile->uTile =
+            (Uint16)((uTile16 + pSubTile[0]) & 0x03FF);
+
+        pTile->uFlip =
+            (Uint8)uFlip;
+
+        pTile->uPal =
+            (Uint8)((uScrData >> 10) & 0x0F);
+
+        pTile->uOffsetY =
+            (Uint8)(uTileScrollY & 7);
+
+        pTile++;
+
+        pOffset += 2;
+        uX += 8;
+
+        nTiles--;
+    }
+
+    PROF_LEAVE("_FetchBG16x16Offset");
+}
+
+
 Uint32 SnesPPURender::FetchBGOffset(SnesBGInfoT *pBGInfo, struct SnesRenderTileT *pTiles, Int32 nTiles, Int32 iLine, Uint16 *pOffset, Uint32 uOffsetMask, Bool bVOffset)
 {
 	SnesPPUScreenT *pScreen[4];
@@ -529,6 +687,25 @@ Uint32 SnesPPURender::FetchBGOffset(SnesBGInfoT *pBGInfo, struct SnesRenderTileT
 		}
 		break;
 	case 1:
+		// target BG uses 16x16 map tiles
+		_GetScreenPtrs(
+			pScreen,
+			m_pPPU,
+			pBGInfo->uScrAddr,
+			pBGInfo->uScrSize
+		);
+
+		_FetchBG16x16Offset(
+			pBGInfo->uScrollX,
+			pBGInfo->uScrollY,
+			iLine,
+			pTiles,
+			nTiles,
+			pScreen,
+			pOffset,
+			uOffsetMask,
+			bVOffset
+		);
 		break;
 
 	default:
@@ -541,76 +718,247 @@ Uint32 SnesPPURender::FetchBGOffset(SnesBGInfoT *pBGInfo, struct SnesRenderTileT
 }
 
 
-Uint32 SnesPPURender::FetchOffset(SnesBGInfoT *pBGInfo, Uint16 *pOffset, Int32 iLine, Uint32 &uOldVramAddr, Bool bVOffset)
+
+static Uint16 _SNPPUReadOffset16Cell(
+    Uint32 uPixelX,
+    Uint32 uPixelY,
+    SnesPPUScreenT **ppScreen)
 {
-	Uint32 uScrollX, uScrollY;
-	Uint32 uTileX, uTileY;
-	Uint32 uVramAddr = 0;
-	SnesPPUScreenT *pScreen[4];
-	Uint32 uOffsetOR = 0;
+    Uint32 uTileX;
+    Uint32 uTileY;
+    Uint32 uAddr;
 
-	uScrollX = pBGInfo->uScrollX;
-	uScrollY = pBGInfo->uScrollY; // + iLine;
+    uTileX = (uPixelX >> 4) & 63;
+    uTileY = (uPixelY >> 4) & 63;
 
-	// fetch tiles (8x8)
-	// calculate tile x/y
-	uTileX = (uScrollX >> 3) & 63;
-	uTileY = (uScrollY >> 3) & 63;
+    uAddr  = (uTileX & 0x1F);
+    uAddr |= (uTileY & 0x1F) << 5;
+    uAddr |= (uTileX >> 5) << 10;
+    uAddr |= (uTileY >> 5) << 11;
 
-	// calculate vram tile address (ssyyyyyxxxxx)
-	uVramAddr = (uTileX & 0x1F) << 0 ;
-	uVramAddr|= (uTileY & 0x1F) << 5 ;
-	uVramAddr|= (uTileX >>   5) << 10;
-	uVramAddr|= (uTileY >>   5) << 11;
-
-	switch (pBGInfo->uScrSize)
-	{
-	case 0:
-	case 1:
-	case 2:
-	case 3:
-		if (uVramAddr != uOldVramAddr)
-		{
-			// get pointers to screens
-			_GetScreenPtrs(pScreen, m_pPPU, pBGInfo->uScrAddr, pBGInfo->uScrSize);
-
-			// fetch h-offsets
-			uOffsetOR = _FetchOffset(uVramAddr, pOffset, 32, pScreen);
-
-			if (bVOffset)
-			{
-				// fetch v-offsets
-				uOffsetOR |= _FetchOffset(
-					_SNPPUOffsetNextRow((Uint16)uVramAddr),
-					pOffset + 1,
-					32,
-					pScreen
-				);
-			}
-
-			uOldVramAddr = uVramAddr;
-
-			pOffset[64] = uOffsetOR;
-		} else
-		{
-			uOffsetOR = pOffset[64];
-		}
-		break;
-		// 16x16 offsets ?
-//		break;
-	}
-
-	return  uOffsetOR;
+    return
+        ((Uint16 *)ppScreen[(uAddr >> 10) & 3])
+        [uAddr & 0x03FF];
 }
 
 
+static Uint32 _FetchOffset16x16Map(
+    Uint32 uScrollX,
+    Uint32 uScrollY,
+    Uint16 *pOffset,
+    SnesPPUScreenT **ppScreen,
+    Bool bVOffset)
+{
+    Uint32 uOffsetOR = 0;
+    Int32 i;
+
+    /*
+     * Leftmost target tile does not receive OPT.
+     */
+    pOffset[0] = 0;
+    pOffset[1] = 0;
+
+    /*
+     * 33 renderer columns:
+     *
+     *   pair 0      = unmodified left edge
+     *   pairs 1..32 = offset entries
+     */
+    for (i = 1; i < 33; i++)
+    {
+        Uint32 uX;
+        Uint16 h;
+
+        /*
+         * Offset lookup advances by 8 screen pixels even though
+         * BG3's own map entry is 16 pixels wide.
+         */
+        uX =
+            (uScrollX & ~7U) +
+            ((Uint32)(i - 1) << 3);
+
+        h = _SNPPUReadOffset16Cell(
+            uX,
+            uScrollY,
+            ppScreen
+        );
+
+        pOffset[i * 2] = h;
+        uOffsetOR |= h;
+
+        if (bVOffset)
+        {
+            Uint16 v;
+
+            /*
+             * Vertical offset table is selected eight pixels below
+             * the horizontal offset row.
+             */
+            v = _SNPPUReadOffset16Cell(
+                uX,
+                uScrollY + 8,
+                ppScreen
+            );
+
+            pOffset[i * 2 + 1] = v;
+            uOffsetOR |= v;
+        }
+        else
+        {
+            pOffset[i * 2 + 1] = 0;
+        }
+    }
+
+    return uOffsetOR;
+}
 
 
+Uint32 SnesPPURender::FetchOffset(
+    SnesBGInfoT *pBGInfo,
+    Uint16 *pOffset,
+    Int32 iLine,
+    Uint32 &uOldVramAddr,
+    Bool bVOffset)
+{
+    Uint32 uScrollX;
+    Uint32 uScrollY;
+    Uint32 uTileX;
+    Uint32 uTileY;
+    Uint32 uVramAddr;
+    Uint32 uCacheKey;
+    Uint32 uOffsetOR = 0;
 
+    SnesPPUScreenT *pScreen[4];
 
+    uScrollX = pBGInfo->uScrollX;
+    uScrollY = pBGInfo->uScrollY;
 
+    /*
+     * The current screen scanline does NOT select another BG3
+     * offset row. BG3VOFS selects the horizontal row; the vertical
+     * row in Mode 2 is the corresponding row eight pixels below.
+     */
+    (void)iLine;
 
+    /*
+     * Cache key includes the 8-pixel phases as well as BG3 map
+     * configuration. This is important with 16x16 BG3 tiles:
+     * moving by eight pixels can retain the same 16x16 cell while
+     * changing which renderer columns reuse that entry.
+     */
+    uCacheKey =
+          ((uScrollX >> 3) & 0x7F)
+        | (((uScrollY >> 3) & 0x7F) << 7)
+        | (((pBGInfo->uScrAddr >> 10) & 0x1F) << 14)
+        | ((pBGInfo->uScrSize & 3) << 19)
+        | ((pBGInfo->uChrSize & 1) << 21)
+        | ((bVOffset ? 1U : 0U) << 22);
 
+    if (uCacheKey != uOldVramAddr)
+    {
+        _GetScreenPtrs(
+            pScreen,
+            m_pPPU,
+            pBGInfo->uScrAddr,
+            pBGInfo->uScrSize
+        );
+
+        if (pBGInfo->uChrSize == 0)
+        {
+            /*
+             * Standard 8x8 BG3 offset map.
+             */
+            uTileX =
+                (uScrollX >> 3) & 63;
+
+            uTileY =
+                (uScrollY >> 3) & 63;
+
+            uVramAddr  =
+                (uTileX & 0x1F);
+
+            uVramAddr |=
+                (uTileY & 0x1F) << 5;
+
+            uVramAddr |=
+                (uTileX >> 5) << 10;
+
+            uVramAddr |=
+                (uTileY >> 5) << 11;
+
+            /*
+             * 33 visible/fetch columns.
+             *
+             * _FetchOffset reserves pair zero for the unaffected
+             * left edge and fills the remaining 32 entries.
+             */
+            uOffsetOR =
+                _FetchOffset(
+                    (Uint16)uVramAddr,
+                    pOffset,
+                    33,
+                    pScreen
+                );
+
+            if (bVOffset)
+            {
+                uOffsetOR |=
+                    _FetchOffset(
+                        _SNPPUOffsetNextRow(
+                            (Uint16)uVramAddr
+                        ),
+                        pOffset + 1,
+                        33,
+                        pScreen
+                    );
+            }
+            else
+            {
+                Int32 i;
+
+                for (i = 0; i < 33; i++)
+                {
+                    pOffset[i * 2 + 1] = 0;
+                }
+            }
+        }
+        else
+        {
+            /*
+             * BG3 itself uses 16x16 tilemap entries.
+             */
+            uOffsetOR =
+                _FetchOffset16x16Map(
+                    uScrollX,
+                    uScrollY,
+                    pOffset,
+                    pScreen,
+                    bVOffset
+                );
+        }
+
+        uOldVramAddr = uCacheKey;
+
+        /*
+         * BGOffset[68]:
+         *
+         *   0..65 = 33 H/V pairs
+         *   66    = cached OR of all offset words
+         *   67    = spare
+         *
+         * The old slot 64 overlapped the final horizontal offset.
+         */
+        pOffset[66] =
+            (Uint16)uOffsetOR;
+    }
+    else
+    {
+        uOffsetOR =
+            pOffset[66];
+    }
+
+    return uOffsetOR;
+}
 
 
 

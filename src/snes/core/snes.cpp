@@ -1105,7 +1105,6 @@ void SnesSystem::SoftReset()
      * Do not randomize or clear main RAM/SRAM here.
      */
 SNCPUResetCounters(&m_Cpu);
-SNSPCResetCounters(&m_Spc);
 
 SNCPUReset(&m_Cpu, false);
 m_Cpu.Regs.rS.w = 0x01FF;
@@ -1114,7 +1113,8 @@ m_Cpu.Regs.rDB = 0;
 m_Cpu.Regs.rX.b.h = 0;
 m_Cpu.Regs.rY.b.h = 0;
 
-SNSPCReset(&m_Spc, false);
+/* Restart SPC from IPL ROM while preserving APURAM. */
+SNSPCSoftReset(&m_Spc);
 
 m_uFrame = 0;
 m_uLine = 0;
