@@ -51,9 +51,14 @@ If the repository was cloned without `--recurse-submodules`, run
 
 *(**NOTE**: to find the options above, go to the Video Settings and change to page 2 with the circle button.)*
 
+**FIXED:**
+
+* Super Mario Bros. 2 (SNES version, All Stars) curtain transition effect
+
 **TO BE FIXED:**
 
 * Top Gear (SNES) performance still needs PS2 hardware retesting after the CHR H-flip cache optimization
+
 **TO BE ADDED:**
 
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!
