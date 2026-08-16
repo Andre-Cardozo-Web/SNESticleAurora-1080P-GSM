@@ -1,15 +1,21 @@
+# Build output
 build/
 refs/
 logs/
+
+# Compiled/generated files
 *.o
 *.elf
 *.log
 *.tar.gz
-build/
-*.o
-*.elf
-*.log
 *.bak*
+
+# Local Python scripts
+*.py
+
+# Local helper scripts
+backup.sh
+copy.sh
 
 # Local PS2DEV environment
 .ps2dev-env
