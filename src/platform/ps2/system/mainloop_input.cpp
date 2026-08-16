@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <libpad.h>
-#include <kernel.h>
+
 #include "mainloop_input.h"
 #include "mainloop_iop.h"
 #include "mainloop_menu.h"
@@ -141,7 +141,6 @@ void _MainLoopInputProcess(Uint32 buttons)
 	static Bool bStateHotkeyHeld = FALSE;
 	Uint32 trigger;
 
-
 	if (_MainLoop_bSuppressGameInputUntilRelease &&
 	    !(buttons & (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT |
 	                 PAD_CROSS | PAD_CIRCLE | PAD_START)))
@@ -164,13 +163,7 @@ void _MainLoopInputProcess(Uint32 buttons)
 
 	trigger = ((buttons ^ lastbuttons) & buttons);
 	lastbuttons = buttons;
-        if ((buttons & (PAD_L1 | PAD_L2 | PAD_R1 | PAD_R2 |
-                    PAD_START | PAD_SELECT)) ==
-        (PAD_L1 | PAD_L2 | PAD_R1 | PAD_R2 |
-         PAD_START | PAD_SELECT))
-    {
-        Exit(0);
-    }
+
 	if (!(buttons & PAD_L2) ||
 	    !(buttons & (PAD_CROSS | PAD_CIRCLE)))
 	{
@@ -210,7 +203,7 @@ void _MainLoopInputProcess(Uint32 buttons)
 	if (_bMenu &&
 	    _MainLoop_pScreen == (CScreen *)_MainLoop_pStateDeviceScreen)
 	{
-		if (trigger & PAD_CROSS)
+		if (trigger & PAD_CIRCLE)
 		{
 			_MainLoopStateDevicePromptCancel();
 		}
@@ -225,7 +218,7 @@ void _MainLoopInputProcess(Uint32 buttons)
 	    _MainLoop_pScreen ==
 	            (CScreen *)_MainLoop_pMemCardFormatScreen)
 	{
-		if (trigger & PAD_CROSS)
+		if (trigger & PAD_CIRCLE)
 		{
 			_MainLoopMemCardFormatPromptCancel();
 		}
@@ -470,13 +463,14 @@ void _MainLoopInputProcess(Uint32 buttons)
 	else
 	{
 
-		if (buttons & PAD_L2)
+if ((buttons & PAD_L2))
+	{
+		if (trigger & PAD_SELECT)
 		{
-			if (trigger & PAD_SELECT)
-			{
-				_MainLoop_BlackScreen^=1;
-			}
+			_pSystem->SoftReset();
+			return;
 		}
+	}
 
 #if 0
 		// perform cheesy non-deterministic disk switching

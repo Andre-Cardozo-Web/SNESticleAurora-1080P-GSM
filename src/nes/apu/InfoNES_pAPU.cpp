@@ -59,6 +59,7 @@ static WORD        s_EnterClock;
 static int         s_LastApuTime;
 static int         s_FrameEndTime;
 static int         s_ApuReady;
+static int          s_DutySwap;
 
 static void InfoNES_ApuConstructObjects( void )
 {
@@ -133,10 +134,36 @@ static void InfoNES_ApuWriteRegister( WORD addr, BYTE value )
   if ( !s_ApuReady )
     return;
 
+  if (s_DutySwap &&
+      (addr == 0x4000 || addr == 0x4004))
+  {
+    BYTE duty = (value >> 6) & 3;
+
+    if (duty == 1)
+      duty = 2;
+    else if (duty == 2)
+      duty = 1;
+
+    value = (value & 0x3F) | (duty << 6);
+  }
+
   int time = InfoNES_ApuCurrentTime();
   s_pNesApu->write_register( time, addr, value );
   s_LastApuTime = time;
 }
+
+void InfoNES_pAPUSetDutySwap(int bEnable)
+{
+  s_DutySwap = bEnable ? 1 : 0;
+
+  if ( !s_ApuReady )
+    return;
+
+  InfoNES_ApuWriteRegister( 0x4000, APU_Reg[0x00] );
+  InfoNES_ApuWriteRegister( 0x4004, APU_Reg[0x04] );
+}
+
+
 
 /* InfoNES dispatches $4000-$4013 through this table. */
 ApuWritefunc pAPUSoundRegs[20] =
@@ -206,6 +233,19 @@ void InfoNES_pAPUVsync( void )
   s_EnterClock = K6502_GetPassedClocks();
   s_LastApuTime = 0;
   s_FrameEndTime = NES_APU_FRAME_CYCLES;
+}
+void InfoNES_pAPUSoftReset(void)
+{
+  if (!s_ApuReady)
+    return;
+
+  s_pNesApu->reset(false, 0);
+  s_pNesBlip->clear();
+
+  s_EnterClock = K6502_GetPassedClocks();
+  s_LastApuTime = 0;
+  s_FrameEndTime = NES_APU_FRAME_CYCLES;
+  s_FrameEndTime = InfoNES_ApuCyclesToNextVsync();
 }
 
 int InfoNES_pAPUSaveState( void *pState, int nStateBytes )

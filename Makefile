@@ -51,6 +51,13 @@ TARGET_STRIPPED := $(OBJ_DIR)/SNESticle.stripped.elf
 TARGET_PACKED := $(OBJ_DIR)/SNESticle.packed.elf
 BIN2C   ?= $(PS2SDK)/bin/bin2c
 
+# QUICKNES_SNESTICLE_BEGIN
+QUICKNES_DIR ?= $(CURDIR)/src/third_party/quicknes
+QUICKNES_LIB ?= $(QUICKNES_DIR)/quicknes_libretro_ps2.a
+QUICKNES_INC := $(QUICKNES_DIR)/libretro/libretro-common/include
+QUICKNES_NATIVE_INC := $(QUICKNES_DIR)/nes_emu
+# QUICKNES_SNESTICLE_END
+
 EE_CC ?= $(shell if command -v ee-gcc >/dev/null 2>&1; then echo ee-gcc; elif command -v mips64r5900el-ps2-elf-gcc >/dev/null 2>&1; then echo mips64r5900el-ps2-elf-gcc; elif [ -x "$(PS2DEV)/ee/bin/ee-gcc" ]; then echo "$(PS2DEV)/ee/bin/ee-gcc"; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-gcc" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-gcc"; fi)
 EE_CXX ?= $(shell if command -v ee-g++ >/dev/null 2>&1; then echo ee-g++; elif command -v mips64r5900el-ps2-elf-g++ >/dev/null 2>&1; then echo mips64r5900el-ps2-elf-g++; elif [ -x "$(PS2DEV)/ee/bin/ee-g++" ]; then echo "$(PS2DEV)/ee/bin/ee-g++"; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-g++" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-g++"; fi)
 EE_STRIP ?= $(shell if command -v ee-strip >/dev/null 2>&1; then echo ee-strip; elif command -v mips64r5900el-ps2-elf-strip >/dev/null 2>&1; then echo mips64r5900el-ps2-elf-strip; elif [ -x "$(PS2DEV)/ee/bin/ee-strip" ]; then echo "$(PS2DEV)/ee/bin/ee-strip"; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-strip" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-strip"; fi)
@@ -284,7 +291,9 @@ INCS := \
 	-I$(PS2SDK)/common/include \
 	-I$(PS2SDK)/ee/include \
 	-I$(PS2SDK)/ports/include \
-	-I$(GSKIT)/include
+	-I$(GSKIT)/include \
+	-I$(QUICKNES_INC) \
+	-I$(QUICKNES_NATIVE_INC)
 
 LIBDIRS := \
 	-L$(PS2SDK)/ee/lib \
@@ -468,16 +477,9 @@ SRCS := \
 	src/platform/ps2/system/mainloop_bgm.cpp \
 	src/platform/ps2/system/global_alloc.cpp \
 	src/platform/ps2/system/embedded_irx.cpp \
-	src/third_party/nes_snd_emu/Blip_Buffer.cpp \
-	src/third_party/nes_snd_emu/Nes_Apu.cpp \
-	src/third_party/nes_snd_emu/Nes_Oscs.cpp \
-	src/nes/core/InfoNES.cpp \
-	src/nes/cpu/K6502.cpp \
-	src/nes/apu/InfoNES_pAPU.cpp \
-	src/nes/mapper/InfoNES_Mapper.cpp \
-	src/nes/system/InfoNES_System_PS2.cpp \
 	src/nes/system/nesrom.cpp \
-	src/nes/system/nessystem.cpp
+	src/nes/quicknes/quicknes_bridge.cpp \
+	src/nes/quicknes/nessystem_quicknes.cpp
 
 OBJS := \
 	$(patsubst src/%.c,$(OBJ_DIR)/%.o,$(filter %.c,$(SRCS))) \
@@ -787,8 +789,21 @@ $(OBJ_DIR)/%.o: src/%.s | $(OBJ_DIR)
 	$(call RUN_COMPILE,AS,$<,$(EE_CC) $(CFLAGS) $(DEPFLAGS) $(INCS) -c "$<" -o "$@")
 $(OBJ_DIR)/%.o: src/%.S | $(OBJ_DIR)
 	$(call RUN_COMPILE,AS,$<,$(EE_CC) $(CFLAGS) $(DEPFLAGS) $(INCS) -c "$<" -o "$@")
-$(TARGET): $(OBJS) | $(OBJ_DIR)
-	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) $(LIBDIRS) $(LIBS))
+# SNESTICLE_QUICKNES_ALWAYS_SUBMAKE
+.PHONY: FORCE_QUICKNES
+FORCE_QUICKNES:
+
+$(QUICKNES_LIB): FORCE_QUICKNES
+	@echo "[ QuickNES ] Building PS2 static core"
+	@PATH="$(PS2DEV)/ee/bin:$(PS2DEV)/bin:$(PS2SDK)/bin:$$PATH" \
+	$(MAKE) -C "$(QUICKNES_DIR)" \
+		platform=ps2 \
+		PS2DEV="$(PS2DEV)" \
+		PS2SDK="$(PS2SDK)" \
+		all
+
+$(TARGET): $(OBJS) $(QUICKNES_LIB) | $(OBJ_DIR)
+	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) "$(QUICKNES_LIB)" $(LIBDIRS) $(LIBS))
 
 $(TARGET_STRIPPED): $(TARGET)
 	@cp -f "$(TARGET)" "$@"

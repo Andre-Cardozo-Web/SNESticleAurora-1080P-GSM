@@ -74,7 +74,7 @@
 #endif
 
 #ifndef MAINLOOP_MAXSRAMSIZE
-#define MAINLOOP_MAXSRAMSIZE (64 * 1024)
+#define MAINLOOP_MAXSRAMSIZE (512 * 1024)
 #endif
 
 
@@ -126,6 +126,7 @@ extern AudMixBuffer *_AudMix;
    any consumer falls back to the legacy hardcoded layout. */
 extern Uint32 _MainLoop_uOutTexTBP;
 extern Uint32 _MainLoop_uBlenderTBP;
+extern Uint32 g_FakeSRAMSize;
 #ifdef DEBUG
 extern CWavFile _WavFile;
 #endif

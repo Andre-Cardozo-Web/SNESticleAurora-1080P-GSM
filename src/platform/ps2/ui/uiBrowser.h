@@ -60,6 +60,7 @@ class CBrowserScreen : public CScreen
 	CMenuScreen m_SubMenu;
 	Bool	m_bStateManager;
 	Bool	m_bHasExecutables;
+Bool m_bSramManager;
 
 	static int MenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2);
 	Bool EnsureEntryCapacity(Int32 nRequired);
@@ -84,7 +85,7 @@ public:
 	void Chdir(const Char *pSubDir);
 	void RefreshRootDevices();
 	void SetStateManager(Bool bEnabled) { m_bStateManager = bEnabled; }
-
+void SetSramManager(Bool bEnabled) { m_bSramManager = bEnabled; }
 };
 
 #endif

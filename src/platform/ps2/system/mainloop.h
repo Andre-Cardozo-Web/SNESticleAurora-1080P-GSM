@@ -6,5 +6,5 @@
 Bool MainLoopInit();
 Bool MainLoopProcess();
 void MainLoopShutdown();
-
+void MainResetEmulator(void);
 #endif

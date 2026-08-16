@@ -102,7 +102,7 @@ private:
 	Bool		m_bSuperFX;   // cartucho usa SuperFX/GSU -> rotear $3000-34FF
 
 	SnesRom		*m_pRom;
-
+Bool            m_bRegionLocked;
 	SnesPPURender	m_PPURender;
 	SNSpcDspMixFull		m_SpcDspMixer;		    // non-deterministic mixer
 	SNSpcDspMixSilent	m_SpcDspSilentMixer;    // deterministic mixer

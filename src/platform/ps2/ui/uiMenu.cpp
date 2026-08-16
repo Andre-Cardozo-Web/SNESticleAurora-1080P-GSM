@@ -150,10 +150,10 @@ void CMenuScreen::Input(Uint32 buttons, Uint32 trigger)
 	if (m_iSelect < 0) m_iSelect = 0;
  	if (m_iSelect > (m_nItems - 1)) m_iSelect = (m_nItems - 1);
 
-	if (trigger & (PAD_CIRCLE | PAD_START))
-{
-    SendMessage(1, m_iSelect, m_pUserData);
-}
+	if (trigger & (PAD_CROSS | PAD_START))
+	{
+		SendMessage(1, m_iSelect, m_pUserData);
+	}
 
 }
 

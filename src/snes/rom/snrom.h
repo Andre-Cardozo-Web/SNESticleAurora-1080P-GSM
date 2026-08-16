@@ -22,6 +22,18 @@ enum SNRomVideoE
 	SNROM_VIDEO_NUM
 };
 
+enum SnesForceRegionE
+{
+    SNES_FORCE_REGION_OFF,
+    SNES_FORCE_REGION_NTSC_U,
+    SNES_FORCE_REGION_NTSC_J,
+    SNES_FORCE_REGION_PAL,
+
+    SNES_FORCE_REGION_NUM
+};
+
+extern SnesForceRegionE g_SnesForceRegion;
+
 enum SNRomMappingE
 {
 	SNROM_MAPPING_LOROM,
@@ -43,7 +55,9 @@ enum SNRomMappingE
 #define SNROM_FLAG_SDD1		0x200
 #define SNROM_FLAG_SRTC		0x400
 #define SNROM_FLAG_DSP3		0x800
-#define SNROM_FLAG_DSP4		0x1000
+#define SNROM_FLAG_DSP4    0x1000
+
+extern Uint32 g_FakeSRAMSize;
 
 struct SNRomInfoT
 {

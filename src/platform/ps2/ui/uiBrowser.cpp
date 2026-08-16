@@ -21,6 +21,7 @@
 #endif
 #include "poly.h"
 #include "uiBrowser.h"
+#include "mainloop_menu.h"
 #include "uiCover.h"
 #include "mainloop_bgm.h"
 #include "mainloop_smb.h"
@@ -73,6 +74,15 @@ static Bool BrowserIsSramDirectoryName(const Char *pName)
 {
 	return pName &&
 	       (!strcasecmp(pName, "SNES") || !strcasecmp(pName, "NES"));
+}
+
+static Bool BrowserIsSramFileName(const Char *pName)
+{
+    size_t nLength = pName ? strlen(pName) : 0;
+
+    return nLength >= 4 &&
+           pName[nLength - 4] == '.' &&
+           !strcasecmp(pName + nLength - 3, "srm");
 }
 
 static Bool BrowserIsSmbPath(const Char *pPath)
@@ -884,6 +894,7 @@ CBrowserScreen::CBrowserScreen(Uint32 uMaxEntries)
 	m_bMCDir = FALSE;
 	m_bSubMenu = FALSE;
 	m_bStateManager = FALSE;
+m_bSramManager = FALSE;
 	m_bHasExecutables = FALSE;
 	m_pDirEntries = NULL;
 
@@ -1509,10 +1520,16 @@ void CBrowserScreen::Input(Uint32 buttons, Uint32 trigger)
 		m_iScroll = m_iSelect - m_MaxLines + 1;
 	}
 
-	if (trigger & PAD_TRIANGLE)
+if (trigger & PAD_TRIANGLE)
+{
+    if (m_bStateManager || m_bSramManager)
     {
-        Chdir("..");
+        _MainLoopStateBrowserReturn();
+        return;
     }
+
+    Chdir("..");
+}
 
 	if (trigger & (PAD_CROSS | PAD_START))
 	{
@@ -1640,93 +1657,120 @@ void CBrowserScreen::SetDir(const Char *pDir)
 		/* falha ao montar a particao -> lista vazia (sem crashar) */
 	}
 	else if (strlen(openPath) > 0)
-	{
-		int dfd = BrowserOpenDirectory(openPath);
-		if (dfd >= 0)
-		{
-			iox_dirent_t de;
-			int dreadResult;
-			while ((dreadResult = fileXioDread(dfd, &de)) > 0)
-			{
-				BrowserEntryTypeE eType;
-				BrowserEntryTypeE resolvedType;
-				Bool bIsDir;
-				Int32 nSize;
+{
+    int dfd = BrowserOpenDirectory(openPath);
 
-				/* Be defensive with third-party iomanX drivers that fill all
-				   256 bytes without writing a final NUL. */
-				de.name[sizeof(de.name) - 1] = '\0';
-				if (!de.name[0] || !strcmp(de.name, ".") || !strcmp(de.name, ".."))
-					continue;
-				if (m_bStateManager && BrowserIsSramDirectoryName(de.name))
-					continue;
-				if (BrowserIsCoverMetadataName(de.name))
-					continue;
+    if (dfd >= 0)
+    {
+        iox_dirent_t de;
+        int dreadResult;
 
-				/* Hide cover-art PNGs from the browser list - they are
-				   artwork for the cover system, not ROMs. */
-				{
-					size_t nLength = strlen(de.name);
-					if (nLength >= 4 &&
-					    strcasecmp(de.name + nLength - 4, ".png") == 0)
-						continue;
-				}
+        while ((dreadResult = fileXioDread(dfd, &de)) > 0)
+        {
+            BrowserEntryTypeE eType;
+            BrowserEntryTypeE resolvedType;
+            Bool bIsDir;
+            Int32 nSize;
 
-				resolvedType = (BrowserEntryTypeE)SendMessage(
-					2, 0, (void *)de.name);
+            /* Be defensive with third-party iomanX drivers that fill all
+               256 bytes without writing a final NUL. */
+            de.name[sizeof(de.name) - 1] = '\0';
 
-				/* Recognised ROM extensions win over the directory flag and never
-				   need a getstat/dopen fallback. This
-				   keeps compatibility with old CDVD drivers whose dread result
-				   occasionally leaked a SUBDIR bit into regular files, without
-				   paying for a stat() call per ROM. */
-				if (resolvedType == BROWSER_ENTRYTYPE_EXECUTABLE)
-				{
-					eType = BROWSER_ENTRYTYPE_EXECUTABLE;
-				}
-				else
-				{
-					bIsDir = BrowserResolveDirectory(
-						openPath, de.name, de.stat.mode);
-					if (bIsDir)
-					{
-						eType = BROWSER_ENTRYTYPE_DIR;
-					}
-					else
-					{
-					/* The dedicated manager must never invite deletion of
-					   SRAM, state.cfg, icons, or unrelated files that share
-					   mc0:/SNESticle with memory-card state banks. */
-						if (m_bStateManager &&
-						    !BrowserIsStateBankName(de.name))
-							continue;
-						eType = BROWSER_ENTRYTYPE_OTHER;
-					}
-				}
+            if (!de.name[0] ||
+                !strcmp(de.name, ".") ||
+                !strcmp(de.name, ".."))
+                continue;
 
-				/* BrowserEntryT keeps a legacy signed 32-bit display size. The
-				   size column is disabled, but clamp instead of wrapping huge
-				   files negative. */
-				if (de.stat.hisize != 0 || de.stat.size > (unsigned int)INT_MAX)
-					nSize = INT_MAX;
-				else
-					nSize = (Int32)de.stat.size;
+            if (m_bStateManager &&
+                BrowserIsSramDirectoryName(de.name))
+                continue;
 
-				if (!AddEntry(de.name, eType, nSize))
-					break;
-			}
-			fileXioDclose(dfd);
-			if (dreadResult < 0 && BrowserIsSmbPath(openPath))
-			{
-				SmbReportBrowseError(dreadResult);
-				MainLoopModalPrintf(60 * 2, "SMB: %s", SmbGetStatusText());
-			}
-		}
-		else if (BrowserIsSmbPath(openPath))
-		{
-			MainLoopModalPrintf(60 * 2, "SMB: %s\nCheck config/network", SmbGetStatusText());
-		}
-	} else
+            if (BrowserIsCoverMetadataName(de.name))
+                continue;
+
+            /* Hide cover-art PNGs from the browser list. */
+            {
+                size_t nLength = strlen(de.name);
+
+                if (nLength >= 4 &&
+                    strcasecmp(de.name + nLength - 4, ".png") == 0)
+                    continue;
+            }
+
+            resolvedType = (BrowserEntryTypeE)SendMessage(
+                2, 0, (void *)de.name);
+
+            if (resolvedType == BROWSER_ENTRYTYPE_EXECUTABLE)
+            {
+                eType = BROWSER_ENTRYTYPE_EXECUTABLE;
+            }
+            else
+            {
+                bIsDir = BrowserResolveDirectory(
+                    openPath,
+                    de.name,
+                    de.stat.mode
+                );
+
+                if (bIsDir)
+                {
+                    eType = BROWSER_ENTRYTYPE_DIR;
+                }
+                else
+                {
+                    if (m_bStateManager)
+                    {
+                        if (!BrowserIsStateBankName(de.name))
+                            continue;
+                    }
+                    else if (m_bSramManager)
+                    {
+                        if (!BrowserIsSramFileName(de.name))
+                            continue;
+                    }
+
+                    eType = BROWSER_ENTRYTYPE_OTHER;
+                }
+            }
+
+            /* BrowserEntryT keeps a legacy signed 32-bit display size. */
+            if (de.stat.hisize != 0 ||
+                de.stat.size > (unsigned int)INT_MAX)
+            {
+                nSize = INT_MAX;
+            }
+            else
+            {
+                nSize = (Int32)de.stat.size;
+            }
+
+            if (!AddEntry(de.name, eType, nSize))
+                break;
+        }
+
+        fileXioDclose(dfd);
+
+        if (dreadResult < 0 &&
+            BrowserIsSmbPath(openPath))
+        {
+            SmbReportBrowseError(dreadResult);
+            MainLoopModalPrintf(
+                60 * 2,
+                "SMB: %s",
+                SmbGetStatusText()
+            );
+        }
+    }
+    else if (BrowserIsSmbPath(openPath))
+    {
+        MainLoopModalPrintf(
+            60 * 2,
+            "SMB: %s\nCheck config/network",
+            SmbGetStatusText()
+        );
+    }
+}
+else
 	{
         AddEntry("cdfs:", BROWSER_ENTRYTYPE_DRIVE, 0);
 //        AddEntry("cdrom:", BROWSER_ENTRYTYPE_DRIVE, 0);

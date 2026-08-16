@@ -433,6 +433,20 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 
 	pSystem->Reset();
 
+    /* SNESTICLE_QUICKNES_REQUIRE_ROM_READY
+     * QuickNES only runs a successfully opened .nes cartridge. SetRom()
+     * deliberately rejects FDS/non-cartridge images and can also reject an
+     * unsupported mapper. Do not publish that half-loaded NesSystem to the
+     * frame loop. */
+    if (pSystem == _pNes && !_pNes->IsRomReady())
+    {
+        printf("[QuickNES] ROM rejected; aborting launch before mainloop\n");
+        _MainLoopUnloadRom();
+        MainLoopModalPrintf(60 * 3,
+            "ERROR: QuickNES cannot run this NES image (format/mapper/FDS)");
+        return FALSE;
+    }
+
     _pSystem = pSystem;
     snprintf(_RomPath, sizeof(_RomPath), "%s", OriginalPath);
     MainLoopStateOnRomChanged();

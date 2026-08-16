@@ -165,8 +165,10 @@ public:
 	SnesPPU();
 
 	void                    Reset();
+	void                    SoftReset();
 	void                    BeginFrame();
 	void                    EndFrame();
+void SetRegionPAL(Bool bPAL);
 	void                    SetPPURender(ISnesPPURender *pPPURender)    {m_pRender=pPPURender;}
 
 	const SnesPPURegsT *    GetRegs() const                             {return &m_Regs;}

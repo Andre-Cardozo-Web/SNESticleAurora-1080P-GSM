@@ -18,7 +18,9 @@ BYTE InfoNES_pAPUReadStatus(void);
 void InfoNES_pAPUInit(void);
 void InfoNES_pAPUDone(void);
 void InfoNES_pAPUVsync(void);
-
+void InfoNES_pAPUSetDutySwap(int bEnable);
+void InfoNES_pAPUSetDutySwap(int bEnable);
+void InfoNES_pAPUSoftReset(void);
 /* Opaque, pointer-free APU snapshot used by the NES save-state layer. */
 #define INFONES_APU_STATE_MAX (16 * 1024)
 int InfoNES_pAPUSaveState(void *pState, int nStateBytes);

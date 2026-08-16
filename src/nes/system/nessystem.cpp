@@ -220,7 +220,7 @@ void NesSystem::SetRom(Emu::Rom *pRom)
     /* Battery RAM belongs to the newly inserted cartridge. Clear the
        previous game's bytes before the frontend attempts to load its .srm.
        An iNES trainer is mapped at CPU $7000-$71ff (SRAM + $1000). */
-    memset(SRAM, 0xFE, SRAM_SIZE);
+    
     if (pTrainer)
         memcpy(SRAM + 0x1000, pTrainer, 512);
 
@@ -284,7 +284,12 @@ void NesSystem::Reset()
 
 void NesSystem::SoftReset()
 {
-    Reset();
+    m_uFrameTick = 0;
+    m_uFrame     = 0;
+    m_uLine      = 0;
+
+    if (m_bRomReady)
+        InfoNES_SoftReset();
 }
 
 

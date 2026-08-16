@@ -6,6 +6,8 @@
 #include "snrom.h"
 #include "dataio.h"
 #include "sndbglog.h"
+Uint32 g_FakeSRAMSize = 0;
+SnesForceRegionE g_SnesForceRegion = SNES_FORCE_REGION_OFF;
 
 /* Pontua um header LoROM candidato em 'base' (deslocamento do $FFC0 da
    metade). Usado para descobrir QUAL metade de uma ROM ExLoROM contem o
@@ -444,22 +446,29 @@ void SnesRom::SetCartInfo(SNRomInfoT *pCartInfo)
 
 		m_eVideoType = pCountry ? pCountry->eVideoType : SNROM_VIDEO_NTSC;
 		m_uROMSize	  = 1 << (pCartInfo->RomSize - 7);
-		switch (pCartInfo->SRAMSize)
-		{
-		default:
-		case 0:
-			m_uSRAMSize = 0;
-			break;
-		case 1:
-			m_uSRAMSize = 16;
-			break;
-		case 2:
-			m_uSRAMSize = 32;
-			break;
-		case 3:
-			m_uSRAMSize = 64;
-			break;
-		}
+		if (g_FakeSRAMSize)
+{
+    m_uSRAMSize = g_FakeSRAMSize;
+}
+else
+{
+    switch (pCartInfo->SRAMSize)
+    {
+    default:
+    case 0:
+        m_uSRAMSize = 0;
+        break;
+    case 1:
+        m_uSRAMSize = 16;
+        break;
+    case 2:
+        m_uSRAMSize = 32;
+        break;
+    case 3:
+        m_uSRAMSize = 64;
+        break;
+    }
+}
 		switch (pCartInfo->RomType)
 		{
 		case 0:

@@ -126,6 +126,16 @@ void MainSetBootDir(const char *pPath)
 	}
 }
 
+void MainResetEmulator(void)
+{
+    const char *pBootPath = MainGetBootPath();
+
+    if (!pBootPath || !pBootPath[0])
+        return;
+
+    LoadExecPS2(pBootPath, 0, NULL);
+}
+
 /* Your program's main entry point */
 int main(int argc, char **argv) 
 {

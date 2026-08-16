@@ -142,7 +142,11 @@ static const MainLoopStateManagerStorageT _MainLoop_StateManagerStorage[] =
 
 static Int32 _MainLoop_StateManagerStorageIndex =
         MAINLOOP_STATEMANAGER_MASS0;
+
+static CScreen *_MainLoop_StateBrowserPreviousScreen = NULL;
+
 static char _MainLoop_StateManagerBrowseEntry[] = "Browse State Files";
+static char _MainLoop_StateManagerBrowseSramEntry[] = "Browse SRAM Files";
 static char _MainLoop_StateManagerStorageEntry[48];
 static char _MainLoop_StateManagerSlotEntry[32];
 static char _MainLoop_StateManagerResetEntry[] = "Ask Save Location Again";
@@ -151,6 +155,7 @@ static char _MainLoop_StateManagerStatus[64];
 char *_MainLoopStateMenuEntries[] =
 {
         _MainLoop_StateManagerBrowseEntry,
+        _MainLoop_StateManagerBrowseSramEntry,
         _MainLoop_StateManagerStorageEntry,
         _MainLoop_StateManagerSlotEntry,
         _MainLoop_StateManagerResetEntry,
@@ -284,41 +289,82 @@ int _MainLoopStateMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
         switch (Parm1)
         {
                 case 0:
-                        if ((_MainLoop_StateManagerStorageIndex ==
-                             MAINLOOP_STATEMANAGER_MC0 ||
-                             _MainLoop_StateManagerStorageIndex ==
-                             MAINLOOP_STATEMANAGER_MC1))
-                        {
-                                Int32 iPort =
-                                        _MainLoop_StateManagerStorageIndex ==
-                                        MAINLOOP_STATEMANAGER_MC0 ? 0 : 1;
+    if ((_MainLoop_StateManagerStorageIndex ==
+         MAINLOOP_STATEMANAGER_MC0 ||
+         _MainLoop_StateManagerStorageIndex ==
+         MAINLOOP_STATEMANAGER_MC1))
+    {
+        Int32 iPort =
+            _MainLoop_StateManagerStorageIndex ==
+            MAINLOOP_STATEMANAGER_MC0 ? 0 : 1;
 
-                                if (MemCardGetStatus(iPort) ==
-                                    MEMCARD_STATUS_UNFORMATTED)
-                                {
-                                        _MainLoopMemCardFormatPromptOpen(
-                                                iPort,
-                                                MAINLOOP_MEMCARDFORMAT_BROWSE
-                                        );
-                                        break;
-                                }
-                        }
-                        _MainLoopSetScreen(
-                                (CScreen *)_MainLoop_pStateBrowserScreen
-                        );
-                        _MainLoop_pStateBrowserScreen->SetDir(
-                                _MainLoop_StateManagerStorage[
-                                        _MainLoop_StateManagerStorageIndex
-                                ].pPath
-                        );
-                        break;
+        if (MemCardGetStatus(iPort) ==
+            MEMCARD_STATUS_UNFORMATTED)
+        {
+            _MainLoopMemCardFormatPromptOpen(
+                iPort,
+                MAINLOOP_MEMCARDFORMAT_BROWSE
+            );
+            break;
+        }
+    }
+
+_MainLoop_pStateBrowserScreen =
+    new CBrowserScreen(1024);
+
+_MainLoop_pStateBrowserScreen->SetMsgFunc(
+    _MainLoopStateBrowserEvent
+);
+
+_MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
+    _MainLoop_pStateBrowserScreen->SetSramManager(FALSE);
+
+    _MainLoopSetScreen(
+        (CScreen *)_MainLoop_pStateBrowserScreen
+    );
+
+    _MainLoop_pStateBrowserScreen->SetDir(
+        _MainLoop_StateManagerStorage[
+            _MainLoop_StateManagerStorageIndex
+        ].pPath
+    );
+    break;
 
                 case 1:
+{
+    const Char *pSystemDir =
+        (_pSystem == _pNes) ? "NES" : "SNES";
+
+    Char SramDir[1024];
+
+    _MainLoop_StateBrowserPreviousScreen =
+        _MainLoop_pStateScreen;
+
+    _MainLoop_pStateBrowserScreen->SetStateManager(FALSE);
+    _MainLoop_pStateBrowserScreen->SetSramManager(TRUE);
+
+    snprintf(
+        SramDir,
+        sizeof(SramDir),
+        "%s/%s/",
+        _SramPath,
+        pSystemDir
+    );
+
+    _MainLoopSetScreen(
+        (CScreen *)_MainLoop_pStateBrowserScreen
+    );
+
+    _MainLoop_pStateBrowserScreen->SetDir(SramDir);
+    break;
+}
+
+                case 2:
                         _MainLoopStateManagerCycleStorage();
                         _MainLoopStateMenuRefresh();
                         break;
 
-                case 2:
+                case 3:
                         MainLoopStateCycleSlot();
                         if (MainLoopStateHasDeviceChoice())
                         {
@@ -327,7 +373,7 @@ int _MainLoopStateMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
                         _MainLoopStateMenuRefresh();
                         break;
 
-                case 3:
+                case 4:
                         MainLoopStateForgetDeviceChoice();
                         _MainLoopStateMenuRefresh();
                         MainLoopModalPrintf(
@@ -349,8 +395,24 @@ static char *_MainLoop_StateDeviceEntries[MAINLOOP_STATEDEVICE_NUM + 1];
 static MainLoopStateDeviceE
         _MainLoop_StateDeviceMap[MAINLOOP_STATEDEVICE_NUM];
 static Int32 _MainLoop_StateDeviceEntryCount = 0;
-static CScreen *_MainLoop_StateDevicePreviousScreen = NULL;
 
+static CScreen *_MainLoop_StateDevicePreviousScreen = NULL;
+void _MainLoopStateBrowserReturn(void)
+{
+    if (_MainLoop_StateBrowserPreviousScreen)
+    {
+        _MainLoopSetScreen(
+            _MainLoop_StateBrowserPreviousScreen
+        );
+        _MainLoop_StateBrowserPreviousScreen = NULL;
+    }
+
+    if (_MainLoop_pStateBrowserScreen)
+    {
+        _MainLoop_pStateBrowserScreen->SetStateManager(FALSE);
+        _MainLoop_pStateBrowserScreen->SetSramManager(FALSE);
+    }
+}
 static void _MainLoopStateDeviceAddEntry(
         MainLoopStateDeviceE eDevice,
         char *pEntry)

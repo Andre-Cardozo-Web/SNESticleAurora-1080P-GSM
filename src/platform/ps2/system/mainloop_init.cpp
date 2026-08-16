@@ -449,7 +449,17 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 		PathExtAdd(MAINLOOP_ENTRYTYPE_NESFDSBIOS, _pNesFDSBios->GetExtName(iExt));
 	}
 
-	s_pMovieClip = new Emu::MovieClip(_pSnes->GetStateSize(), 60 * 60 * 60);
+	/* SNESTICLE_MOVIE_MAX_SYSTEM_STATE
+	 * MovieClip::RecordBegin changes m_uStateSize to the ACTIVE system and
+	 * asserts it is <= the constructor maximum. Allocate for whichever
+	 * core has the larger frontend state envelope instead of assuming SNES. */
+	{
+		Uint32 uMovieStateBytes = (Uint32)_pSnes->GetStateSize();
+		Uint32 uNesStateBytes   = (Uint32)_pNes->GetStateSize();
+		if (uNesStateBytes > uMovieStateBytes)
+			uMovieStateBytes = uNesStateBytes;
+		s_pMovieClip = new Emu::MovieClip(uMovieStateBytes, 60 * 60 * 60);
+	}
 
 	// init menu
 	_MainLoop_pBrowserScreen = new CBrowserScreen(6000);

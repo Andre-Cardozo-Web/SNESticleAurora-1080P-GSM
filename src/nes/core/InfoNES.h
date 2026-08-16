@@ -293,6 +293,13 @@ int InfoNES_Load( const char *pszFileName );
 /* Reset InfoNES */
 int InfoNES_Reset();
 
+
+
+/* Soft reset InfoNES without clearing RAM/SRAM/PPU RAM */
+int InfoNES_SoftReset();
+
+
+
 /* Initialize PPU */
 void InfoNES_SetupPPU();
 

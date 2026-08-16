@@ -25,4 +25,5 @@ void _MainLoopMemCardFormatPromptCancel();
 int _MainLoopLogEvent(Uint32 Type, Uint32 Parm1, void *Parm2);
 extern const char *_MainLoopMenuEntries[];
 extern char *_MainLoopStateMenuEntries[];
+void _MainLoopStateBrowserReturn(void);
 extern char *_MainLoop_pInstallFiles[];

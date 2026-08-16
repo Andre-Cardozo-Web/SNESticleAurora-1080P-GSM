@@ -13,3 +13,7 @@ build/
 
 # Local PS2DEV environment
 .ps2dev-env
+
+# Editor/temp files
+.#*
+*~

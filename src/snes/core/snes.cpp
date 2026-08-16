@@ -11,6 +11,7 @@
 #include "sndebug.h"
 #include "sndbglog.h"
 
+
 // --- diagnostico de TIMING (ver sndbglog.h) ---
 #if SNDBG_LOG
 static Uint32 g_TmgFrameStart = 0;   // COP0 cycle no inicio do frame
@@ -1058,8 +1059,9 @@ void SnesSystem::Reset()
 	memset(_CPUHackMem, 0, sizeof(_CPUHackMem));
 #endif
 
-	memset(m_Ram, 0, sizeof(m_Ram));
-	memset(m_SRam, 0, sizeof(m_SRam));
+memset(m_Ram, 0x00, sizeof(m_Ram));
+if (m_uSramSize)
+    memset(m_SRam, 0xFF, m_uSramSize);
 
 	// reset cpu
 	SNCPUReset(&m_Cpu, true);
@@ -1071,9 +1073,51 @@ void SnesSystem::Reset()
 
 void SnesSystem::SoftReset()
 {
-	// reset cpu
-	SNCPUReset(&m_Cpu, false);
-	SNSPCReset(&m_Spc, false);
+    /*
+     * Soft reset:
+     * reset the console hardware state without clearing RAM, SRAM,
+     * VRAM, CGRAM or OAM.
+     */
+
+    SetSlowRom();
+
+    m_PPU.SoftReset();
+    m_DMAC.Reset();
+    m_IO.Reset();
+    m_SpcIO.Reset();
+    m_SpcDsp.Reset();
+    m_SpcDspMixer.Reset();
+    m_SpcDspSilentMixer.Reset();
+
+#ifdef SNES_DSP1
+    if (m_pDsp)
+    {
+        m_pDsp->Reset();
+    }
+#endif
+
+    m_OBC1.Reset();
+    m_CX4.Reset();
+    m_GSU.Reset();
+    m_SDD1.Reset();
+
+    /*
+     * Do not randomize or clear main RAM/SRAM here.
+     */
+SNCPUResetCounters(&m_Cpu);
+SNSPCResetCounters(&m_Spc);
+
+SNCPUReset(&m_Cpu, false);
+m_Cpu.Regs.rS.w = 0x01FF;
+m_Cpu.Regs.rDP = 0;
+m_Cpu.Regs.rDB = 0;
+m_Cpu.Regs.rX.b.h = 0;
+m_Cpu.Regs.rY.b.h = 0;
+
+SNSPCReset(&m_Spc, false);
+
+m_uFrame = 0;
+m_uLine = 0;
 }
 
 
@@ -1389,6 +1433,25 @@ void SnesSystem::ExecuteLine()
 
 void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, CMixBuffer *pSound, ModeE eMode)
 {
+Bool bPAL = FALSE;
+
+if (g_SnesForceRegion == SNES_FORCE_REGION_PAL)
+{
+    bPAL = TRUE;
+}
+else
+if (g_SnesForceRegion == SNES_FORCE_REGION_NTSC_U ||
+    g_SnesForceRegion == SNES_FORCE_REGION_NTSC_J)
+{
+    bPAL = FALSE;
+}
+else
+if (m_pRom)
+{
+    bPAL = (m_pRom->m_eVideoType == SNROM_VIDEO_PAL);
+}
+
+m_PPU.SetRegionPAL(bPAL);
     m_uLine = 0;
 
 #if SNDBG_LOG
@@ -1499,7 +1562,7 @@ void SnesSystem::ExecuteFrame(Emu::SysInputT  *pInput, CRenderSurface *pTarget, 
     m_IO.m_Regs.rdnmi |= 0x80;
     SNCPUSignalNMI(&m_Cpu, m_IO.m_Regs.rdnmi & m_IO.m_Regs.nmitimen & 0x80);
 
-    for ( ; m_uLine < 262; m_uLine++)
+    for ( ; m_uLine < (bPAL ? 312 : 262); m_uLine++)
 	{
 		ExecuteLine();
 
