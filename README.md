@@ -15,7 +15,7 @@ Keep in mind: this fork uses **AI-generated code** but it's always tested by me,
 **FEATURES ADDED:**
 
 * QuickNES for NES games
-* Fixes and improvements for the 240p display modes
+* Fixes and improvements for the 240p display modes, improved screen positioning and overscan settings for each system and graphical resolution/modes.
 * "Dirty fix" for font rendering in 240p *(a better fix should be implemented in the future)*
 * Changed SRAM and RAM initialization for both NES and SNES. This will fix all the very few games that rely on specific initial values to work properly.
 * Turbo B/A for NES games
@@ -25,14 +25,12 @@ Keep in mind: this fork uses **AI-generated code** but it's always tested by me,
 * In-game soft reset (L2+SELECT)
 * Famiclone audio option (swap duty cycles)
 * Option to reload the .elf
-
 *(**NOTE**: to find the options above, go to the Video Settings and change to page 2 with the circle button.)*
 
 **TO BE FIXED:**
 
-* Save and load states in QuickNES
+...
 
 **TO BE ADDED:**
 
-* Individual and improved screen positioning and overscan options for each system and graphical resolution/modes.
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!
