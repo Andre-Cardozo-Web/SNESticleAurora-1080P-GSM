@@ -440,7 +440,7 @@ static int SmbWriteConfigFile(const char *path, const SmbConfigT *config)
         return -1;
 
     ok = fprintf(file,
-                 "# SNESticle Revive SMB configuration\n"
+                 "# SNESticle Aurora SMB configuration\n"
                  "SERVER_IP=%s\n"
                  "SERVER_PORT=%d\n"
                  "SHARE=%s\n"

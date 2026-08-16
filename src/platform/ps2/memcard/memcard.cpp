@@ -171,7 +171,7 @@ int MemCardCreateSave(char *pDir, char *pTitle, Bool bForceWrite)
 	strcpy((char *)icon_sys.head, "PS2D");
 	/* Titulo em Shift-JIS fullwidth (obrigatorio no OSDSYS). */
 	_TitleToSjis((unsigned char *)&icon_sys.title, pTitle);
-	/* nlOffset = byte onde a 2a linha comeca.  "SNESticle Revive" = 16
+	/* nlOffset = byte onde a 2a linha comeca.  "SNESticle Aurora" = 16
 	   chars * 2 bytes = 32 bytes; nlOffset=32 (= fim do texto) deixa
 	   tudo numa LINHA SO' (2a linha vazia). */
 	icon_sys.nlOffset = 32;

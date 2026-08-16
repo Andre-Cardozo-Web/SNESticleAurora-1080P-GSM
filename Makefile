@@ -46,9 +46,9 @@ SRC_DIR := $(CURDIR)/src
 OBJ_DIR := $(CURDIR)/build
 PKG_DIR := $(OBJ_DIR)/pkg
 EMBED_DIR := $(OBJ_DIR)/embed
-TARGET        := $(OBJ_DIR)/SNESticle_Aurora.elf
-TARGET_STRIPPED := $(OBJ_DIR)/SNESticle_Aurora.stripped.elf
-TARGET_PACKED := $(OBJ_DIR)/SNESticle_Aurora.packed.elf
+TARGET        := $(OBJ_DIR)/SNESticle.elf
+TARGET_STRIPPED := $(OBJ_DIR)/SNESticle.stripped.elf
+TARGET_PACKED := $(OBJ_DIR)/SNESticle.packed.elf
 BIN2C   ?= $(PS2SDK)/bin/bin2c
 
 # QUICKNES_SNESTICLE_BEGIN

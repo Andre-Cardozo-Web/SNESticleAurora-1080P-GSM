@@ -192,9 +192,9 @@ void _MenuDraw()
 
 #ifdef APP_VERSION
     static const char *_AppVersionStr =
-        "SNESticle Revive PS2 v" APP_VERSION;
+        "SNESticle Aurora v" APP_VERSION;
 #else
-    static const char *_AppVersionStr = "SNESticle Revive PS2 v1.0.4";
+    static const char *_AppVersionStr = "SNESticle Aurora v1.0.4";
 #endif
     FontPuts(256 - 16 - FontGetStrWidth(_AppVersionStr),
              vy, _AppVersionStr);
