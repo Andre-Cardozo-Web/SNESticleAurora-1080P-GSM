@@ -159,6 +159,10 @@ void MainLoopRender()
  */
 PolyRect(0.0f, 2.0f, 256.0f, 240.0f);
         }
+        else if (_pSystem == _pSnes)
+        {
+PolyRect(0.0f, 8.0f, 256.0f, 240.0f);
+        }
         else
         {
 PolyRect(0.0f, 4.0f, 256.0f, 240.0f);

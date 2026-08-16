@@ -38,7 +38,8 @@ If the repository was cloned without `--recurse-submodules`, run
 **FEATURES ADDED:**
 
 * QuickNES for NES games
-* Improved SNES offset-per-tile rendering (including the Super Mario Bros. 2 curtain transition in Super Mario All-Stars)
+* Support for more NES mappers: 16, 18, 27, 48, 64, 65, 67, 72, 80, 82, 92, 99, 101, 105, 151, 153, 155, 158, 188, 216, and 552.
+* Improved SNES offset-per-tile rendering
 * Fixes and improvements for the 240p display modes, improved screen positioning and overscan settings for each system and graphical resolution/modes.
 * "Dirty fix" for font rendering in 240p *(a better fix should be implemented in the future)*
 * Changed SRAM and RAM initialization for both NES and SNES. This will fix all the very few games that rely on specific initial values to work properly.
@@ -48,7 +49,7 @@ If the repository was cloned without `--recurse-submodules`, run
 * Browse SRAM files
 * In-game soft reset (L2+SELECT)
 * Famiclone audio option (swap duty cycles)
-* Option to reload the .elf
+* Option to reload the emulator's .elf (very useful for upgrading and testing)
 
 *(**NOTE**: to find the options above, go to the Video Settings and change to page 2 with the circle button.)*
 
@@ -59,8 +60,8 @@ If the repository was cloned without `--recurse-submodules`, run
 **TO BE FIXED:**
 
 * Top Gear (SNES) performance is very slow
-* iNES mapper 206 (and many others)
 
 **TO BE ADDED:**
 
+* Every NES mapper possible!
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!
