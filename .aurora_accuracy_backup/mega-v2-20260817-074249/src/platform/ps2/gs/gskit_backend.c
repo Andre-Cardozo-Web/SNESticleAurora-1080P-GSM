@@ -71,26 +71,6 @@ GSGLOBAL *GSK_GetGlobal(void)
     return _pGsGlobal;
 }
 
-/* AURORA_MEGA_V2_GS_REFRESH_IMPL
- * PS2 NTSC VBlank is the 59.94-family clock, not exactly 60.000 Hz. Feeding
- * this rational to the audio mixer prevents a slow ring-buffer phase drift.
- */
-void GSK_GetRefreshRate(Uint32 *pNumerator, Uint32 *pDenominator)
-{
-    if (!pNumerator || !pDenominator) return;
-    if (_pGsGlobal && _pGsGlobal->Mode == GS_MODE_PAL)
-    {
-        *pNumerator = 50;
-        *pDenominator = 1;
-    }
-    else
-    {
-        *pNumerator = 60000;
-        *pDenominator = 1001;
-    }
-}
-
-
 /* Detect the console's TV region from the BIOS ROMVER region byte.
  *
  * This is the well-known, public technique used by uLaunchELF / OPL /

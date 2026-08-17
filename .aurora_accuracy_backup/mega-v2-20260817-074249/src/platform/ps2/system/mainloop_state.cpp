@@ -396,14 +396,6 @@ Bool _MainLoopCheckSRAM()
 {
     Int32 nSramBytes = _pSystem ? _pSystem->GetSRAMBytes() : 0;
 
-    /* AURORA_MEGA_V2_SNES_SRAM_NO_POLL
-       SNES SRAM is force-checked immediately when the in-game menu
-       opens, before the save decision. Therefore a 30-frame full
-       memory sweep during gameplay is redundant and can create a
-       small periodic EE workload spike on large SRAM carts. */
-    if (_pSystem == _pSnes)
-        return TRUE;
-
     if (nSramBytes > 0)
     {
         /* The inline auto-save trigger (decrement SaveCounter -> call

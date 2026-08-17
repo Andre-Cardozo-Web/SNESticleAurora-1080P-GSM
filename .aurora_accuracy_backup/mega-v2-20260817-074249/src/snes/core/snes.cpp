@@ -308,20 +308,6 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read2000(SNCpuT *pCpu, Uint32 uAddr)
 		pSnes->SyncSPC();
 		return pSnes->m_SpcIO.m_Regs.apu_r[uAddr & 3];
 	}
-
-	/* AURORA_MEGA_V2_PPU_READ_MDR
-	 * PPU1 write-only register reads expose the chip's MDR. */
-	switch (uAddr)
-	{
-	case 0x2104: case 0x2105: case 0x2106: case 0x2108:
-	case 0x2109: case 0x210A: case 0x2114: case 0x2115:
-	case 0x2116: case 0x2118: case 0x2119: case 0x211A:
-	case 0x2124: case 0x2125: case 0x2126: case 0x2128:
-	case 0x2129: case 0x212A:
-		return pSnes->m_PPU.GetPPU1MDR();
-	default:
-		break;
-	}
 /*	if (uAddr < 0x2140)
 	{
 		// ppu read
@@ -339,106 +325,68 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read2000(SNCpuT *pCpu, Uint32 uAddr)
 			pPPURegs->opvct.Reg.w = pSnes->m_uLine & 0x1FF;
 			pPPURegs->stat78 |= 0x40;
 		}
-		/* $2137 itself returns the S-CPU MDR; it does not drive a
-		   fresh PPU value onto the bus. */
-		return pCpu->uMDR;
+		return 0;
 
-	case 0x2138: // OAMDATAREAD (PPU1 MDR)
-		{
-			#if SNPPU_WRITEQUEUE
-			pSnes->SyncPPU();
-			#endif
-			Uint8 uData = pSnes->m_PPU.ReadOAMDATA();
-			pSnes->m_PPU.SetPPU1MDR(uData);
-			return uData;
-		}
+	case 0x2138: // read oam
+		#if SNPPU_WRITEQUEUE
+		pSnes->SyncPPU();
+		#endif
+        return pSnes->m_PPU.ReadOAMDATA();
 
-	case 0x213c: // OPHCT (PPU2 MDR; high read only replaces bit 0)
-		{
-			Bool bHigh = pPPURegs->ophct.bFlip;
-			Uint8 uData = pPPURegs->ophct.Read8();
-			if (bHigh)
-				uData = (Uint8)((pSnes->m_PPU.GetPPU2MDR() & 0xFE) | (uData & 1));
-			pSnes->m_PPU.SetPPU2MDR(uData);
-			return uData;
-		}
+	case 0x213c: // ophct
+		return pPPURegs->ophct.Read8();
 
-	case 0x213d: // OPVCT (PPU2 MDR; high read only replaces bit 0)
-		{
-			Bool bHigh = pPPURegs->opvct.bFlip;
-			Uint8 uData = pPPURegs->opvct.Read8();
-			if (bHigh)
-				uData = (Uint8)((pSnes->m_PPU.GetPPU2MDR() & 0xFE) | (uData & 1));
-			pSnes->m_PPU.SetPPU2MDR(uData);
-			return uData;
-		}
+	case 0x213d: // opvct
+		return pPPURegs->opvct.Read8();
 
-	case 0x213e: // STAT77: bit 4 comes from PPU1 MDR
-		{
-			Uint8 uData = (Uint8)((pSnes->m_PPU.GetPPU1MDR() & 0x10) |
-			                           (pPPURegs->stat77 & 0xCF));
-			pSnes->m_PPU.SetPPU1MDR(uData);
-			return uData;
-		}
+	case 0x213e: // stat77
+		return pPPURegs->stat77;
 
-	case 0x213f: // STAT78: bit 5 comes from PPU2 MDR
+	case 0x213f: // stat78
 		{
 			Uint8 uData = pPPURegs->stat78;
 			pPPURegs->ophct.Reset();
 			pPPURegs->opvct.Reset();
+			/* With WRIO.7 low the external latch input forces the latch
+			   status high. With software/external latching enabled, reading
+			   STAT78 acknowledges the stored latch event. */
 			if (!(pSnes->m_IO.m_Regs.wrio & 0x80))
 				uData |= 0x40;
 			else
 				pPPURegs->stat78 &= (Uint8)~0x40;
-			uData = (Uint8)((uData & 0xDF) | (pSnes->m_PPU.GetPPU2MDR() & 0x20));
-			pSnes->m_PPU.SetPPU2MDR(uData);
 			return uData;
 		}
-	case 0x2134: // MPYL (PPU1 MDR)
-	case 0x2135: // MPYM
-	case 0x2136: // MPYH
-		{
-			#if SNPPU_WRITEQUEUE
-			pSnes->SyncPPU();
-			#endif
-			Uint8 uData = (uAddr == 0x2134) ? pPPURegs->mpyl :
-			              (uAddr == 0x2135) ? pPPURegs->mpym : pPPURegs->mpyh;
-			pSnes->m_PPU.SetPPU1MDR(uData);
-			return uData;
-		}
+	case 0x2134: //mpyl
+		#if SNPPU_WRITEQUEUE
+		pSnes->SyncPPU();
+		#endif
+		return pPPURegs->mpyl;
+	case 0x2135: //mpym
+		#if SNPPU_WRITEQUEUE
+		pSnes->SyncPPU();
+		#endif
+		return pPPURegs->mpym;
+	case 0x2136: //mpyh
+		#if SNPPU_WRITEQUEUE
+		pSnes->SyncPPU();
+		#endif
+		return pPPURegs->mpyh;
+	case 0x2139:
+		#if SNPPU_WRITEQUEUE
+		pSnes->SyncPPU();
+		#endif
+		return pSnes->m_PPU.ReadVMDATAL();
+	case 0x213a:	// vmdatah (video port data hi)
+		#if SNPPU_WRITEQUEUE
+		pSnes->SyncPPU();
+		#endif
+		return pSnes->m_PPU.ReadVMDATAH();
 
-	case 0x2139: // VMDATALREAD (PPU1 MDR)
-		{
-			#if SNPPU_WRITEQUEUE
-			pSnes->SyncPPU();
-			#endif
-			Uint8 uData = pSnes->m_PPU.ReadVMDATAL();
-			pSnes->m_PPU.SetPPU1MDR(uData);
-			return uData;
-		}
-
-	case 0x213a: // VMDATAHREAD (PPU1 MDR)
-		{
-			#if SNPPU_WRITEQUEUE
-			pSnes->SyncPPU();
-			#endif
-			Uint8 uData = pSnes->m_PPU.ReadVMDATAH();
-			pSnes->m_PPU.SetPPU1MDR(uData);
-			return uData;
-		}
-
-	case 0x213b: // CGDATAREAD (PPU2 MDR)
-		{
-			#if SNPPU_WRITEQUEUE
-			pSnes->SyncPPU();
-			#endif
-			Bool bHigh = (pPPURegs->cgadd.w & 1) ? TRUE : FALSE;
-			Uint8 uData = pSnes->m_PPU.ReadCGDATA();
-			if (bHigh)
-				uData = (Uint8)((pSnes->m_PPU.GetPPU2MDR() & 0x80) | (uData & 0x7F));
-			pSnes->m_PPU.SetPPU2MDR(uData);
-			return uData;
-		}
+	case 0x213b:
+		#if SNPPU_WRITEQUEUE
+		pSnes->SyncPPU();
+		#endif
+		return pSnes->m_PPU.ReadCGDATA();
 
 	case 0x2180:	// WMDATA
 		{

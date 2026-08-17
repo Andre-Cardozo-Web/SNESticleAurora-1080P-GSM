@@ -198,15 +198,6 @@ void SetRegionPAL(Bool bPAL);
 	Uint8                   ReadVMDATAL();
 	Uint8                   ReadVMDATAH();
 
-	/* AURORA_MEGA_V2_PPU_MDR
-	 * Separate data-bus latches for the two S-PPU chips. These are
-	 * internal open-bus state, deliberately kept outside SnesPPURegsT
-	 * so the existing save-state/register layout stays unchanged. */
-	Uint8                   GetPPU1MDR() const { return m_PPU1MDR; }
-	Uint8                   GetPPU2MDR() const { return m_PPU2MDR; }
-	void                    SetPPU1MDR(Uint8 uData) { m_PPU1MDR = uData; }
-	void                    SetPPU2MDR(Uint8 uData) { m_PPU2MDR = uData; }
-
 
 	SnesColor16T            GetCG(Uint32 uEntry)  const                       {return m_CGRAM[uEntry];}
 	SnesColor16T *          GetCGData()                                       {return m_CGRAM;}
@@ -229,8 +220,6 @@ private:
 	Uint8                   m_OAMLatch;
 	/* AURORA_ACCURACY_PPU_LATCHES_V1 */
 	Uint8                   m_CGRAMLatch;
-	Uint8                   m_PPU1MDR;
-	Uint8                   m_PPU2MDR;
 
     ISnesPPURender *        m_pRender;
 

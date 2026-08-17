@@ -17,9 +17,6 @@ class AudMixBuffer : public CMixBuffer
     Uint32  m_uSampleRate;
     Bool    m_bAsync;
     Uint32  m_uFrameSamplePhase;
-    /* AURORA_MEGA_V2_AUDIO_CLOCK_FIELDS */
-    Uint32  m_uFrameRateNum;
-    Uint32  m_uFrameRateDen;
 
 	Uint32	m_uLastOutput;
 
@@ -34,16 +31,6 @@ public:
     {
         m_uSampleRate = uSampleRate;
         m_uFrameSamplePhase = 0;
-    }
-    void SetFrameRateRational(Uint32 uNumerator, Uint32 uDenominator)
-    {
-        if (!uNumerator || !uDenominator) return;
-        if (m_uFrameRateNum != uNumerator || m_uFrameRateDen != uDenominator)
-        {
-            m_uFrameRateNum = uNumerator;
-            m_uFrameRateDen = uDenominator;
-            m_uFrameSamplePhase = 0;
-        }
     }
 	Uint32 GetLastOutput() {return m_uLastOutput;}
     void Reset();

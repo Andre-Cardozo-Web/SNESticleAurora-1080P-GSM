@@ -19,7 +19,6 @@
 #include "mainloop_state.h"
 #include "mainloop_exec.h"
 #include "mainloop_iop.h"
-#include "gskit_backend.h"
 
 #include "types.h"
 #include "console.h"
@@ -226,15 +225,6 @@ Bool MainLoopProcess()
             }
             else
             {
-                /* AURORA_MEGA_V2_SNES_AUDIO_CLOCK
-                   Match produced PCM to the GS VBlank clock. Keep this
-                   SNES-only so the QuickNES path is unchanged. */
-                if (_AudMix)
-                {
-                    Uint32 uRateNum = 60, uRateDen = 1;
-                    GSK_GetRefreshRate(&uRateNum, &uRateDen);
-                    _AudMix->SetFrameRateRational(uRateNum, uRateDen);
-                }
                 _ExecuteSnes(pSurface, pMixBuffer, &Input, eMode);
             }
 		    _iframetex^=1;

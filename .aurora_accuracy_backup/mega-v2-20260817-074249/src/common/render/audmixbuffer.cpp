@@ -42,9 +42,6 @@ AudMixBuffer::AudMixBuffer(Uint32 uSampleRate, Bool bAsync)
 {
     m_uSampleRate = uSampleRate;
     m_bAsync      = bAsync;
-    /* AURORA_MEGA_V2_AUDIO_CLOCK_INIT */
-    m_uFrameRateNum = 60;
-    m_uFrameRateDen = 1;
     Reset();
 }
 
@@ -90,10 +87,8 @@ Int32 AudMixBuffer::GetOutputSamples()
      * audsrv pode ter underrun, mas nunca tentamos "pagar a divida" dobrando
      * o custo do mixer no proximo quadro.
      */
-    nSamples = AudFrameScheduleNextRational(&m_uFrameSamplePhase,
-                                            m_uSampleRate,
-                                            m_uFrameRateNum,
-                                            m_uFrameRateDen, 4);
+    nSamples = AudFrameScheduleNext(&m_uFrameSamplePhase,
+                                    m_uSampleRate, 60, 4);
 
     m_uLastOutput  = nSamples;
     return nSamples;

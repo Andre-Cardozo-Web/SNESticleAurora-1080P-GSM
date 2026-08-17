@@ -72,9 +72,6 @@ void GSK_ReinitVideo(void);
    GSK_ReinitVideo() runs. */
 int GSK_GetActiveVideoMode(void);
 
-/* AURORA_MEGA_V2_GS_REFRESH_DECL: exact presentation clock for audio pacing. */
-void GSK_GetRefreshRate(Uint32 *pNumerator, Uint32 *pDenominator);
-
 /* Returns the active gsKit global, or NULL if GSK_Init has not run. */
 struct gsGlobal *GSK_GetGlobal(void);
 

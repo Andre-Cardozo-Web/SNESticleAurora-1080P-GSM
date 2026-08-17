@@ -933,9 +933,6 @@ void SnesPPU::Reset()
 	m_pRender->UpdateVRAMRange(0, SNESPPU_VRAM_NUMWORDS);
 	m_OAMLatch = 0;
 	m_CGRAMLatch = 0;
-	/* AURORA_MEGA_V2_PPU_MDR_RESET */
-	m_PPU1MDR = 0;
-	m_PPU2MDR = 0;
 
 	// confirmed:
 	m_Regs.stat77 =  SNPPU_VERSION_5C77;
@@ -956,9 +953,6 @@ void SnesPPU::SoftReset()
     memset(&m_Regs, 0, sizeof(m_Regs));
     m_OAMLatch = 0;
     m_CGRAMLatch = 0;
-	/* AURORA_MEGA_V2_PPU_MDR_RESET */
-	m_PPU1MDR = 0;
-	m_PPU2MDR = 0;
 
     m_Regs.stat77 = SNPPU_VERSION_5C77;
     m_Regs.stat78 = SNPPU_VERSION_5C78;
@@ -969,8 +963,6 @@ SnesPPU::SnesPPU()
 	m_pRender = NULL;
 	m_OAMLatch = 0;
 	m_CGRAMLatch = 0;
-	m_PPU1MDR = 0;
-	m_PPU2MDR = 0;
 }
 
 #ifdef SNES_DEBUG

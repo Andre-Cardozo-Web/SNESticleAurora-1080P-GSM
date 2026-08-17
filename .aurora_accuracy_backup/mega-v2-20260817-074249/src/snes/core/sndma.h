@@ -63,8 +63,6 @@ private:
 
 	void                        TransferData(SnesDMAChT *pChan, Uint8 *pData, Int32 nBytes);
 	void                        ProcessMDMAChRead(Uint32 uChan);
-	/* AURORA_MEGA_V2_DMA_ACCURATE_DECL */
-	void                        ProcessMDMAChAccurate(Uint32 uChan);
 	void                        ProcessMDMAChFast(Uint32 uChan);
 	void                        ProcessHDMACh(Uint32 uChan);
 
