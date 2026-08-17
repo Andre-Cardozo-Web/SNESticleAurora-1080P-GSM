@@ -65,6 +65,7 @@ If the repository was cloned without `--recurse-submodules`, run
 
 **TO BE ADDED:**
 
+* SA-1 Emulation
 * Improve Mode 7 and FX2 emulation
 * Turbo button toggle for SNES
 * Famicom Disk System support
