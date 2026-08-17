@@ -317,14 +317,11 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read2000(SNCpuT *pCpu, Uint32 uAddr)
 	{
 
 	case 0x2137: // slhv
-		/* AURORA_ACCURACY_HV_IO_LATCH_V1
-		 * Software latching through $2137 is enabled by WRIO bit 7. */
-		if (pSnes->m_IO.m_Regs.wrio & 0x80)
-		{
-			pPPURegs->ophct.Reg.w = (SNCPUGetCounter(&pSnes->m_Cpu, SNCPU_COUNTER_LINE) + 14) >> 2;
-			pPPURegs->opvct.Reg.w = pSnes->m_uLine & 0x1FF;
-			pPPURegs->stat78 |= 0x40;
-		}
+		//SnesDebug("readppu_slhv\n");
+		pPPURegs->ophct.Reg.w = (SNCPUGetCounter(&pSnes->m_Cpu, SNCPU_COUNTER_LINE) + 14) >> 2;
+		pPPURegs->opvct.Reg.w = pSnes->m_uLine & 0x1FF;
+		//pPPURegs->opvct.Reg.w |= (pPPURegs->opvct.Reg.w << 8) & 0xFE00;
+		//pPPURegs->opvct.Reg.w = 0xE1;
 		return 0;
 
 	case 0x2138: // read oam
@@ -343,19 +340,9 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read2000(SNCpuT *pCpu, Uint32 uAddr)
 		return pPPURegs->stat77;
 
 	case 0x213f: // stat78
-		{
-			Uint8 uData = pPPURegs->stat78;
-			pPPURegs->ophct.Reset();
-			pPPURegs->opvct.Reset();
-			/* With WRIO.7 low the external latch input forces the latch
-			   status high. With software/external latching enabled, reading
-			   STAT78 acknowledges the stored latch event. */
-			if (!(pSnes->m_IO.m_Regs.wrio & 0x80))
-				uData |= 0x40;
-			else
-				pPPURegs->stat78 &= (Uint8)~0x40;
-			return uData;
-		}
+		pPPURegs->ophct.Reset();
+		pPPURegs->opvct.Reset();
+		return pPPURegs->stat78; // NTSC/PAL bit 4
 	case 0x2134: //mpyl
 		#if SNPPU_WRITEQUEUE
 		pSnes->SyncPPU();
@@ -601,7 +588,7 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read4000(SNCpuT *pCpu, Uint32 uAddr)
         return pIO->m_Regs.hvbjoy;
 
     case 0x4213:	// RDIO
-        return pIO->m_Regs.wrio;
+        return 0;
 
 	case 0x4214:	// RDDIVL
 		return pIO->m_Regs.rddiv.b.l;
@@ -721,17 +708,9 @@ void SNCPU_TRAPFUNC SnesSystem::Write4000(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
             break;
 
         case 0x4201:	// wrio (programmable i/o port)
-            /* Falling edge on PIO bit 7 is the software-controlled
-               external H/V latch trigger used by the real S-CPU. */
-            if ((pIO->m_Regs.wrio & 0x80) && !(uData & 0x80))
-            {
-                SnesPPURegsT *pPPURegs =
-                    (SnesPPURegsT *)pSnes->m_PPU.GetRegs();
-                pPPURegs->ophct.Reg.w =
-                    (SNCPUGetCounter(&pSnes->m_Cpu, SNCPU_COUNTER_LINE) + 14) >> 2;
-                pPPURegs->opvct.Reg.w = pSnes->m_uLine & 0x1FF;
-                pPPURegs->stat78 |= 0x40;
-            }
+            // confirmed:
+            // setting this to a value will cause the h/v latching to be controlled
+            // by external latching (v-count seemed to stick at E1)
             pIO->m_Regs.wrio = uData;
             break;
 

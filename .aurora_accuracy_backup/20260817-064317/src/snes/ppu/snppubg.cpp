@@ -546,35 +546,24 @@ static void _FetchBG16x16Offset(
         Uint32 uFlip;
         Uint32 uQuadrant;
         Uint8 *pSubTile;
-        Uint16 *pOpt;
 
-        /* AURORA_ACCURACY_OPT_16X16_FIRST_COLUMN_V1
-         * Offset-per-tile exempts one complete target tile, not one
-         * renderer sub-column.  A 16x16 target therefore leaves the
-         * first 16 screen pixels untouched.  The lookup stream is
-         * correspondingly one 8-pixel entry behind the renderer's
-         * pOffset cursor after that exempt region. */
-        pOpt = (uX >= 16) ? (pOffset - 2) : NULL;
-
-        if (pOpt)
-        {
         if (bMode4)
         {
             /*
              * Mode 4 stores either H or V in the same offset word.
              * Bit 15 selects vertical offset.
              */
-            if (pOpt[0] & uOffsetMask)
+            if (pOffset[0] & uOffsetMask)
             {
-                if (pOpt[0] & 0x8000)
+                if (pOffset[0] & 0x8000)
                 {
-                    uTileScrollY = pOpt[0] & 0x3FF;
+                    uTileScrollY = pOffset[0] & 0x3FF;
                 }
                 else
                 {
                     uTileScrollX =
                         (uScrollX & 7) |
-                        (pOpt[0] & 0x3F8);
+                        (pOffset[0] & 0x3F8);
                 }
             }
         }
@@ -582,19 +571,18 @@ static void _FetchBG16x16Offset(
         {
             /* Mode 2 has independent H and V offset words. */
 
-            if (pOpt[0] & uOffsetMask)
+            if (pOffset[0] & uOffsetMask)
             {
                 uTileScrollX =
                     (uScrollX & 7) |
-                    (pOpt[0] & 0x3F8);
+                    (pOffset[0] & 0x3F8);
             }
 
-            if (pOpt[1] & uOffsetMask)
+            if (pOffset[1] & uOffsetMask)
             {
                 uTileScrollY =
-                    pOpt[1] & 0x3FF;
+                    pOffset[1] & 0x3FF;
             }
-        }
         }
 
         uTileScrollX += uX;
@@ -1042,10 +1030,7 @@ void SnesPPURender::DecodeBGInfo(SnesBGInfoT *pBGInfo)
 	pBGInfo[0].uScrollY = pRegs->bg1vofs.w & 0x3FF;
 	pBGInfo[0].uScrAddr = (pRegs->bg1sc >> 2) << 10;
 	pBGInfo[0].uScrSize =  pRegs->bg1sc & 3;
-	/* AURORA_ACCURACY_BGNBA_4BIT_V1
-	 * BGNBA exposes a full four-bit tiledata base for each BG.
-	 * The old &7 mask silently discarded base bit 3. */
-	pBGInfo[0].uChrAddr =  ((pRegs->bg12nba >> 0) & 0xF) << 12;
+	pBGInfo[0].uChrAddr =  ((pRegs->bg12nba >> 0) & 0x7) << 12;
 	pBGInfo[0].uChrSize =  (pRegs->bgmode >> 4) & 1;
 	pBGInfo[0].uMosaic  = (pRegs->mosaic&1) ? (pRegs->mosaic>>4) : 0;
 
@@ -1053,7 +1038,7 @@ void SnesPPURender::DecodeBGInfo(SnesBGInfoT *pBGInfo)
 	pBGInfo[1].uScrollY = pRegs->bg2vofs.w & 0x3FF;
 	pBGInfo[1].uScrAddr = (pRegs->bg2sc >> 2) << 10;
 	pBGInfo[1].uScrSize =  pRegs->bg2sc & 3;
-	pBGInfo[1].uChrAddr =  ((pRegs->bg12nba >> 4) & 0xF) << 12;
+	pBGInfo[1].uChrAddr =  ((pRegs->bg12nba >> 4) & 0x7) << 12;
 	pBGInfo[1].uChrSize =  (pRegs->bgmode >> 5) & 1;
 	pBGInfo[1].uMosaic  = (pRegs->mosaic&2) ? (pRegs->mosaic>>4) : 0;
 
@@ -1061,7 +1046,7 @@ void SnesPPURender::DecodeBGInfo(SnesBGInfoT *pBGInfo)
 	pBGInfo[2].uScrollY = pRegs->bg3vofs.w & 0x3FF;
 	pBGInfo[2].uScrAddr = (pRegs->bg3sc >> 2) << 10;
 	pBGInfo[2].uScrSize =  pRegs->bg3sc & 3;
-	pBGInfo[2].uChrAddr =  ((pRegs->bg34nba >> 0) & 0xF) << 12;
+	pBGInfo[2].uChrAddr =  ((pRegs->bg34nba >> 0) & 0x7) << 12;
 	pBGInfo[2].uChrSize =  (pRegs->bgmode >> 6) & 1;
 	pBGInfo[2].uMosaic  = (pRegs->mosaic&4) ? (pRegs->mosaic>>4) : 0;
 
@@ -1069,7 +1054,7 @@ void SnesPPURender::DecodeBGInfo(SnesBGInfoT *pBGInfo)
 	pBGInfo[3].uScrollY = pRegs->bg4vofs.w & 0x3FF;
 	pBGInfo[3].uScrAddr = (pRegs->bg4sc >> 2) << 10;
 	pBGInfo[3].uScrSize =  pRegs->bg4sc & 3;
-	pBGInfo[3].uChrAddr =  ((pRegs->bg34nba >> 4) & 0xF) << 12;
+	pBGInfo[3].uChrAddr =  ((pRegs->bg34nba >> 4) & 0x7) << 12;
 	pBGInfo[3].uChrSize =  (pRegs->bgmode >> 7) & 1;
 	pBGInfo[3].uMosaic  = (pRegs->mosaic&8) ? (pRegs->mosaic>>4) : 0;
 
@@ -1143,8 +1128,7 @@ void SnesPPURender::DecodeBGInfo(SnesBGInfoT *pBGInfo)
 		break;
 
 	case 6: // hi-res
-		/* AURORA_ACCURACY_MODE6_4BPP_V1: hardware Mode 6 BG1 is 4bpp. */
-		pBGInfo[0].uBitDepth= 4;
+		pBGInfo[0].uBitDepth= 8;
 		pBGInfo[1].uBitDepth= 0;
 		pBGInfo[0].Priority  =  5;
 		pBGInfo[1].Priority  =  4;

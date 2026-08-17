@@ -2116,63 +2116,67 @@ static void _FetchMode7Opaque(Uint8 *pMask, Uint8 *pLine, Int32 nPixels)
 static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPriority, SNMaskT *pOpaque)
 {
 	const SnesPPURegsT *pRegs = pPPU->GetRegs();
-	Uint8 *pVram = (Uint8 *)pPPU->GetVramPtr(0);
-	Int32 m7a = (Int16)pRegs->m7a.w;
-	Int32 m7b = (Int16)pRegs->m7b.w;
-	Int32 m7c = (Int16)pRegs->m7c.w;
-	Int32 m7d = (Int16)pRegs->m7d.w;
-	Int32 hofs, vofs, cx, cy;
-	Int32 screenY, screenX;
-	Int32 originX, originY;
-	Int32 x, y, dx, dy;
+	Int32 x1, y1,x,y;
+	Int32 m7a,m7b,m7c,m7d,m7x,m7y;
+	Uint8 *pVram;
 
-	/* AURORA_ACCURACY_MODE7_CORE_V1
-	 * The Mode 7 adder clips the translated H/V differences to its internal
-	 * signed range and discards six fractional bits after each product. This
-	 * matters at wrap boundaries and with non-trivial centre coordinates. */
-	#define AURORA_M7_SIGN13(_n) \
-		((((Int32)(_n) & 0x1000) != 0) ? ((Int32)(_n) | ~0x1FFF) : ((Int32)(_n) & 0x1FFF))
-	#define AURORA_M7_CLIP(_n) \
-		((((Int32)(_n) & 0x2000) != 0) ? ((Int32)(_n) | ~1023) : ((Int32)(_n) & 1023))
+	pVram = (Uint8 *)pPPU->GetVramPtr(0);
 
-	hofs = AURORA_M7_SIGN13(pRegs->m7hofs.w);
-	vofs = AURORA_M7_SIGN13(pRegs->m7vofs.w);
-	cx   = AURORA_M7_SIGN13(pRegs->m7x.w);
-	cy   = AURORA_M7_SIGN13(pRegs->m7y.w);
+	// get x/y scroll position
+	x1 = pRegs->m7hofs.w;
+	y1 = pRegs->m7vofs.w;
 
-	/* Mode 7 mosaic is deliberately not approximated here. Its vertical phase
-	 * is controlled by an internal PPU counter that can be reloaded mid-frame;
-	 * absolute scanline grouping would create a new inaccuracy. */
+	// sign extend to 13-bit
+	x1<<= 32- 13; x1>>= 32- 13;
+	y1<<= 32- 13; y1>>= 32- 13;
 
-	screenY = (pRegs->m7sel & 0x02) ? (255 - iLine) : iLine;
+	// advance scrolly to current line
+	y1 += iLine;
 
-	originX = (m7a * AURORA_M7_CLIP(hofs - cx) & ~63) +
-	          (m7b * AURORA_M7_CLIP(vofs - cy) & ~63) +
-	          (m7b * screenY & ~63) + (cx << 8);
-	originY = (m7c * AURORA_M7_CLIP(hofs - cx) & ~63) +
-	          (m7d * AURORA_M7_CLIP(vofs - cy) & ~63) +
-	          (m7d * screenY & ~63) + (cy << 8);
+	// fetch matrix parameters
+	m7a = (Int16)pRegs->m7a.w;
+	m7b = (Int16)pRegs->m7b.w;
+	m7c = (Int16)pRegs->m7c.w;
+	m7d = (Int16)pRegs->m7d.w;
+	m7x = pRegs->m7x.w;
+	m7y = pRegs->m7y.w;
 
-	screenX = (pRegs->m7sel & 0x01) ? 255 : 0;
-	x = originX + m7a * screenX;
-	y = originY + m7c * screenX;
-	dx = (pRegs->m7sel & 0x01) ? -m7a : m7a;
-	dy = (pRegs->m7sel & 0x01) ? -m7c : m7c;
+	// sign extend to 13-bit
+	m7x<<= 32- 13; m7x>>= 32- 13;
+	m7y<<= 32- 13; m7y>>= 32- 13;
 
-	/* M7SEL repeat values 0 and 1 both wrap. Value 2 is transparent/backdrop
-	 * outside the 1024x1024 map, value 3 repeats character 0. */
-	switch ((pRegs->m7sel >> 6) & 3)
+	// do matrix multiply for left pixel of line
+	x = (x1 - m7x) * m7a + (y1 - m7y) * m7b + (m7x << 8);
+	y = (x1 - m7x) * m7c + (y1 - m7y) * m7d + (m7y << 8);
+
+
+	if (pRegs->m7sel & 0x1)
 	{
-	case 0:
-	case 1:
-		_FetchMode7_Repeat(pLine, 256, pVram, x, y, dx, dy);
+		x +=  256 * m7a;  // translate to right of screen
+		y +=  256 * m7c;
+		m7a = -m7a;
+		m7c = -m7c;
+	}
+
+	if (pRegs->m7sel & 0x2)
+	{
+		x +=  262 * m7b;  // translate to bottom of screen
+		y +=  262 * m7d;
+		m7b = -m7b;
+		m7d = -m7d;
+	}
+
+	switch (pRegs->m7sel>>6)
+	{
+	case 0: // screen repetition if outside of screen area
+		_FetchMode7_Repeat(pLine, 256, pVram, x, y, m7a, m7c);
 		break;
-	case 3:
-		_FetchMode7_Clamp(pLine, 256, pVram, x, y, dx, dy);
+	case 3: // character 0x00 repetition if outside of screen area
+		_FetchMode7_Clamp(pLine, 256, pVram, x, y, m7a, m7c);
 		break;
-	case 2:
 	default:
-		_FetchMode7_Black(pLine, 256, pVram, x, y, dx, dy);
+	case 2: // outside of the screen area is the back drop screen in single color
+		_FetchMode7_Black(pLine, 256, pVram, x, y, m7a, m7c);
 		break;
 	}
 
@@ -2183,15 +2187,14 @@ static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPrio
 			PROF_ENTER("_FetchMode7Priority");
 			_FetchMode7Priority(pPriority->uMask8, pLine, 256);
 			PROF_LEAVE("_FetchMode7Priority");
-		}
-		else
+		} else
 		{
+//			SNMaskClear(pPriority);
 			SNMaskSet(pPriority);
+
 		}
 	}
 
+	// no transparency?
 	_FetchMode7Opaque(pOpaque->uMask8, pLine, 256);
-
-	#undef AURORA_M7_CLIP
-	#undef AURORA_M7_SIGN13
 }

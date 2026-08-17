@@ -218,8 +218,6 @@ private:
     Uint16			        m_VRAM[SNESPPU_VRAM_NUMWORDS] _ALIGN(16);
     SnesOAMT		        m_OAM;
 	Uint8                   m_OAMLatch;
-	/* AURORA_ACCURACY_PPU_LATCHES_V1 */
-	Uint8                   m_CGRAMLatch;
 
     ISnesPPURender *        m_pRender;
 
@@ -228,7 +226,6 @@ private:
 #endif
 
     void                    UpdateMatMul();
-	void                    UpdateVRAMReadBuffer();
 	void                    UpdateOAMPriority();
 };
 

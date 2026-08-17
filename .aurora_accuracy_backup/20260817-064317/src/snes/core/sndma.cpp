@@ -370,8 +370,6 @@ void SnesDMAC::ProcessMDMAChRead(Uint32 uChan)
 
 		// read byte
 		uData = SNCPURead8(m_pCPU, uAddr);
-		/* AURORA_ACCURACY_MDMA_MDR_V1: B-bus DMA reads drive S-CPU MDR. */
-		m_pCPU->uMDR = uData;
 
 		// write byte
 		SNCPUWrite8(m_pCPU, pChan->a1tx | (pChan->a1bx << 16), uData);
@@ -468,13 +466,6 @@ Uint32 SnesDMAC::ProcessMDMACh(Uint32 uChan)
 
 void SnesDMAC::TransferData(SnesDMAChT *pChan, Uint8 *pData, Int32 nBytes)
 {
-    /* A->B MDMA also leaves the last A-bus source byte on MDR.
-       The optimized path is atomic to the emulated CPU, so publishing
-       the final byte preserves its externally observable final state
-       without destroying the PS2 block-transfer fast path. */
-    if (nBytes > 0)
-        m_pCPU->uMDR = pData[nBytes - 1];
-
     SNCPUConsumeCycles(m_pCPU,  SNCPU_CYCLE_SLOW * nBytes);
 
     // special case simple transfer mode llll

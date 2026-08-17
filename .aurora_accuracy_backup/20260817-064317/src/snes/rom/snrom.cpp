@@ -446,31 +446,29 @@ void SnesRom::SetCartInfo(SNRomInfoT *pCartInfo)
 
 		m_eVideoType = pCountry ? pCountry->eVideoType : SNROM_VIDEO_NTSC;
 		m_uROMSize	  = 1 << (pCartInfo->RomSize - 7);
-		/* AURORA_ACCURACY_SRAM_SIZE_EXPONENT_V1
-		 * The SNES internal header stores ordinary Game Pak RAM size as an
-		 * exponent.  In bytes the conventional formula is 2^(code + 10);
-		 * m_uSRAMSize is expressed in kilobits, therefore 8 << code.
-		 * Codes through 8 fit Aurora's existing 256 KiB backing store
-		 * (code 8 = 256 KiB). Do not clamp larger declarations
-		 * into that buffer: treating them as absent is safer than aliasing or
-		 * writing past the allocation.  SuperFX may override this value later
-		 * from its extended header, as before. */
 		if (g_FakeSRAMSize)
-		{
-			m_uSRAMSize = g_FakeSRAMSize;
-		}
-		else if (pCartInfo->SRAMSize == 0)
-		{
-			m_uSRAMSize = 0;
-		}
-		else if (pCartInfo->SRAMSize <= 8)
-		{
-			m_uSRAMSize = (Uint32)8 << pCartInfo->SRAMSize;
-		}
-		else
-		{
-			m_uSRAMSize = 0;
-		}
+{
+    m_uSRAMSize = g_FakeSRAMSize;
+}
+else
+{
+    switch (pCartInfo->SRAMSize)
+    {
+    default:
+    case 0:
+        m_uSRAMSize = 0;
+        break;
+    case 1:
+        m_uSRAMSize = 16;
+        break;
+    case 2:
+        m_uSRAMSize = 32;
+        break;
+    case 3:
+        m_uSRAMSize = 64;
+        break;
+    }
+}
 		switch (pCartInfo->RomType)
 		{
 		case 0:
