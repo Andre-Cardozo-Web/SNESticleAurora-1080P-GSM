@@ -24,7 +24,12 @@ int main()
 	Uint32 nInvalidated;
 
 	std::memset(&g_Cache, 0, sizeof(g_Cache));
+	/* AURORA_CHR_HFLIP_DUALMODE_TEST_V1 */
+#if SNPPU_CHR_CACHE_HFLIP
+	Check("CHR cache bytes", sizeof(g_Cache), 595968);
+#else
 	Check("CHR cache bytes", sizeof(g_Cache), 448512);
+#endif
 	Check("2bpp cold miss", SnesPPUChrCacheLookup2(&g_Cache,
 		0x1234, FALSE, &uData, &uOpaque), FALSE);
 
@@ -51,6 +56,13 @@ int main()
 		0x2345, TRUE, &uData, &uOpaque), TRUE);
 	Check("4bpp hflip data", uData, 0x08090A0B0C0D0E0FULL);
 	Check("4bpp hflip opaque", uOpaque, 0x69);
+#if SNPPU_CHR_CACHE_HFLIP
+	/* AURORA_CHR_HFLIP_HELPER_TEST_V1 */
+	uData = 0; uOpaque = 0;
+	SnesPPUChrCacheLoad4HFlip(&g_Cache, 0x2345, &uData, &uOpaque);
+	Check("4bpp stored hflip data", uData, 0x08090A0B0C0D0E0FULL);
+	Check("4bpp stored hflip opaque", uOpaque, 0x69);
+#endif
 
 	/* Uma palavra tocada invalida as interpretacoes 2bpp e 4bpp do tile. */
 	SnesPPUChrCacheStore2(&g_Cache, 0x3451, 0x11, 1);

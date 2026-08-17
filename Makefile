@@ -641,7 +641,7 @@ FORCE_COMPILE_MODE:
 
 $(BUILD_CONFIG_FILE): FORCE_COMPILE_MODE | $(OBJ_DIR)
 	@mkdir -p "$(BUILD_META_DIR)"; \
-	mode='SNES_DIAGNOSTICS=$(SNES_DIAGNOSTICS) SNES_OBJ_CACHE=$(SNES_OBJ_CACHE) SNES_BG_CACHE=$(SNES_BG_CACHE) PROFILE=$(PROFILE) DSP4_CAPTURE=$(DSP4_CAPTURE) DSP4_STUB=$(DSP4_STUB)'; \
+	mode='SNES_DIAGNOSTICS=$(SNES_DIAGNOSTICS) SNES_OBJ_CACHE=$(SNES_OBJ_CACHE) SNES_BG_CACHE=$(SNES_BG_CACHE) SNES_CHR_HFLIP_CACHE=$(SNES_CHR_HFLIP_CACHE) PROFILE=$(PROFILE) DSP4_CAPTURE=$(DSP4_CAPTURE) DSP4_STUB=$(DSP4_STUB)'; \
 	if [ ! -f "$@" ] || [ "$$(cat "$@")" != "$$mode" ]; then \
 		printf '%s\n' "$$mode" > "$@"; \
 	fi
@@ -1359,6 +1359,7 @@ help:
 	printf "  SNES_DIAGNOSTICS=2           Deep OBJ/DMA/GSU capture (measurable overhead)\n"; \
 	printf "  SNES_OBJ_CACHE=0             Disable shared CHR cache for OBJ A/B only\n"; \
 	printf "  SNES_BG_CACHE=1              Enable experimental BG CHR cache for A/B only\n"; \
+	printf "  SNES_CHR_HFLIP_CACHE=0       Disable pre-flipped 4bpp rows for Top Gear A/B\n"; \
 	printf "  OUT=/path                    Copy final ELF to this folder\n"; \
 	printf "  out=/path                    Same as OUT=/path\n"; \
 	printf "  ROMS=/path                   ROM folder for ISO build\n"; \

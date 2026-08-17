@@ -23,8 +23,9 @@
  *
  * Cada linha guarda oito indices de cor sem paleta. BG e OBJ 4bpp usam a
  * MESMA tabela; trocar CGRAM, prioridade ou paleta nao invalida os pixels.
- * A orientacao canonica e' sem H-flip. O flip e' feito somente na saida,
- * evitando duplicar quase 450 KiB de dados.
+ * A orientacao canonica e' sem H-flip. Com o switch H-flip ligado,
+ * uma copia 4bpp pre-invertida acrescenta 147456 bytes; com =0, o
+ * caminho canonico faz a reversao na saida como na base r29.
  *
  * Diferente dos caches experimentais de linha, um hit nao le a fonte da
  * VRAM, nao calcula hash e nao disputa uma entrada de 512 slots. Escritas em

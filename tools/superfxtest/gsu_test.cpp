@@ -515,6 +515,37 @@ int main()
         CHECK("bitplane3 byte[17]", g_ram[17], 0x00);
     }
     {
+        // AURORA_GSU_FULLPIX_FAST_TEST_V1
+        // Oito PLOTs consecutivos completam o pixel-cache (flags=FF). RPIX
+        // forca o flush e valida os quatro bitplanes do novo fast path.
+        static const uint8_t pfull[] = {
+            0xF5,0x05,0x00,   // IWT R5,#5
+            0xB5,0x4E,        // FROM R5 ; COLOR=5
+            0xF1,0x00,0x00,   // R1=X=0
+            0xF2,0x00,0x00,   // R2=Y=0
+            0x4C,0x4C,0x4C,0x4C,0x4C,0x4C,0x4C,0x4C,
+            0xF1,0x00,0x00,   // R1=X=0 para RPIX
+            0x16,0x3D,0x4C,   // TO R6 ; ALT1 ; RPIX
+            0x00 };
+        memset(g_rom, 0x01, sizeof(g_rom));
+        memset(g_ram, 0x00, sizeof(g_ram));
+        memcpy(g_rom, pfull, sizeof(pfull));
+        SNGSU g;
+        g.SetMemory(g_rom, sizeof(g_rom), g_ram, sizeof(g_ram));
+        g.Reset();
+        g.WriteReg(0x303A, 0x19);
+        g.WriteReg(0x3038, 0x00);
+        g.WriteReg(0x3034, 0x00);
+        g.WriteReg(0x301E, 0x00);
+        g.WriteReg(0x301F, 0x80);
+        g.Run(100000);
+        CHECK("PLOT full-row RPIX", g.GetReg(6), 5);
+        CHECK("PLOT full-row plane0", g_ram[0], 0xFF);
+        CHECK("PLOT full-row plane1", g_ram[1], 0x00);
+        CHECK("PLOT full-row plane2", g_ram[16], 0xFF);
+        CHECK("PLOT full-row plane3", g_ram[17], 0x00);
+    }
+    {
         // POR.OBJ força layout 256x256 mesmo quando SCMR.HT seleciona 128.
         // Em 4bpp, pixel (0,128) pertence ao tile $200 -> offset $4000.
         static const uint8_t pobj[] = {

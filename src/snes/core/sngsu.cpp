@@ -471,18 +471,52 @@ void SNGSU::PixFlush(Int32 nCache)
     Uint8 y = (Uint8)(offset >> 5);
     Int32  bpp = ScreenBpp();
     Uint32 rowAddr = PixelRowAddr(xbase, y);
-    for (Int32 b = 0; b < bpp; b++) {
-        // plano b: par (b>>1) a offset (b>>1)*16, byte (b&1) dentro do par
-        Uint32 addr = rowAddr + (Uint32)((b >> 1) * 16 + (b & 1));
-        Uint8  byte = (flags == 0xFF) ? 0 : RamReadByte(addr);
-        for (Int32 i = 0; i < 8; i++) {
-            if (flags & (1 << i)) {
-                Uint8 mask = (Uint8)(1 << (7 - i));        // pixel 0 = bit7
-                if ((m_PixColor[nCache][i] >> b) & 1) byte |= mask;
-                else                          byte &= (Uint8)~mask;
-            }
+
+    /* AURORA_GSU_FULLPIX_FAST_V1
+     *
+     * PLOT entrega blocos completos de oito pixels com frequencia alta. No
+     * caminho antigo, mesmo flags==FF fazia 8 testes/branches por bitplane.
+     * Para um bloco completo nao existe byte antigo a preservar: monte o byte
+     * final diretamente. O caminho parcial abaixo fica byte-for-byte com a
+     * logica anterior (read/modify/write), portanto nenhuma aproximacao grafica
+     * ou mudanca de timing emulado e introduzida.
+     */
+    if (flags == 0xFF)
+    {
+        const Uint8 *pColor = m_PixColor[nCache];
+        for (Int32 b = 0; b < bpp; b++)
+        {
+            Uint32 addr = rowAddr + (Uint32)((b >> 1) * 16 + (b & 1));
+            Uint8 byte = (Uint8)(
+                (((pColor[0] >> b) & 1u) << 7) |
+                (((pColor[1] >> b) & 1u) << 6) |
+                (((pColor[2] >> b) & 1u) << 5) |
+                (((pColor[3] >> b) & 1u) << 4) |
+                (((pColor[4] >> b) & 1u) << 3) |
+                (((pColor[5] >> b) & 1u) << 2) |
+                (((pColor[6] >> b) & 1u) << 1) |
+                (((pColor[7] >> b) & 1u) << 0));
+            RamWriteByte(addr, byte);
         }
-        RamWriteByte(addr, byte);
+    }
+    else
+    {
+        /* Legacy partial-row path: preserve untouched pixels exactly. */
+        for (Int32 b = 0; b < bpp; b++)
+        {
+            Uint32 addr = rowAddr + (Uint32)((b >> 1) * 16 + (b & 1));
+            Uint8 byte = RamReadByte(addr);
+            for (Int32 i = 0; i < 8; i++)
+            {
+                if (flags & (1 << i))
+                {
+                    Uint8 mask = (Uint8)(1 << (7 - i));
+                    if ((m_PixColor[nCache][i] >> b) & 1) byte |= mask;
+                    else                          byte &= (Uint8)~mask;
+                }
+            }
+            RamWriteByte(addr, byte);
+        }
     }
     m_PixFlags[nCache] = 0;
 }

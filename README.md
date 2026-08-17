@@ -7,7 +7,7 @@ Aurora is based on **SNESticle Revive by @ReyFxck (Thomas R.)**, whose work brou
 **Huge thanks to @ReyFxck** for his work on SNESticle Revive and for providing the foundation from which Aurora was created. **Huge thanks to Icer Addis** for creating the original SNESticle and its codebase.
 
 <!-- AURORA_QUICKNES_CREDIT -->
-**QuickNES credit:** NES emulation through QuickNES is based on the **QuickNES core originally by Shay Green**, with the libretro core maintained by **libretro contributors**. Aurora uses `itsveenee/QuickNES_Core` as a pinned Git submodule for its PS2 integration. See [THIRD_PARTY.md](THIRD_PARTY.md) and the license notices inside the QuickNES submodule.
+NES emulation through **QuickNES** is based on the **QuickNES core originally by Shay Green**, with the libretro core maintained by **libretro contributors**. Aurora uses `itsveenee/QuickNES_Core` as a pinned Git submodule for its PS2 integration. See [THIRD_PARTY.md](THIRD_PARTY.md) and the license notices inside the QuickNES submodule.
 
 Aurora focuses on 240p CRT output, NES/QuickNES integration and experiments, real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
 
@@ -20,7 +20,7 @@ Keep in mind: this project uses **AI-generated code**, but the changes are teste
 
 ## Building from Git
 
-Clone Aurora together with its pinned third-party cores:
+Clone SNESticle Aurora together with its pinned third-party cores:
 
 ```bash
 git clone --recurse-submodules https://github.com/itsveenee/SNESticleAurora.git
@@ -39,7 +39,6 @@ If the repository was cloned without `--recurse-submodules`, run
 
 * QuickNES for NES games
 * Support added for more NES mappers: 13, 16, 18, 27, 48, 64, 65, 67, 68, 72, 77, 80, 82, 92, 96, 99, 101, 105, 118, 119, 151, 153, 155, 157, 158, 159, 185, 188, 210, 216, and 552. Every licensed NES and Famicom game will boot now.
-* Improved SNES offset-per-tile rendering
 * Fixes and improvements for the 240p display modes, improved screen positioning and overscan settings for each system and graphical resolution/modes.
 * "Dirty fix" for font rendering in 240p *(a better fix should be implemented in the future)*
 * Changed SRAM and RAM initialization for both NES and SNES. This will fix all the very few games that rely on specific initial values to work properly.
@@ -67,6 +66,7 @@ If the repository was cloned without `--recurse-submodules`, run
 **TO BE ADDED:**
 
 * Improve Mode 7 and FX2 emulation
+* Turbo button toggle for SNES
 * Famicom Disk System support
 * Every NES mapper possible!
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!

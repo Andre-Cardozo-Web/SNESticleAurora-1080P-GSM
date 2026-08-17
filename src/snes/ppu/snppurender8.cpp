@@ -678,8 +678,16 @@ static void _FetchCHR4_64(const Uint16 *pVram, Uint32 uBaseAddr, const SnesRende
 			uTile0 |= (*pLookup)[uPlane3] << 3;
 			SnesPPUChrCacheStore4(&_SnesPPU_ChrCache, uRowAddr,
 				uTile0, uMask);
+			/* AURORA_BG_HFLIP_MISS_REUSE_V1 */
 			if (pTiles->uFlip & 1)
+			{
+#if SNPPU_CHR_CACHE_HFLIP
+				SnesPPUChrCacheLoad4HFlip(
+					&_SnesPPU_ChrCache, uRowAddr, &uTile0, &uMask);
+#else
 				SnesPPUChrCacheFlipRow(&uTile0, &uMask);
+#endif
+			}
 		}
 		#else
 		{
@@ -1329,6 +1337,8 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 		Uint32 uCol0 = pObj->uTile & 0x0F;
 		Uint32 uYoff = ObjY & 7;
 		Int32  iTileX = 0;
+		/* AURORA_OBJ_PALETTE_HOIST_V1 */
+		Uint32 uPalette = _SnesPPU_Obj4PalLookup[pObj->uPal];
 
 #if SNDBG_DEEP
 		if (bTrace)
@@ -1384,9 +1394,6 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 				if (bSecondTable)
 					uTileAddr += uNameSelect;
 				Uint32 uRowAddr = (uTileAddr & 0x7FFF) + uYoff;
-				Uint32 uPalette;
-				// get palette bits
-				uPalette = _SnesPPU_Obj4PalLookup[pObj->uPal];
 
 #if SNPPU_OBJ_CACHE
 				{
