@@ -13,6 +13,13 @@
 
 #define SNCPU_FASTREADMEM TRUE
 
+/* AURORA_SPEEDY_MDR_CPU_LAYOUT_V1
+   Compile-time ABI guards: fail instead of corrupting the EE ASM layout. */
+typedef char SNCpuMdrOffsetMustRemain51[(offsetof(SNCpuT, uMDR) == 51) ? 1 : -1];
+#if !defined(SNCPU_TEST) || !(SNCPU_TEST)
+typedef char SNCpuBankOffsetMustRemain52[(offsetof(SNCpuT, Bank) == 52) ? 1 : -1];
+#endif
+
 //
 //
 //
@@ -102,6 +109,9 @@ void SNCPUReset(SNCpuT *pCpu, Bool bHardReset)
 	pCpu->Regs.rE  = 1;
 	// reset pc
 	pCpu->Regs.rPC = SNCPURead16(pCpu, SNCPU_VECTOR_RESET);
+	/* AURORA_SPEEDY_MDR_RESET_V1
+	   Reset-vector high byte is the last byte read during reset. */
+	pCpu->uMDR = (Uint8)(pCpu->Regs.rPC >> 8);
 	// A hardware reset starts in emulation mode with S=$01FF.  Keeping the
 	// low byte left by SNCPUResetRegs ($00) made the first pushes land one
 	// page position too early and breaks games which inspect the reset stack.

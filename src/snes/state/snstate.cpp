@@ -6,6 +6,11 @@
 #include "snes.h"
 #include "snstate.h"
 
+/* AURORA_SPEEDY_MDR_STATE_LAYOUT_V1
+   SNStateCPUT was 44 bytes before MDR support. New fields only consume
+   old padding, so existing state payload size must remain identical. */
+typedef char SNStateCPUSizeMustRemain44[(sizeof(SNStateCPUT) == 44) ? 1 : -1];
+
 void SnesSystem::SaveState(void *pState, Int32 nStateBytes)
 {
     if (nStateBytes == sizeof(SnesStateT))
@@ -54,6 +59,10 @@ void SnesSystem::SaveState(SnesStateT *pState)
 	pState->CPU.Counter[2] = m_Cpu.Counter[2];
 	pState->CPU.Counter[3] = m_Cpu.Counter[3];
 	pState->CPU.uSignal    = m_Cpu.uSignal;
+	/* AURORA_SPEEDY_MDR_STATE_RW_V1 */
+	pState->CPU.uMDR       = m_Cpu.uMDR;
+	pState->CPU.uMDRTag[0] = 'M';
+	pState->CPU.uMDRTag[1] = 'D';
 
 	pState->SPC.Regs = m_Spc.Regs;
 	pState->SPC.Cycles = m_Spc.Cycles;
@@ -99,6 +108,12 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
 	m_Cpu.Counter[3] = pState->CPU.Counter[3];
 	m_Cpu.nAbortCycles = 0;
 	m_Cpu.uSignal    = pState->CPU.uSignal;
+	/* AURORA_SPEEDY_MDR_STATE_RW_V1
+	   Old states used these bytes as padding; trust MDR only with tag MD. */
+	if (pState->CPU.uMDRTag[0] == 'M' && pState->CPU.uMDRTag[1] == 'D')
+		m_Cpu.uMDR = pState->CPU.uMDR;
+	else
+		m_Cpu.uMDR = (Uint8)(m_Cpu.Regs.rPC >> 8);
 	m_Cpu.uNmiDmaDelay = 0;
 
 	m_Spc.Regs = pState->SPC.Regs;

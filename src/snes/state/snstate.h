@@ -10,6 +10,10 @@ struct SNStateCPUT
 	Int32		Cycles;							// cycle counter for current execution
 	Int32		Counter[SNCPU_COUNTER_NUM];		// counter(s)
 	Uint8		uSignal;
+	/* AURORA_SPEEDY_MDR_STATE_LAYOUT_V1
+	   Uses the three former tail-padding bytes; serialized size is unchanged. */
+	Uint8		uMDR;
+	Uint8		uMDRTag[2];
 };
 
 struct SNStatePPUT

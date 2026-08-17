@@ -78,6 +78,11 @@ typedef struct SNCpu_t
 	   This reuses the old padding byte, so the PS2 assembly layout is stable. */
 	Uint8				uNmiDmaDelay;
 
+	/* AURORA_SPEEDY_MDR_CPU_LAYOUT_V1
+	   S-CPU memory data register / open-bus latch. This consumes byte 51,
+	   formerly alignment padding, so Bank[] remains at ASM offset 52. */
+	Uint8				uMDR;
+
 #if defined(SNCPU_TEST) && SNCPU_TEST
 	/* Host-only instruction-vector accounting.  Kept out of release builds so
 	   the hand-written PS2 assembly layout remains unchanged. */

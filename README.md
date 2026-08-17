@@ -61,7 +61,10 @@ If the repository was cloned without `--recurse-submodules`, run
 
 * Super Mario World 2 (SNES) performance
 * Top Gear (SNES) performance
-* Any other games with performance issues
+* Speedy Gonzales in Los Gatos Banditos (SNES) performance
+* The Lost Vikings 1 and 2 (SNES) black screen
+* Addams Family (SNES) graphical glitches
+* Any other games with performance or graphical issues
 
 **TO BE ADDED:**
 

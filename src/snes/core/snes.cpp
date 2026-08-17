@@ -571,11 +571,17 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read4000(SNCpuT *pCpu, Uint32 uAddr)
             return uData;
         }
 
-    case 0x4211:	// TIMEUP 
+    case 0x4211:	// TIMEUP
         {
             Uint8 uData = pIO->m_Regs.timeup;
             pIO->m_Regs.timeup &= ~0x80;
             SNCPUSignalIRQ(pCpu, 0);
+
+            /* AURORA_SPEEDY_MDR_4211_V1
+               TIMEUP drives bit 7; bits 0-6 are S-CPU MDR/open bus.
+               This is the behavior used by the classic Speedy Gonzales case. */
+            uData = (Uint8)((uData & 0x80) | (pCpu->uMDR & 0x7F));
+            pCpu->uMDR = uData;
             return uData;
         }
     case 0x4212:	// HVBJOY
