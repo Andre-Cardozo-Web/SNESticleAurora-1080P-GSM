@@ -284,33 +284,7 @@ void AudMixBuffer::Flush()
            passthrough).  gainPct==100 (Game Volume 50) is unity -> skip. */
         {
             Int32 gainPct = (s_gameVolume * AUDMIXBUFFER_BASE_GAIN_PCT) / 100;
-            /* AURORA_MEGA_V4_AUDIO_GAIN_FASTPATH
-             * Game Volume 100 is the shipped 200% base gain. For every int16
-             * input, (sample * 200) / 100 is exactly sample * 2; retain the
-             * identical saturation but avoid a division per channel/sample.
-             * Muting is likewise exactly an all-zero byte plane. Every other
-             * user volume keeps the original formula and rounding. */
-            if (gainPct == 0)
-            {
-                memset(m_OutData[0], 0, nOutSamples * sizeof(Int16));
-                memset(m_OutData[1], 0, nOutSamples * sizeof(Int16));
-            }
-            else if (gainPct == 200)
-            {
-                Int32 ch, i;
-                for (ch = 0; ch < 2; ch++)
-                {
-                    Int16 *p = m_OutData[ch];
-                    for (i = 0; i < nOutSamples; i++)
-                    {
-                        Int32 v = (Int32)p[i] * 2;
-                        if (v >  32767) v =  32767;
-                        if (v < -32768) v = -32768;
-                        p[i] = (Int16)v;
-                    }
-                }
-            }
-            else if (gainPct != 100)
+            if (gainPct != 100)
             {
                 Int32 ch, i;
                 for (ch = 0; ch < 2; ch++)

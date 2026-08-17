@@ -729,15 +729,10 @@ void SnesDMAC::ProcessMDMAChFast(Uint32 uChan)
 		return ProcessMDMAChRead(uChan);
 	}
 
-	/* AURORA_MEGA_V3_MDMA_DECREMENT_BUS
-	 * Keep decrementing A-bus transfers on mega-v2's byte-accurate path.
-	 * The old fast branch was already per-byte for decrement mode, so this
-	 * costs essentially no useful bulk optimisation while ensuring every
-	 * byte gets the same A/B validity and MDR semantics.  Fixed-address
-	 * mode is intentionally NOT forced here: S-DD1 legitimately uses that
-	 * mode and has its own decompression fast path below. */
-	if ((((pChan->dmapx >> 3) & 3) == 2) ||
-	    SnesDMAChannelNeedsAccurateBus(pChan))
+	/* Hardware-invalid A/B bus aliases are uncommon in normal game DMA.
+	   Route only those channels through the precise byte path so ordinary
+	   tile/OAM uploads retain Aurora's fast bulk implementation. */
+	if (SnesDMAChannelNeedsAccurateBus(pChan))
 	{
 		ProcessMDMAChAccurate(uChan);
 		return;

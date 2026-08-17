@@ -306,8 +306,6 @@ void Aud_Enqueue(short *left, short *right, int size, int wait)
 {
     int i;
     int bytes;
-    const char *src;
-    int remaining;
 
     if (!sjpcm_inited) return;
     if (size <= 0) return;
@@ -323,37 +321,7 @@ void Aud_Enqueue(short *left, short *right, int size, int wait)
 
     if (wait)
     {
-        /* AURORA_MEGA_V4_AUDSRV_LOSSLESS_CHUNKS
-         * PS2SDK audsrv truncates play_audio() to the room available in its
-         * IOP ring. wait_audio() guarantees its requested amount, but the
-         * ring starts only half-free after set_format(). Keep each request
-         * <= 4096 bytes: below the initial free window and normally one whole
-         * emulator frame. A rare short positive write is retried from the
-         * exact unsent byte, so PCM is neither dropped nor duplicated. */
-        src = (const char *)_interleave_buf;
-        remaining = bytes;
-        while (remaining > 0)
-        {
-            int chunk = remaining;
-            int sent;
-
-            if (chunk > 4096)
-                chunk = 4096;
-
-            if (audsrv_wait_audio(chunk) != AUDSRV_ERR_NOERROR)
-                return;
-
-            sent = audsrv_play_audio(src, chunk);
-            if (sent < 0)
-                return;
-            if (sent == 0)
-                continue;
-
-            src += sent;
-            remaining -= sent;
-            sjpcm_playing = 1;
-        }
-        return;
+        audsrv_wait_audio(bytes);
     }
 
     if (audsrv_play_audio((const char *)_interleave_buf, bytes) >= 0)
@@ -382,11 +350,7 @@ int Aud_BufferedAsyncGet(void)
 
 void Aud_EnqueueAsync(short *left, short *right, int size)
 {
-    /* AURORA_MEGA_V3_AUDSRV_BACKPRESSURE
-     * mega-v2 removed the long-term 60-vs-59.94 drift; v4's Aud_Enqueue
-     * now provides bounded lossless back-pressure for occasional queue
-     * pressure without fabricating, duplicating or pitch-shifting PCM. */
-    Aud_Enqueue(left, right, size, 1);
+    Aud_Enqueue(left, right, size, 0);
 }
 
 

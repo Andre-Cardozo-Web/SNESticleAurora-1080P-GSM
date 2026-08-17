@@ -200,28 +200,17 @@ void SnesPPU::WriteVMDATABlock(const Uint8 *pData, Int32 nBytes)
 		{
 			Uint32 uPhysical = m_Regs.vmaddr.w & 0x7FFF;
 			Int32 nChunk = 0x8000 - (Int32)uPhysical;
+			Int32 iWord;
+
 			if (nChunk > nWordsLeft)
 				nChunk = nWordsLeft;
 
-			/* AURORA_MEGA_V4_VRAM_DMA_PORTABLE
-			 * The PS2 EE is little-endian, matching the guarded mode-1
-			 * $2118/$2119 L,H stream exactly.  Keep the old explicit assembly
-			 * for any non-PS2 build so this optimisation cannot silently make
-			 * the shared source endian-dependent. */
-#if CODE_PLATFORM == CODE_PS2
-			memcpy(&m_VRAM[uPhysical], pData, nChunk * sizeof(Uint16));
-			pData += nChunk * 2;
-#else
+			for (iWord = 0; iWord < nChunk; iWord++)
 			{
-				Int32 iWord;
-				for (iWord = 0; iWord < nChunk; iWord++)
-				{
-					m_VRAM[uPhysical + iWord] =
-						(Uint16)pData[0] | ((Uint16)pData[1] << 8);
-					pData += 2;
-				}
+				m_VRAM[uPhysical + iWord] =
+					(Uint16)pData[0] | ((Uint16)pData[1] << 8);
+				pData += 2;
 			}
-#endif
 
 			m_Regs.vmaddr.w = (Uint16)(m_Regs.vmaddr.w + nChunk);
 			nWordsLeft -= nChunk;

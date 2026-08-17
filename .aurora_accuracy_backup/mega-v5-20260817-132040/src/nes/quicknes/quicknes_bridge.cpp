@@ -209,24 +209,19 @@ static void qDrainAudio(CMixBuffer *pMix)
     if (count > QN_AUDIO_MAX)
         count = QN_AUDIO_MAX;
 
-    /* AURORA_MEGA_V4_QUICKNES_BRIDGE_BULK_COPY
-     * These three arrays are independent host-side PCM buffers. The old
-     * loops performed straight Int16 copies with no mapper/APU side effects,
-     * so libc bulk copies are byte-identical and avoid per-sample loop work. */
-    int n = s_PendingCount + (int)count;
-    if (s_PendingCount > 0)
-        memcpy(s_AudioOut, s_Pending,
-               (size_t)s_PendingCount * sizeof(s_Pending[0]));
-    memcpy(s_AudioOut + s_PendingCount, s_Audio,
-           (size_t)count * sizeof(s_Audio[0]));
+    int n = s_PendingCount;
+    int i;
+    for (i = 0; i < s_PendingCount; ++i)
+        s_AudioOut[i] = s_Pending[i];
+    for (i = 0; i < count; ++i)
+        s_AudioOut[n++] = s_Audio[i];
 
     /* AudMixBuffer's existing 32->48 kHz path expects input counts divisible
      * by four. Keep only the tail (0..3 samples) for the next frame. */
     int flush = n & ~3;
     s_PendingCount = n - flush;
-    if (s_PendingCount > 0)
-        memcpy(s_Pending, s_AudioOut + flush,
-               (size_t)s_PendingCount * sizeof(s_Pending[0]));
+    for (i = 0; i < s_PendingCount; ++i)
+        s_Pending[i] = s_AudioOut[flush + i];
 
     if (flush > 0)
         pMix->OutputSamplesMono(s_AudioOut, flush);

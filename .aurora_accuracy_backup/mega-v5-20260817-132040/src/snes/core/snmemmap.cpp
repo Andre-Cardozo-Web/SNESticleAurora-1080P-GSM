@@ -50,18 +50,6 @@ static SnesMemMapT	_SnesMemMap_LoRom[]=
 	{0, 0, 0, 0, SNESMEM_TYPE_NONE}
 };
 
-/* AURORA_MEGA_V31_LOROM_SRAM_DECODE
- * Small standard LoROM boards (ROM <= 2 MiB, SRAM <= 32 KiB) decode SRAM
- * across the complete $0000-$ffff range of banks $70-$7d/$f0-$ff. Larger
- * LoROMs leave the upper half to ROM. Keep this as a supplemental map so
- * the common mega-v2 low-half windows remain correct for every LoROM. */
-static SnesMemMapT _SnesMemMap_LoRom_SRAMFullHigh[]=
-{
-	{0x70, 0x7D, 0x8000, 0xFFFF, SNCPU_CYCLE_SLOW, SNESMEM_TYPE_SRAM},
-	{0xF0, 0xFF, 0x8000, 0xFFFF, SNCPU_CYCLE_SLOW, SNESMEM_TYPE_SRAM},
-	{0, 0, 0, 0, SNESMEM_TYPE_NONE}
-};
-
 static SnesMemMapT	_SnesMemMap_HiRom[]=
 {
 	// map slow rom
@@ -357,11 +345,7 @@ void SnesSystem::MapMem(SnesMemMapT *pMemMap)
 					if (nBytes & (SNCPU_BANK_SIZE - 1))
 					{
 						// size of sram wont map evenly to our bank size, so we must use a traphandler for reads/writes
-						/* AURORA_MEGA_V31_SRAM_SMALL_MIRROR_TRAP
-						 * Small SRAM is mirrored throughout the complete cartridge
-						 * window; ReadSRAM/WriteSRAM perform the physical wrap. */
-						SNCPUSetTrap(pCpu, uStartAddr, uEndAddr - uStartAddr,
-						             ReadSRAM, WriteSRAM);
+						SNCPUSetTrap(pCpu, uStartAddr, uAlignedBytes, ReadSRAM, WriteSRAM);
 					}
 					else
 					{
@@ -441,9 +425,7 @@ void SnesSystem::DumpMemMap()
    tem que vencer a ROM que a regiao $40-$7F mapeia ali). */
 static SnesMemMapT _SnesMemMap_ExLoRom_Sys[]=
 {
-	/* v3.1: Jumbo/ExLoROM uses the standard LoROM SRAM mirrors. */
-	{0x70, 0x7D, 0x0000, 0x7FFF, SNCPU_CYCLE_SLOW, SNESMEM_TYPE_SRAM},
-	{0xF0, 0xFF, 0x0000, 0x7FFF, SNCPU_CYCLE_SLOW, SNESMEM_TYPE_SRAM},
+	{0x70, 0x77, 0x0000, 0x7FFF, SNCPU_CYCLE_SLOW, SNESMEM_TYPE_SRAM},
 	{0x7E, 0x7F, 0x0000, 0xFFFF, SNCPU_CYCLE_SLOW, SNESMEM_TYPE_RAM},
 	{0x00, 0x3F, 0x0000, 0x1FFF, SNCPU_CYCLE_SLOW, SNESMEM_TYPE_LORAM},
 	{0x00, 0x3F, 0x2000, 0x3FFF, SNCPU_CYCLE_FAST, SNESMEM_TYPE_PPU0},
@@ -521,15 +503,6 @@ void SnesSystem::MapMem(SNRomMappingE eRomMapping, Uint32 uFlags)
 		// mode 20h
 		case SNROM_MAPPING_LOROM:
 			MapMem(_SnesMemMap_LoRom);
-
-			/* v3.1: generic small-LoROM full-bank SRAM decode. The first
-			 * MapMem call above has already resolved/capped m_uSramSize. */
-			if (!(uFlags & SNROM_FLAG_SUPERFX) &&
-			    m_pRom->GetBytes() <= 0x200000 &&
-			    m_uSramSize > 0 && m_uSramSize <= 0x8000)
-			{
-				MapMem(_SnesMemMap_LoRom_SRAMFullHigh);
-			}
 
 #if SNES_DSP1
 			if (uFlags & SNROM_FLAG_DSP1) { MapMem(_SnesMemMap_LoRom_DSP1); m_pDsp = &m_DSP1; }

@@ -133,22 +133,6 @@ CXXFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fn
 	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE) \
 	-DSNPPU_CHR_CACHE_HFLIP=$(SNES_CHR_HFLIP_CACHE)
 
-# AURORA_MEGA_V4_SAFE_HOT_COMPILE
-# Keep the project's global -O2 + CONSERVATIVE_FLAGS contract.  Only ask GCC
-# to inline more aggressively inside pure computational translation units;
-# do not enable -O3's loop transforms globally and do not touch GIF/GS/DMA I/O.
-AURORA_SAFE_HOT_CXXFLAGS := -finline-functions -finline-small-functions -findirect-inlining
-AURORA_SAFE_HOT_OBJS = \
-	$(OBJ_DIR)/snes/ppu/snppurender8.o \
-	$(OBJ_DIR)/snes/ppu/snppubg.o \
-	$(OBJ_DIR)/snes/ppu/snppuobj.o \
-	$(OBJ_DIR)/snes/core/sngsu.o \
-	$(OBJ_DIR)/snes/apu/snspcmix.o \
-	$(OBJ_DIR)/nes/quicknes/quicknes_bridge.o
-$(AURORA_SAFE_HOT_OBJS): CXXFLAGS += $(AURORA_SAFE_HOT_CXXFLAGS)
-# Makefile changes to the target-specific flags must invalidate these objects.
-$(AURORA_SAFE_HOT_OBJS): Makefile
-
 # The official libxmp-lite embedded/core configuration keeps the MOD/XM effect
 # and loop engines while omitting desktop-only depackers and format extras,
 # which matters for both ELF size and EE CPU on the PS2.

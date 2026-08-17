@@ -1138,8 +1138,10 @@ void SnesSystem::Reset()
 	memset(_CPUHackMem, 0, sizeof(_CPUHackMem));
 #endif
 
-	/* AURORA_MEGA_V5_RESET_PRESERVE_RAM
-	 * RESET is warm: preserve WRAM/SRAM. Cold power is SetSnesRom(). */
+memset(m_Ram, 0x00, sizeof(m_Ram));
+if (m_uSramSize)
+    memset(m_SRam, 0xFF, m_uSramSize);
+
 	// reset cpu
 	SNCPUReset(&m_Cpu, true);
 	SNSPCReset(&m_Spc, true);
@@ -1220,24 +1222,6 @@ void SnesSystem::SetSnesRom(SnesRom *pRom)
 	{
 		// setup memory mapping for this rom
 		MapMem(m_pRom->m_eMapping, m_pRom->m_Flags);
-
-		/* AURORA_MEGA_V5_COLD_BOOT_WRAM
-		 * Real power-on WRAM is undefined/random-looking. Randomise only when a
-		 * new cartridge is attached, never on RESET or save-state restore. */
-		Uint32 uAuroraSeed =
-			((Uint32)(unsigned long)m_pRom ^ (Uint32)rand() ^
-			 ((Uint32)rand() << 16) ^ 0xA5C31F27u);
-		if (!uAuroraSeed) uAuroraSeed = 0x6D2B79F5u;
-		for (Uint32 i = 0; i < (Uint32)sizeof(m_Ram); ++i)
-		{
-			uAuroraSeed ^= uAuroraSeed << 13;
-			uAuroraSeed ^= uAuroraSeed >> 17;
-			uAuroraSeed ^= uAuroraSeed << 5;
-			m_Ram[i] = (Uint8)uAuroraSeed;
-		}
-		/* Fresh nonvolatile backing starts erased; the SRAM loader may replace it. */
-		if (m_uSramSize)
-			memset(m_SRam, 0xFF, m_uSramSize);
 	} 
 	else
 	{

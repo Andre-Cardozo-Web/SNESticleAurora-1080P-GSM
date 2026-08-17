@@ -333,22 +333,28 @@ static void _MosaicBGPlanar(Uint8 *pLine, Int32 nTotalPixels, Uint32 uMosaic)
 
 void _ClearLine8(Uint8 *pLine8, Uint8 *pLineP, Int32 nPixels, Uint8 uColor, Uint32 uBGMask)
 {
-    /* AURORA_MEGA_V4_CLEARLINE_MEMSET
-     * These are host-side byte planes only. The old loops assigned Uint8 on
-     * every iteration, so memset with the same truncated byte is exactly the
-     * same state and lets the PS2 libc use its tuned bulk store path. */
-    if (nPixels > 0)
-    {
-        memset(pLine8, uColor, (size_t)nPixels);
-        memset(pLineP, (Uint8)uBGMask, (size_t)nPixels);
-    }
+	while (nPixels > 0)
+	{
+		pLine8[0] = uColor;
+		pLineP[0] = uBGMask;
+
+		pLine8++;
+		pLineP++;
+		nPixels--;
+	}
+
 }
 
 void _ClearLine8(Uint8 *pLine8, Int32 nPixels, Uint8 uColor)
 {
-    /* AURORA_MEGA_V4_CLEARLINE_MEMSET: byte-exact host-plane clear. */
-    if (nPixels > 0)
-        memset(pLine8, uColor, (size_t)nPixels);
+	while (nPixels > 0)
+	{
+		pLine8[0] = uColor;
+
+		pLine8++;
+		nPixels--;
+	}
+
 }
 
 #if !SNPPURENDER_CHR64
