@@ -32,6 +32,19 @@ static Uint32   _GPFifo_nListQwords;
 static Uint32   _GPFifo_iCurList;
 static Bool     _GPFifo_bInited = FALSE;
 
+/* AURORA_COMPAT_GPFIFO_STATE */
+static Bool _GPFifo_bCompatFullCache = FALSE;
+
+void GPFifoSetCompatFullCache(Bool enabled)
+{
+    _GPFifo_bCompatFullCache = enabled ? TRUE : FALSE;
+}
+
+Bool GPFifoGetCompatFullCache(void)
+{
+    return _GPFifo_bCompatFullCache;
+}
+
 /* Kept for debugging the bridged gslist path. Marked unused so
    GCC stops warning about it; flip the call site in GPFifoPause to
    (re-)enable. */
@@ -80,8 +93,9 @@ void GPFifoPause(void)
      * Keep a conservative future-proof guard: if GSDmaRef() was used, retain
      * the old FlushCache(0), because the REF payload can live outside this
      * list.  With no REF, synchronize only the qwords the DMAC will read. */
-    if (GSListHasDmaRefs())
+    if (_GPFifo_bCompatFullCache || GSListHasDmaRefs())
     {
+        /* Full compatibility mode restores the old whole-cache fallback. */
         FlushCache(0);
     }
     else

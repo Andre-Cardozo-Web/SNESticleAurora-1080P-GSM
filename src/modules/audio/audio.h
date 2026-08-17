@@ -32,4 +32,10 @@ void Aud_Wait();
 
 int  Aud_IsInitialized();
 
+/* AURORA_COMPAT_AUDIO_API */
+void Aud_SetCompatSmallChunks(int enabled);
+int  Aud_GetCompatSmallChunks(void);
+void Aud_SetCompatDeepQueue(int enabled);
+int  Aud_GetCompatDeepQueue(void);
+
 #endif /* _AUDIO_H */

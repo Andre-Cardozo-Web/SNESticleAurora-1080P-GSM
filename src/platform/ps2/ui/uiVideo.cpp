@@ -11,6 +11,9 @@
 #include "snrom.h"
 extern "C" {
 #include "gskit_backend.h"
+#include "gpfifo.h"
+#include "ps2dma.h"
+#include "audio.h"
 }
 #include "memcard.h"
 #include "uiCover.h"
@@ -32,7 +35,7 @@ void MainResetEmulator(void);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 20
+#define VIDEOCFG_VERSION 21
 /* AURORA_V85_SOFTWARE_HACKS_CONFIG
  * v20 only appends renderer-hack preferences. Old configs migrate with all
  * hacks disabled and all layers enabled. */
@@ -61,6 +64,7 @@ typedef struct
 	Int32  forceregion;
 	Int32  sneshacklayersoff;
 	Int32  sneshackflags;
+	Int32  compatflags;
 } VideoCfgT;
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -154,6 +158,33 @@ typedef struct
 	Int32  forceregion;
 } VideoCfgV19T;
 
+/* Exact on-card layout written by v20 (V8.5). */
+typedef struct
+{
+	Uint32 magic;
+	Int32  version;
+	Int32  mode;
+	Int32  offx;
+	Int32  offy;
+	Int32  overscan;
+	Int32  widescreen;
+	Int32  covers;
+	Int32  bgmvol;
+	Int32  bgmrate;
+	Int32  gamevol;
+	Int32  hddenable;
+	Int32  mmceenable;
+	Int32  massenable;
+	Int32  smbenable;
+	Int32  mx4sioenable;
+	Int32  colorprofile;
+	Int32  famicloneaudio;
+	Int32  fakesramsize;
+	Int32  forceregion;
+	Int32  sneshacklayersoff;
+	Int32  sneshackflags;
+} VideoCfgV20T;
+
 typedef struct
 {
 	Uint32 magic;
@@ -167,6 +198,29 @@ static void _VideoCfgPath(char *pOut)
 }
 
 static Bool g_FamicloneAudio = FALSE;
+
+/* AURORA_COMPAT_PAGE_V21
+ * Zero flags = exact V8.5 host behavior. */
+#define VIDEO_COMPAT_GS_FULL_CACHE   (1 << 0)
+#define VIDEO_COMPAT_GIF_LONG_WAIT   (1 << 1)
+#define VIDEO_COMPAT_AUDIO_SMALL_RPC (1 << 2)
+#define VIDEO_COMPAT_AUDIO_DEEP_Q    (1 << 3)
+#define VIDEO_COMPAT_ALL             0x0F
+
+static Int32 g_VideoCompatFlags = 0;
+
+static void _VideoApplyCompatFlags(Int32 flags)
+{
+	g_VideoCompatFlags = flags & VIDEO_COMPAT_ALL;
+	GPFifoSetCompatFullCache(
+		(g_VideoCompatFlags & VIDEO_COMPAT_GS_FULL_CACHE) ? TRUE : FALSE);
+	DmaSetGifCompatLongWait(
+		(g_VideoCompatFlags & VIDEO_COMPAT_GIF_LONG_WAIT) ? TRUE : FALSE);
+	Aud_SetCompatSmallChunks(
+		(g_VideoCompatFlags & VIDEO_COMPAT_AUDIO_SMALL_RPC) ? 1 : 0);
+	Aud_SetCompatDeepQueue(
+		(g_VideoCompatFlags & VIDEO_COMPAT_AUDIO_DEEP_Q) ? 1 : 0);
+}
 
 void VideoSettingsSave(void)
 {
@@ -198,6 +252,7 @@ void VideoSettingsSave(void)
 		(SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
 		 SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
 	cfg.sneshackflags = SNPPURenderGetSoftwareHackFlags();
+	cfg.compatflags = g_VideoCompatFlags & VIDEO_COMPAT_ALL;
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -217,6 +272,7 @@ void VideoSettingsLoad(void)
 		SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
 		SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
 	SNPPURenderSetSoftwareHackFlags(0);
+	_VideoApplyCompatFlags(0);
 	_VideoCfgPath(path);
 
 	memset(&header, 0, sizeof(header));
@@ -226,6 +282,18 @@ void VideoSettingsLoad(void)
 				if (header.version == VIDEOCFG_VERSION)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+		}
+		else if (header.version == 20)
+		{
+			VideoCfgV20T oldcfg20;
+			memset(&oldcfg20, 0, sizeof(oldcfg20));
+			if (MemCardReadFile(path, (Uint8 *)&oldcfg20, sizeof(oldcfg20)))
+			{
+				memcpy(&cfg, &oldcfg20, sizeof(oldcfg20));
+				cfg.version = VIDEOCFG_VERSION;
+				cfg.compatflags = 0;
+				loaded = TRUE;
+			}
 		}
 		else if (header.version == 19)
 		{
@@ -346,6 +414,8 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 				(Uint8)(uLayerBits & ~cfg.sneshacklayersoff));
 		if ((cfg.sneshackflags & ~SNPPU_HACK_ALL) == 0)
 			SNPPURenderSetSoftwareHackFlags((Uint8)cfg.sneshackflags);
+		if ((cfg.compatflags & ~VIDEO_COMPAT_ALL) == 0)
+			_VideoApplyCompatFlags(cfg.compatflags);
 	}
 }
 
@@ -469,6 +539,29 @@ static const char *_VideoHackFrameSkipStatus()
 		? "1" : "Off";
 }
 
+static const char *_VideoCompatProfileStatus()
+{
+	if (g_VideoCompatFlags == 0) return "Standard";
+	if (g_VideoCompatFlags == VIDEO_COMPAT_ALL) return "Conservative";
+	return "Custom";
+}
+static const char *_VideoCompatGsCacheStatus()
+{
+	return (g_VideoCompatFlags & VIDEO_COMPAT_GS_FULL_CACHE) ? "Full" : "Range";
+}
+static const char *_VideoCompatGifWaitStatus()
+{
+	return (g_VideoCompatFlags & VIDEO_COMPAT_GIF_LONG_WAIT) ? "Long" : "Normal";
+}
+static const char *_VideoCompatAudioRpcStatus()
+{
+	return (g_VideoCompatFlags & VIDEO_COMPAT_AUDIO_SMALL_RPC) ? "1 KB" : "4 KB";
+}
+static const char *_VideoCompatAudioQueueStatus()
+{
+	return (g_VideoCompatFlags & VIDEO_COMPAT_AUDIO_DEEP_Q) ? "Deep" : "Normal";
+}
+
 static const char *_VideoMx4sioStatus()
 {
 	if (!Mx4sioIsEnabled())       return "Off";
@@ -506,7 +599,8 @@ void CVideoScreen::Draw()
 	int   m = _VideoModeIndex(g_GskVideoMode);
 	const char *pMode = _VideoModes[m].name;
 	/* AURORA_V85_SOFTWARE_HACKS_PAGE */
-	int   iPage = (m_iSelect >= 19) ? 2 : ((m_iSelect >= 10) ? 1 : 0);
+	int   iPage = (m_iSelect >= 28) ? 3 :
+	              ((m_iSelect >= 19) ? 2 : ((m_iSelect >= 10) ? 1 : 0));
 	const char *pWide = "Off";
 	const char *pColor = (SNPPUColorGetProfile() == SNPPU_COLOR_PROFILE_COMPOSITE)
 	                   ? "Composite" : "Original";
@@ -517,9 +611,10 @@ void CVideoScreen::Draw()
 	FontSelect(0);
 
 	_VideoHeader(vy,
-		iPage == 0 ? "Video Config (1/3)" :
-		iPage == 1 ? "Video Config (2/3)" :
-		             "Video Config (3/3)");
+		iPage == 0 ? "Video Config (1/4)" :
+		iPage == 1 ? "Video Config (2/4)" :
+		iPage == 2 ? "Video Config (3/4)" :
+		             "Video Config (4/4)");
 	vy += 18;
 
 	if (iPage == 0) {
@@ -590,7 +685,7 @@ _VideoRow(vy, 17, m_iSelect, "Famiclone Audio",
 _VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;
 
 	}
-	else
+	else if (iPage == 2)
 	{
 		_VideoHeader(vy, "Software Hacks"); vy += 14;
 		_VideoRow(vy, 19, m_iSelect, "BG1 Layer",
@@ -612,12 +707,26 @@ _VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;
 		_VideoRow(vy, 27, m_iSelect, "Frame Skip",
 			_VideoHackFrameSkipStatus()); vy += 12;
 	}
+	else
+	{
+		_VideoHeader(vy, "Compatibility"); vy += 14;
+		_VideoRow(vy, 28, m_iSelect, "Profile",
+			_VideoCompatProfileStatus()); vy += 12;
+		_VideoRow(vy, 29, m_iSelect, "GS Cache Sync",
+			_VideoCompatGsCacheStatus()); vy += 12;
+		_VideoRow(vy, 30, m_iSelect, "GIF DMA Wait",
+			_VideoCompatGifWaitStatus()); vy += 12;
+		_VideoRow(vy, 31, m_iSelect, "Audio RPC Chunk",
+			_VideoCompatAudioRpcStatus()); vy += 12;
+		_VideoRow(vy, 32, m_iSelect, "Audio Queue",
+			_VideoCompatAudioQueueStatus()); vy += 12;
+	}
 
 	/* controls / hints (clear of the vy=215 footer) */
 	vy = 184;
 	FontColor4f(0.6f, 0.6f, 0.6f, 1.0f);
 	_VideoCenter(128, vy, "Up/Dn: select   L/R: change   X: save"); vy += 12;
-	_VideoCenter(128, vy, "O (Circle): next page"); vy += 12;
+	_VideoCenter(128, vy, "O: next   Square: previous"); vy += 12;
 
 	if (g_GskVideoMode != GSK_GetActiveVideoMode())
 	{
@@ -635,11 +744,12 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
 	int dir = 0;
 
-	/* Circle: Video/Audio -> Devices/Misc -> Software Hacks. */
+	/* Circle: Video/Audio -> Devices/Misc -> Software Hacks -> Compatibility. */
 	if (trigger & PAD_CIRCLE)
 	{
 		if (m_iSelect < 10)       m_iSelect = 10;
 		else if (m_iSelect < 19)  m_iSelect = 19;
+		else if (m_iSelect < 28)  m_iSelect = 28;
 		else                      m_iSelect = 0;
 	}
 
@@ -647,7 +757,8 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		int lo, hi;
 		if (m_iSelect < 10)      { lo = 0;  hi = 9;  }
 		else if (m_iSelect < 19) { lo = 10; hi = 18; }
-		else                     { lo = 19; hi = 27; }
+		else if (m_iSelect < 28) { lo = 19; hi = 27; }
+		else                     { lo = 28; hi = 32; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -898,17 +1009,39 @@ case 17: /* Famiclone Audio */
 			SNPPURenderSetSoftwareHackFlags(
 				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_FRAME_SKIP);
 			break;
+		case 28:
+			_VideoApplyCompatFlags(
+				g_VideoCompatFlags == VIDEO_COMPAT_ALL ? 0 : VIDEO_COMPAT_ALL);
+			break;
+		case 29:
+			_VideoApplyCompatFlags(
+				g_VideoCompatFlags ^ VIDEO_COMPAT_GS_FULL_CACHE);
+			break;
+		case 30:
+			_VideoApplyCompatFlags(
+				g_VideoCompatFlags ^ VIDEO_COMPAT_GIF_LONG_WAIT);
+			break;
+		case 31:
+			_VideoApplyCompatFlags(
+				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_SMALL_RPC);
+			break;
+		case 32:
+			_VideoApplyCompatFlags(
+				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_DEEP_Q);
+			break;
 		}
 
 
 	}
 
-	/* Square: reset the display offset (live). */
+	/* AURORA_VIDEO_SQUARE_PREV_PAGE
+	 * Square: previous configuration page. */
 	if (trigger & PAD_SQUARE)
 	{
-		g_GskDispOffX = 0;
-		g_GskDispOffY = 0;
-		GSK_SetDisplayOffset(0, 0);
+		if (m_iSelect >= 28)      m_iSelect = 19;
+		else if (m_iSelect >= 19) m_iSelect = 10;
+		else if (m_iSelect >= 10) m_iSelect = 0;
+		else                      m_iSelect = 28;
 	}
 
 /* Cross / Start: persist all video settings to the memory card. */

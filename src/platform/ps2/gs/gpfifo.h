@@ -3,6 +3,11 @@
 #define _GPFIFO_H
 
 
+/* AURORA_COMPAT_GPFIFO_API
+ * Default FALSE keeps V8.5 range-based D-cache sync unchanged. */
+void GPFifoSetCompatFullCache(Bool enabled);
+Bool GPFifoGetCompatFullCache(void);
+
 void GPFifoFlush();
 void GPFifoPause();
 void GPFifoResume();

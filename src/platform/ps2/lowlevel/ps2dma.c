@@ -5,6 +5,19 @@
 
 #define DMA_DEBUG (CODE_DEBUG || 1)
 
+/* AURORA_COMPAT_GIFWAIT_STATE */
+static Bool _DmaGifCompatLongWait = FALSE;
+
+void DmaSetGifCompatLongWait(Bool enabled)
+{
+    _DmaGifCompatLongWait = enabled ? TRUE : FALSE;
+}
+
+Bool DmaGetGifCompatLongWait(void)
+{
+    return _DmaGifCompatLongWait;
+}
+
 void DmaExecSprToRam(Uint128 *pMem, Uint128 *pSpr, Uint32 nQwords)
 {
     D8_QWC  = nQwords;
@@ -117,7 +130,8 @@ void DmaExecGIFChain(Uint128 *pTag)
 
 void DmaSyncGIF()
 {
-	int timeout=10*1000*1000;
+	/* Normal is the exact old timeout; Long only widens the safety guard. */
+	int timeout = _DmaGifCompatLongWait ? 40*1000*1000 : 10*1000*1000;
 
     // sync dma
     while ((D2_CHCR & DCHCR_M_STR) && timeout > 0)

@@ -107,6 +107,10 @@ void DmaExecGIF(Uint128 *pMem,  Uint32 nQwords);
 void DmaExecGIFChain(Uint128 *pTag);
 void DmaSyncGIF();
 
+/* AURORA_COMPAT_GIFWAIT_API */
+void DmaSetGifCompatLongWait(Bool enabled);
+Bool DmaGetGifCompatLongWait(void);
+
 
 #ifdef __cplusplus
 }

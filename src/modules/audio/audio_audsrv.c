@@ -154,6 +154,28 @@ static int sjpcm_playing = 0;
 #define AUD_GUARD_ADJUST_SAMPLES     2
 static unsigned int aud_guard_enqueues = 0;
 
+/* AURORA_COMPAT_AUDIO_STATE
+ * 0/0 is exactly the V8.5 path. */
+static int aud_compat_small_chunks = 0;
+static int aud_compat_deep_queue = 0;
+
+void Aud_SetCompatSmallChunks(int enabled)
+{
+    aud_compat_small_chunks = enabled ? 1 : 0;
+}
+int Aud_GetCompatSmallChunks(void)
+{
+    return aud_compat_small_chunks;
+}
+void Aud_SetCompatDeepQueue(int enabled)
+{
+    aud_compat_deep_queue = enabled ? 1 : 0;
+}
+int Aud_GetCompatDeepQueue(void)
+{
+    return aud_compat_deep_queue;
+}
+
 /* audsrv_stop_audio() does more than empty its queue: it leaves the IOP
    mixer stopped until the next audsrv_play_audio() call.  Keep that state
    explicit so the legacy Aud_Play() API really resumes playback instead of
@@ -169,10 +191,14 @@ static void Aud_WakeAudsrv(void)
        Keep ~16 ms of known-valid silence beyond audsrv's built-in half-ring
        startup cushion.  The old 64-frame prime was only ~1.3 ms and left too
        little protection against an isolated slow EE frame. */
-    memset(_interleave_buf, 0,
-           AUD_WAKE_PRIME_SAMPLES * AUD_BYTES_PER_SAMPLE);
-    ret = audsrv_play_audio((const char *)_interleave_buf,
-                            AUD_WAKE_PRIME_SAMPLES * AUD_BYTES_PER_SAMPLE);
+    {
+        const int prime_samples =
+            aud_compat_deep_queue ? 1024 : AUD_WAKE_PRIME_SAMPLES;
+        memset(_interleave_buf, 0,
+               prime_samples * AUD_BYTES_PER_SAMPLE);
+        ret = audsrv_play_audio((const char *)_interleave_buf,
+                                prime_samples * AUD_BYTES_PER_SAMPLE);
+    }
     if (ret >= 0)
         sjpcm_playing = 1;
 }
@@ -359,9 +385,13 @@ void Aud_Enqueue(short *left, short *right, int size, int wait)
         if (queued_bytes >= 0)
         {
             int queued_samples = queued_bytes / AUD_BYTES_PER_SAMPLE;
-            if (queued_samples < AUD_GUARD_LOW_SAMPLES)
+            const int guard_low =
+                aud_compat_deep_queue ? 3072 : AUD_GUARD_LOW_SAMPLES;
+            const int guard_high =
+                aud_compat_deep_queue ? 4096 : AUD_GUARD_HIGH_SAMPLES;
+            if (queued_samples < guard_low)
                 aud_adjust_now = AUD_GUARD_ADJUST_SAMPLES;
-            else if (queued_samples > AUD_GUARD_HIGH_SAMPLES)
+            else if (queued_samples > guard_high)
                 aud_adjust_now = -AUD_GUARD_ADJUST_SAMPLES;
         }
     }
@@ -428,13 +458,15 @@ void Aud_Enqueue(short *left, short *right, int size, int wait)
          * exact unsent byte, so PCM is neither dropped nor duplicated. */
         src = (const char *)_interleave_buf;
         remaining = bytes;
-        while (remaining > 0)
         {
-            int chunk = remaining;
-            int sent;
+            const int chunk_limit = aud_compat_small_chunks ? 1024 : 4096;
+            while (remaining > 0)
+            {
+                int chunk = remaining;
+                int sent;
 
-            if (chunk > 4096)
-                chunk = 4096;
+                if (chunk > chunk_limit)
+                    chunk = chunk_limit;
 
             if (audsrv_wait_audio(chunk) != AUDSRV_ERR_NOERROR)
                 return;
@@ -445,9 +477,10 @@ void Aud_Enqueue(short *left, short *right, int size, int wait)
             if (sent == 0)
                 continue;
 
-            src += sent;
-            remaining -= sent;
-            sjpcm_playing = 1;
+                src += sent;
+                remaining -= sent;
+                sjpcm_playing = 1;
+            }
         }
         return;
     }
