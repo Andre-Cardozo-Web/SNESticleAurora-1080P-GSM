@@ -14,7 +14,7 @@ class CMixBuffer;
  * Keep a fixed capacity so asking for the state size never needs to
  * serialize the machine merely to discover the length.
  */
-enum { QUICKNES_STATE_CAPACITY = 32 * 1024 };
+enum { QUICKNES_STATE_CAPACITY = 64 * 1024 };
 
 bool QuicknesBridge_Init(void);
 void QuicknesBridge_Shutdown(void);

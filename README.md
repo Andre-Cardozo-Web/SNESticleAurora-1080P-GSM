@@ -56,12 +56,17 @@ If the repository was cloned without `--recurse-submodules`, run
 **FIXED:**
 
 * Super Mario Bros. 2 (SNES version, All Stars) curtain transition effect
+* Many graphical glitches and inaccuracies on many NES and SNES games
 
 **TO BE FIXED:**
 
-* Top Gear (SNES) performance is very slow
+* Super Mario World 2 (SNES) performance
+* Top Gear (SNES) performance
+* Any other games with performance issues
 
 **TO BE ADDED:**
 
+* Improve Mode 7 and FX2 emulation
+* Famicom Disk System support
 * Every NES mapper possible!
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!

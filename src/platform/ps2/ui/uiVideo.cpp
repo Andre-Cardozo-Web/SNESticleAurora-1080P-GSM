@@ -663,7 +663,7 @@ case 15: /* SRAM Size */
     switch (g_FakeSRAMSize)
     {
         case 0:
-            g_FakeSRAMSize = (dir > 0) ? 8 : 4096;
+            g_FakeSRAMSize = (dir > 0) ? 8 : 2048;
             break;
 
         case 8:
