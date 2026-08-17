@@ -1,0 +1,404 @@
+/*
+    ---------------------------------------------------------------------
+    audio_audsrv.c - audsrv backend for the Aud_* EE-side audio API.
+    ---------------------------------------------------------------------
+
+    The original SjPCM library (Nick Van Veen "Sjeep", 2002) talked to a
+    custom IOP-side IRX (SJPCM2.IRX) over SIF RPC. That precompiled IRX
+    pre-dates a number of changes in modern PS2SDK / IOP rom builds and
+    its RPC server either fails to register or hangs SifBindRpc on
+    emulators (NetherSX2/PCSX2 Qt) and stripped-down PS2 setups, which
+    is why the project had to disable the embedded SJPCM2.IRX entirely
+    (see src/platform/ps2/system/embedded_irx.cpp). Result: silent audio.
+
+    The PS2DEV team replaced SjPCM with **audsrv** back in 2005:
+        https://forums.ps2dev.org/viewtopic.php?t=1500
+            "Audsrv comes to replace sjpcm, and provide an easy and
+             stable way to utilize the SPU2."
+    audsrv.irx ships with every modern PS2SDK at
+        $(PS2SDK)/iop/irx/audsrv.irx
+    and is the standard audio service used by SDL, ScummVM, OPL, etc.
+
+    This file keeps the Aud_* API surface that AudMixBuffer and
+    mainloop_iop.cpp call into, but the backend is now audsrv. Sample
+    format is fixed at the SPU2's native 48000 Hz / 16 bit / stereo,
+    which matches what AudMixBuffer already converts the SNES output
+    to (see src/common/render/sjpcmbuffer.cpp). Left/right separated
+    channels are interleaved into a stereo buffer before being passed
+    to audsrv_play_audio().
+
+    audsrv exposes audsrv_queued() / audsrv_available() (in bytes), so
+    Aud_Buffered() / Aud_Available() map directly without needing
+    any time-based estimation.
+*/
+
+#include <tamtypes.h>
+#include <kernel.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <audsrv.h>
+#include <sio.h>
+
+#include "audio.h"
+
+/* ScrPrintf goes to the on-screen log (and stays there during the
+   splash). Plain printf on EE-side never reaches the emulator console
+   in this project, but ScrPrintf does survive long enough to be seen
+   in a screenshot of the boot screen. Forward-declare it here so we
+   don't have to drag the C++ mainloop_ui.h into this C file. */
+extern void ScrPrintf(const char *pFormat, ...);
+
+/* Diagnostic printf helper for this project.
+
+   Plain printf() on the EE never seems to reach NetherSX2 / PCSX2's
+   emulator log file in this codebase (some piece of the libc->SIF->IOP
+   stdout wiring is missing). What *does* reach the emulator log is the
+   EE SIO TX FIFO at 0x1000f180: PCSX2 captures bytes written to it and
+   emits them on the EE_SIO log channel, which lands in the same console
+   /log file as the IOP "loadmodule:" / "audsrv_adpcm_init()" lines.
+
+   We therefore route diagnostics through sio_putsn() (writes to EE SIO
+   TX FIFO byte-by-byte) and also mirror them to ScrPrintf so the user
+   sees them on the on-screen splash log. sio_init() is called lazily
+   on first use with the standard 38400 8N1 setting.
+
+   Tag: each line is prefixed with "[snes-aud] " so the user can grep
+   the log file. */
+static int   _sio_inited = 0;
+static char  _dlog_buf[256];
+
+/* Non-static so other translation units can extern it for one-off
+   audio-path tracing. Mirror of the local prototype:
+       extern void DLog(const char *fmt, ...);
+   See mainloop_process.cpp / sjpcmbuffer.cpp where this is called
+   via that extern declaration. */
+void DLog(const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    if (!_sio_inited)
+    {
+        sio_init(38400, 0, 0, 0, 0);
+        _sio_inited = 1;
+    }
+
+    va_start(ap, fmt);
+    n = vsnprintf(_dlog_buf, sizeof(_dlog_buf) - 2, fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    if (n > (int)sizeof(_dlog_buf) - 2) n = sizeof(_dlog_buf) - 2;
+
+    /* Make sure the line ends with \n so the emulator log flushes it. */
+    if (n == 0 || _dlog_buf[n - 1] != '\n')
+    {
+        _dlog_buf[n++] = '\n';
+        _dlog_buf[n]   = '\0';
+    }
+
+    sio_putsn(_dlog_buf);
+}
+
+
+/*
+    Output is fixed 48000 Hz / 16 bit / stereo (SPU2 native).
+    AudMixBuffer already up-samples 32000 Hz SNES audio to 48000 Hz
+    before calling Aud_Enqueue, so audsrv runs without any internal
+    upsampling.
+*/
+#define AUD_AUDSRV_FREQ      48000
+#define AUD_AUDSRV_BITS      16
+#define AUD_AUDSRV_CHANNELS  2
+#define AUD_BYTES_PER_SAMPLE (AUD_AUDSRV_CHANNELS * (AUD_AUDSRV_BITS / 8)) /* 4 */
+
+
+/*
+    Static interleave scratch sized for the worst case the engine will
+    ever pass into Aud_Enqueue. AUDMIXBUFFER_MAXENQUEUE in
+    sjpcmbuffer.h is currently (800 * 5) = 4000 samples per channel.
+    Round up to 4096 for alignment headroom.
+*/
+#define AUD_MAX_ENQUEUE_SAMPLES 4096
+static short _interleave_buf[AUD_MAX_ENQUEUE_SAMPLES * AUD_AUDSRV_CHANNELS]
+    __attribute__((aligned(64)));
+
+
+static int sjpcm_inited = 0;
+static int sjpcm_playing = 0;
+
+/* audsrv_stop_audio() does more than empty its queue: it leaves the IOP
+   mixer stopped until the next audsrv_play_audio() call.  Keep that state
+   explicit so the legacy Aud_Play() API really resumes playback instead of
+   relying on the first emulator/BGM block to do it by accident. */
+static void Aud_WakeAudsrv(void)
+{
+    int ret;
+
+    if (!sjpcm_inited || sjpcm_playing)
+        return;
+
+    /* A tiny silent block is enough to restart audsrv.  It also gives
+       audsrv_queued()/available() a deterministic state before producers
+       decide whether there is room to enqueue their first real block. */
+    memset(_interleave_buf, 0, 64 * AUD_BYTES_PER_SAMPLE);
+    ret = audsrv_play_audio((const char *)_interleave_buf,
+                            64 * AUD_BYTES_PER_SAMPLE);
+    if (ret >= 0)
+        sjpcm_playing = 1;
+}
+
+
+int Aud_Init(int sync, int numsamples, int maxenqueuesamples)
+{
+    struct audsrv_fmt_t fmt;
+    int ret;
+
+    (void)sync;
+    (void)numsamples;
+    (void)maxenqueuesamples;
+
+    if (sjpcm_inited)
+    {
+        return 0;
+    }
+
+    /* Mirror init progression to the on-screen splash log too -- on
+       real PS2 hardware without an SIO cable, the screen is the only
+       way to see where init died.  If audsrv_init() blocks inside
+       SifBindRpc (because the IOP audsrv RPC server never registered),
+       the user will see "audsrv_init..." on screen as the last line
+       and we know exactly which step deadlocked. */
+    // DLog("[snes-aud] audsrv_init() ...");
+    ret = audsrv_init();
+    // DLog("[snes-aud] audsrv_init() = %d", ret);
+    if (ret != 0)
+    {
+        // DLog("[snes-aud] init FAILED %d (%s)",
+        //      ret, audsrv_get_error_string());
+        return -1;
+    }
+
+    fmt.freq     = AUD_AUDSRV_FREQ;
+    fmt.bits     = AUD_AUDSRV_BITS;
+    fmt.channels = AUD_AUDSRV_CHANNELS;
+
+    ret = audsrv_set_format(&fmt);
+    // DLog("[snes-aud] set_format(48000,16,2) = %d", ret);
+    if (ret != 0)
+    {
+        // DLog("[snes-aud] set_format FAILED %d (%s)",
+        //      ret, audsrv_get_error_string());
+        audsrv_quit();
+        return -1;
+    }
+
+    /* Default to full volume. Aud_Setvol() may override. */
+    ret = audsrv_set_volume(MAX_VOLUME);
+    // DLog("[snes-aud] set_volume(%d) = %d", MAX_VOLUME, ret);
+
+    /* Prime audsrv before a producer asks queued()/available(). */
+    sjpcm_inited = 1;
+    sjpcm_playing = 0;
+    Aud_WakeAudsrv();
+    return 0;
+}
+
+
+void Aud_Quit(void)
+{
+    if (!sjpcm_inited) return;
+    audsrv_stop_audio();
+    audsrv_quit();
+    sjpcm_inited = 0;
+    sjpcm_playing = 0;
+}
+
+
+/*
+    The original API was pause/play; audsrv plays continuously while
+    samples are queued, so Play is effectively "make sure not stopped"
+    and Pause is "drop the queue". AudMixBuffer calls
+    Aud_Clearbuff() + Aud_Play() once at boot.
+*/
+void Aud_Play(void)
+{
+    Aud_WakeAudsrv();
+}
+
+
+void Aud_Pause(void)
+{
+    if (!sjpcm_inited) return;
+    audsrv_stop_audio();
+    sjpcm_playing = 0;
+}
+
+
+void Aud_Clearbuff(void)
+{
+    if (!sjpcm_inited) return;
+    audsrv_stop_audio();
+    sjpcm_playing = 0;
+}
+
+
+/*
+    Aud_Setvol took a 14-bit hardware-style volume (0..0x3FFF) where
+    0x3FFF was full scale. audsrv's volume is 0..MAX_VOLUME (100), so
+    rescale.
+*/
+void Aud_Setvol(unsigned int volume)
+{
+    int v;
+
+    if (!sjpcm_inited) return;
+
+    volume &= 0x3FFF;
+    v = (int)((volume * MAX_VOLUME) / 0x3FFF);
+    if (v < MIN_VOLUME) v = MIN_VOLUME;
+    if (v > MAX_VOLUME) v = MAX_VOLUME;
+
+    audsrv_set_volume(v);
+}
+
+
+/*
+    Bytes already queued in audsrv's IOP-side ring buffer, expressed as
+    stereo sample-frames so the math in AudMixBuffer::GetOutputSamples
+    keeps working unchanged.
+*/
+int Aud_Buffered(void)
+{
+    int bytes;
+
+    if (!sjpcm_inited) return 0;
+
+    bytes = audsrv_queued();
+    if (bytes < 0) return 0;
+
+    return bytes / AUD_BYTES_PER_SAMPLE;
+}
+
+
+int Aud_Available(void)
+{
+    int bytes;
+
+    if (!sjpcm_inited) return 0;
+
+    bytes = audsrv_available();
+    if (bytes < 0) return 0;
+
+    return bytes / AUD_BYTES_PER_SAMPLE;
+}
+
+
+/*
+    Interleave separate left/right channels and push to audsrv. `wait`
+    selects between blocking until enough room is available
+    (audsrv_wait_audio) and best-effort (drop overflow if the IOP ring
+    is full).
+*/
+void Aud_Enqueue(short *left, short *right, int size, int wait)
+{
+    int i;
+    int bytes;
+    const char *src;
+    int remaining;
+
+    if (!sjpcm_inited) return;
+    if (size <= 0) return;
+    if (size > AUD_MAX_ENQUEUE_SAMPLES) size = AUD_MAX_ENQUEUE_SAMPLES;
+
+    for (i = 0; i < size; i++)
+    {
+        _interleave_buf[i * 2 + 0] = left[i];
+        _interleave_buf[i * 2 + 1] = right[i];
+    }
+
+    bytes = size * AUD_BYTES_PER_SAMPLE;
+
+    if (wait)
+    {
+        /* AURORA_MEGA_V4_AUDSRV_LOSSLESS_CHUNKS
+         * PS2SDK audsrv truncates play_audio() to the room available in its
+         * IOP ring. wait_audio() guarantees its requested amount, but the
+         * ring starts only half-free after set_format(). Keep each request
+         * <= 4096 bytes: below the initial free window and normally one whole
+         * emulator frame. A rare short positive write is retried from the
+         * exact unsent byte, so PCM is neither dropped nor duplicated. */
+        src = (const char *)_interleave_buf;
+        remaining = bytes;
+        while (remaining > 0)
+        {
+            int chunk = remaining;
+            int sent;
+
+            if (chunk > 4096)
+                chunk = 4096;
+
+            if (audsrv_wait_audio(chunk) != AUDSRV_ERR_NOERROR)
+                return;
+
+            sent = audsrv_play_audio(src, chunk);
+            if (sent < 0)
+                return;
+            if (sent == 0)
+                continue;
+
+            src += sent;
+            remaining -= sent;
+            sjpcm_playing = 1;
+        }
+        return;
+    }
+
+    if (audsrv_play_audio((const char *)_interleave_buf, bytes) >= 0)
+        sjpcm_playing = 1;
+}
+
+
+/*
+    The original async API let AudMixBuffer overlap RPC traffic with
+    the next SNES frame via a SIF callback + semaphore handshake.
+    audsrv_play_audio is already non-blocking when there is room in the
+    ring buffer, and audsrv_wait_audio handles back-pressure when there
+    isn't, so the async path collapses into the synchronous one.
+*/
+void Aud_BufferedAsyncStart(void)
+{
+    /* nothing to do - audsrv tracks queued bytes internally */
+}
+
+
+int Aud_BufferedAsyncGet(void)
+{
+    return Aud_Buffered();
+}
+
+
+void Aud_EnqueueAsync(short *left, short *right, int size)
+{
+    /* AURORA_MEGA_V3_AUDSRV_BACKPRESSURE
+     * mega-v2 removed the long-term 60-vs-59.94 drift; v4's Aud_Enqueue
+     * now provides bounded lossless back-pressure for occasional queue
+     * pressure without fabricating, duplicating or pitch-shifting PCM. */
+    Aud_Enqueue(left, right, size, 1);
+}
+
+
+void Aud_Wait(void)
+{
+    /* audsrv ring-buffer back-pressure is handled inside Enqueue via
+       audsrv_wait_audio when the caller passes wait=1, so there is no
+       extra synchronisation to perform here. */
+}
+
+
+int Aud_IsInitialized(void)
+{
+    return sjpcm_inited;
+}
