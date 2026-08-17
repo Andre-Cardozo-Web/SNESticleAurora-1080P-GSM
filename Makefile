@@ -92,7 +92,7 @@ SNES_OBJ_CACHE ?= 1
 SNES_BG_CACHE ?= 0
 
 # Cache H-flip 4bpp para reduzir trabalho repetido em sprites
-SNES_CHR_HFLIP_CACHE ?= 1
+SNES_CHR_HFLIP_CACHE ?= 0
 
 # Conservative flags to bridge the GCC 3.2 (2003) -> GCC 15.1 (2025)
 # gap in default optimization behavior. The original iaddis source was
