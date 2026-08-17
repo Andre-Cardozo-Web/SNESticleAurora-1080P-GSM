@@ -20,6 +20,12 @@ typedef struct
     Uint64    *pGifData;    // pointer to 64-bit gifdata stream
 
     GSListFlushFuncT pFlushFunc;
+
+    /* AURORA_V83_GSLIST_REF_GUARD
+     * A plain GIF command list only needs its own written qwords synchronized
+     * for DMA.  A list containing DMA_REF may point at independently cached
+     * payload, so GPFifo conservatively falls back to FlushCache(0). */
+    Bool bHasDmaRef;
 } GSListT;
 
 
@@ -62,6 +68,7 @@ void GSListBegin(Uint128 *pMem, Uint32 nQwords, GSListFlushFuncT pFlushFunc)
     pList->pBegin       = pMem;
     pList->pEnd         = pMem + nQwords;
     pList->pFlushFunc   = pFlushFunc;
+    pList->bHasDmaRef   = FALSE;
 
 	pList->pDmaCnt  	= NULL;
 	pList->pGifTag  	= NULL;
@@ -126,6 +133,12 @@ Int32 GSListGetSize()
     return (Int32)(pList->pPtr - pList->pBegin);
 }
 
+
+Int32 GSListHasDmaRefs()
+{
+    return _GSList_List.bHasDmaRef ? 1 : 0;
+}
+
 void GSDmaCntOpen()
 {
     GSListT *pList = &_GSList_List;
@@ -170,6 +183,7 @@ void GSDmaRef(Uint128 *pRefAddr, Uint32 nQwords)
     DmaTagT *pTag;
 
     GSAssert(!pList->pDmaCnt);
+    pList->bHasDmaRef = TRUE;
     
     pTag = (DmaTagT *)pList->pPtr++;
     

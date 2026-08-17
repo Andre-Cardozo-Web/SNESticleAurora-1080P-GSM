@@ -61,6 +61,42 @@ Uint8 _tmw = 0x3F;
 Uint8 _ts = 0x3F;
 Uint8 _tsw = 0x3F;
 
+/* AURORA_V85_SOFTWARE_HACKS_STATE
+ * 0x1f = BG1..BG4+OBJ enabled. flags==0 = unchanged V8.3 output. */
+Uint8 g_SnesSoftwareLayerMask = (Uint8)(
+    SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
+    SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
+Uint8 g_SnesSoftwareHackFlags = 0;
+static Uint8 g_SoftwareFramePhase = 0;
+
+void SNPPURenderSetSoftwareLayerMask(Uint8 uMask)
+{
+    g_SnesSoftwareLayerMask = (Uint8)(uMask &
+        (SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
+         SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ));
+}
+
+void SNPPURenderSetSoftwareHackFlags(Uint8 uFlags)
+{
+    Uint8 uNew = (Uint8)(uFlags & SNPPU_HACK_ALL);
+    if ((uNew ^ g_SnesSoftwareHackFlags) & SNPPU_HACK_FRAME_SKIP)
+        g_SoftwareFramePhase = 0;
+    g_SnesSoftwareHackFlags = uNew;
+}
+
+Bool SNPPURenderShouldRenderFrame(void)
+{
+    if (!(g_SnesSoftwareHackFlags & SNPPU_HACK_FRAME_SKIP))
+    {
+        g_SoftwareFramePhase = 0;
+        return TRUE;
+    }
+
+    Bool bRender = (g_SoftwareFramePhase == 0);
+    g_SoftwareFramePhase ^= 1;
+    return bRender;
+}
+
 
 #if CODE_PLATFORM == CODE_PS2
 #define PS2_RENDERINFOADDR  (PS2MEM_SCRATCHPAD +  0*1024)
@@ -187,6 +223,14 @@ void SnesPPURender::RenderLine32(Int32 iLine, Bool bPlanar)
 	SnesRender8pInfoT *pRenderInfo;
     SNPPUBlendInfoT *pBlendInfo;
 	const SnesPPURegsT *pRegs  = m_pPPU->GetRegs();
+	/* AURORA_V85_EFFECTIVE_COLOR_PATH
+	 * Derive renderer-only values. Never mutate emulated PPU registers. */
+	const Uint8 uHackFlags = SNPPURenderGetSoftwareHackFlags();
+	const Uint8 uEffectiveCGWSEL =
+		(uHackFlags & SNPPU_HACK_WINDOWS_OFF)
+		? (Uint8)(pRegs->cgwsel & 0x03) : pRegs->cgwsel;
+	const Uint8 uEffectiveCGADSUB =
+		(uHackFlags & SNPPU_HACK_COLOR_MATH_OFF) ? 0 : pRegs->cgadsub;
 
 	pRenderInfo = m_pRenderInfo;
     pBlendInfo = &pRenderInfo->BlendInfo;
@@ -261,7 +305,8 @@ static Bool bPrint = TRUE;
 
 	    if (m_UpdateFlags & SNESPPURENDER_UPDATE_WINDOW)
         {
-    		DecodeWindows(pRenderInfo->WindowMask, pRenderInfo->BGWindow);
+			if (!(uHackFlags & SNPPU_HACK_WINDOWS_OFF))
+			DecodeWindows(pRenderInfo->WindowMask, pRenderInfo->BGWindow);
     		m_UpdateFlags &= ~SNESPPURENDER_UPDATE_WINDOW;
         }
 
@@ -277,8 +322,8 @@ static Bool bPrint = TRUE;
 		   all add/sub masks are mathematically unable to change the result.
 		   With main clipping disabled and brightness at 15, the GS can expand
 		   the indexed main line directly into the output texture. */
-		bDirectMain = (pRegs->cgadsub & 0x3F) == 0 &&
-		              (pRegs->cgwsel & 0xC0) == 0 &&
+		bDirectMain = (uEffectiveCGADSUB & 0x3F) == 0 &&
+		              (uEffectiveCGWSEL & 0xC0) == 0 &&
 		              m_pPPU->GetIntensity() == 15;
 #endif
 
@@ -287,7 +332,7 @@ static Bool bPrint = TRUE;
         // 1 = enabled
 		if (!bDirectMain)
 		{
-			switch ((pRegs->cgwsel >> 6) & 3)
+			switch ((uEffectiveCGWSEL >> 6) & 3)
 			{
 			case 0:	// all the time
 				SNMaskSet(&ColorMask[0]);
@@ -307,7 +352,7 @@ static Bool bPrint = TRUE;
 			// determine color window mask for sub screen
 			// 0 = disabled (masked)
 			// 1 = enabled
-			switch ((pRegs->cgwsel >> 4) & 3)
+			switch ((uEffectiveCGWSEL >> 4) & 3)
 			{
 			case 0:	// enabled all the time (only when add/sub layers of main screen are opaque)
 				SNMaskCopy(&ColorMask[1], &pRenderInfo->MainAddSubMask);
@@ -330,7 +375,7 @@ static Bool bPrint = TRUE;
 			//      ANDed with the enabled pixels of the subscreen (opaque, fixed color, and windowed)
 			// Quoth: "in the back color constant area on the sub screen, it does not	become 1/2"
 			// there will never be a case where 1/2 is applied to a main or subscreen color that has been masked by color window
-			if (pRegs->cgadsub & 0x40)
+			if (uEffectiveCGADSUB & 0x40)
 			{
 				// 0 = disabled
 				// 1 = 1/2 add sub enabled
@@ -353,7 +398,7 @@ static Bool bPrint = TRUE;
             iLine,
             pRegs->coldata,
 			bDirectMain ? NULL : ColorMask,
-            (pRegs->cgadsub & 0x80),
+            (uEffectiveCGADSUB & 0x80),
             m_pPPU->GetIntensity()
             );
 #if SNDBG_LOG

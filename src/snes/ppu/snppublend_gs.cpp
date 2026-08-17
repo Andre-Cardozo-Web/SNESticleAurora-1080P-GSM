@@ -945,8 +945,16 @@ void SNPPUBlendGS::Exec(SNPPUBlendInfoT *pInfo, Int32 iLine, Uint32 uFixedColor3
 		                      m_DmaListWithPalette.uOutAddr, TRUE,
 		                      bApplyIntensity, bDirectMain);
 
-        // flush cache
-        FlushCache(0);
+        /* AURORA_V83_BLENDLIST_RANGE_DCACHE
+         * Only the two 2 KiB command templates were rewritten above.
+         * Their DMA_REF payloads point at the dedicated EE scratchpad staging
+         * area, so there is no cached external payload to write back here.
+         * Keep the emulator's unrelated D-cache resident. */
+        SyncDCache(m_DmaList.Data,
+                   (Uint8 *)m_DmaList.Data + sizeof(m_DmaList.Data) - 1);
+        SyncDCache(m_DmaListWithPalette.Data,
+                   (Uint8 *)m_DmaListWithPalette.Data +
+                       sizeof(m_DmaListWithPalette.Data) - 1);
 
         m_pDmaBlendInfo = pInfo;
         m_bDmaListHasIntensity = bApplyIntensity;

@@ -244,6 +244,86 @@ void GPPrimSetTex(u32 tbp, u32 tbw, u32 texwidthlog2, u32 texheightlog2,
     _gpprim_curTexValid = 1;
 }
 
+/* AURORA_V83_TEXTURE_RANGE_DCACHE
+ * gsKit_texture_send_inline() builds DMA_REF tags to the caller's texel
+ * memory but, unlike gsKit_texture_send(), deliberately does not flush the
+ * source D-cache.  Synchronize exactly the qwords the GIF DMAC can read
+ * instead of FlushCache(0), preserving every transferred byte without
+ * evicting unrelated emulator state.
+ *
+ * The size rules mirror gsKit_texture_size_ee().  Round to 16 bytes because
+ * the inline sender rounds its DMA QWC upward to a complete quadword. */
+static Uint32 _GPPrimTextureDmaBytes(int psm, int width, int height)
+{
+    Uint32 pixels;
+    Uint32 bytes;
+
+    if (width <= 0 || height <= 0)
+        return 0;
+
+    pixels = (Uint32)width * (Uint32)height;
+    switch (psm)
+    {
+    case 0x00: /* PSMCT32 */
+    case 0x01: /* PSMCT24: gsKit stores/sends 4 bytes per texel */
+        bytes = pixels * 4U;
+        break;
+    case 0x02: /* PSMCT16 */
+    case 0x0A: /* PSMCT16S */
+        bytes = pixels * 2U;
+        break;
+    case 0x13: /* PSMT8 */
+        bytes = pixels;
+        break;
+    case 0x14: /* PSMT4 */
+        bytes = pixels / 2U;
+        break;
+    default:
+        return 0;
+    }
+
+    return (bytes + 15U) & ~15U;
+}
+
+static void _GPPrimSyncTextureSource(void *tex, int psm, int width, int height)
+{
+    Uint32 addr = (Uint32)tex;
+    Uint32 bytes = _GPPrimTextureDmaBytes(psm, width, height);
+
+    if (!tex || !bytes)
+    {
+        /* Unknown format: preserve the old broad behavior rather than
+           guessing about the number of bytes a future gsKit path may read. */
+        FlushCache(0);
+        return;
+    }
+
+    if (addr < 0x20000000U)
+    {
+        /* Normal cached EE RAM. PS2SDK's SyncDCache end pointer is inclusive
+           (gsKit itself calls SyncDCache(p, p + size - 1)).  For transfers
+           at least as large as the 8 KiB EE D-cache, the whole-cache syscall
+           is cheaper than walking a larger virtual range. */
+        if (bytes >= 8192U)
+            FlushCache(0);
+        else
+            SyncDCache(tex, (Uint8 *)tex + bytes - 1);
+        return;
+    }
+
+    if ((addr >= 0x20000000U && addr < 0x40000000U) ||
+        (addr >= 0x70000000U && addr < 0x70004000U) ||
+        (addr >= 0xF0000000U && addr < 0xF0004000U))
+    {
+        /* KSEG1/UCAB or scratchpad aliases are not D-cache-backed. */
+        __asm__ __volatile__("sync.l" ::: "memory");
+        return;
+    }
+
+    /* Unknown/kernel mapping: retain the pre-V8.3 safety fallback. */
+    FlushCache(0);
+}
+
 /* Direct EE->VRAM texture upload via gsKit's helper. The legacy
    variant built BITBLTBUF / TRXPOS / TRXREG / TRXDIR registers and
    an image GIF tag by hand; gsKit_texture_send does the same thing
@@ -294,7 +374,7 @@ void GPPrimUploadTexture(int TBP, int TBW, int xofs, int yofs,
            FlushCache(0) writes back+invalidates the EE data cache
            so the DMA sees the actual texel data. Required before
            every EE->VRAM transfer. */
-        FlushCache(0);
+        _GPPrimSyncTextureSource(tex, pxlfmt, wpxls, hpxls);
         gsKit_texture_send_inline(gs, (u32 *)tex,
                                   wpxls, hpxls,
                                   tbp_bytes, /* bytes; gsKit divides by 256 */

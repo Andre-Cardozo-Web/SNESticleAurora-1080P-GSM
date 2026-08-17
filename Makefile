@@ -119,14 +119,18 @@ CONSERVATIVE_FLAGS := \
 	-fwrapv \
 	-fsigned-char
 
-CFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) \
+# AURORA_V7_SAFE_BUILD_FLAGS
+# -pipe changes only compiler temporary-file plumbing; -fomit-frame-pointer
+# is semantics-preserving here and frees one register on the EE hot paths.
+# Deliberately no -O3, fast-math, LTO or renewed auto-vectorization.
+CFLAGS := -G0 -O2 -pipe -fomit-frame-pointer -Wall $(CONSERVATIVE_FLAGS) \
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
 	-DSNDBG_LOG=$(SNES_DIAG_ENABLED) -DSNDBG_DEEP=$(SNES_DIAG_DEEP) \
 	-DSNPPU_OBJ_CACHE=$(SNES_OBJ_CACHE) \
 	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE) \
 	-DSNPPU_CHR_CACHE_HFLIP=$(SNES_CHR_HFLIP_CACHE)
 
-CXXFLAGS := -G0 -O2 -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fno-exceptions -fno-rtti -fpermissive \
+CXXFLAGS := -G0 -O2 -pipe -fomit-frame-pointer -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fno-exceptions -fno-rtti -fpermissive \
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
 	-DSNDBG_LOG=$(SNES_DIAG_ENABLED) -DSNDBG_DEEP=$(SNES_DIAG_DEEP) \
 	-DSNPPU_OBJ_CACHE=$(SNES_OBJ_CACHE) \
@@ -510,6 +514,11 @@ OBJS := \
 	$(patsubst src/%.cpp,$(OBJ_DIR)/%.o,$(filter %.cpp,$(SRCS))) \
 	$(patsubst src/%.s,$(OBJ_DIR)/%.o,$(filter %.s,$(SRCS))) \
 	$(patsubst src/%.S,$(OBJ_DIR)/%.o,$(filter %.S,$(SRCS)))
+
+# AURORA_V7_MAKEFILE_REBUILDS_OBJECTS
+# Compiler flags live in this Makefile.  Make every main object depend on it
+# so changing flags causes a rebuild even when the user simply runs `make -j8`.
+$(OBJS): Makefile
 
 # Rastreamento de dependencia de headers.  -MMD faz o compilador gerar um
 # .d por objeto listando os headers que ele inclui; -MP adiciona alvos

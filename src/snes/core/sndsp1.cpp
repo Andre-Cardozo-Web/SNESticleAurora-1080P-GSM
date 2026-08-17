@@ -983,7 +983,10 @@ void SNDSP1::Execute(Uint8 uCmd)
         DSP1_Normalize(C1, C, E);
         C = (Int16)(((Int32)DSP1_DenormalizeAndClip(C, E) * H) >> 15);
         Int16 X = (Int16)(m_CentreX + (Int16)(((Int32)C * m_CosAas) >> 15));
-        Int16 Y = (Int16)(m_CentreY + (Int16)(((Int32)C * m_SinAas) >> 15));
+        /* AURORA_V85_DSP1_TARGET_Y_SIGN
+         * Target ($0E): horizontal screen displacement contributes
+         * CentreY - H*sin(Aas), matching the public DSP-1 algorithm. */
+        Int16 Y = (Int16)(m_CentreY - (Int16)(((Int32)C * m_SinAas) >> 15));
 
         V = (Int16)(V << 8);
         DSP1_Normalize((Int16)(((Int32)C1 * m_SecAZS_C1) >> 15), C, E1);

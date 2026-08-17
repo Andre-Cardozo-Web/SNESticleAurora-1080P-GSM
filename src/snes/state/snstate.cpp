@@ -196,6 +196,12 @@ void SnesDMAC::RestoreState(struct SNStateDMACT *pState)
 	m_HDMADoTransfer = pState->m_HDMADoTransfer;
 	m_MDMAEnable = pState->m_MDMAEnable;
 	memcpy(m_Channels, pState->m_Channels, sizeof(m_Channels));
+	/* AURORA_V82_MDMA_PHASE_STATE_RESTORE
+	 * Phase/startup are transient scheduler state and are intentionally not
+	 * added to the legacy opaque save-state payload. */
+	memset(m_MDMAPhase, 0, sizeof(m_MDMAPhase));
+	m_MDMAChannelStartup = 0;
+	m_MDMAStartupPending = 0;
 }
 
 void SnesPPU::SaveState(struct SNStatePPUT *pState)

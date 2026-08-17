@@ -593,7 +593,10 @@ void SnesSystem::MapMem(SNRomMappingE eRomMapping, Uint32 uFlags)
 
 				// A MMIO do GSU ($3000-$34FF) compartilha a pagina do PPU e
 				// continua roteada por Read2000/Write2000.
-				m_GSU.SetVersion(bMarioChip1 ? 0x01 : 0x04);
+				/* AURORA_V81_SUPERFX_REVISION_BIND
+				 * Keep the already board-specific S-CPU maps intact; only pass
+				 * MC1/GSU1/GSU2 identity into the core for clock capabilities. */
+				m_GSU.SetRevision((Uint8)nBoard);
 				m_GSU.SetMemory(m_pRom->GetData(), m_pRom->GetBytes(),
 				                m_SRam, m_uSramSize);
 			}

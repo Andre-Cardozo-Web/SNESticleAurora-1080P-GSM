@@ -36,6 +36,33 @@ enum
 #define SNPPU_BGFLAGS_FETCHPAL (2)
 #define SNPPU_BGFLAGS_OFFSET (4)
 
+/* AURORA_V85_SOFTWARE_HACKS_API
+ * Renderer/output compromises only. Defaults are the full V8.3 path. */
+enum
+{
+    SNPPU_HACK_COLOR_MATH_OFF = 1 << 0,
+    SNPPU_HACK_WINDOWS_OFF    = 1 << 1,
+    SNPPU_HACK_MODE7_HALF     = 1 << 2,
+    SNPPU_HACK_FRAME_SKIP     = 1 << 3,
+    SNPPU_HACK_ALL            = 0x0F
+};
+
+extern Uint8 g_SnesSoftwareLayerMask;
+extern Uint8 g_SnesSoftwareHackFlags;
+
+_INLINE Uint8 SNPPURenderGetSoftwareLayerMask(void)
+{
+    return g_SnesSoftwareLayerMask;
+}
+_INLINE Uint8 SNPPURenderGetSoftwareHackFlags(void)
+{
+    return g_SnesSoftwareHackFlags;
+}
+
+void  SNPPURenderSetSoftwareLayerMask(Uint8 uMask);
+void  SNPPURenderSetSoftwareHackFlags(Uint8 uFlags);
+Bool  SNPPURenderShouldRenderFrame(void);
+
 enum 
 {
     SNPPU_BGWINDOW_BG1,

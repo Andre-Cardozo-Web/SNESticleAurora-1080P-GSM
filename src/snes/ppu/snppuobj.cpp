@@ -178,14 +178,28 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 #if SNDBG_DEEP
 			g_DbgObjDrawnPixels += _ObjCountBits8(uVisible);
 #endif
-			if (uVisible & 0x01) pDest8[0] = pObj->uData[0];
-			if (uVisible & 0x02) pDest8[1] = pObj->uData[1];
-			if (uVisible & 0x04) pDest8[2] = pObj->uData[2];
-			if (uVisible & 0x08) pDest8[3] = pObj->uData[3];
-			if (uVisible & 0x10) pDest8[4] = pObj->uData[4];
-			if (uVisible & 0x20) pDest8[5] = pObj->uData[5];
-			if (uVisible & 0x40) pDest8[6] = pObj->uData[6];
-			if (uVisible & 0x80) pDest8[7] = pObj->uData[7];
+			/* AURORA_V7_OBJ_FULLROW_MEMCPY
+			 * Exact semantic fast path: after all priority/window masks have
+			 * already been resolved, an entirely visible 8-pixel row is just
+			 * the same eight byte stores.  memcpy is alignment-safe on EE and
+			 * avoids eight branches in sprite-heavy scenes (Top Gear). */
+			if (!uVisible)
+				continue;
+			if (uVisible == 0xFF)
+			{
+				memcpy(pDest8, pObj->uData, 8);
+			}
+			else
+			{
+				if (uVisible & 0x01) pDest8[0] = pObj->uData[0];
+				if (uVisible & 0x02) pDest8[1] = pObj->uData[1];
+				if (uVisible & 0x04) pDest8[2] = pObj->uData[2];
+				if (uVisible & 0x08) pDest8[3] = pObj->uData[3];
+				if (uVisible & 0x10) pDest8[4] = pObj->uData[4];
+				if (uVisible & 0x20) pDest8[5] = pObj->uData[5];
+				if (uVisible & 0x40) pDest8[6] = pObj->uData[6];
+				if (uVisible & 0x80) pDest8[7] = pObj->uData[7];
+			}
 		} else
 		{
 			Int32 iPixel;

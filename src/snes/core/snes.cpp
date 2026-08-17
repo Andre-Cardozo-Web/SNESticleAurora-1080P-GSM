@@ -1422,39 +1422,45 @@ void SnesSystem::ExecuteWithIRQ(Int32 nCycles, Int32 &nIRQCycles)
 
 void SnesSystem::ExecuteLine()
 {
+	/* AURORA_V7_HORIZONTAL_SCHEDULER
+	 * Keep the existing scanline-oriented renderer, but put the major
+	 * S-CPU bus events at their real horizontal positions instead of
+	 * treating H=1024 as both HBlank and HDMA.
+	 *
+	 * ExecuteWithIRQ() is deliberately used to account stolen intervals.
+	 * The bus owner first subtracts clocks from m_Cpu.Cycles; scheduling the
+	 * same number of physical clocks afterwards advances the counters while
+	 * the negative CPU budget prevents 65816 instructions from running.
+	 * If HDMA overruns H=1364, the remaining negative budget naturally
+	 * carries into the next line instead of lengthening the video line. */
 	SNCPUResetCounter(&m_Cpu, SNCPU_COUNTER_LINE);
 
-    // don't trigger IRQ by default
-    int nHIRQCycles = -1;
+	Int32 nHIRQCycles = -1;
+	Int32 nHClock = 0;
+	/* ares S-CPU revision 2: setup=12+phase, refresh=538-phase.
+	 * Counter[TOTAL] is scheduled physical time, so it remains meaningful
+	 * even when a DMA overrun is carried as a negative CPU budget. */
+	Int32 nDMAPhase = m_Cpu.Counter[SNCPU_COUNTER_TOTAL] & 7;
+	Int32 nHDMASetupCycle = SNES_HDMA_SETUP_BASE_CYCLE + nDMAPhase;
+	Int32 nDRAMRefreshCycle = SNES_DRAM_REFRESH_BASE_CYCLE - nDMAPhase;
 
-	// virq enabled?
+	// vertical + horizontal IRQ selection
 	if (m_IO.m_Regs.nmitimen & 0x20)
 	{
 		if (m_uLine == m_IO.m_Regs.vtime.w)
 		{
-			// hirq enabled?
 			if (m_IO.m_Regs.nmitimen & 0x10)
-			{
-				// calculate cycle time to perform h-irq
 				nHIRQCycles = SNES_HIRQ_CYCLES(m_IO.m_Regs.htime.w);
-
-			} else
-			{
-				// trigger at beginning of line
+			else
 				nHIRQCycles = SNES_VIRQ_CYCLES;
-			}
 		}
-	} else
-	// hirq enabled?
-	if (m_IO.m_Regs.nmitimen & 0x10)
+	}
+	else if (m_IO.m_Regs.nmitimen & 0x10)
 	{
-		// calculate cycle time to perform h-irq
 		nHIRQCycles = SNES_HIRQ_CYCLES(m_IO.m_Regs.htime.w);
 	}
 
 #if SNDBG_LOG
-	// rastreia a scanline em que um H-IRQ esta agendado (divisao de tela).
-	// Se min..max variam muito frame a frame, a divisao "treme".
 	if (nHIRQCycles >= 0)
 	{
 		Int32 ln = (Int32)m_uLine;
@@ -1466,51 +1472,96 @@ void SnesSystem::ExecuteLine()
 
 	PROF_ENTER("ExecLine");
 
-	SNCPUConsumeCycles(&m_Cpu, SNES_LINECYCLEDELAY);
+	/* These macros advance PHYSICAL line time.  They intentionally do not
+	 * force m_Cpu.Cycles to zero: a negative budget is an in-flight bus
+	 * stall from DMA/HDMA and is paid by later physical slices. */
+#define AURORA_V7_RUN_TO(_target) do { \
+		Int32 _auroraTarget = (Int32)(_target); \
+		if (nHClock < _auroraTarget) { \
+			Int32 _auroraSlice = _auroraTarget - nHClock; \
+			ExecuteWithIRQ(_auroraSlice, nHIRQCycles); \
+			nHClock = _auroraTarget; \
+		} \
+	} while (0)
 
-    // execute CPU during scanline
-#if SNDBG_LOG
-	Uint32 _tCPU = ProfCtrGetCycle();
-#endif
-    ExecuteWithIRQ(SNES_CYCLESPERLINE - SNES_HBLANKCYCLES, nHIRQCycles);
-#if SNDBG_LOG
-	g_TmgCycCPU += ProfCtrGetCycle() - _tCPU;
-#endif
+#define AURORA_V7_ACCOUNT_STEAL(_clocks) do { \
+		Int32 _auroraSteal = (Int32)(_clocks); \
+		Int32 _auroraRoom = SNES_CYCLESPERLINE - nHClock; \
+		if (_auroraSteal > _auroraRoom) _auroraSteal = _auroraRoom; \
+		if (_auroraSteal > 0) { \
+			ExecuteWithIRQ(_auroraSteal, nHIRQCycles); \
+			nHClock += _auroraSteal; \
+		} \
+	} while (0)
 
-	// set h-blank enable flag
-	m_IO.m_Regs.hvbjoy|= 0x40;
+	/* HVBJOY reports the tiny HBlank wrap interval at the beginning of a
+	 * scanline as well as the long HBlank at the end. */
+	m_IO.m_Regs.hvbjoy |= 0x40;
+	AURORA_V7_RUN_TO(SNES_HBLANK_WRAP_CYCLES);
+	m_IO.m_Regs.hvbjoy &= ~0x40;
 
-    // are we not in vblank?
-    if ( !(m_IO.m_Regs.hvbjoy & 0x80) )
-    {
-        // perform HDMA
+	/* HDMA setup belongs near H=12 on line zero, not before BeginFrame(). */
+	if (m_uLine == 0 && nHClock < SNES_CYCLESPERLINE)
+	{
+		Int32 nBefore;
+		Int32 nStolen;
+
+		AURORA_V7_RUN_TO(nHDMASetupCycle);
+		nBefore = m_Cpu.Cycles;
+		m_DMAC.BeginHDMA();
+		nStolen = nBefore - m_Cpu.Cycles;
+		AURORA_V7_ACCOUNT_STEAL(nStolen);
+	}
+
+	/* Keep the 40-clock aggregate refresh cost, now at the revision-2
+	 * DMA-divider-aligned horizontal position instead of H=0. */
+	AURORA_V7_RUN_TO(nDRAMRefreshCycle);
+	if (nHClock < SNES_CYCLESPERLINE)
+	{
+		SNCPUConsumeCycles(&m_Cpu, SNES_DRAM_REFRESH_CYCLES);
+		AURORA_V7_ACCOUNT_STEAL(SNES_DRAM_REFRESH_CYCLES);
+	}
+
+	/* Normal HBlank starts at H=1096. */
+	AURORA_V7_RUN_TO(SNES_HBLANK_START_CYCLE);
+	m_IO.m_Regs.hvbjoy |= 0x40;
+
+	/* HDMA starts eight clocks into HBlank, at H=1104. */
+	AURORA_V7_RUN_TO(SNES_HDMA_START_CYCLE);
+	if (!(m_IO.m_Regs.hvbjoy & 0x80) && nHClock < SNES_CYCLESPERLINE)
+	{
+		Int32 nBefore = m_Cpu.Cycles;
 #if SNDBG_LOG
 		Uint32 _tHDMA = ProfCtrGetCycle();
 #endif
-        m_DMAC.ProcessHDMA();
+		m_DMAC.ProcessHDMA();
 #if SNDBG_LOG
 		g_TmgCycHDMA += ProfCtrGetCycle() - _tHDMA;
 #endif
-    }
+		Int32 nStolen = nBefore - m_Cpu.Cycles;
+		AURORA_V7_ACCOUNT_STEAL(nStolen);
+	}
 
-    // execute CPU during h-blank
-#if SNDBG_LOG
-	_tCPU = ProfCtrGetCycle();
-#endif
-    ExecuteWithIRQ(SNES_HBLANKCYCLES, nHIRQCycles);
-#if SNDBG_LOG
-	g_TmgCycCPU += ProfCtrGetCycle() - _tCPU;
-#endif
+	AURORA_V7_RUN_TO(SNES_CYCLESPERLINE);
 
-	// O hardware GSU roda em paralelo com o 65816. Este emulador sincroniza
-	// os dois uma vez por scanline, como uma aproximacao de baixo custo para
-	// o PS2: ~370 instrucoes em 10,7 MHz e ~925 em 21,4 MHz.
+	/* The PPU beam wraps regardless of whether a DMA debt carries into the
+	 * following line. */
+	m_IO.m_Regs.hvbjoy &= ~0x40;
+
+#undef AURORA_V7_ACCOUNT_STEAL
+#undef AURORA_V7_RUN_TO
+
+	// GSU runs in parallel; preserve Aurora's low-cost per-scanline model.
 	if (m_bSuperFX && m_GSU.IsRunning())
 	{
 #if SNDBG_LOG
 		Uint32 _tGSU = ProfCtrGetCycle();
 #endif
-		m_GSU.Run(m_GSU.GetLineInstructionBudget());
+		/* AURORA_V8_GSU_CLOCK_SCHEDULER
+		 * The GSU core now charges cache/external-memory clocks internally.
+		 * Give it one 21.47-MHz master-clock scanline (1364 clocks) rather
+		 * than an arbitrary instruction count; CLSR is accounted in the core. */
+		m_GSU.Run(m_GSU.GetLineClockBudget());
 #if SNDBG_LOG
 		g_TmgCycGSU += ProfCtrGetCycle() - _tGSU;
 #endif
@@ -1518,8 +1569,6 @@ void SnesSystem::ExecuteLine()
 	if (m_bSuperFX && m_GSU.IrqPending())
 		SNCPUSignalIRQ(&m_Cpu, 1);
 
-	// clear h-blank enable flag
-	m_IO.m_Regs.hvbjoy&= ~0x40;
 	PROF_LEAVE("ExecLine");
 }
 
@@ -1612,8 +1661,7 @@ m_PPU.SetRegionPAL(bPAL);
         SnesDebug("frame\n");
 #endif
 
-	m_DMAC.BeginHDMA();
-
+	/* AURORA_V7_HDMA_SETUP_MOVED: BeginHDMA() agora ocorre em H=12..19 (fase DMA) da linha 0. */
 	m_PPURender.BeginRender(pTarget);
 	m_PPU.BeginFrame();
 	

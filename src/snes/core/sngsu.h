@@ -25,6 +25,14 @@
 #include "types.h"
 #include "sndbglog.h"
 
+/* AURORA_V8_GSU_REVISIONS
+ * Keep board generation separate from the VCR byte.  Commercial MC1 uses
+ * VCR=01; later known chips expose 04, but GSU1 and GSU2 still differ in
+ * clock/RAM capabilities. */
+#define SNGSU_REVISION_MC1  1
+#define SNGSU_REVISION_GSU1 2
+#define SNGSU_REVISION_GSU2 3
+
 #if SNDBG_LOG
 struct SNGSUDiagT
 {
@@ -54,9 +62,10 @@ public:
     // Conecta os buffers de Game Pak ROM/RAM (propriedade do SnesSystem).
     void  SetMemory(Uint8 *pRom, Uint32 uRomSize, Uint8 *pRam, Uint32 uRamSize);
 
-    // Configura a revisao exposta em VCR. O valor sobrevive a Reset():
-    // 01h = Mario Chip 1 (Star Fox/Starwing), 04h = GSU2.
+    // Compatibilidade com chamadas antigas baseadas apenas no VCR.
     void  SetVersion(Uint8 uVersion);
+    // Revisao fisica da placa/chip: MC1, GSU1 ou GSU2.
+    void  SetRevision(Uint8 uRevision);
 
     void  Reset();
 
@@ -75,9 +84,13 @@ public:
     // Executa o GSU por ~nClocks ciclos enquanto GO=1.
     void  Run(Int32 nClocks);
 
-    // Orcamento aproximado por scanline usado pelo scheduler do SNES.
-    // O core ainda conta instrucoes (nao clocks individuais).
-    Int32 GetLineInstructionBudget() const { return (m_CLSR & 1) ? 960 : 384; }
+    /* AURORA_V8_GSU_CLOCK_ACCOUNTING_DECL
+     * The GSU timing domain is the SNES master clock. Code-cache hits cost
+     * 1/2 clocks and external accesses 5/6 clocks (high/low CLSR), so Run()
+     * consumes this physical scanline budget rather than an instruction count. */
+    Int32 GetLineClockBudget() const { return 1364; }
+    // Kept only for source compatibility with old diagnostics/out-of-tree code.
+    Int32 GetLineInstructionBudget() const { return GetLineClockBudget(); }
 
     Bool  IsRunning() const { return m_bGo; }
     // IRQ pendente para o SNES (set on STOP, a menos que mascarado em CFGR).
@@ -117,12 +130,18 @@ private:
     Uint8  m_CLSR;           // clock select
     Uint8  m_SCMR;           // screen mode (RON bit4, RAN bit3, height, md)
     Uint8  m_VCR;            // version code register (read-only)
-    Uint8  m_ConfigVCR;      // revisao escolhida pelo cartucho; persiste Reset
+    Uint8  m_ConfigVCR;      // VCR configurado pelo cartucho; persiste Reset
+    Uint8  m_Revision;       // AURORA V8: MC1 / GSU1 / GSU2 reais
     Uint16 m_CBR;            // cache base register
 
     // buffers de prefetch/IO
     Uint8  m_RomBuffer;      // byte pre-lido de ROM[ROMBR:R14]
     Bool   m_RomBufValid;
+
+    // AURORA_V8_GSU_CLOCK_ACCOUNTING_DECL: transient timing state only.
+    mutable Int32 m_StepClocks;  // clocks charged by the current instruction
+    Int32  m_ClockCarry;         // instruction overrun carried into next line
+    Bool   m_R14Modified;        // defer internal R14 prefetch to instruction end
 
     // watchdog: se o programa rodar demais sem STOP (ex.: opcodes ainda
     // incompletos durante o desenvolvimento), forca a parada e devolve o
@@ -185,6 +204,11 @@ private:
     void   WriteRegister(Uint8 n, Uint16 val); // trata R14 prefetch e R15 pipeline
     void   UpdateRomBuffer();
     void   FlushCodeCache();
+    Int32  MemoryClockCost() const { return m_CLSR ? 5 : 6; }
+    Int32  CacheClockCost()  const { return m_CLSR ? 1 : 2; }
+    void   ChargeClocks(Int32 n) const { m_StepClocks += n; }
+    /* AURORA_V81_GSU_RUN_GATE_DECL */
+    Bool   CanExecuteNow() const;
 
     // graficos
     Int32  ScreenBpp() const;                 // 2, 4 ou 8 (de SCMR.MD)

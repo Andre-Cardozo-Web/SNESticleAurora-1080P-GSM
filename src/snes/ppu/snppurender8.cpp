@@ -1502,12 +1502,27 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	SnesRenderObj8T ObjLine[SNPPU_MAXOBJCHR];
 	Int32 nObjLine;
 	const SnesPPURegsT *pRegs = m_pPPU->GetRegs();
-	Uint8 tm = pRegs->tm & _tm;
-	Uint8 tmw = pRegs->tmw & _tmw;
-	Uint32 cgadsub =  (pRegs->cgadsub & 0x3F);
-	Uint8 ts = (pRegs->ts & _ts);
-	Uint8 tsw = pRegs->tsw & _tsw;
+	/* AURORA_V85_SOFTWARE_LAYER_MASK
+	 * Mask before fetch/decode so disabled layers really save EE work. */
+	const Uint8 uSoftwareLayers = SNPPURenderGetSoftwareLayerMask();
+	const Uint8 uSoftwareHacks = SNPPURenderGetSoftwareHackFlags();
+	Uint8 tm = (Uint8)(pRegs->tm & _tm & uSoftwareLayers);
+	Uint8 tmw = (Uint8)(pRegs->tmw & _tmw & uSoftwareLayers);
+	Uint32 cgadsub = (pRegs->cgadsub & 0x3F);
+	Uint8 ts = (Uint8)(pRegs->ts & _ts & uSoftwareLayers);
+	Uint8 tsw = (Uint8)(pRegs->tsw & _tsw & uSoftwareLayers);
+	Uint8 cgwsel = pRegs->cgwsel;
 	Uint8 uFetchLayers;
+
+	if (uSoftwareHacks & SNPPU_HACK_COLOR_MATH_OFF)
+		cgadsub = 0;
+	if (uSoftwareHacks & SNPPU_HACK_WINDOWS_OFF)
+	{
+		tmw = 0;
+		tsw = 0;
+		/* Preserve direct-color/subscreen selection (bits 0-1). */
+		cgwsel &= 0x03;
+	}
 	Bool bRendered;
 
 	SNMaskT *pMain = pRenderInfo->Main;
@@ -1521,7 +1536,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	/* Fixed-color math never samples the sub screen.  With no CGADSUB target,
 	   color math cannot affect a pixel at all.  Apply both facts before
 	   tile/OBJ fetch so disabled layers do no invisible EE work. */
-	if (!(pRegs->cgwsel & 0x02) || cgadsub == 0)
+	if (!(cgwsel & 0x02) || cgadsub == 0)
 		ts = 0;
 	uFetchLayers = tm | ts;
 
@@ -1756,7 +1771,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 #if SNDBG_LOG
 	Uint32 _tBGSub = ProfCtrGetCycle();
 #endif
-	if (pRegs->cgwsel & 0x02)
+	if (cgwsel & 0x02)
 	{
 		// coloradd/sub subscreen
 		SNMaskClear(pSubAddSubMask);		// the bg of the subscreen is not 1/2'd
@@ -2153,21 +2168,42 @@ static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPrio
 	dx = (pRegs->m7sel & 0x01) ? -m7a : m7a;
 	dy = (pRegs->m7sel & 0x01) ? -m7c : m7c;
 
+	/* AURORA_V85_MODE7_HALF
+	 * Optional performance compromise. Full remains the exact old path. */
+	Int32 nMode7Pixels = 256;
+	if (SNPPURenderGetSoftwareHackFlags() & SNPPU_HACK_MODE7_HALF)
+	{
+		nMode7Pixels = 128;
+		dx *= 2;
+		dy *= 2;
+	}
+
 	/* M7SEL repeat values 0 and 1 both wrap. Value 2 is transparent/backdrop
 	 * outside the 1024x1024 map, value 3 repeats character 0. */
 	switch ((pRegs->m7sel >> 6) & 3)
 	{
 	case 0:
 	case 1:
-		_FetchMode7_Repeat(pLine, 256, pVram, x, y, dx, dy);
+		_FetchMode7_Repeat(pLine, nMode7Pixels, pVram, x, y, dx, dy);
 		break;
 	case 3:
-		_FetchMode7_Clamp(pLine, 256, pVram, x, y, dx, dy);
+		_FetchMode7_Clamp(pLine, nMode7Pixels, pVram, x, y, dx, dy);
 		break;
 	case 2:
 	default:
-		_FetchMode7_Black(pLine, 256, pVram, x, y, dx, dy);
+		_FetchMode7_Black(pLine, nMode7Pixels, pVram, x, y, dx, dy);
 		break;
+	}
+
+	if (nMode7Pixels == 128)
+	{
+		Int32 i;
+		for (i = 127; i >= 0; i--)
+		{
+			Uint8 uPixel = pLine[i];
+			pLine[i * 2 + 0] = uPixel;
+			pLine[i * 2 + 1] = uPixel;
+		}
 	}
 
 	if (pPriority)

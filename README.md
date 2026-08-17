@@ -2,14 +2,14 @@
 
 **SNESticle Aurora** is a PlayStation 2 emulator fork maintained by **@itsveenee**.
 
-Aurora is based on **SNESticle Revive by @ReyFxck (Thomas R.)**, whose work brought SNESticle back into active development, and ultimately on the original **SNESticle by Icer Addis**.
+SNESticle Aurora is based on **SNESticle Revive by @ReyFxck (Thomas R.)**, whose work brought SNESticle back into active development, and ultimately on the original **SNESticle by Icer Addis**.
 
 **Huge thanks to @ReyFxck** for his work on SNESticle Revive and for providing the foundation from which Aurora was created. **Huge thanks to Icer Addis** for creating the original SNESticle and its codebase.
 
 <!-- AURORA_QUICKNES_CREDIT -->
 NES emulation through **QuickNES** is based on the **QuickNES core originally by Shay Green**, with the libretro core maintained by **libretro contributors**. Aurora uses `itsveenee/QuickNES_Core` as a pinned Git submodule for its PS2 integration. See [THIRD_PARTY.md](THIRD_PARTY.md) and the license notices inside the QuickNES submodule.
 
-Aurora focuses on 240p CRT output, NES/QuickNES integration and experiments, real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
+SNESticle Aurora focuses on 240p CRT output, NES/QuickNES integration and experiments, real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
 
 **Any changes made in SNESticle Aurora are also available to anyone** who wants to cherry-pick, pull, or otherwise incorporate them into SNESticle Revive or any other fork as they see fit.
 
@@ -49,13 +49,13 @@ If the repository was cloned without `--recurse-submodules`, run
 * In-game soft reset (L2+SELECT)
 * Famiclone audio option (swap duty cycles)
 * Option to reload the emulator's .elf (very useful for upgrading and testing)
+* Emulation hacks menu options (disable layers, change rendering options) *(still experimental)*
 
-*(**NOTE**: to find the options above, go to the Video Settings and change to page 2 with the circle button.)*
+*(**NOTE**: to find the options above, go to the Video Settings and change the pages with the circle button.)*
 
 **FIXED:**
 
-* Super Mario Bros. 2 (SNES version, All Stars) curtain transition effect
-* Many graphical glitches and inaccuracies on many NES and SNES games
+* Many graphical glitches and inaccuracies on many NES and SNES games (testing still being done)
 
 **TO BE FIXED:**
 
@@ -69,7 +69,7 @@ If the repository was cloned without `--recurse-submodules`, run
 **TO BE ADDED:**
 
 * SA-1 Emulation
-* Improve Mode 7 and FX2 emulation
+* Improve Mode 7, FX1 and FX2 emulation
 * Turbo button toggle for SNES
 * Famicom Disk System support
 * Every NES mapper possible!

@@ -53,6 +53,15 @@ public:
 private:
 	SnesDMAChT	                m_Channels[SNESDMAC_CHANNEL_NUM];
 	Uint8		                m_MDMAEnable;
+	/* AURORA_V82_MDMA_PHASE_STATE
+	 * MDMA may be suspended at a horizontal event between any two bytes.
+	 * Preserve the four-entry B-bus transfer pattern across those slices;
+	 * without this, resuming mode 1/3/4/5/7 at phase zero corrupts ports.
+	 * Startup state is transient too: $420B only arms DMA; the bus pause,
+	 * divider sync and per-channel overhead happen after that instruction. */
+	Uint8                       m_MDMAPhase[SNESDMAC_CHANNEL_NUM];
+	Uint8                       m_MDMAChannelStartup;
+	Uint8                       m_MDMAStartupPending;
 	Uint8		                m_HDMAEnable;		// hdma channel enable
 	Uint8		                m_HDMAEnded;		// channels stopped for this frame
 	Uint8		                m_HDMADoTransfer;	// repeat/first-line transfer latch

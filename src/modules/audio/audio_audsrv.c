@@ -126,8 +126,33 @@ static short _interleave_buf[AUD_MAX_ENQUEUE_SAMPLES * AUD_AUDSRV_CHANNELS]
     __attribute__((aligned(64)));
 
 
+/* AURORA_V83_AUDIO_PACKED_STEREO
+ * The EE build is little-endian and the destination is 64-byte aligned.
+ * One 32-bit store writes exactly the same L-low/L-high/R-low/R-high bytes
+ * as the two 16-bit assignments it replaces.  This changes no PCM sample,
+ * queue size, scheduler decision or audsrv call. */
+static inline void Aud_StoreStereoFrame(int index, short left, short right)
+{
+    ((u32 *)(void *)_interleave_buf)[index] =
+        (u32)(u16)left | ((u32)(u16)right << 16);
+}
+
+
 static int sjpcm_inited = 0;
 static int sjpcm_playing = 0;
+
+/* AURORA_V7_AUDSRV_GUARD
+ * PS2SDK audsrv uses a pointer-only ring buffer and cannot distinguish a
+ * completely empty queue from a completely full one.  Keep generous valid
+ * headroom and apply an extremely small, bounded queue servo only when the
+ * stream drifts well outside its normal band.  Nominal frames are untouched. */
+#define AUD_WAKE_PRIME_SAMPLES       768
+#define AUD_GUARD_WARMUP_ENQUEUES    120
+#define AUD_GUARD_POLL_ENQUEUES      16
+#define AUD_GUARD_LOW_SAMPLES        2560
+#define AUD_GUARD_HIGH_SAMPLES       3840
+#define AUD_GUARD_ADJUST_SAMPLES     2
+static unsigned int aud_guard_enqueues = 0;
 
 /* audsrv_stop_audio() does more than empty its queue: it leaves the IOP
    mixer stopped until the next audsrv_play_audio() call.  Keep that state
@@ -140,12 +165,14 @@ static void Aud_WakeAudsrv(void)
     if (!sjpcm_inited || sjpcm_playing)
         return;
 
-    /* A tiny silent block is enough to restart audsrv.  It also gives
-       audsrv_queued()/available() a deterministic state before producers
-       decide whether there is room to enqueue their first real block. */
-    memset(_interleave_buf, 0, 64 * AUD_BYTES_PER_SAMPLE);
+    /* AURORA_V7_AUDSRV_PRIME
+       Keep ~16 ms of known-valid silence beyond audsrv's built-in half-ring
+       startup cushion.  The old 64-frame prime was only ~1.3 ms and left too
+       little protection against an isolated slow EE frame. */
+    memset(_interleave_buf, 0,
+           AUD_WAKE_PRIME_SAMPLES * AUD_BYTES_PER_SAMPLE);
     ret = audsrv_play_audio((const char *)_interleave_buf,
-                            64 * AUD_BYTES_PER_SAMPLE);
+                            AUD_WAKE_PRIME_SAMPLES * AUD_BYTES_PER_SAMPLE);
     if (ret >= 0)
         sjpcm_playing = 1;
 }
@@ -202,6 +229,8 @@ int Aud_Init(int sync, int numsamples, int maxenqueuesamples)
     /* Prime audsrv before a producer asks queued()/available(). */
     sjpcm_inited = 1;
     sjpcm_playing = 0;
+    /* AURORA_V7_AUD_GUARD_RESET_INIT */
+    aud_guard_enqueues = 0;
     Aud_WakeAudsrv();
     return 0;
 }
@@ -234,6 +263,8 @@ void Aud_Pause(void)
     if (!sjpcm_inited) return;
     audsrv_stop_audio();
     sjpcm_playing = 0;
+    /* AURORA_V7_AUD_GUARD_RESET_PAUSE */
+    aud_guard_enqueues = 0;
 }
 
 
@@ -242,6 +273,8 @@ void Aud_Clearbuff(void)
     if (!sjpcm_inited) return;
     audsrv_stop_audio();
     sjpcm_playing = 0;
+    /* AURORA_V7_AUD_GUARD_RESET_CLEAR */
+    aud_guard_enqueues = 0;
 }
 
 
@@ -313,10 +346,73 @@ void Aud_Enqueue(short *left, short *right, int size, int wait)
     if (size <= 0) return;
     if (size > AUD_MAX_ENQUEUE_SAMPLES) size = AUD_MAX_ENQUEUE_SAMPLES;
 
-    for (i = 0; i < size; i++)
+    /* AURORA_V81_AUD_ONE_SHOT_SERVO
+     * The rational 59.94/50-Hz frame scheduler remains the clock authority.
+     * Poll audsrv only once every 16 enqueues after warm-up, and make at most
+     * ONE +/-2-sample-frame correction on that poll block.  This restores
+     * queue margin slowly without creating a periodic pitch correction. */
+    int aud_adjust_now = 0;
+    if (aud_guard_enqueues >= AUD_GUARD_WARMUP_ENQUEUES &&
+        (aud_guard_enqueues % AUD_GUARD_POLL_ENQUEUES) == 0)
     {
-        _interleave_buf[i * 2 + 0] = left[i];
-        _interleave_buf[i * 2 + 1] = right[i];
+        int queued_bytes = audsrv_queued();
+        if (queued_bytes >= 0)
+        {
+            int queued_samples = queued_bytes / AUD_BYTES_PER_SAMPLE;
+            if (queued_samples < AUD_GUARD_LOW_SAMPLES)
+                aud_adjust_now = AUD_GUARD_ADJUST_SAMPLES;
+            else if (queued_samples > AUD_GUARD_HIGH_SAMPLES)
+                aud_adjust_now = -AUD_GUARD_ADJUST_SAMPLES;
+        }
+    }
+    aud_guard_enqueues++;
+
+    if (aud_adjust_now > 0 &&
+        size > aud_adjust_now &&
+        size + aud_adjust_now <= AUD_MAX_ENQUEUE_SAMPLES)
+    {
+        int out = 0;
+        int acc = size / 2;
+        const int add = aud_adjust_now;
+        for (i = 0; i < size; i++)
+        {
+            Aud_StoreStereoFrame(out, left[i], right[i]);
+            out++;
+            acc += add;
+            if (acc >= size)
+            {
+                acc -= size;
+                _interleave_buf[out * 2 + 0] = left[i];
+                _interleave_buf[out * 2 + 1] = right[i];
+                out++;
+            }
+        }
+        size = out;
+    }
+    else if (aud_adjust_now < 0 && size > -aud_adjust_now)
+    {
+        int out = 0;
+        int acc = size / 2;
+        const int remove = -aud_adjust_now;
+        for (i = 0; i < size; i++)
+        {
+            acc += remove;
+            if (acc >= size)
+            {
+                acc -= size;
+                continue;
+            }
+            Aud_StoreStereoFrame(out, left[i], right[i]);
+            out++;
+        }
+        size = out;
+    }
+    else
+    {
+        for (i = 0; i < size; i++)
+        {
+            Aud_StoreStereoFrame(i, left[i], right[i]);
+        }
     }
 
     bytes = size * AUD_BYTES_PER_SAMPLE;

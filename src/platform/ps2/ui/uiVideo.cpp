@@ -19,6 +19,7 @@ extern "C" {
 #include "audmixbuffer.h"
 #include "embedded_irx.h"   /* HddSupportIsEnabled / HddSupportSetEnabled */
 #include "snppucolor.h"
+#include "snppurender.h"
 #include "nes/quicknes/quicknes_bridge.h" /* QUICKNES_FAMICLONE_HOOK */
 
 /* mc0:/SNESticle (defined in mainloop_globals.cpp). */
@@ -31,7 +32,10 @@ void MainResetEmulator(void);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 19
+#define VIDEOCFG_VERSION 20
+/* AURORA_V85_SOFTWARE_HACKS_CONFIG
+ * v20 only appends renderer-hack preferences. Old configs migrate with all
+ * hacks disabled and all layers enabled. */
 
 typedef struct
 {
@@ -55,6 +59,8 @@ typedef struct
 	Int32  famicloneaudio;
 	Int32  fakesramsize;
 	Int32  forceregion;
+	Int32  sneshacklayersoff;
+	Int32  sneshackflags;
 } VideoCfgT;
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -123,6 +129,31 @@ typedef struct
 	Int32  famicloneaudio;
 } VideoCfgV18T;
 
+/* Exact on-card layout written by v19. */
+typedef struct
+{
+	Uint32 magic;
+	Int32  version;
+	Int32  mode;
+	Int32  offx;
+	Int32  offy;
+	Int32  overscan;
+	Int32  widescreen;
+	Int32  covers;
+	Int32  bgmvol;
+	Int32  bgmrate;
+	Int32  gamevol;
+	Int32  hddenable;
+	Int32  mmceenable;
+	Int32  massenable;
+	Int32  smbenable;
+	Int32  mx4sioenable;
+	Int32  colorprofile;
+	Int32  famicloneaudio;
+	Int32  fakesramsize;
+	Int32  forceregion;
+} VideoCfgV19T;
+
 typedef struct
 {
 	Uint32 magic;
@@ -162,6 +193,11 @@ void VideoSettingsSave(void)
 	cfg.famicloneaudio = g_FamicloneAudio ? 1 : 0;
 	cfg.fakesramsize = g_FakeSRAMSize;
 	cfg.forceregion = g_SnesForceRegion;
+	cfg.sneshacklayersoff =
+		(~SNPPURenderGetSoftwareLayerMask()) &
+		(SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
+		 SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
+	cfg.sneshackflags = SNPPURenderGetSoftwareHackFlags();
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -177,6 +213,10 @@ void VideoSettingsLoad(void)
 	Bool      loaded = FALSE;
 
 	memset(&cfg, 0, sizeof(cfg));
+	SNPPURenderSetSoftwareLayerMask(
+		SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
+		SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
+	SNPPURenderSetSoftwareHackFlags(0);
 	_VideoCfgPath(path);
 
 	memset(&header, 0, sizeof(header));
@@ -186,6 +226,20 @@ void VideoSettingsLoad(void)
 				if (header.version == VIDEOCFG_VERSION)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+		}
+		else if (header.version == 19)
+		{
+			VideoCfgV19T oldcfg19;
+
+			memset(&oldcfg19, 0, sizeof(oldcfg19));
+			if (MemCardReadFile(path, (Uint8 *)&oldcfg19, sizeof(oldcfg19)))
+			{
+				memcpy(&cfg, &oldcfg19, sizeof(oldcfg19));
+				cfg.version = VIDEOCFG_VERSION;
+				cfg.sneshacklayersoff = 0;
+				cfg.sneshackflags = 0;
+				loaded = TRUE;
+			}
 		}
 		else if (header.version == 18)
 		{
@@ -283,6 +337,15 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 		{
 			g_SnesForceRegion = cfg.forceregion;
 		}
+
+		const Int32 uLayerBits =
+			SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
+			SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ;
+		if ((cfg.sneshacklayersoff & ~uLayerBits) == 0)
+			SNPPURenderSetSoftwareLayerMask(
+				(Uint8)(uLayerBits & ~cfg.sneshacklayersoff));
+		if ((cfg.sneshackflags & ~SNPPU_HACK_ALL) == 0)
+			SNPPURenderSetSoftwareHackFlags((Uint8)cfg.sneshackflags);
 	}
 }
 
@@ -384,6 +447,28 @@ static const char *_VideoFamicloneAudioStatus()
 	return g_FamicloneAudio ? "On" : "Off";
 }
 
+static const char *_VideoHackLayerStatus(Uint8 uLayer)
+{
+	return (SNPPURenderGetSoftwareLayerMask() & uLayer) ? "On" : "Off";
+}
+
+static const char *_VideoHackAccurateStatus(Uint8 uFlag)
+{
+	return (SNPPURenderGetSoftwareHackFlags() & uFlag) ? "Off" : "Accurate";
+}
+
+static const char *_VideoHackMode7Status()
+{
+	return (SNPPURenderGetSoftwareHackFlags() & SNPPU_HACK_MODE7_HALF)
+		? "Half" : "Full";
+}
+
+static const char *_VideoHackFrameSkipStatus()
+{
+	return (SNPPURenderGetSoftwareHackFlags() & SNPPU_HACK_FRAME_SKIP)
+		? "1" : "Off";
+}
+
 static const char *_VideoMx4sioStatus()
 {
 	if (!Mx4sioIsEnabled())       return "Off";
@@ -420,7 +505,8 @@ void CVideoScreen::Draw()
 	char  buf[16];
 	int   m = _VideoModeIndex(g_GskVideoMode);
 	const char *pMode = _VideoModes[m].name;
-	bool  bDevices = (m_iSelect >= 10);  /* pagina 2/2 = dispositivos */
+	/* AURORA_V85_SOFTWARE_HACKS_PAGE */
+	int   iPage = (m_iSelect >= 19) ? 2 : ((m_iSelect >= 10) ? 1 : 0);
 	const char *pWide = "Off";
 	const char *pColor = (SNPPUColorGetProfile() == SNPPU_COLOR_PROFILE_COMPOSITE)
 	                   ? "Composite" : "Original";
@@ -430,10 +516,13 @@ void CVideoScreen::Draw()
 
 	FontSelect(0);
 
-	_VideoHeader(vy, bDevices ? "Video Config (2/2)" : "Video Config (1/2)");
+	_VideoHeader(vy,
+		iPage == 0 ? "Video Config (1/3)" :
+		iPage == 1 ? "Video Config (2/3)" :
+		             "Video Config (3/3)");
 	vy += 18;
 
-	if (!bDevices) {
+	if (iPage == 0) {
 	_VideoHeader(vy, "Screen");
 	vy += 14;
 
@@ -472,7 +561,7 @@ void CVideoScreen::Draw()
 	snprintf(buf, sizeof(buf), "%d kHz", (BgmGetRate() + 500) / 1000);
 	_VideoRow(vy, 9, m_iSelect, "Frequency", buf); vy += 12;
 	}
-	else
+	else if (iPage == 1)
 	{
 		_VideoHeader(vy, "Storage / Devices"); vy += 14;
 
@@ -501,12 +590,34 @@ _VideoRow(vy, 17, m_iSelect, "Famiclone Audio",
 _VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;
 
 	}
+	else
+	{
+		_VideoHeader(vy, "Software Hacks"); vy += 14;
+		_VideoRow(vy, 19, m_iSelect, "BG1 Layer",
+			_VideoHackLayerStatus(SNESPPU_MASK_BG1)); vy += 12;
+		_VideoRow(vy, 20, m_iSelect, "BG2 Layer",
+			_VideoHackLayerStatus(SNESPPU_MASK_BG2)); vy += 12;
+		_VideoRow(vy, 21, m_iSelect, "BG3 Layer",
+			_VideoHackLayerStatus(SNESPPU_MASK_BG3)); vy += 12;
+		_VideoRow(vy, 22, m_iSelect, "BG4 Layer",
+			_VideoHackLayerStatus(SNESPPU_MASK_BG4)); vy += 12;
+		_VideoRow(vy, 23, m_iSelect, "Sprites / OBJ",
+			_VideoHackLayerStatus(SNESPPU_MASK_OBJ)); vy += 12;
+		_VideoRow(vy, 24, m_iSelect, "Color Math",
+			_VideoHackAccurateStatus(SNPPU_HACK_COLOR_MATH_OFF)); vy += 12;
+		_VideoRow(vy, 25, m_iSelect, "Window Effects",
+			_VideoHackAccurateStatus(SNPPU_HACK_WINDOWS_OFF)); vy += 12;
+		_VideoRow(vy, 26, m_iSelect, "Mode 7 Quality",
+			_VideoHackMode7Status()); vy += 12;
+		_VideoRow(vy, 27, m_iSelect, "Frame Skip",
+			_VideoHackFrameSkipStatus()); vy += 12;
+	}
 
 	/* controls / hints (clear of the vy=215 footer) */
 	vy = 184;
 	FontColor4f(0.6f, 0.6f, 0.6f, 1.0f);
 	_VideoCenter(128, vy, "Up/Dn: select   L/R: change   X: save"); vy += 12;
-	_VideoCenter(128, vy, "O (Circle): switch page"); vy += 12;
+	_VideoCenter(128, vy, "O (Circle): next page"); vy += 12;
 
 	if (g_GskVideoMode != GSK_GetActiveVideoMode())
 	{
@@ -524,15 +635,19 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
 	int dir = 0;
 
-	/* Circle (O) alterna entre as 2 paginas: Video/Audio (idx 0-9) e
-	   Devices (10-14). NAO uso L1/R1 aqui de proposito -- eles ja trocam
-	   de ABA no nivel global (Browser/Network/Menu/Log/Video). */
+	/* Circle: Video/Audio -> Devices/Misc -> Software Hacks. */
 	if (trigger & PAD_CIRCLE)
-		m_iSelect = (m_iSelect >= 10) ? 0 : 10;
+	{
+		if (m_iSelect < 10)       m_iSelect = 10;
+		else if (m_iSelect < 19)  m_iSelect = 19;
+		else                      m_iSelect = 0;
+	}
 
 	{
-		int lo = (m_iSelect >= 10) ? 10 : 0;
-		int hi = (m_iSelect >= 10) ? 18 : 9;
+		int lo, hi;
+		if (m_iSelect < 10)      { lo = 0;  hi = 9;  }
+		else if (m_iSelect < 19) { lo = 10; hi = 18; }
+		else                     { lo = 19; hi = 27; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -755,6 +870,34 @@ case 17: /* Famiclone Audio */
     g_FamicloneAudio = !g_FamicloneAudio;
     QuicknesBridge_SetDutySwap(g_FamicloneAudio ? true : false);
     break;
+
+		case 19: case 20: case 21: case 22: case 23:
+		{
+			static const Uint8 kLayers[5] = {
+				SNESPPU_MASK_BG1, SNESPPU_MASK_BG2, SNESPPU_MASK_BG3,
+				SNESPPU_MASK_BG4, SNESPPU_MASK_OBJ
+			};
+			Uint8 uMask = SNPPURenderGetSoftwareLayerMask();
+			uMask ^= kLayers[m_iSelect - 19];
+			SNPPURenderSetSoftwareLayerMask(uMask);
+			break;
+		}
+		case 24:
+			SNPPURenderSetSoftwareHackFlags(
+				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_COLOR_MATH_OFF);
+			break;
+		case 25:
+			SNPPURenderSetSoftwareHackFlags(
+				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_WINDOWS_OFF);
+			break;
+		case 26:
+			SNPPURenderSetSoftwareHackFlags(
+				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_MODE7_HALF);
+			break;
+		case 27:
+			SNPPURenderSetSoftwareHackFlags(
+				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_FRAME_SKIP);
+			break;
 		}
 
 

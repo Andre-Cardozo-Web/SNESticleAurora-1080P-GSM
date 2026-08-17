@@ -27,6 +27,12 @@ Uint128 *GSListGetStart();
 Int32 GSListGetSize();
 Int32 GSListGetSpace();
 
+/* AURORA_V83_GSLIST_REF_GUARD_DECL
+ * GPFifo may use a narrow D-cache sync only when its command list contains
+ * no DMA REF source.  If a REF is ever added, callers retain the old
+ * whole-cache fallback rather than silently assuming the source is coherent. */
+Int32 GSListHasDmaRefs();
+
 void GSDmaCntOpen();
 void GSDmaCntClose();
 void GSDmaRef(Uint128 *pRefAddr, Uint32 nQwords);

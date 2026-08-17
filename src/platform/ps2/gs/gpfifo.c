@@ -71,13 +71,42 @@ void GPFifoPause(void)
     /* add end tag */
     GSDmaEnd();
 
+    /* AURORA_V83_GPFIFO_RANGE_DCACHE
+     * GSK_DrainAndWait() above has already serialized gsKit and GIF DMA.
+     * The current bridge list is ordinarily just Begin/End GS register
+     * commands.  Writing back+invalidating the entire EE D-cache here threw
+     * away hot emulator state for a few dozen qwords.
+     *
+     * Keep a conservative future-proof guard: if GSDmaRef() was used, retain
+     * the old FlushCache(0), because the REF payload can live outside this
+     * list.  With no REF, synchronize only the qwords the DMAC will read. */
+    if (GSListHasDmaRefs())
+    {
+        FlushCache(0);
+    }
+    else
+    {
+        Uint128 *pStart = GSListGetStart();
+        Int32 nQwords = GSListGetSize();
+        Uint32 nBytes = nQwords > 0 ? (Uint32)nQwords * sizeof(Uint128) : 0;
+        if (pStart && nBytes > 0)
+        {
+            /* The EE D-cache is 8 KiB.  Walking a range larger than the
+               complete cache cannot save work, so retain FlushCache(0) for
+               unusually large lists. */
+            if (nBytes >= 8192U)
+                FlushCache(0);
+            else
+                SyncDCache(pStart, (Uint8 *)pStart + nBytes - 1);
+        }
+    }
+
     /* end list */
     GSListEnd();
 
-    /* flush cache */
-    FlushCache(0);
-
-    /* wait for previous dma to finish */
+    /* Keep this second guard even though GSK_DrainAndWait already syncs GIF:
+       DmaSyncGIF has a bounded timeout in this project, so retaining it keeps
+       the pre-V8.3 failure tolerance exactly unchanged. */
     DmaSyncGIF();
 
     /* transfer current list */
