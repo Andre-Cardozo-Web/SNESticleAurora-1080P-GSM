@@ -35,6 +35,7 @@ extern "C" {
 #include "gpfifo.h"
 #include "gpprim.h"
 #include "gskit_backend.h"
+#include "audio.h"
 };
 
 extern "C" {
@@ -318,6 +319,13 @@ PolyRect(0.0f, 4.0f, 256.0f, 240.0f);
     GSK_SyncFlip();
     if ( (_iFrame&15)==0)   _uVblankCycle = ProfCtrGetCycle() - _uVblankCycle;
     PROF_LEAVE("WaitVBlank");
+
+    /* AURORA_AUDIO_FAILSOFT_POSTVBLANK_V1
+     * The frame is already presented. Keep the normal gameplay audio drain
+     * here so synchronous audsrv RPC latency is moved out of the pre-render
+     * deadline. Aud_BufferedAsyncStart uses only wait=0 drains. */
+    if (!_bMenu && _pSystem && !_MainLoop_BlackScreen)
+        Aud_BufferedAsyncStart();
 
     /* whichdrawbuf is now decorative - gsKit owns the active
        framebuffer index via gsGlobal->ActiveBuffer. Keep it

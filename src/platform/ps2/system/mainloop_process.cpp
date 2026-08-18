@@ -260,7 +260,9 @@ Bool MainLoopProcess()
 		    _iframetex^=1;
         }
 
-        Aud_BufferedAsyncStart();
+        /* AURORA_AUDIO_FAILSOFT_POSTVBLANK_V1
+         * Host-audio RPC drain moved to MainLoopRender(), AFTER GSK_SyncFlip.
+         * Do not spend synchronous SIF time before this frame is presented. */
     }
 
     _MainLoopCheckSRAM();

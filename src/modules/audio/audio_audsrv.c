@@ -160,20 +160,20 @@ static int aud_async_count = 0;
  */
 #define AUD_ASYNC_RING_MARGIN_SAMPLES  32
 /* AURORA_AUDIO_BACKLOG_CATCHUP_V2
+ * AURORA_AUDIO_FAILSOFT_POSTVBLANK_V1
  *
- * 3072 stereo frames = 12288 bytes. PS2SDK audsrv's EE RPC staging area
- * accepts up to 16380 audio bytes in one PLAY_AUDIO RPC, so this remains a
- * single RPC while draining 50% more accumulated EE backlog than the old
- * 2048-frame cap. Normal ~one-frame sends are unchanged.
+ * 4095 stereo frames = 16380 bytes: exactly one maximum-sized copy in the
+ * PS2SDK audsrv EE staging buffer (sizeof(sbuff)-sizeof(int)).
+ * Normal ~one-frame sends are unchanged; only an accumulated backlog can use
+ * the larger burst.
  *
- * The availability cache is a LOWER bound: successful sends subtract space,
- * while IOP consumption is never added. Extending the periodic refresh budget
- * therefore cannot overestimate free ring space; low/unknown cache still
- * forces an immediate probe. */
-#define AUD_ASYNC_MAX_BURST_SAMPLES  3072
-#define AUD_ASYNC_AVAIL_PROBE_BUDGET     8
+ * aud_async_cached_avail remains a LOWER BOUND. Successful sends subtract
+ * space, while IOP consumption is never guessed/added. Therefore a fresh
+ * audsrv_available() RPC is needed only when the cache is unknown or nearly
+ * exhausted; periodic refreshes while the lower bound is already sufficient
+ * add synchronous SIF jitter without adding safety. */
+#define AUD_ASYNC_MAX_BURST_SAMPLES  4095
 static int aud_async_cached_avail = -1;
-static int aud_async_probe_budget = 0;
 
 
 /* AURORA_V83_AUDIO_PACKED_STEREO
@@ -259,7 +259,6 @@ static void Aud_AsyncReset(void)
     aud_async_head = 0;
     aud_async_count = 0;
     aud_async_cached_avail = -1;
-    aud_async_probe_budget = 0;
 }
 
 void Aud_AsyncDiscardPending(void)
@@ -330,8 +329,7 @@ static int Aud_AsyncDrainOne(int wait)
             aud_async_head -= AUD_ASYNC_FIFO_SAMPLES;
         aud_async_count -= n;
         aud_async_cached_avail = -1;
-        aud_async_probe_budget = 0;
-        return n;
+            return n;
     }
 
     {
@@ -342,14 +340,15 @@ static int Aud_AsyncDrainOne(int wait)
         int sent_frames;
         int short_write;
 
-        /* Probe only when the conservative cache is unknown/low or after
-           several drains. Aud_Available() is a synchronous EE<->IOP RPC. */
+        /* AURORA_AUDIO_FAILSOFT_POSTVBLANK_V1
+         * Aud_Available() is a synchronous EE<->IOP RPC. The cache is a
+         * conservative LOWER bound, so refreshing it while it already proves
+         * sufficient free space cannot improve correctness. Probe only when
+         * unknown/low. */
         if (aud_async_cached_avail < 0 ||
-            aud_async_cached_avail <= AUD_ASYNC_RING_MARGIN_SAMPLES ||
-            aud_async_probe_budget <= 0)
+            aud_async_cached_avail <= AUD_ASYNC_RING_MARGIN_SAMPLES)
         {
             aud_async_cached_avail = Aud_Available();
-            aud_async_probe_budget = AUD_ASYNC_AVAIL_PROBE_BUDGET;
         }
 
         if (aud_async_cached_avail <= AUD_ASYNC_RING_MARGIN_SAMPLES)
@@ -381,16 +380,14 @@ static int Aud_AsyncDrainOne(int wait)
 
         bytes = n * AUD_BYTES_PER_SAMPLE;
 
-        /* <= 12288 bytes in Standard mode, still below audsrv RPC's
-           16380-byte single-copy limit: one PLAY_AUDIO RPC. audsrv may
-           accept only a prefix; consume exactly the complete stereo frames
-           reported. */
+        /* <= 16380 bytes in Standard mode: exactly one maximum-sized
+           PLAY_AUDIO copy in PS2SDK's EE staging buffer. audsrv may accept
+           only a prefix; consume exactly the complete stereo frames reported. */
         sent_bytes = audsrv_play_audio((const char *)_interleave_buf, bytes);
         if (sent_bytes <= 0)
         {
             aud_async_cached_avail = -1;
-            aud_async_probe_budget = 0;
-            return 0;
+                    return 0;
         }
 
         sent_frames = sent_bytes / AUD_BYTES_PER_SAMPLE;
@@ -399,8 +396,7 @@ static int Aud_AsyncDrainOne(int wait)
         if (sent_frames <= 0)
         {
             aud_async_cached_avail = -1;
-            aud_async_probe_budget = 0;
-            return 0;
+                    return 0;
         }
 
         /* If the server accepted less than our conservative lower-bound
@@ -416,15 +412,12 @@ static int Aud_AsyncDrainOne(int wait)
         if (short_write)
         {
             aud_async_cached_avail = -1;
-            aud_async_probe_budget = 0;
-        }
+                }
         else
         {
             aud_async_cached_avail -= sent_frames;
             if (aud_async_cached_avail < 0)
                 aud_async_cached_avail = 0;
-            if (aud_async_probe_budget > 0)
-                aud_async_probe_budget--;
         }
 
         sjpcm_playing = 1;
@@ -469,20 +462,27 @@ void Aud_PrepareGameplayHeadroom(void)
         int chunk = remaining_bytes;
         int sent;
 
-        /* Same 4 KiB maximum used by V8.5's normal lossless enqueue path. */
-        if (chunk > 4096)
-            chunk = 4096;
+        /* AURORA_AUDIO_FAILSOFT_POSTVBLANK_V1
+         * Transition priming is best-effort too. Never call wait_audio():
+         * if the IOP ring cannot accept the requested silence immediately,
+         * keep whatever headroom already exists and let gameplay continue.
+         *
+         * _gameplay_silence is 2048 stereo frames = 8192 bytes, still below
+         * PS2SDK audsrv's single-copy 16380-byte staging limit. */
+        if (chunk > (int)sizeof(_gameplay_silence))
+            chunk = (int)sizeof(_gameplay_silence);
 
-        if (audsrv_wait_audio(chunk) != AUDSRV_ERR_NOERROR)
-            break;
-
-        /* The source is all zeroes; each iteration may safely reuse it. */
         sent = audsrv_play_audio((const char *)_gameplay_silence, chunk);
         if (sent <= 0)
             break;
 
         remaining_bytes -= sent;
         sjpcm_playing = 1;
+
+        /* Short write means the IOP ring reached its current safe capacity.
+           Do not spin or wait for more room. */
+        if (sent < chunk)
+            break;
     }
 }
 
