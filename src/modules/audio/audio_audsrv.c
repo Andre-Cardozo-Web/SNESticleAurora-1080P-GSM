@@ -159,8 +159,19 @@ static int aud_async_count = 0;
  * pessimistic, never optimistic.
  */
 #define AUD_ASYNC_RING_MARGIN_SAMPLES  32
-#define AUD_ASYNC_MAX_BURST_SAMPLES  2048
-#define AUD_ASYNC_AVAIL_PROBE_BUDGET     4
+/* AURORA_AUDIO_BACKLOG_CATCHUP_V2
+ *
+ * 3072 stereo frames = 12288 bytes. PS2SDK audsrv's EE RPC staging area
+ * accepts up to 16380 audio bytes in one PLAY_AUDIO RPC, so this remains a
+ * single RPC while draining 50% more accumulated EE backlog than the old
+ * 2048-frame cap. Normal ~one-frame sends are unchanged.
+ *
+ * The availability cache is a LOWER bound: successful sends subtract space,
+ * while IOP consumption is never added. Extending the periodic refresh budget
+ * therefore cannot overestimate free ring space; low/unknown cache still
+ * forces an immediate probe. */
+#define AUD_ASYNC_MAX_BURST_SAMPLES  3072
+#define AUD_ASYNC_AVAIL_PROBE_BUDGET     8
 static int aud_async_cached_avail = -1;
 static int aud_async_probe_budget = 0;
 
@@ -329,6 +340,7 @@ static int Aud_AsyncDrainOne(int wait)
         int bytes;
         int sent_bytes;
         int sent_frames;
+        int short_write;
 
         /* Probe only when the conservative cache is unknown/low or after
            several drains. Aud_Available() is a synchronous EE<->IOP RPC. */
@@ -369,9 +381,10 @@ static int Aud_AsyncDrainOne(int wait)
 
         bytes = n * AUD_BYTES_PER_SAMPLE;
 
-        /* <= 8192 bytes in Standard mode, below audsrv RPC's ~16 KiB
-           internal copy limit: one PLAY_AUDIO RPC. audsrv may accept only
-           a prefix; consume exactly the complete stereo frames reported. */
+        /* <= 12288 bytes in Standard mode, still below audsrv RPC's
+           16380-byte single-copy limit: one PLAY_AUDIO RPC. audsrv may
+           accept only a prefix; consume exactly the complete stereo frames
+           reported. */
         sent_bytes = audsrv_play_audio((const char *)_interleave_buf, bytes);
         if (sent_bytes <= 0)
         {
@@ -390,16 +403,29 @@ static int Aud_AsyncDrainOne(int wait)
             return 0;
         }
 
+        /* If the server accepted less than our conservative lower-bound
+           request, some assumption changed (for example another producer).
+           Never carry a potentially optimistic cache into the next drain. */
+        short_write = (sent_frames < n) ? 1 : 0;
+
         aud_async_head += sent_frames;
         if (aud_async_head >= AUD_ASYNC_FIFO_SAMPLES)
             aud_async_head -= AUD_ASYNC_FIFO_SAMPLES;
         aud_async_count -= sent_frames;
 
-        aud_async_cached_avail -= sent_frames;
-        if (aud_async_cached_avail < 0)
-            aud_async_cached_avail = 0;
-        if (aud_async_probe_budget > 0)
-            aud_async_probe_budget--;
+        if (short_write)
+        {
+            aud_async_cached_avail = -1;
+            aud_async_probe_budget = 0;
+        }
+        else
+        {
+            aud_async_cached_avail -= sent_frames;
+            if (aud_async_cached_avail < 0)
+                aud_async_cached_avail = 0;
+            if (aud_async_probe_budget > 0)
+                aud_async_probe_budget--;
+        }
 
         sjpcm_playing = 1;
         return sent_frames;

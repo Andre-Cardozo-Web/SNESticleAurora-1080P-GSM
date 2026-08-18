@@ -531,11 +531,18 @@ void SNPPUBlendGS::End()
 
     GPFifoResume();
 
-    GSGifTagOpenAD();
-    // reset frame register
-	GSGifRegAD(GS_REG_FRAME_1, GS_GetFrameReg());
-	GSGifRegAD(GS_REG_XYOFFSET_1, GS_GetOffsetReg());
-    GSGifTagCloseAD();
+    /* AURORA_BLEND_POST_RESTORE_ELIDE_V2
+     *
+     * The legacy path queued FRAME_1/XYOFFSET_1 restoration here, but this
+     * newly-resumed raw list is not dispatched until the end-of-frame
+     * GPFifoFlush(). Modern MainLoopRender calls GSK_ResetFrame() BEFORE its
+     * first gsKit primitive, restoring FRAME_1, XYOFFSET_1, ALPHA_1 and
+     * COLCLAMP in the actual draw queue that needs them.
+     *
+     * No host GS primitive is issued between this End() and that reset during
+     * gameplay. Leave the raw list at its exact idle state (one open CNT tag)
+     * so GPFifoFlush() can take its empty-list fast path instead of sending a
+     * two-register restore chain that is already superseded. */
 
     /* The blender chain has just rendered into _OutTex via raw GIF
        DMA (FRAME_1 = uOutAddr). The next gsKit textured prim that

@@ -62,6 +62,26 @@ static void _GPFifoDumpList(void)
 
 void GPFifoFlush(void)
 {
+    /* AURORA_GPFIFO_EMPTY_FASTPATH_V2
+     *
+     * GPFifoResume() begins a GSList and immediately opens one DMA CNT tag.
+     * Therefore GSListGetSize()==1 is the exact idle representation: there
+     * are no GIF commands and no REF payload after that open CNT.
+     *
+     * We still submit/drain gsKit because this function is the end-of-frame
+     * host flush. We simply avoid closing, cache-syncing, DMA-kicking,
+     * swapping and reopening a raw chain that contains no commands.
+     *
+     * Any actual blender/setup write advances the list beyond qword 1 and
+     * falls through to the historical Pause/Resume path unchanged. */
+    if (_GPFifo_bInited &&
+        GSListGetSize() == 1 &&
+        !GSListHasDmaRefs())
+    {
+        GSK_DrainForRawGif();
+        return;
+    }
+
     GPFifoPause();
     GPFifoResume();
 }
