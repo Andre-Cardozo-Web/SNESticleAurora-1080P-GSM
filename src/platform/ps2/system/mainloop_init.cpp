@@ -418,10 +418,8 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	_pSnes->Reset();
 
 	_pSnesRom = new SnesRom();
-	for (Uint32 iExt=0; iExt < _pSnesRom->GetNumExts(); iExt++)
-	{
-		PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, _pSnesRom->GetExtName(iExt));
-	}
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"sfc");
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"smc");
 
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESPALETTE, (char *)"snpal");
 

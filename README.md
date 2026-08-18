@@ -65,6 +65,7 @@ If the repository was cloned without `--recurse-submodules`, run
 * The Lost Vikings 1 and 2 (SNES) black screen
 * Addams Family (SNES) graphical glitches and timing issues
 * Sonic Blast Man (SNES) wrong colors
+* Pilotwings (SNES) Mode7 rendering
 * Any other games with performance or graphical issues
 
 **TO BE ADDED:**
