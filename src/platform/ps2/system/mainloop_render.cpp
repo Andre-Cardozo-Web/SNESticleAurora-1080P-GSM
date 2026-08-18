@@ -84,6 +84,12 @@ void MainLoopRender()
        to a stale (or, after the SNES blender ran, completely wrong)
        buffer and the visible framebuffer flickered black on every
        other frame. See gskit_backend.h for the longer rationale. */
+    /* AURORA_GS_PARTIAL_GAMEPLAY_CLEAR_V1
+     * Only enable the reduced clear when this frame is guaranteed to draw the
+     * normal game output texture. Menu, boot and black-screen frames retain
+     * the complete physical clear. */
+    GSK_SetGameplayFastClear(
+        (!_bMenu && _pSystem && !_MainLoop_BlackScreen) ? TRUE : FALSE);
     GSK_ResetFrame();
 
     // render frame

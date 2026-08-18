@@ -35,7 +35,9 @@ void MainResetEmulator(void);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 21
+#define VIDEOCFG_VERSION 22
+/* AURORA_MODE7_HALF_DEFAULT_V22_ONLY
+ * v22 keeps the exact v21 layout; bump is migration-only. */
 /* AURORA_V85_SOFTWARE_HACKS_CONFIG
  * v20 only appends renderer-hack preferences. Old configs migrate with all
  * hacks disabled and all layers enabled. */
@@ -271,7 +273,7 @@ void VideoSettingsLoad(void)
 	SNPPURenderSetSoftwareLayerMask(
 		SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
 		SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
-	SNPPURenderSetSoftwareHackFlags(0);
+	SNPPURenderSetSoftwareHackFlags(SNPPU_HACK_MODE7_HALF);
 	_VideoApplyCompatFlags(0);
 	_VideoCfgPath(path);
 
@@ -282,6 +284,15 @@ void VideoSettingsLoad(void)
 				if (header.version == VIDEOCFG_VERSION)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+		}
+		else if (header.version == 21)
+		{
+			/* v21 and v22 are byte-identical VideoCfgT layouts. */
+			if (MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg)))
+			{
+				cfg.version = VIDEOCFG_VERSION;
+				loaded = TRUE;
+			}
 		}
 		else if (header.version == 20)
 		{
@@ -349,6 +360,11 @@ void VideoSettingsLoad(void)
 			}
 		}
 	}
+
+	/* New policy applies exactly once to every pre-v22 config. Once the
+	 * user saves v22, a manual Full selection remains persistent. */
+	if (loaded && header.version < VIDEOCFG_VERSION)
+		cfg.sneshackflags |= SNPPU_HACK_MODE7_HALF;
 
 	if (loaded && cfg.magic == VIDEOCFG_MAGIC)
 	{

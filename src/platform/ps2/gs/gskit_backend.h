@@ -87,6 +87,19 @@ Uint32 GSK_VramAllocTBP(Uint32 nBytes);
    DMA chain on the GIF channel. */
 void GSK_DrainAndWait(void);
 
+/* AURORA_GS_RAWGIF_DRAIN_V1
+ * Bridge-only drain: submit gsKit and wait until GIF DMA has finished feeding
+ * the same path-3 channel, but do not wait for the GS FINISH token itself.
+ * Packet execution order is still preserved by the GIF. */
+void GSK_DrainForRawGif(void);
+
+/* AURORA_GS_PARTIAL_GAMEPLAY_CLEAR_V1
+ * Hint that the current frame will immediately receive the normal full-width,
+ * bottom-reaching gameplay texture blit. When enabled, GSK_ResetFrame limits
+ * its black clear to a conservative top strip and restores full scissor before
+ * subsequent primitives. Default/off keeps the historical full clear. */
+void GSK_SetGameplayFastClear(Bool enabled);
+
 /* Drain gsKit's draw queue and wait. Equivalent to GSK_DrainAndWait
    but kept as a separate name for clarity in the per-frame flush. */
 void GSK_FlushFrame(void);

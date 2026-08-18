@@ -69,14 +69,17 @@ void GPFifoFlush(void)
 void GPFifoPause(void)
 {
     if (!_GPFifo_bInited) {
-        /* Nothing to flush - just make sure gsKit's queue is drained
-           so the blender's raw DMA chain has the GIF channel free. */
-        GSK_DrainAndWait();
+        /* Nothing to flush - just make sure gsKit's DMA has finished feeding
+           path 3 before a raw producer can use the same GIF channel.
+           AURORA_GS_RAWGIF_DRAIN_V1 */
+        GSK_DrainForRawGif();
         return;
     }
 
-    /* Make sure gsKit isn't mid-transfer on the GIF channel. */
-    GSK_DrainAndWait();
+    /* AURORA_GS_RAWGIF_DRAIN_V1
+     * Serialize the producer switch at GIF-DMA completion, not full GS
+     * raster completion. Command order remains FIFO on the same path 3. */
+    GSK_DrainForRawGif();
 
     /* close current dma cnt */
     GSDmaCntClose();

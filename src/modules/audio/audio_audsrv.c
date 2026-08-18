@@ -138,10 +138,12 @@ static short _gameplay_silence[
  * The audsrv port called Aud_EnqueueAsync() but still blocked in
  * audsrv_wait_audio(). Stage gameplay PCM here instead.
  *
- * 16384 stereo frames ~= 341 ms @ 48 kHz, 64 KiB total.
- * Normal occupancy should stay around one frame (~800 samples).
+ * AURORA_AUDIO_OVERFLOW_NOBLOCK_V4_1
+ * 65536 stereo frames ~= 1365 ms @ 48 kHz, 256 KiB total.
+ * Normal occupancy should still stay around one frame (~800 samples).
+ * The extra 64 KiB is only shock-absorber headroom for rare host/IOP stalls.
  */
-#define AUD_ASYNC_FIFO_SAMPLES 16384
+#define AUD_ASYNC_FIFO_SAMPLES 65536
 static short _async_left[AUD_ASYNC_FIFO_SAMPLES]
     __attribute__((aligned(64)));
 static short _async_right[AUD_ASYNC_FIFO_SAMPLES]
@@ -781,13 +783,17 @@ void Aud_EnqueueAsync(short *left, short *right, int size)
 
     /* V3: producer is RAM-only. The post-frame hook owns IOP RPC. */
 
-    /* >~341 ms backlog: preserve ordering/PCM with blocking safety drain
-       rather than silently dropping audio. Normal gameplay should not hit. */
-    while (aud_async_count + size > AUD_ASYNC_FIFO_SAMPLES)
-    {
-        if (Aud_AsyncDrainOne(1) <= 0)
-            return;
-    }
+    /* AURORA_AUDIO_OVERFLOW_NOBLOCK_V4
+     *
+     * Last-resort only. If >~1.36 s of exact gameplay PCM is already staged,
+     * the audio backend is catastrophically behind. The former safety path
+     * could block waiting for IOP ring space.
+     *
+     * Do NOT turn an audio failure into a CPU/video hitch. Preserve every
+     * already-staged sample in order and drop only this NEW block. Under
+     * normal operation this branch is never reached. */
+    if (aud_async_count + size > AUD_ASYNC_FIFO_SAMPLES)
+        return;
 
     Aud_AsyncCopyIn(left, right, size);
 }

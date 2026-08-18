@@ -41,6 +41,11 @@ static GSGLOBAL *_pGsGlobal = NULL;
 static int       _gsk_initialised = 0;
 static int       _gsk_invalidate_pending = 0;
 
+/* AURORA_GS_LATENCY_V1
+ * Off by default: every caller that does not explicitly opt into the gameplay
+ * fast-clear path retains the exact historical full-frame clear. */
+static Bool      _gsk_gameplay_fast_clear = FALSE;
+
 /* Video mode + display offset (selectable in the Settings screen).
    480i is the safe default and 1080i is the only alternate output. */
 int g_GskVideoMode = GSK_VIDMODE_480I;
@@ -496,6 +501,35 @@ void GSK_DrainAndWait(void)
     DmaSyncGIF();
 }
 
+/* AURORA_GS_RAWGIF_DRAIN_V1
+ *
+ * This is intentionally narrower than GSK_DrainAndWait().
+ *
+ * gsKit_queue_exec() appends a FINISH command to its queue. Waiting for that
+ * FINISH here forces the EE to sit idle until the GS has rasterized every
+ * preceding primitive. For a producer switch on the SAME GIF/path-3 channel,
+ * that is stronger than necessary: DmaSyncGIF() is sufficient to ensure the
+ * previous EE DMA source is no longer active before we start the raw chain.
+ * The GIF/GS command stream itself remains FIFO-ordered, so raw commands cannot
+ * overtake the earlier gsKit packets.
+ *
+ * Keep GSK_DrainAndWait() untouched for callers that genuinely request full
+ * GS completion. */
+void GSK_DrainForRawGif(void)
+{
+    if (!_gsk_initialised) {
+        return;
+    }
+
+    gsKit_queue_exec(_pGsGlobal);
+    DmaSyncGIF();
+}
+
+void GSK_SetGameplayFastClear(Bool enabled)
+{
+    _gsk_gameplay_fast_clear = enabled ? TRUE : FALSE;
+}
+
 void GSK_FlushFrame(void)
 {
     if (!_gsk_initialised) {
@@ -596,12 +630,40 @@ void GSK_ResetFrame(void)
     *p_data++ = (u64)1;
     *p_data++ = (u64)GS_REG_COLCLAMP;
 
-    /* Clear the complete PHYSICAL framebuffer, not only the transformed
-       256x240 canvas, so overscan borders never retain stale pixels. */
+    /* Clear policy.
+     *
+     * Menu/boot/black-screen: retain the historical full physical clear.
+     *
+     * Gameplay: MainLoopRender immediately draws the game texture across the
+     * complete framebuffer width and all the way to the bottom edge. Current
+     * layouts leave at most 16 physical rows uncovered at the top (SNES in the
+     * 640x480 source). Clear 32 rows for a 2x safety margin, then restore the
+     * full scissor before any later primitive. Nothing visible is left stale;
+     * we simply avoid rasterizing black underneath pixels that the game blit
+     * overwrites later in the same queue.
+     *
+     * AURORA_GS_PARTIAL_GAMEPLAY_CLEAR_V1 */
     {
         u8 previous_alpha = gs->PrimAlphaEnable;
         gs->PrimAlphaEnable = GS_SETTING_OFF;
-        gsKit_clear(gs, 0);
+
+        if (_gsk_gameplay_fast_clear && gs->Width > 0 && gs->Height > 0)
+        {
+            int clear_rows = (gs->Height < 32) ? gs->Height : 32;
+            u64 top_scissor = GS_SETREG_SCISSOR(
+                0, gs->Width - 1, 0, clear_rows - 1);
+            u64 full_scissor = GS_SETREG_SCISSOR(
+                0, gs->Width - 1, 0, gs->Height - 1);
+
+            gsKit_set_scissor(gs, top_scissor);
+            gsKit_clear(gs, 0);
+            gsKit_set_scissor(gs, full_scissor);
+        }
+        else
+        {
+            gsKit_clear(gs, 0);
+        }
+
         gs->PrimAlphaEnable = previous_alpha;
     }
 }
