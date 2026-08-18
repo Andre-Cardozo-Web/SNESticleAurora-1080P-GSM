@@ -741,6 +741,10 @@ void SNCPU_TRAPFUNC SnesSystem::Write4000(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
             break;
 
         case 0x4200:	// nmitimen
+        {
+#if SNES_HVIRQ_RESCHEDULE
+            Uint8 uOldNmitimen = pIO->m_Regs.nmitimen;
+#endif
             pIO->m_Regs.nmitimen = uData;
 
             // unconfirmed:
@@ -770,7 +774,12 @@ void SNCPU_TRAPFUNC SnesSystem::Write4000(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
 
             // set new nmi signal
             SNCPUSignalNMI(pCpu, pIO->m_Regs.rdnmi & pIO->m_Regs.nmitimen & 0x80);
+#if SNES_HVIRQ_RESCHEDULE
+            if ((uOldNmitimen ^ uData) & 0x30)
+                pSnes->RescheduleLineIRQ(TRUE);
+#endif
             break;
+        }
 
         case 0x4201:	// wrio (programmable i/o port)
             /* Falling edge on PIO bit 7 is the software-controlled
@@ -819,15 +828,27 @@ void SNCPU_TRAPFUNC SnesSystem::Write4000(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
 
         case 0x4207:	// htmel (video horizontal IRQ beam position)
             pIO->m_Regs.htime.b.l = uData;
+#if SNES_HVIRQ_RESCHEDULE
+            pSnes->RescheduleLineIRQ(FALSE);
+#endif
             break;
         case 0x4208:	// htmeh (video horizontal IRQ beam position)
             pIO->m_Regs.htime.b.h = uData & 1;
+#if SNES_HVIRQ_RESCHEDULE
+            pSnes->RescheduleLineIRQ(FALSE);
+#endif
             break;
         case 0x4209:	// vtmel (video vertical IRQ beam position)
             pIO->m_Regs.vtime.b.l = uData;
+#if SNES_HVIRQ_RESCHEDULE
+            pSnes->RescheduleLineIRQ(FALSE);
+#endif
             break;
         case 0x420A:	// vtmeh (video vertical IRQ beam position)
             pIO->m_Regs.vtime.b.h = uData & 1;
+#if SNES_HVIRQ_RESCHEDULE
+            pSnes->RescheduleLineIRQ(FALSE);
+#endif
             break;
 
 		case 0x420B:	// mdmaen (DMA enable register)
@@ -1060,6 +1081,14 @@ SnesSystem::SnesSystem()
 	m_Cpu.pUserData = (void *)this;
 
 	m_uSramSize = 0;
+#if SNES_HVIRQ_RESCHEDULE
+	m_bLineIRQActive = FALSE;
+	m_bLineIRQReschedule = FALSE;
+	m_bLineIRQFired = FALSE;
+	m_bLineIRQInstant = FALSE;
+	m_nLineIRQCycle = -1;
+	m_nLineIRQClock = 0;
+#endif
 
 	// setup spc
 	SNSPCNew(&m_Spc);
@@ -1253,6 +1282,54 @@ void SnesSystem::SetSnesRom(SnesRom *pRom)
 
 
 
+#if SNES_HVIRQ_RESCHEDULE
+/* AURORA_HVIRQ_RESCHEDULE_V4
+ * Return the absolute master-clock position of the timer event on the
+ * current scanline.  -1 means that the current H/V enable + V-counter state
+ * does not arm an IRQ on this line.
+ *
+ * H-only: every line at HTIME.
+ * V-only: matching V line at the vertical IRQ trigger position.
+ * H+V:    matching V line at HTIME.
+ */
+Int32 SnesSystem::CalculateLineIRQCycle()
+{
+	const Bool bH = (m_IO.m_Regs.nmitimen & 0x10) ? TRUE : FALSE;
+	const Bool bV = (m_IO.m_Regs.nmitimen & 0x20) ? TRUE : FALSE;
+
+	if (bV)
+	{
+		if (m_uLine != m_IO.m_Regs.vtime.w)
+			return -1;
+		return bH ? SNES_HIRQ_CYCLES(m_IO.m_Regs.htime.w) : SNES_VIRQ_CYCLES;
+	}
+
+	return bH ? SNES_HIRQ_CYCLES(m_IO.m_Regs.htime.w) : -1;
+}
+
+
+void SnesSystem::RescheduleLineIRQ(Bool bAllowImmediate)
+{
+	/* Register writes outside ExecuteLine() only affect the next line's normal
+	 * initial calculation.  While a line is live, re-arm from the new register
+	 * state and abort the current 65816 execution batch so ExecuteWithIRQ() can
+	 * return the unspent clocks to the horizontal scheduler and split at the
+	 * new event position.
+	 *
+	 * SNCPUAbort() is already the core's supported mechanism for leaving the
+	 * executing CPU batch (MDMA/NMI use the same facility); it preserves the
+	 * remaining cycle budget in m_Cpu.Cycles. */
+	if (!m_bLineIRQActive)
+		return;
+
+	m_nLineIRQCycle = CalculateLineIRQCycle();
+	m_bLineIRQFired = FALSE;
+	m_bLineIRQInstant = bAllowImmediate;
+	m_bLineIRQReschedule = TRUE;
+	SNCPUAbort(&m_Cpu);
+}
+#endif
+
 void SnesSystem::ExecuteCPU(Int32 nCycles)
 {
     // increment cycle counter
@@ -1390,6 +1467,10 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
 
         // run CPU!
         SNCPUExecute(&m_Cpu);
+#if SNES_HVIRQ_RESCHEDULE
+        if (m_bLineIRQActive && m_bLineIRQReschedule)
+            break;
+#endif
     }
 }
 
@@ -1397,6 +1478,110 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
 
 void SnesSystem::ExecuteWithIRQ(Int32 nCycles, Int32 &nIRQCycles)
 {
+#if SNES_HVIRQ_RESCHEDULE
+	if (m_bLineIRQActive)
+	{
+		/* Dynamic timer path.  Normally this still executes one large batch up
+		 * to the pending IRQ.  Extra scheduler work happens only when a game
+		 * actually rewrites $4200/$4207-$420A during the line.
+		 *
+		 * A timer write calls SNCPUAbort(), leaving the unexecuted part of the
+		 * current batch in m_Cpu.Cycles.  Undo that reservation from all CPU
+		 * counters before looping, so the replacement schedule does not double
+		 * count physical time. */
+		Int32 nRemaining = nCycles;
+
+		while (nRemaining > 0)
+		{
+			Int32 nNow = m_nLineIRQClock;
+
+			/* A newly-programmed position may already be behind the beam.  This
+			 * is the immediate-IRQ case used by mature SNES schedulers when timer
+			 * registers are changed mid-line. */
+			if (!m_bLineIRQFired && m_nLineIRQCycle >= 0 &&
+				m_nLineIRQCycle <= nNow)
+			{
+				/* Current Snes9x only permits an instant IRQ when IRQ mode is
+				 * toggled. A plain HTIME/VTIME rewrite to a position already
+				 * behind the beam is stale for this scanline. */
+				m_bLineIRQFired = TRUE;
+				m_nLineIRQCycle = -1;
+				if (m_bLineIRQInstant)
+				{
+					m_IO.m_Regs.timeup |= 0x80;
+					SNCPUSignalIRQ(&m_Cpu, 1);
+				}
+				continue;
+			}
+
+			Int32 nRun = nRemaining;
+			Bool bReachIRQ = FALSE;
+
+			if (!m_bLineIRQFired && m_nLineIRQCycle >= 0)
+			{
+				Int32 nToIRQ = m_nLineIRQCycle - nNow;
+				if (nToIRQ > 0 && nToIRQ <= nRun)
+				{
+					nRun = nToIRQ;
+					bReachIRQ = TRUE;
+				}
+			}
+
+			m_bLineIRQReschedule = FALSE;
+			ExecuteCPU(nRun);
+
+			if (m_bLineIRQReschedule)
+			{
+				/* SNCPUAbort restored the part of this just-added execution budget
+				 * that has not run yet.  Remove those clocks from Cycles AND every
+				 * scheduled counter.  Counter-Cycles (the observed beam position)
+				 * therefore stays unchanged. */
+				Int32 nUnspent = m_Cpu.Cycles;
+				if (nUnspent < 0)
+					nUnspent = 0;
+				if (nUnspent > nRun)
+				{
+					/* This should be impossible at an I/O trap; fail conservative by
+					 * limiting the rollback to clocks reserved by this batch. */
+					nUnspent = nRun;
+				}
+
+				if (nUnspent > 0)
+				{
+					m_Cpu.Cycles -= nUnspent;
+					for (Int32 i = 0; i < SNCPU_COUNTER_NUM; ++i)
+						m_Cpu.Counter[i] -= nUnspent;
+				}
+
+				Int32 nSpent = nRun - nUnspent;
+				if (nSpent < 0)
+					nSpent = 0;
+				m_nLineIRQClock += nSpent;
+				nRemaining -= nSpent;
+				m_bLineIRQReschedule = FALSE;
+				continue;
+			}
+
+			m_nLineIRQClock += nRun;
+			nRemaining -= nRun;
+
+			if (bReachIRQ && !m_bLineIRQFired && m_nLineIRQCycle >= 0)
+			{
+				/* The old scheduler stopped here too; IRQ entry itself still waits
+				 * for the 65816 instruction boundary through SNCPUSignalIRQ(). */
+				m_bLineIRQFired = TRUE;
+				m_nLineIRQCycle = -1;
+				m_IO.m_Regs.timeup |= 0x80;
+				SNCPUSignalIRQ(&m_Cpu, 1);
+			}
+		}
+
+		nIRQCycles -= nCycles;
+		return;
+	}
+#endif
+
+	/* Exact legacy scheduler, compiled unchanged for A/B fallback. */
     if (nIRQCycles >= 0 && nIRQCycles < nCycles)
     {
         // execute up to h-irq
@@ -1459,6 +1644,15 @@ void SnesSystem::ExecuteLine()
 	{
 		nHIRQCycles = SNES_HIRQ_CYCLES(m_IO.m_Regs.htime.w);
 	}
+
+#if SNES_HVIRQ_RESCHEDULE
+	m_bLineIRQActive = TRUE;
+	m_bLineIRQReschedule = FALSE;
+	m_bLineIRQFired = FALSE;
+	m_bLineIRQInstant = TRUE;
+	m_nLineIRQCycle = nHIRQCycles;
+	m_nLineIRQClock = 0;
+#endif
 
 #if SNDBG_LOG
 	if (nHIRQCycles >= 0)
@@ -1568,6 +1762,14 @@ void SnesSystem::ExecuteLine()
 	}
 	if (m_bSuperFX && m_GSU.IrqPending())
 		SNCPUSignalIRQ(&m_Cpu, 1);
+
+#if SNES_HVIRQ_RESCHEDULE
+	m_bLineIRQActive = FALSE;
+	m_bLineIRQReschedule = FALSE;
+	m_bLineIRQInstant = FALSE;
+	m_nLineIRQCycle = -1;
+	m_nLineIRQClock = SNES_CYCLESPERLINE;
+#endif
 
 	PROF_LEAVE("ExecLine");
 }

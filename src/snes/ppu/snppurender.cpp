@@ -67,6 +67,10 @@ Uint8 g_SnesSoftwareLayerMask = (Uint8)(
     SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
     SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
 Uint8 g_SnesSoftwareHackFlags = 0;
+
+/* AURORA_SONIC_BLAST_MAN_COLOR_V7
+ * Set by the ROM loader only for exact Sonic Blast Man CRCs. */
+extern Bool g_SnesCompatSonicBlastManColorMath;
 static Uint8 g_SoftwareFramePhase = 0;
 
 void SNPPURenderSetSoftwareLayerMask(Uint8 uMask)
@@ -229,8 +233,14 @@ void SnesPPURender::RenderLine32(Int32 iLine, Bool bPlanar)
 	const Uint8 uEffectiveCGWSEL =
 		(uHackFlags & SNPPU_HACK_WINDOWS_OFF)
 		? (Uint8)(pRegs->cgwsel & 0x03) : pRegs->cgwsel;
-	const Uint8 uEffectiveCGADSUB =
+	Uint8 uEffectiveCGADSUB =
 		(uHackFlags & SNPPU_HACK_COLOR_MATH_OFF) ? 0 : pRegs->cgadsub;
+#if SNES_SONIC_COLOR_WORKAROUND
+	/* Sonic Blast Man workaround: preserve windows/layers, suppress only
+	 * CGADSUB color math. This is deliberately narrower than the menu hack. */
+	if (g_SnesCompatSonicBlastManColorMath)
+		uEffectiveCGADSUB = 0;
+#endif
 
 	pRenderInfo = m_pRenderInfo;
     pBlendInfo = &pRenderInfo->BlendInfo;

@@ -94,6 +94,21 @@ SNES_BG_CACHE ?= 0
 # Cache H-flip 4bpp para reduzir trabalho repetido em sprites
 SNES_CHR_HFLIP_CACHE ?= 0
 
+# AURORA_HVIRQ_RESCHEDULE_V4
+# Re-arm H/V timer events when $4200/$4207-$420A change mid-scanline.
+# Set to 0 for an exact legacy scheduler A/B build.
+SNES_HVIRQ_RESCHEDULE ?= 1
+
+# AURORA_ROM_COMPAT_DB_V6
+# CRC-gated in-memory ROM workarounds. No file on disk is modified.
+# REGIONAL=0 keeps only payloads documented directly for the source region.
+SNES_ROM_COMPAT_PATCHES ?= 1
+SNES_ROM_COMPAT_REGIONAL ?= 1
+
+# AURORA_SONIC_COLOR_V7
+# CRC-gated Sonic Blast Man color-math workaround; set 0 for A/B testing.
+SNES_SONIC_COLOR_WORKAROUND ?= 1
+
 # Conservative flags to bridge the GCC 3.2 (2003) -> GCC 15.1 (2025)
 # gap in default optimization behavior. The original iaddis source was
 # written assuming the older compiler's much more conservative defaults,
@@ -128,14 +143,22 @@ CFLAGS := -G0 -O2 -pipe -fomit-frame-pointer -Wall $(CONSERVATIVE_FLAGS) \
 	-DSNDBG_LOG=$(SNES_DIAG_ENABLED) -DSNDBG_DEEP=$(SNES_DIAG_DEEP) \
 	-DSNPPU_OBJ_CACHE=$(SNES_OBJ_CACHE) \
 	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE) \
-	-DSNPPU_CHR_CACHE_HFLIP=$(SNES_CHR_HFLIP_CACHE)
+	-DSNPPU_CHR_CACHE_HFLIP=$(SNES_CHR_HFLIP_CACHE) \
+	-DSNES_HVIRQ_RESCHEDULE=$(SNES_HVIRQ_RESCHEDULE) \
+	-DSNES_ROM_COMPAT_PATCHES=$(SNES_ROM_COMPAT_PATCHES) \
+	-DSNES_ROM_COMPAT_REGIONAL=$(SNES_ROM_COMPAT_REGIONAL) \
+	-DSNES_SONIC_COLOR_WORKAROUND=$(SNES_SONIC_COLOR_WORKAROUND)
 
 CXXFLAGS := -G0 -O2 -pipe -fomit-frame-pointer -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fno-exceptions -fno-rtti -fpermissive \
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
 	-DSNDBG_LOG=$(SNES_DIAG_ENABLED) -DSNDBG_DEEP=$(SNES_DIAG_DEEP) \
 	-DSNPPU_OBJ_CACHE=$(SNES_OBJ_CACHE) \
 	-DSNPPU_BG_CACHE=$(SNES_BG_CACHE) \
-	-DSNPPU_CHR_CACHE_HFLIP=$(SNES_CHR_HFLIP_CACHE)
+	-DSNPPU_CHR_CACHE_HFLIP=$(SNES_CHR_HFLIP_CACHE) \
+	-DSNES_HVIRQ_RESCHEDULE=$(SNES_HVIRQ_RESCHEDULE) \
+	-DSNES_ROM_COMPAT_PATCHES=$(SNES_ROM_COMPAT_PATCHES) \
+	-DSNES_ROM_COMPAT_REGIONAL=$(SNES_ROM_COMPAT_REGIONAL) \
+	-DSNES_SONIC_COLOR_WORKAROUND=$(SNES_SONIC_COLOR_WORKAROUND)
 
 # AURORA_MEGA_V4_SAFE_HOT_COMPILE
 # Keep the project's global -O2 + CONSERVATIVE_FLAGS contract.  Only ask GCC
