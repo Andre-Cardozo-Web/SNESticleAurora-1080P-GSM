@@ -14,6 +14,37 @@ SnesForceRegionE g_SnesForceRegion = SNES_FORCE_REGION_OFF;
  * No Sonic Blast Man ROM byte is modified. */
 Bool g_SnesCompatSonicBlastManColorMath = FALSE;
 
+/* AURORA_CRC_ZERO_INIT_DB_V8
+ * Set from the normalized/headerless ROM CRC before any in-memory ROM patch.
+ * SnesSystem consumes it only while attaching a new cartridge. */
+Bool g_SnesCompatZeroInit = FALSE;
+
+/* AURORA_HK97_SPC_BOOT_DB_V9
+ * Exact-CRC runtime flag for Hong Kong '97. This does not patch ROM bytes.
+ * Both known 512 KiB images are accepted:
+ *   11A6E64B = standard PD image
+ *   C6A95816 = CM variant
+ */
+Bool g_SnesCompatHongKong97SPCBoot = FALSE;
+
+#ifndef SNES_HK97_SPC_BOOT
+#define SNES_HK97_SPC_BOOT 1
+#endif
+
+#if SNES_HK97_SPC_BOOT
+static Uint32 _SNRomHK97CRC32(const Uint8 *pData, Uint32 nBytes)
+{
+    Uint32 crc = 0xFFFFFFFFu;
+    while (nBytes--)
+    {
+        crc ^= *pData++;
+        for (Uint32 bit = 0; bit < 8; ++bit)
+            crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320u : 0u);
+    }
+    return crc ^ 0xFFFFFFFFu;
+}
+#endif
+
 /* AURORA_CRC_COMPAT_DB_V6
  * Tiny CRC-gated ROM compatibility database.
  *
@@ -33,6 +64,94 @@ Bool g_SnesCompatSonicBlastManColorMath = FALSE;
 #endif
 #ifndef SNES_ROM_COMPAT_REGIONAL
 #define SNES_ROM_COMPAT_REGIONAL 1
+#endif
+#ifndef SNES_CRC_ZERO_INIT
+#define SNES_CRC_ZERO_INIT 1
+#endif
+
+#if SNES_CRC_ZERO_INIT
+/* AURORA_CRC_ZERO_INIT_DB_V8
+ * Exact CRC32 allow-list. CRC is computed after copier-header removal /
+ * deinterleaving and before V6 mutates any ROM bytes.
+ *
+ * Included:
+ *   Hong Kong '97 (standard + CM)
+ *   Lost Vikings 1 (U/E/F/G/S/J)
+ *   Lost Vikings 2 (U/E)
+ *   The Addams Family (U/E/J)
+ *   Sonic Blast Man (U/E/J)
+ *   Speedy Gonzales - Los Gatos Bandidos (USA + Rev 1)
+ *   Top Gear / Top Racer (U/E/J)
+ *   Super Mario World 2 - Yoshi's Island / Yossy Island (U/E/J revisions)
+ *
+ * Pilotwings is intentionally NOT included:
+ *   USA 266C44ED, Japan 77871727, Europe DEF45776.
+ */
+static Uint32 _SNRomZeroInitCRC32(const Uint8 *pData, Uint32 nBytes)
+{
+    Uint32 crc = 0xFFFFFFFFu;
+    while (nBytes--)
+    {
+        crc ^= *pData++;
+        for (Uint32 bit = 0; bit < 8; ++bit)
+            crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320u : 0u);
+    }
+    return crc ^ 0xFFFFFFFFu;
+}
+
+static Bool _SNRomNeedsZeroInit(Uint32 crc)
+{
+    switch (crc)
+    {
+        /* Hong Kong '97 */
+        case 0x11A6E64Bu:
+        case 0xC6A95816u:
+
+        /* The Lost Vikings 1 */
+        case 0x6838BE08u:
+        case 0x66989491u:
+        case 0x94093298u:
+        case 0x4EE705ABu:
+        case 0x6E8A1081u:
+        case 0x50FEF979u:
+
+        /* The Lost Vikings 2 / Norse by Norsewest */
+        case 0x3AA01DBDu:
+        case 0x3C49A285u:
+
+        /* The Addams Family */
+        case 0x2E8034ABu:
+        case 0x82497F19u:
+        case 0xCD80351Cu:
+
+        /* Sonic Blast Man */
+        case 0x8886396Eu:
+        case 0x5441F25Bu:
+        case 0xBE523800u:
+
+        /* Speedy Gonzales - Los Gatos Bandidos */
+        case 0xE2DBAD76u:
+        case 0xCB0653D0u:
+
+        /* Top Gear / Top Racer */
+        case 0xD34C49B7u:
+        case 0xB0150052u:
+        case 0xE5A57B12u:
+
+        /* Super Mario World 2 - Yoshi's Island */
+        case 0xD138F224u:
+        case 0xCF98DDAAu:
+        case 0x857980B2u:
+        case 0x07E01EF9u:
+        case 0x343E0DFBu:
+        case 0x0F66698Bu:
+        case 0xF1063FADu:
+            return TRUE;
+
+        default:
+            return FALSE;
+    }
+}
 #endif
 
 #if SNES_ROM_COMPAT_PATCHES
@@ -937,6 +1056,32 @@ Emu::Rom::LoadErrorE SnesRom::LoadRom(CDataIO *pFileIO, Uint8 *pBuffer, Uint32 n
 /* AURORA_SONIC_BLAST_MAN_COLOR_V7
  * Never leak the previous game's renderer workaround into the next load. */
 g_SnesCompatSonicBlastManColorMath = FALSE;
+
+/* AURORA_HK97_SPC_BOOT_DB_V9
+ * Detect the normalized/headerless ROM before any V6 in-memory patching.
+ * The flag is reset on every load so it can never leak to the next game. */
+g_SnesCompatHongKong97SPCBoot = FALSE;
+#if SNES_HK97_SPC_BOOT
+if (m_pRomData && m_uRomBytes == 0x80000u)
+{
+    const Uint32 uHK97CRC = _SNRomHK97CRC32(m_pRomData, m_uRomBytes);
+    g_SnesCompatHongKong97SPCBoot =
+        (uHK97CRC == 0x11A6E64Bu) ||
+        (uHK97CRC == 0xC6A95816u);
+}
+#endif
+
+/* AURORA_CRC_ZERO_INIT_DB_V8
+ * Reset on every load, then identify the untouched normalized ROM before
+ * V6 applies any in-memory compatibility bytes. */
+g_SnesCompatZeroInit = FALSE;
+#if SNES_CRC_ZERO_INIT
+if (m_pRomData && m_uRomBytes)
+{
+    const Uint32 uZeroInitCRC = _SNRomZeroInitCRC32(m_pRomData, m_uRomBytes);
+    g_SnesCompatZeroInit = _SNRomNeedsZeroInit(uZeroInitCRC);
+}
+#endif
 
 #if SNES_ROM_COMPAT_PATCHES
 	/* AURORA_CRC_COMPAT_DB_V6

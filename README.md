@@ -70,9 +70,10 @@ If the repository was cloned without `--recurse-submodules`, run
 
 **TO BE ADDED:**
 
+* Save SRAM to USB
+* Save and load state confirmation prompt
 * SA-1 Emulation
 * Improve Mode 7, FX1 and FX2 emulation
 * Turbo button toggle for SNES
 * Famicom Disk System support
-* Every NES mapper possible!
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!

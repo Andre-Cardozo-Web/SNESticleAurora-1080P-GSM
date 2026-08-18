@@ -11,6 +11,27 @@
 #include "sndebug.h"
 #include "sndbglog.h"
 
+#ifndef SNES_HK97_SPC_BOOT
+#define SNES_HK97_SPC_BOOT 1
+#endif
+
+/* AURORA_HK97_SPC_PREWARM_V9
+ * Set by snrom.cpp from the normalized ROM's exact CRC32. */
+extern Bool g_SnesCompatHongKong97SPCBoot;
+
+/* AURORA_HK97_SPC_PREWARM_V9_2
+ * mainloop_exec.cpp normally installs this only immediately before frame 1.
+ * V9.2 needs the real interpreter during Reset() for the CRC-gated prewarm. */
+extern "C" Int32 SNSPCExecute_C(SNSpcT *pCpu);
+
+#ifndef SNES_CRC_ZERO_INIT
+#define SNES_CRC_ZERO_INIT 1
+#endif
+
+/* AURORA_CRC_ZERO_INIT_CORE_V8
+ * Set by snrom.cpp from the normalized ROM's exact CRC32. */
+extern Bool g_SnesCompatZeroInit;
+
 
 // --- diagnostico de TIMING (ver sndbglog.h) ---
 #if SNDBG_LOG
@@ -1173,6 +1194,63 @@ void SnesSystem::Reset()
 	SNCPUReset(&m_Cpu, true);
 	SNSPCReset(&m_Spc, true);
 
+#if SNES_HK97_SPC_BOOT
+	/* AURORA_HK97_SPC_PREWARM_V9
+	 *
+	 * Hong Kong '97 forces $2100=$80 (black screen) and then performs
+	 * a 16-bit CMP $2140 until the SPC700 IPL publishes $BBAA.
+	 *
+	 * Normally Aurora advances the SPC lazily when the S-CPU touches APUIO.
+	 * For these exact Hong Kong '97 CRCs only, let the REAL embedded IPL run
+	 * first until it naturally writes AA to $F4 and BB to $F5.
+	 *
+	 * We do NOT synthesize AA/BB. If the SPC core cannot reach the handshake
+	 * within the bounded budget, restore the ordinary hard-reset state.
+	 *
+	 * On success, retain SPC registers/APURAM/ports but zero only scheduler
+	 * counters, so CPU and SPC both begin emulated time at t=0 while the IPL
+	 * remains parked in its normal wait-for-$CC loop.
+	 */
+	if (g_SnesCompatHongKong97SPCBoot)
+	{
+		const Int32 kHK97ChunkClocks = 4096;
+		const Int32 kHK97MaxClocks   = 131072;
+		Int32 nHK97Clocks = 0;
+
+		while (nHK97Clocks < kHK97MaxClocks &&
+		       !(m_SpcIO.m_Regs.apu_r[0] == 0xAA &&
+		         m_SpcIO.m_Regs.apu_r[1] == 0xBB))
+		{
+			/* V9.2: Reset() runs before _ExecuteSnes() installs
+			 * SNSPCExecute_C as the global SPC executor. Calling the wrapper here
+			 * therefore used the no-op default executor in V9/V9.1.
+			 *
+			 * Reproduce SNSPCExecute()'s accounting locally, but invoke the real
+			 * SPC700 interpreter directly. This keeps the experiment CRC-isolated
+			 * and does not change the global executor for other games. */
+			m_Spc.Cycles += kHK97ChunkClocks;
+			m_Spc.Counter[SNSPC_COUNTER_TOTAL] += kHK97ChunkClocks;
+			m_Spc.Counter[SNSPC_COUNTER_FRAME] += kHK97ChunkClocks;
+			SNSPCExecute_C(&m_Spc);
+			nHK97Clocks += kHK97ChunkClocks;
+		}
+
+		if (m_SpcIO.m_Regs.apu_r[0] == 0xAA &&
+		    m_SpcIO.m_Regs.apu_r[1] == 0xBB)
+		{
+			/* Preserve the naturally reached IPL state and handshake,
+			   but do not start the APU ahead of the S-CPU scheduler. */
+			SNSPCResetCounters(&m_Spc);
+		}
+		else
+		{
+			/* Fail closed: exact legacy hard-reset state, no forged ports. */
+			m_SpcIO.Reset();
+			SNSPCReset(&m_Spc, true);
+		}
+	}
+#endif
+
 	m_uFrame=0;
 	m_uLine =0;
 }
@@ -1250,23 +1328,38 @@ void SnesSystem::SetSnesRom(SnesRom *pRom)
 		// setup memory mapping for this rom
 		MapMem(m_pRom->m_eMapping, m_pRom->m_Flags);
 
-		/* AURORA_MEGA_V5_COLD_BOOT_WRAM
-		 * Real power-on WRAM is undefined/random-looking. Randomise only when a
-		 * new cartridge is attached, never on RESET or save-state restore. */
-		Uint32 uAuroraSeed =
-			((Uint32)(unsigned long)m_pRom ^ (Uint32)rand() ^
-			 ((Uint32)rand() << 16) ^ 0xA5C31F27u);
-		if (!uAuroraSeed) uAuroraSeed = 0x6D2B79F5u;
-		for (Uint32 i = 0; i < (Uint32)sizeof(m_Ram); ++i)
+		/* AURORA_CRC_ZERO_INIT_CORE_V8
+		 * A tiny exact-CRC compatibility group reproduces ReyFxck's original
+		 * cold boot (WRAM=00, SRAM backing=00). This happens before the normal
+		 * SRAM loader, so an existing .srm still replaces the initialized bytes.
+		 * Every other ROM keeps Aurora's randomized WRAM + 0xFF fresh SRAM. */
+#if SNES_CRC_ZERO_INIT
+		if (g_SnesCompatZeroInit)
 		{
-			uAuroraSeed ^= uAuroraSeed << 13;
-			uAuroraSeed ^= uAuroraSeed >> 17;
-			uAuroraSeed ^= uAuroraSeed << 5;
-			m_Ram[i] = (Uint8)uAuroraSeed;
+			memset(m_Ram, 0x00, sizeof(m_Ram));
+			memset(m_SRam, 0x00, sizeof(m_SRam));
 		}
-		/* Fresh nonvolatile backing starts erased; the SRAM loader may replace it. */
-		if (m_uSramSize)
-			memset(m_SRam, 0xFF, m_uSramSize);
+		else
+#endif
+		{
+			/* AURORA_MEGA_V5_COLD_BOOT_WRAM
+			 * Real power-on WRAM is undefined/random-looking. Randomise only when a
+			 * new cartridge is attached, never on RESET or save-state restore. */
+			Uint32 uAuroraSeed =
+				((Uint32)(unsigned long)m_pRom ^ (Uint32)rand() ^
+				 ((Uint32)rand() << 16) ^ 0xA5C31F27u);
+			if (!uAuroraSeed) uAuroraSeed = 0x6D2B79F5u;
+			for (Uint32 i = 0; i < (Uint32)sizeof(m_Ram); ++i)
+			{
+				uAuroraSeed ^= uAuroraSeed << 13;
+				uAuroraSeed ^= uAuroraSeed >> 17;
+				uAuroraSeed ^= uAuroraSeed << 5;
+				m_Ram[i] = (Uint8)uAuroraSeed;
+			}
+			/* Fresh nonvolatile backing starts erased; the SRAM loader may replace it. */
+			if (m_uSramSize)
+				memset(m_SRam, 0xFF, m_uSramSize);
+		}
 	} 
 	else
 	{

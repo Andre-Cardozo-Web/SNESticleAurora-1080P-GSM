@@ -109,6 +109,18 @@ SNES_ROM_COMPAT_REGIONAL ?= 1
 # CRC-gated Sonic Blast Man color-math workaround; set 0 for A/B testing.
 SNES_SONIC_COLOR_WORKAROUND ?= 1
 
+# AURORA_CRC_ZERO_INIT_V8
+# Exact-CRC cold-boot compatibility. Selected SNES titles reproduce the
+# ReyFxck/SNESticleRevive cold boot: WRAM=0x00 and SRAM backing=0x00.
+# Existing .srm files are still loaded later and overwrite this initial state.
+# Set to 0 for an A/B build using Aurora's random WRAM + 0xFF fresh SRAM.
+SNES_CRC_ZERO_INIT ?= 1
+
+# AURORA_HK97_SPC_BOOT_V9
+# Hong Kong '97 only: let the SPC700 IPL naturally reach its AA/BB boot
+# handshake before the S-CPU starts. Exact CRC32 gate, disabled with =0.
+SNES_HK97_SPC_BOOT ?= 1
+
 # Conservative flags to bridge the GCC 3.2 (2003) -> GCC 15.1 (2025)
 # gap in default optimization behavior. The original iaddis source was
 # written assuming the older compiler's much more conservative defaults,
@@ -147,7 +159,9 @@ CFLAGS := -G0 -O2 -pipe -fomit-frame-pointer -Wall $(CONSERVATIVE_FLAGS) \
 	-DSNES_HVIRQ_RESCHEDULE=$(SNES_HVIRQ_RESCHEDULE) \
 	-DSNES_ROM_COMPAT_PATCHES=$(SNES_ROM_COMPAT_PATCHES) \
 	-DSNES_ROM_COMPAT_REGIONAL=$(SNES_ROM_COMPAT_REGIONAL) \
-	-DSNES_SONIC_COLOR_WORKAROUND=$(SNES_SONIC_COLOR_WORKAROUND)
+	-DSNES_SONIC_COLOR_WORKAROUND=$(SNES_SONIC_COLOR_WORKAROUND) \
+	-DSNES_CRC_ZERO_INIT=$(SNES_CRC_ZERO_INIT) \
+	-DSNES_HK97_SPC_BOOT=$(SNES_HK97_SPC_BOOT)
 
 CXXFLAGS := -G0 -O2 -pipe -fomit-frame-pointer -Wall $(CONSERVATIVE_FLAGS) -Wno-narrowing -Wno-overflow -fno-exceptions -fno-rtti -fpermissive \
 	-D_EE -DPS2 -DLSB_FIRST -DALIGN_DWORD -DCODE_PLATFORM=3 \
@@ -158,7 +172,9 @@ CXXFLAGS := -G0 -O2 -pipe -fomit-frame-pointer -Wall $(CONSERVATIVE_FLAGS) -Wno-
 	-DSNES_HVIRQ_RESCHEDULE=$(SNES_HVIRQ_RESCHEDULE) \
 	-DSNES_ROM_COMPAT_PATCHES=$(SNES_ROM_COMPAT_PATCHES) \
 	-DSNES_ROM_COMPAT_REGIONAL=$(SNES_ROM_COMPAT_REGIONAL) \
-	-DSNES_SONIC_COLOR_WORKAROUND=$(SNES_SONIC_COLOR_WORKAROUND)
+	-DSNES_SONIC_COLOR_WORKAROUND=$(SNES_SONIC_COLOR_WORKAROUND) \
+	-DSNES_CRC_ZERO_INIT=$(SNES_CRC_ZERO_INIT) \
+	-DSNES_HK97_SPC_BOOT=$(SNES_HK97_SPC_BOOT)
 
 # AURORA_MEGA_V4_SAFE_HOT_COMPILE
 # Keep the project's global -O2 + CONSERVATIVE_FLAGS contract.  Only ask GCC
