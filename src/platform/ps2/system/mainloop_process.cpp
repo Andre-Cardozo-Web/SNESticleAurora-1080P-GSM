@@ -45,6 +45,11 @@ extern "C" {
 
 static Uint32 _iframetex=0;
 
+/* AURORA_GAMEPLAY_HEADROOM_TRANSITION
+ * Host-audio warmup state only; no emulated/save-state state. */
+static Bool _AudioGameplayWasActive = FALSE;
+static Emu::System *_AudioGameplaySystem = NULL;
+
 
 Bool MainLoopProcess()
 {
@@ -81,6 +86,21 @@ Bool MainLoopProcess()
 
 //	_MainLoopInputProcess(InputGetPadData(0));
 //	_MainLoopInputProcess(InputGetPadData(1));
+
+    {
+        const Bool bGameplayNow =
+            (!_bMenu && _pSystem && !_MainLoop_BlackScreen) ? TRUE : FALSE;
+
+        if (bGameplayNow &&
+            (!_AudioGameplayWasActive || _AudioGameplaySystem != _pSystem))
+        {
+            /* Fill host-audio safety headroom BEFORE the first cold frame. */
+            Aud_PrepareGameplayHeadroom();
+            _AudioGameplaySystem = _pSystem;
+        }
+
+        _AudioGameplayWasActive = bGameplayNow;
+    }
 
     if (!_bMenu && _pSystem && !_MainLoop_BlackScreen)
     {

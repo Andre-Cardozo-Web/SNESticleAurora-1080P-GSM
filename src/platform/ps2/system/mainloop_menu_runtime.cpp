@@ -101,7 +101,12 @@ void _MenuEnable(Bool bEnable)
 			_bMenu = TRUE;
 			BgmMenuEnter();
 			if (_MainLoop_bAudioReady)
+			{
+				/* AURORA_AUDIO_ASYNC_FIFO_MENU_CUT
+				 * Staged gameplay PCM must not leak into menu BGM/resume. */
+				Aud_AsyncDiscardPending();
 				Aud_Setvol(0);
+			}
 
 			/* Preserve a write performed in the <30-frame checksum window. */
 			_MainLoopForceCheckSRAM();

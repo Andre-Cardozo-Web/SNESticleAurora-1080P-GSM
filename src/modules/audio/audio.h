@@ -32,6 +32,15 @@ void Aud_Wait();
 
 int  Aud_IsInitialized();
 
+/* AURORA_GAMEPLAY_HEADROOM_V1
+ * Called once when host UI transitions into gameplay. It may append silence
+ * only to restore a small safety cushion before cold renderer work begins. */
+void Aud_PrepareGameplayHeadroom();
+
+/* AURORA_AUDIO_ASYNC_FIFO_V2
+ * Drop only EE-staged gameplay PCM when intentionally leaving gameplay. */
+void Aud_AsyncDiscardPending();
+
 /* AURORA_COMPAT_AUDIO_API */
 void Aud_SetCompatSmallChunks(int enabled);
 int  Aud_GetCompatSmallChunks(void);
