@@ -49,7 +49,7 @@ If the repository was cloned without `--recurse-submodules`, run
 * In-game soft reset (L2+SELECT)
 * Famiclone audio option (swap duty cycles)
 * Option to reload the emulator's .elf (very useful for upgrading and testing)
-* Emulation hacks menu options (disable layers, change rendering options) *(still experimental)*
+* Emulation hacks and compatibility menu options (disable layers, change rendering options)
 
 *(**NOTE**: to find the options above, go to the Video Settings and change the pages with the circle button.)*
 
@@ -63,7 +63,8 @@ If the repository was cloned without `--recurse-submodules`, run
 * Top Gear (SNES) performance
 * Speedy Gonzales in Los Gatos Banditos (SNES) performance
 * The Lost Vikings 1 and 2 (SNES) black screen
-* Addams Family (SNES) graphical glitches
+* Addams Family (SNES) graphical glitches and timing issues
+* Sonic Blast Man (SNES) wrong colors
 * Any other games with performance or graphical issues
 
 **TO BE ADDED:**
