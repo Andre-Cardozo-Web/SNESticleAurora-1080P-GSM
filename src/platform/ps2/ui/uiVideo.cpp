@@ -19,6 +19,7 @@ extern "C" {
 #include "uiCover.h"
 #include "mainloop_bgm.h"
 #include "mainloop_state.h"
+#include "input.h"
 #include "mainloop_smb.h"
 #include "audmixbuffer.h"
 #include "embedded_irx.h"   /* HddSupportIsEnabled / HddSupportSetEnabled */
@@ -36,7 +37,7 @@ void MainResetEmulator(void);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 24
+#define VIDEOCFG_VERSION 25
 /* AURORA_CONFIG_V24_STORAGE_OBJ_LIMIT_MODE
  * v24 appends OBJ limiter mode. v23 imports its limiter/storage fields and
  * defaults the new mode to Per Scanline; v21/v22 retain exact import. */
@@ -72,6 +73,7 @@ typedef struct
 	Int32  objlimit;
 	Int32  sramdevice;
 	Int32  objlimitmode;
+	Int32  snesmousemode;
 } VideoCfgT;
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -220,6 +222,38 @@ typedef struct
 	Int32  compatflags;
 } VideoCfgV22T;
 
+
+/* Exact byte layout written by Aurora video.cfg v24. */
+typedef struct
+{
+	Uint32 magic;
+	Int32  version;
+	Int32  mode;
+	Int32  offx;
+	Int32  offy;
+	Int32  overscan;
+	Int32  widescreen;
+	Int32  covers;
+	Int32  bgmvol;
+	Int32  bgmrate;
+	Int32  gamevol;
+	Int32  hddenable;
+	Int32  mmceenable;
+	Int32  massenable;
+	Int32  smbenable;
+	Int32  mx4sioenable;
+	Int32  colorprofile;
+	Int32  famicloneaudio;
+	Int32  fakesramsize;
+	Int32  forceregion;
+	Int32  sneshacklayersoff;
+	Int32  sneshackflags;
+	Int32  compatflags;
+	Int32  objlimit;
+	Int32  sramdevice;
+	Int32  objlimitmode;
+} VideoCfgV24T;
+
 /* Exact byte layout written by Aurora V1/V1.1 (video.cfg v23). */
 typedef struct
 {
@@ -321,6 +355,7 @@ void VideoSettingsSave(void)
 	cfg.objlimit = SNPPURenderGetObjLimitLevel();
 	cfg.sramdevice = MainLoopSramGetDevice();
 	cfg.objlimitmode = SNPPURenderGetObjLimitMode();
+	cfg.snesmousemode = (Int32)InputSnesMouseGetMode();
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -343,6 +378,7 @@ void VideoSettingsLoad(void)
 	SNPPURenderSetObjLimitLevel(SNPPU_OBJ_LIMIT_OFF);
 	SNPPURenderSetObjLimitMode(SNPPU_OBJ_LIMIT_MODE_SCANLINE);
 	MainLoopSramSetDevice(MAINLOOP_SRAMDEVICE_AUTO);
+	InputSnesMouseSetMode(INPUT_SNES_MOUSE_AUTO);
 	_VideoApplyCompatFlags(0);
 	_VideoCfgPath(path);
 
@@ -353,6 +389,18 @@ void VideoSettingsLoad(void)
 				if (header.version == VIDEOCFG_VERSION)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+		}
+		else if (header.version == 24)
+		{
+			VideoCfgV24T oldcfg24;
+			memset(&oldcfg24, 0, sizeof(oldcfg24));
+			if (MemCardReadFile(path, (Uint8 *)&oldcfg24, sizeof(oldcfg24)))
+			{
+				memcpy(&cfg, &oldcfg24, sizeof(oldcfg24));
+				cfg.version = VIDEOCFG_VERSION;
+				cfg.snesmousemode = INPUT_SNES_MOUSE_AUTO;
+				loaded = TRUE;
+			}
 		}
 		else if (header.version == 23)
 		{
@@ -526,8 +574,15 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 			MainLoopSramSetDevice((MainLoopSramDeviceE)cfg.sramdevice);
 		if ((cfg.compatflags & ~VIDEO_COMPAT_ALL) == 0)
 			_VideoApplyCompatFlags(cfg.compatflags);
+		if (cfg.snesmousemode >= INPUT_SNES_MOUSE_AUTO &&
+		    cfg.snesmousemode < INPUT_SNES_MOUSE_MODE_NUM)
+			InputSnesMouseSetMode(
+				(InputSnesMouseModeE)cfg.snesmousemode);
 	}
 }
+
+/* AURORA_MOUSE_VIDEO_COMPAT_V1 */
+/* SNES Mouse lives on Video Config 4/4 and uses Left/Right. */
 
 /* ------------------------------------------------------------------ */
 /* Screen                                                              */
@@ -852,6 +907,10 @@ _VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;
 			_VideoCompatAudioRpcStatus()); vy += 12;
 		_VideoRow(vy, 34, m_iSelect, "Audio Queue",
 			_VideoCompatAudioQueueStatus()); vy += 12;
+
+		_VideoHeader(vy, "Controller / Mouse"); vy += 14;
+		_VideoRow(vy, 35, m_iSelect, "SNES Mouse",
+			InputSnesMouseGetModeName()); vy += 12;
 	}
 
 	/* controls / hints (clear of the vy=215 footer) */
@@ -890,7 +949,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		if (m_iSelect < 10)      { lo = 0;  hi = 9;  }
 		else if (m_iSelect < 19) { lo = 10; hi = 18; }
 		else if (m_iSelect < 30) { lo = 19; hi = 29; }
-		else                     { lo = 30; hi = 34; }
+		else                     { lo = 30; hi = 35; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1176,6 +1235,9 @@ case 17: /* Famiclone Audio */
 		case 34:
 			_VideoApplyCompatFlags(
 				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_DEEP_Q);
+			break;
+		case 35:
+			InputSnesMouseCycleModeDir(dir);
 			break;
 		}
 

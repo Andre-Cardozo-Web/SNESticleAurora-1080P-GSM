@@ -465,23 +465,123 @@ Bool InputIsMouseConnected(void)
     return _Input_bMouseConnected;
 }
 
+/* AURORA_CONTROLLER_SNES_MOUSE_V1
+ * Convert P1 into relative SNES Mouse motion without adding persistent
+ * emulation state. Analog motion is proportional and capped at four host
+ * counts/frame; the d-pad is a precise two-count override. The SNES mouse
+ * core still applies its authentic speed state afterwards. */
+#define INPUT_PAD_MOUSE_DEADZONE    18
+#define INPUT_PAD_MOUSE_DIVISOR     28
+#define INPUT_PAD_MOUSE_DPAD_STEP    2
+
+static Int32 _InputPadMouseAxisDelta(Int32 uAxis)
+{
+    Int32 d = uAxis - 0x80;
+    Int32 mag;
+
+    if (d > -INPUT_PAD_MOUSE_DEADZONE &&
+        d <  INPUT_PAD_MOUSE_DEADZONE)
+        return 0;
+
+    if (d < 0)
+    {
+        mag = -d - INPUT_PAD_MOUSE_DEADZONE;
+        mag = (mag + INPUT_PAD_MOUSE_DIVISOR - 1) /
+              INPUT_PAD_MOUSE_DIVISOR;
+        if (mag > 4) mag = 4;
+        return -mag;
+    }
+
+    mag = d - INPUT_PAD_MOUSE_DEADZONE;
+    mag = (mag + INPUT_PAD_MOUSE_DIVISOR - 1) /
+          INPUT_PAD_MOUSE_DIVISOR;
+    if (mag > 4) mag = 4;
+    return mag;
+}
+
+static void _InputGetControllerMouseData(Int32 *pDeltaX,
+                                         Int32 *pDeltaY,
+                                         Uint32 *pButtons)
+{
+    Uint32 packed = _Input_PadAnalog[0];
+    Uint32 pad = InputGetPadData(0);
+    Int32 dx = _InputPadMouseAxisDelta(
+        (Int32)((packed >> 16) & 0xff));
+    Int32 dy = _InputPadMouseAxisDelta(
+        (Int32)((packed >> 24) & 0xff));
+    Uint32 buttons = 0;
+
+    if (pad & PAD_LEFT)
+        dx = -INPUT_PAD_MOUSE_DPAD_STEP;
+    else if (pad & PAD_RIGHT)
+        dx = INPUT_PAD_MOUSE_DPAD_STEP;
+
+    if (pad & PAD_UP)
+        dy = -INPUT_PAD_MOUSE_DPAD_STEP;
+    else if (pad & PAD_DOWN)
+        dy = INPUT_PAD_MOUSE_DPAD_STEP;
+
+    if (pad & PAD_CROSS)
+        buttons |= 0x01U;
+    if (pad & PAD_CIRCLE)
+        buttons |= 0x02U;
+
+    if (pDeltaX) *pDeltaX = dx;
+    if (pDeltaY) *pDeltaY = dy;
+    if (pButtons) *pButtons = buttons;
+}
+
 void InputGetMouseData(Int32 *pDeltaX, Int32 *pDeltaY, Uint32 *pButtons)
 {
+    if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_CONTROLLER)
+    {
+        _InputGetControllerMouseData(pDeltaX, pDeltaY, pButtons);
+        return;
+    }
+
     if (pDeltaX) *pDeltaX = _Input_MouseDeltaX;
     if (pDeltaY) *pDeltaY = _Input_MouseDeltaY;
     if (pButtons) *pButtons = _Input_MouseButtons;
 }
 
+void InputSnesMouseSetMode(InputSnesMouseModeE eMode)
+{
+    if (eMode < INPUT_SNES_MOUSE_AUTO ||
+        eMode >= INPUT_SNES_MOUSE_MODE_NUM)
+        eMode = INPUT_SNES_MOUSE_AUTO;
+    _Input_SnesMouseMode = eMode;
+}
+
+InputSnesMouseModeE InputSnesMouseGetMode(void)
+{
+    return _Input_SnesMouseMode;
+}
+
+void InputSnesMouseCycleModeDir(Int32 dir)
+{
+    Int32 mode;
+
+    if (dir == 0)
+        return;
+
+    mode = (Int32)_Input_SnesMouseMode + (dir < 0 ? -1 : 1);
+    if (mode < INPUT_SNES_MOUSE_AUTO)
+        mode = INPUT_SNES_MOUSE_MODE_NUM - 1;
+    if (mode >= INPUT_SNES_MOUSE_MODE_NUM)
+        mode = INPUT_SNES_MOUSE_AUTO;
+
+    _Input_SnesMouseMode = (InputSnesMouseModeE)mode;
+}
+
 void InputSnesMouseCycleMode(void)
 {
-    _Input_SnesMouseMode =
-        (InputSnesMouseModeE)((Int32)_Input_SnesMouseMode + 1);
-    if (_Input_SnesMouseMode >= INPUT_SNES_MOUSE_MODE_NUM)
-        _Input_SnesMouseMode = INPUT_SNES_MOUSE_AUTO;
+    InputSnesMouseCycleModeDir(1);
 }
 
 Bool InputSnesMouseShouldUse(void)
 {
+    if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_CONTROLLER)
+        return InputIsPadConnected(0);
     if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_PAD_ONLY)
         return FALSE;
     if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_FORCE)
@@ -491,6 +591,9 @@ Bool InputSnesMouseShouldUse(void)
 
 const char *InputSnesMouseGetModeName(void)
 {
+    if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_CONTROLLER)
+        return InputIsPadConnected(0)
+            ? "Controller" : "Controller (no P1)";
     if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_PAD_ONLY)
         return "Pad only";
     if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_FORCE)

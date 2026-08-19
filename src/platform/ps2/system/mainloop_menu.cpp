@@ -153,7 +153,6 @@ static char _MainLoop_StateManagerSramEntry[48];
 static char _MainLoop_StateManagerStorageEntry[48];
 static char _MainLoop_StateManagerSlotEntry[32];
 static char _MainLoop_StateManagerResetEntry[] = "Ask Save Location Again";
-static char _MainLoop_StateManagerMouseEntry[48];
 static char _MainLoop_StateManagerStatus[64];
 
 char *_MainLoopStateMenuEntries[] =
@@ -164,7 +163,6 @@ char *_MainLoopStateMenuEntries[] =
         _MainLoop_StateManagerStorageEntry,
         _MainLoop_StateManagerSlotEntry,
         _MainLoop_StateManagerResetEntry,
-        _MainLoop_StateManagerMouseEntry,
         NULL
 };
 
@@ -245,13 +243,6 @@ void _MainLoopStateMenuRefresh()
         snprintf(_MainLoop_StateManagerSramEntry,
                  sizeof(_MainLoop_StateManagerSramEntry),
                  "SRAM Storage: %s", MainLoopSramGetDeviceName());
-        snprintf(
-                _MainLoop_StateManagerMouseEntry,
-                sizeof(_MainLoop_StateManagerMouseEntry),
-                "SNES Mouse: %s",
-                InputSnesMouseGetModeName()
-        );
-
         pQuickTarget = MainLoopStateHasDeviceChoice()
                 ? MainLoopStateGetDeviceName()
                 : "Not chosen";
@@ -414,11 +405,6 @@ int _MainLoopStateMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
                                 45,
                                 "Next L2+X will ask the save location."
                         );
-                        break;
-
-                case 6:
-                        InputSnesMouseCycleMode();
-                        _MainLoopStateMenuRefresh();
                         break;
         }
 

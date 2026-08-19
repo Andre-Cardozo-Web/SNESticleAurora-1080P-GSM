@@ -31,8 +31,9 @@ void   InputPoll(void);
 Uint32 InputGetPadData(Uint32 uPad);
 Bool   InputIsPadConnected(Uint32 uPad);
 
-/* USB mouse snapshot. Deltas are raw HID relative counts for the current
-   host frame; button bits are 1=left, 2=right. */
+/* SNES mouse snapshot. USB mode returns raw HID relative counts;
+   Controller mode synthesizes relative counts from P1. Button bits are
+   1=left, 2=right. */
 Bool   InputIsMouseConnected(void);
 void   InputGetMouseData(Int32 *pDeltaX, Int32 *pDeltaY, Uint32 *pButtons);
 void   InputMousePollPostFrame(Bool bCaptureMotion);
@@ -41,12 +42,16 @@ void   InputMousePollPostFrame(Bool bCaptureMotion);
 typedef enum InputSnesMouseModeE
 {
     INPUT_SNES_MOUSE_AUTO = 0,
+    INPUT_SNES_MOUSE_CONTROLLER,
     INPUT_SNES_MOUSE_PAD_ONLY,
     INPUT_SNES_MOUSE_FORCE,
     INPUT_SNES_MOUSE_MODE_NUM
 } InputSnesMouseModeE;
 
 void        InputSnesMouseCycleMode(void);
+void        InputSnesMouseCycleModeDir(Int32 dir);
+InputSnesMouseModeE InputSnesMouseGetMode(void);
+void        InputSnesMouseSetMode(InputSnesMouseModeE eMode);
 const char *InputSnesMouseGetModeName(void);
 Bool        InputSnesMouseShouldUse(void);
 
