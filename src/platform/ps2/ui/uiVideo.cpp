@@ -40,7 +40,9 @@ void MainResetEmulator(void);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 28
+#define VIDEOCFG_VERSION 29
+/* v29 changes Menu Volume semantics to match Game Volume:
+ * internal 0..400, UI displays /2 (0..200). v28 is byte-compatible. */
 /* v27 changes only Game Volume semantics: gamevol is now internal 0..400
  * and the UI displays gamevol/2. v26 remains byte-compatible and migrates. */
 /* AURORA_AUG19_BUNDLE_V3: v26 appends Turbo Speed + CPU Overclock. */
@@ -61,7 +63,7 @@ typedef struct
 	Int32  overscan;
 	Int32  widescreen;
 	Int32  covers;
-	Int32  bgmvol;     /* volume da trilha de menu: 0..100 */
+	Int32  bgmvol;     /* ganho interno da trilha: 0..400; UI /2 */
 	Int32  bgmrate;    /* frequencia de sintese da trilha (Hz)     */
 	Int32  gamevol;    /* ganho interno do jogo (SNES/NES): 0..400; UI /2 */
 	Int32  hddenable;  /* suporte ao HD interno (hdd0:): 0=off, 1=on  */
@@ -411,9 +413,15 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
+		else if (header.version == 28)
+		{
+			/* v28 has the same byte layout; only Menu Volume semantics changed. */
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+			if (loaded) cfg.version = VIDEOCFG_VERSION;
+		}
 		else if (header.version == 27)
 		{
-			/* v27 is the v28 prefix without bgmenable. */
+			/* v27 is the v28/v29 prefix without bgmenable. */
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
@@ -547,15 +555,22 @@ void VideoSettingsLoad(void)
 		}
 	}
 
-	/* v26 and older stored Game Volume as the old 0..100 UI value.
-	 * Preserve the user's audible setting while switching v27 to the real
-	 * internal gain percentage (old 100 -> new 200 -> UI still shows 100). */	/* v27 and older had no independent Menu Music switch; historically it was on. */
+	/* v27 and older had no independent Menu Music switch; historically it was on. */
 	if (loaded && header.version <= 27)
 		cfg.bgmenable = 1;
 
-
-	if (loaded && header.version <= 26 && cfg.gamevol >= 0 && cfg.gamevol <= 100)
+	/* v26 and older stored Game Volume as the old 0..100 UI value.
+	 * Preserve the audible setting (old 100 -> internal 200 -> UI 100). */
+	if (loaded && header.version <= 26 &&
+	    cfg.gamevol >= 0 && cfg.gamevol <= 100)
 		cfg.gamevol *= 2;
+
+	/* v28 and older stored Menu Volume directly as 0..100.
+	 * v29 uses the same convention as Game Volume:
+	 * old 100 -> internal 200 -> UI still shows 100. */
+	if (loaded && header.version <= 28 &&
+	    cfg.bgmvol >= 0 && cfg.bgmvol <= 100)
+		cfg.bgmvol *= 2;
 
 	/* New policy applies exactly once to every pre-v22 config. Once the
 	 * user saves v22, a manual Full selection remains persistent. */
@@ -582,7 +597,7 @@ void VideoSettingsLoad(void)
 		if (cfg.overscan >= 0 && cfg.overscan <= 100) g_GskOverscan = cfg.overscan;
 		if (cfg.widescreen == 0 || cfg.widescreen == 1) g_GskWidescreen = cfg.widescreen;
 		if (cfg.covers == 0 || cfg.covers == 1) CoverSetEnabled(cfg.covers ? TRUE : FALSE);
-		if (cfg.bgmvol >= 0 && cfg.bgmvol <= 100) BgmSetVolume(cfg.bgmvol);
+		if (cfg.bgmvol >= 0 && cfg.bgmvol <= 400) BgmSetVolume(cfg.bgmvol);
 		if (cfg.bgmenable == 0 || cfg.bgmenable == 1) BgmSetEnabled(cfg.bgmenable);
 		if (cfg.bgmrate >= 8000 && cfg.bgmrate <= 48000) BgmSetRate(cfg.bgmrate);
 		if (cfg.gamevol >= 0 && cfg.gamevol <= 400) AudMixGameSetVolume(cfg.gamevol);
@@ -874,10 +889,10 @@ void CVideoScreen::Draw()
 	FontSelect(0);
 
 	_VideoHeader(vy,
-		iPage == 0 ? "Video Config (1/4)" :
-		iPage == 1 ? "Video Config (2/4)" :
-		iPage == 2 ? "Video Config (3/4)" :
-		             "Video Config (4/4)");
+		iPage == 0 ? "Settings Menu (1/4)" :
+		iPage == 1 ? "Settings Menu (2/4)" :
+		iPage == 2 ? "Settings Menu (3/4)" :
+		             "Settings Menu (4/4)");
 	vy += 18;
 
 	if (iPage == 0) {
@@ -906,7 +921,7 @@ void CVideoScreen::Draw()
 	snprintf(buf, sizeof(buf), "%d", AudMixGameGetVolume() / 2);
 	_VideoRow(vy, 7, m_iSelect, "Game Volume", buf); vy += 12;
 
-	snprintf(buf, sizeof(buf), "%d", BgmGetVolume());
+	snprintf(buf, sizeof(buf), "%d", BgmGetVolume() / 2);
 	_VideoRow(vy, 8, m_iSelect, "Menu Volume", buf); vy += 12;
 	{
 		const char *musicStatus;
@@ -1102,11 +1117,11 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 			}
 			break;
 
-		case 8: /* menu music volume 0..100 (0 = off), step 1, live */
+		case 8: /* UI 0..200; internal gain 0..400, step 2 => UI step 1 */
 			{
-				int v = BgmGetVolume() + dir;
+				int v = BgmGetVolume() + dir * 2;
 				if (v < 0)   v = 0;
-				if (v > 100) v = 100;
+				if (v > 400) v = 400;
 				BgmSetVolume(v);
 			}
 			break;

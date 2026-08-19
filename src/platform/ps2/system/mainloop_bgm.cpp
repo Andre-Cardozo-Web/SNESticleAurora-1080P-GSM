@@ -151,14 +151,14 @@ enum BgmStateE {
 };
 
 static int  s_state    = BGM_UNTRIED;
-static int  s_volume   = 100;          /* 0 = off; 1..100 (Video Config)  */
+static int  s_volume   = 200;          /* internal PCM gain 0..400; UI /2 */
 static Bool s_enabled  = TRUE;         /* Menu Music on/off, independent of volume */
-static int  s_rate     = BGM_RATE;     /* taxa de sintese (Hz), Video Config */
+static int  s_rate     = BGM_RATE;     /* taxa de sintese (Hz), Settings Menu */
 static Bool s_volSet   = FALSE;        /* ja' firmamos o volume p/ tocar? */
 static int  s_drainWait = 0;           /* frames esperando dreno da cauda */
 static int  s_gapFrames = 0;           /* frames de silencio na troca de faixa */
 
-/* Frequencias de sintese oferecidas no Video Config (Hz).  Mais alta =
+/* Frequencias de sintese oferecidas no Settings Menu (Hz).  Mais alta =
    melhor qualidade e mais CPU (48000 pode derrubar o fps).  24000 e' o
    padrao seguro. A saida e' sempre reamostrada para 48 kHz. */
 static const int s_rateList[] = { 16000, 22050, 24000, 32000, 38000, 44100, 48000 };
@@ -965,7 +965,7 @@ void BgmSetVolume(int vol)
 {
     _BgmLock();
     if (vol < 0)   vol = 0;
-    if (vol > 100) vol = 100;
+    if (vol > 400) vol = 400;
 
     if (vol == 0)
     {
@@ -976,8 +976,8 @@ void BgmSetVolume(int vol)
     }
     else if (s_volSet && Aud_IsInitialized())
     {
-        /* ja' tocando: ajusta o volume ao vivo */
-        Aud_Setvol((unsigned int)((s_enabled ? vol : 0) * 0x3FFF / 100));
+        /* PCM carries Menu Volume; audsrv only supplies full-scale/mute. */
+        Aud_Setvol(s_enabled ? 0x3FFFu : 0u);
     }
 
     s_volume = vol;
@@ -1003,7 +1003,7 @@ void BgmSetEnabled(int enabled)
     if (!s_enabled)
         Aud_Setvol(0);
     else if (s_volume > 0)
-        Aud_Setvol((unsigned int)(s_volume * 0x3FFF / 100));
+        Aud_Setvol(0x3FFFu);
 
     _BgmUnlock();
 }
@@ -1018,7 +1018,7 @@ int BgmTrackCount(void)
 {
     int result;
     /* Draw/getter paths stay memory-only. The next normal BgmUpdate performs
-       lazy discovery; merely drawing Video Config must not open devices. */
+       lazy discovery; merely drawing Settings Menu must not open devices. */
     _BgmLock();
     result = s_indexCount < 0 ? 0 : s_indexCount;
     _BgmUnlock();
@@ -1155,7 +1155,8 @@ static void _BgmUpdateLocked(Bool allowFilesystem)
             return;
         }
         s_drainWait = 0;
-        Aud_Setvol((unsigned int)(s_volume * 0x3FFF / 100)); /* volume do menu */
+        /* Menu Volume is PCM gain; audsrv stays at its legal full scale. */
+        Aud_Setvol(0x3FFFu);
         s_volSet = TRUE;
     }
 
@@ -1259,10 +1260,29 @@ static void _BgmUpdateLocked(Bool allowFilesystem)
         s_sourceFrames = remain;
     }
 
-    /* garante volume audivel: o menu de pausa muta o audsrv (Aud_Setvol(0))
-       para matar o rabo de audio do jogo; o volume cheio ja' foi firmado
-       acima, apos a cauda do jogo drenar. */
+    /* Menu Volume uses the same internal convention as Game Volume:
+       0..400 internal -> 0..200 UI, with 200 internal = unity / UI 100.
+       audsrv itself cannot exceed full scale, so amplification/attenuation
+       is performed on the 16-bit PCM here and saturated before enqueue. */
+    if (s_volume != 200)
+    {
+        for (j = 0; j < n; j++)
+        {
+            int l = ((int)s_left[j]  * s_volume) / 200;
+            int r = ((int)s_right[j] * s_volume) / 200;
 
+            if (l > 32767)  l = 32767;
+            if (l < -32768) l = -32768;
+            if (r > 32767)  r = 32767;
+            if (r < -32768) r = -32768;
+
+            s_left[j]  = (short)l;
+            s_right[j] = (short)r;
+        }
+    }
+
+    /* O menu de pausa muta audsrv para matar a cauda do jogo. Para BGM
+       nao-zero ele fica em full scale; Menu Volume ja foi aplicado ao PCM. */
     Aud_Enqueue(s_left, s_right, n, 0); /* wait=0: best-effort, nao trava */
 }
 

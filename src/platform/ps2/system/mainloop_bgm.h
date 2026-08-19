@@ -48,8 +48,9 @@ void BgmNext(void);
 void BgmIOBegin(void);
 void BgmIOEnd(void);
 
-/* Volume da trilha de menu: 0..100.  O liga/desliga e independente e
-   controlado por BgmSetEnabled/BgmIsEnabled. */
+/* Menu Volume: ganho PCM interno 0..400, exibido no Settings Menu /2
+   como 0..200; 200 interno = UI 100 = unity. O liga/desliga e independente
+   e controlado por BgmSetEnabled/BgmIsEnabled. */
 void BgmSetVolume(int vol);
 int  BgmGetVolume(void);
 void BgmSetEnabled(int enabled);
