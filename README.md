@@ -54,8 +54,8 @@ User interface:
 * Browse SRAM files
 * Confirmation prompt for saving and loading states
 * Faster UI navigation
+* * Many options to enable emulation hacks and compatibility modes (exchange accuracy for performance or vice-versa)
 * Option to reload the emulator's .elf (very useful for upgrading and testing new builds)
-* Many options to enable emulation hacks and compatibility modes (exchange accuracy for performance or vice-versa)
 * ~Changed font from 80 characters to 40 characters, more readable in 240p.~ *(I'll enable this very soon)*
 
 *(**NOTE**: to find the options above, go to the Video Settings and change the pages with the circle button.)*
@@ -77,7 +77,7 @@ Just for fun:
 
 * Super Mario World 2 (SNES) performance
 * Speedy Gonzales in Los Gatos Banditos (SNES) performance
-* Top Gear (SNES) raw performance (without enabling emulation hacks)
+* Top Gear (SNES) performance
 * The Lost Vikings 1 and 2 (SNES) black screen
 * Addams Family (SNES) graphical glitches and timing issues
 * Sonic Blast Man (SNES) wrong colors
