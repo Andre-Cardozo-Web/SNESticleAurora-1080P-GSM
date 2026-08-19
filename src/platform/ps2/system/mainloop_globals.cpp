@@ -48,6 +48,7 @@ CNetworkScreen *_MainLoop_pNetworkScreen;
 CMenuScreen    *_MainLoop_pMenuScreen;
 CMenuScreen    *_MainLoop_pStateScreen;
 CMenuScreen    *_MainLoop_pStateDeviceScreen;
+CMenuScreen    *_MainLoop_pStateConfirmScreen;
 CMenuScreen    *_MainLoop_pMemCardFormatScreen;
 CLogScreen     *_MainLoop_pLogScreen;
 CVideoScreen   *_MainLoop_pVideoScreen;

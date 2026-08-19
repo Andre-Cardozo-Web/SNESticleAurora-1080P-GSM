@@ -24,6 +24,16 @@ extern "C" {
 //#define MENU_REPEATBUTTONS (PAD_UP|PAD_DOWN|PAD_SQUARE|PAD_CIRCLE)
 #define MENU_REPEATBUTTONS (PAD_UP|PAD_DOWN|PAD_SQUARE|PAD_CIRCLE|PAD_CROSS|PAD_TRIANGLE|PAD_LEFT|PAD_RIGHT)
 
+/* AURORA_SNES_R2_TURBO_NO_DPAD_V1_4_4
+ * D-pad is explicitly NOT turboable. While R2 is held, directions remain
+ * continuous every frame so movement never stutters while another button
+ * is being turboed. */
+#define SNES_DIRECTION_HOST_BUTTONS (     PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT )
+
+#define SNES_TURBO_HOST_BUTTONS (     PAD_SQUARE | PAD_TRIANGLE | PAD_CROSS | PAD_CIRCLE |     PAD_L1 | PAD_R1 | PAD_SELECT | PAD_START )
+
+#define SNES_GAMEPLAY_HOST_BUTTONS (     SNES_DIRECTION_HOST_BUTTONS | SNES_TURBO_HOST_BUTTONS )
+
 static Bool _MainLoop_bSuppressGameInputUntilRelease = FALSE;
 
 void _MainLoopInputSuppressUntilRelease()
@@ -60,29 +70,46 @@ Uint16 _MainLoopInput(Uint32 pad)
 		return 0;
 	}
 
-	if (pad & (PAD_R2|PAD_L2))
-    {
-        return 0;
-    }
-#if 0
-    if (_pSystem==_pSnes)
-    {
-        return _MainLoopSnesInput(pad);
-    } else
-    if (_pSystem==_pNes)
-    {
-        return _MainLoopNesInput(pad);
-    }
-	   return 0;
-#else
- 	return _MainLoopSnesInput(pad);
-#endif
- 
+	/* L2 has absolute priority over the R2 turbo modifier. It remains
+	   reserved for quick-state/menu frontend controls and never reaches
+	   SNES gameplay while held. */
+	if (pad & PAD_L2)
+		return 0;
+
+	if (pad & PAD_R2)
+	{
+		/* SNES only. NES keeps its existing QuickNES Circle/Triangle turbo
+		   and the historical R2-reserved behaviour. */
+		if (_pSystem == _pSnes)
+		{
+			Uint32 uDirections = pad & SNES_DIRECTION_HOST_BUTTONS;
+			Uint32 uTurboButtons = pad & SNES_TURBO_HOST_BUTTONS;
+
+			/* AURORA_SNES_R2_TURBO_NO_DPAD_RUNTIME_V1_4_4
+			   Directions are never phase-gated. Turbo-eligible buttons
+			   use the same 1-frame ON / 1-frame OFF cadence as QuickNES. */
+			if ((_pSystem->GetFrame() & 1) != 0)
+				uTurboButtons = 0;
+
+			/* Examples:
+			   R2+Right       -> Right held continuously.
+			   R2+Right+B     -> Right continuous, B pulses.
+			   R2+B+Y         -> B and Y pulse together. */
+			return _MainLoopSnesInput(uDirections | uTurboButtons);
+		}
+		return 0;
+	}
+
+	return _MainLoopSnesInput(pad);
 }
 
-static void _MainLoopQuickStateAction(Bool bSave)
+void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 {
 	Bool bOK;
+
+	/* AURORA_RUNTIME_SAFE_QUICKSTATE_V1_4_1 */
+	if (!_pSystem)
+		return;
 
 	/* The first quick-save opens the isolated destination chooser. Its
 	   selection callback remembers the target, performs this pending save
@@ -133,6 +160,11 @@ static void _MainLoopQuickStateAction(Bool bSave)
 	);
 }
 
+static void _MainLoopQuickStateAction(Bool bSave)
+{
+	_MainLoopStateConfirmPromptOpen(bSave);
+}
+
 void _MainLoopInputProcess(Uint32 buttons)
 {
 	static Uint32 lastbuttons= ~0;
@@ -141,9 +173,9 @@ void _MainLoopInputProcess(Uint32 buttons)
 	static Bool bStateHotkeyHeld = FALSE;
 	Uint32 trigger;
 
+	/* AURORA_INPUT_SUPPRESS_ALL_GAMEPLAY_V1_4_3 */
 	if (_MainLoop_bSuppressGameInputUntilRelease &&
-	    !(buttons & (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT |
-	                 PAD_CROSS | PAD_CIRCLE | PAD_START)))
+	    !(buttons & (SNES_GAMEPLAY_HOST_BUTTONS | PAD_L2 | PAD_R2)))
 	{
 		_MainLoop_bSuppressGameInputUntilRelease = FALSE;
 	}
@@ -196,6 +228,13 @@ void _MainLoopInputProcess(Uint32 buttons)
 			_MainLoopQuickStateAction(bSaveTrigger);
 			return;
 		}
+	}
+
+	if (_bMenu &&
+	    _MainLoop_pScreen == (CScreen *)_MainLoop_pStateConfirmScreen)
+	{
+		_MainLoopStateConfirmPromptInput(buttons, trigger);
+		return;
 	}
 
 	/* The one-time destination prompt is intentionally isolated from the
@@ -463,7 +502,8 @@ void _MainLoopInputProcess(Uint32 buttons)
 	else
 	{
 
-if ((buttons & PAD_L2))
+/* AURORA_RUNTIME_SAFE_SOFTRESET_V1_4_3 */
+if (_pSystem && (buttons & PAD_L2))
 	{
 		if (trigger & PAD_SELECT)
 		{

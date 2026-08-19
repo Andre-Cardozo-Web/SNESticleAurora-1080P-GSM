@@ -50,6 +50,29 @@ enum
 extern Uint8 g_SnesSoftwareLayerMask;
 extern Uint8 g_SnesSoftwareHackFlags;
 
+/* AURORA_OBJ_LIMIT_V1_2
+ * Level 0 keeps the untouched SNES limits. Scanline mode caps fetched OBJ
+ * tiles per line; Screen mode caps distinct visible OBJ for the whole screen. */
+enum
+{
+    SNPPU_OBJ_LIMIT_OFF = 0,
+    SNPPU_OBJ_LIMIT_LIGHT,
+    SNPPU_OBJ_LIMIT_MEDIUM,
+    SNPPU_OBJ_LIMIT_STRONG,
+    SNPPU_OBJ_LIMIT_EXTREME,
+    SNPPU_OBJ_LIMIT_NUM
+};
+
+enum
+{
+    SNPPU_OBJ_LIMIT_MODE_SCANLINE = 0,
+    SNPPU_OBJ_LIMIT_MODE_SCREEN,
+    SNPPU_OBJ_LIMIT_MODE_NUM
+};
+
+extern Uint8 g_SnesObjLimitLevel;
+extern Uint8 g_SnesObjLimitMode;
+
 _INLINE Uint8 SNPPURenderGetSoftwareLayerMask(void)
 {
     return g_SnesSoftwareLayerMask;
@@ -62,6 +85,18 @@ _INLINE Uint8 SNPPURenderGetSoftwareHackFlags(void)
 void  SNPPURenderSetSoftwareLayerMask(Uint8 uMask);
 void  SNPPURenderSetSoftwareHackFlags(Uint8 uFlags);
 Bool  SNPPURenderShouldRenderFrame(void);
+void  SNPPURenderSetObjLimitLevel(Uint8 uLevel);
+_INLINE Uint8 SNPPURenderGetObjLimitLevel(void)
+{
+    return g_SnesObjLimitLevel;
+}
+void  SNPPURenderSetObjLimitMode(Uint8 uMode);
+_INLINE Uint8 SNPPURenderGetObjLimitMode(void)
+{
+    return g_SnesObjLimitMode;
+}
+Int32 SNPPURenderGetObjTileBudget(void);
+Int32 SNPPURenderGetObjScreenBudget(void);
 
 enum 
 {

@@ -37,43 +37,56 @@ If the repository was cloned without `--recurse-submodules`, run
 
 **FEATURES ADDED:**
 
+Emulation:
+
 * QuickNES for NES games
 * Support added for more NES mappers: 13, 16, 18, 27, 48, 64, 65, 67, 68, 72, 77, 80, 82, 92, 96, 99, 101, 105, 118, 119, 151, 153, 155, 157, 158, 159, 185, 188, 210, 216, and 552. Every licensed NES and Famicom game will boot now.
-* Fixes and improvements for the 240p display modes, improved screen positioning and overscan settings for each system and graphical resolution/modes.
-* "Dirty fix" for font rendering in 240p *(a better fix should be implemented in the future)*
 * Changed SRAM and RAM initialization for both NES and SNES. This will fix all the very few games that rely on specific initial values to work properly.
+* Fixes and improvements for the 240p display modes, improved screen positioning and overscan settings for each system and graphical resolution/modes.
 * Turbo B/A for NES games
-* Region selector (to intentionally trigger region-lock screens) for SNES games
-* Select SRAM size (to intentionally trigger anti-piracy screens and measures) for SNES games
-* Browse SRAM files
+* Turbo toggle (hold R2 + any button) for SNES games
 * In-game soft reset (L2+SELECT)
-* Famiclone audio option (swap duty cycles)
-* Option to reload the emulator's .elf (very useful for upgrading and testing)
-* Emulation hacks and compatibility menu options (disable layers, change rendering options)
+* Experimental SNES mouse emulation
+
+User interface:
+
+* Save SRAM to USB
+* Browse SRAM files
+* Confirmation prompt for saving and loading states
+* Faster UI navigation
+* Option to reload the emulator's .elf (very useful for upgrading and testing new builds)
+* Many options to enable emulation hacks and compatibility modes (exchange accuracy for performance or vice-versa)
+* ~Changed font from 80 characters to 40 characters, more readable in 240p.~ *(I'll enable this very soon)*
 
 *(**NOTE**: to find the options above, go to the Video Settings and change the pages with the circle button.)*
 
+Just for fun:
+
+* Famiclone audio option (swap duty cycles, a known hardware bug in some Famiclones you can intentionally turn on)
+* Region selector (to intentionally trigger region-lock screens) for SNES games
+* Select SRAM size (to intentionally trigger anti-piracy screens and measures) for SNES games
+
+
 **FIXED:**
 
-* Many graphical glitches and inaccuracies on many NES and SNES games (testing still being done)
-* Pilotwings (SNES) Mode 7 rendering
+* Many graphical glitches and inaccuracies on many NES and SNES games
+* Pilotwings (SNES) mode 7 rendering, also fixes other games that rely on it
+
 
 **TO BE FIXED:**
 
 * Super Mario World 2 (SNES) performance
-* Top Gear (SNES) performance
 * Speedy Gonzales in Los Gatos Banditos (SNES) performance
+* Top Gear (SNES) raw performance (without enabling emulation hacks)
 * The Lost Vikings 1 and 2 (SNES) black screen
 * Addams Family (SNES) graphical glitches and timing issues
 * Sonic Blast Man (SNES) wrong colors
 * Any other games with performance or graphical issues
 
+
 **TO BE ADDED:**
 
-* Save SRAM to USB
-* Save and load state confirmation prompt
 * SA-1 Emulation
 * Improve Mode 7, FX1 and FX2 emulation
-* Turbo button toggle for SNES
 * Famicom Disk System support
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!

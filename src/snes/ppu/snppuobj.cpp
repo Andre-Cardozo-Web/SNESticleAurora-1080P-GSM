@@ -452,13 +452,46 @@ Int32 SnesPPURender::CheckOBJ(Uint8 *pObjList, Int32 iLine)
 
 
 
+/* AURORA_OBJ_LIMIT_V1_2_SCREEN
+ * "Per Screen" is intentionally a performance hack rather than SNES
+ * behavior. It chooses the first N genuinely visible OBJ in the same OAM
+ * traversal order already used by the renderer, then keeps each chosen OBJ
+ * for every scanline it occupies. This avoids vertically sliced sprites. */
+static Bool _SnesPPUOBJScreenLimiterVisibleX(Uint16 uPosX, Uint8 uWidth)
+{
+	Int32 iX;
+	uPosX &= 0x1FF;
+	iX = (uPosX & 0x100) ? ((Int32)uPosX - 512) : (Int32)uPosX;
+	return iX < 256 && iX > -(Int32)uWidth;
+}
+
+static Bool _SnesPPUOBJScreenLimiterVisibleY(Uint32 uObjY, Uint32 uObjSize)
+{
+	while (uObjSize > 0)
+	{
+		if (uObjY < SNPPU_MAXLINE)
+			return TRUE;
+		uObjY = (uObjY + 1) & 0xFF;
+		uObjSize--;
+	}
+	return FALSE;
+}
+
 void SnesPPURender::UpdateOBJVisibility(Uint8 *pObjY, Uint8 *pObjSize, Int32 iObj, Int32 nObjs)
 {
+	Int32 nObjBudget = SNPPURenderGetObjScreenBudget();
+	Int32 nObjSelected = 0;
+	Bool bScreenLimited = nObjBudget < SNESPPU_OBJ_NUM;
+
     memset(m_nObjLine, 0, sizeof(m_nObjLine));
 
 	while (nObjs > 0)
 	{
 		Uint32 uObjY, uObjSize;
+		Bool bKeep;
+
+		if (bScreenLimited && nObjSelected >= nObjBudget)
+			break;
 
 		iObj &= 0x7F;
 
@@ -466,9 +499,21 @@ void SnesPPURender::UpdateOBJVisibility(Uint8 *pObjY, Uint8 *pObjSize, Int32 iOb
         uObjSize = pObjSize[iObj];
 		uObjY    = pObjY[iObj];
 
-		if (_SnesPPUOBJVisibleX(m_Objs[iObj].uPosX,
-		                           m_Objs[iObj].uWidth))
-		while (uObjSize > 0)
+		bKeep = _SnesPPUOBJVisibleX(m_Objs[iObj].uPosX,
+		                            m_Objs[iObj].uWidth);
+		if (bKeep && bScreenLimited)
+		{
+			bKeep = _SnesPPUOBJScreenLimiterVisibleX(
+				m_Objs[iObj].uPosX, m_Objs[iObj].uWidth) &&
+				_SnesPPUOBJScreenLimiterVisibleY(uObjY, uObjSize);
+		}
+
+		if (bKeep)
+		{
+			if (bScreenLimited)
+				nObjSelected++;
+
+			while (uObjSize > 0)
         {
             if (uObjY < SNPPU_MAXLINE)
             {
@@ -483,6 +528,7 @@ void SnesPPURender::UpdateOBJVisibility(Uint8 *pObjY, Uint8 *pObjSize, Int32 iOb
             uObjSize--;
     		uObjY&= 0xFF;
         }
+		}
 
 		iObj++;
 		nObjs--;

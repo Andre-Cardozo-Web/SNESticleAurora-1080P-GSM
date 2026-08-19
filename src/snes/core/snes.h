@@ -49,8 +49,14 @@ public:
     void 	SetRom(class Emu::Rom *pRom);
     void	SetSnesRom(SnesRom *pRom);
     void	Reset();
-    void	SoftReset();
+	void	SoftReset();
 	void	ExecuteFrame(Emu::SysInputT *pInput, class CRenderSurface *pTarget, class CMixBuffer *pSound, ModeE eMode);
+
+	/* Host-only peripheral injection; SysInputT/save-state layout stays fixed. */
+	void	SetMouseInput(Bool bConnected, Int32 nDeltaX, Int32 nDeltaY, Uint32 uButtons)
+	{
+		m_IO.SetMouseInput(bConnected, nDeltaX, nDeltaY, uButtons);
+	}
 
     void	SaveState(struct SnesStateT *pState);
     Bool	RestoreState(struct SnesStateT *pState);

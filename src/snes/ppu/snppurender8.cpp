@@ -1563,7 +1563,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 #endif
 	if (uFetchLayers & SNESPPU_MASK_OBJ)
 		nObjLine = _FetchOBJ(m_Objs, m_ObjLine[iLine], m_nObjLine[iLine],
-			ObjLine, SNPPU_MAXOBJCHR, iLine, (pRegs->obsel & 7) << 13,
+			ObjLine, SNPPURenderGetObjTileBudget(), iLine, (pRegs->obsel & 7) << 13,
 			_SnesPPUOBJNameSelect(pRegs->obsel), m_pPPU->GetVramPtr(0));
 	else
 		nObjLine = 0;

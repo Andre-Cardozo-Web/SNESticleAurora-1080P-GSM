@@ -5,3 +5,4 @@
 Uint16 _MainLoopInput(Uint32 pad);
 void _MainLoopInputProcess(Uint32 buttons);
 void _MainLoopInputSuppressUntilRelease();
+void _MainLoopQuickStateExecuteConfirmed(Bool bSave);

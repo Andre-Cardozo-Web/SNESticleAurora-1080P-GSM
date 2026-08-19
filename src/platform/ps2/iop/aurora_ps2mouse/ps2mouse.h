@@ -1,0 +1,33 @@
+#ifndef __PS2MOUSE_H__
+#define __PS2MOUSE_H__
+
+#include <types.h>
+
+typedef struct _mouse_data
+{
+  s32 x, y;
+  s32 wheel;
+  u32 buttons;
+} mouse_data;
+
+#define PS2MOUSE_READMODE_DIFF 0
+#define PS2MOUSE_READMODE_ABS 1
+#define PS2MOUSE_BIND_RPC_ID 0x500C001
+#define PS2MOUSE_READ 0x1
+#define PS2MOUSE_SETREADMODE 0x2
+#define PS2MOUSE_GETREADMODE 0x3
+#define PS2MOUSE_SETTHRES 0x4
+#define PS2MOUSE_GETTHRES 0x5
+#define PS2MOUSE_SETACCEL 0x6
+#define PS2MOUSE_GETACCEL 0x7
+#define PS2MOUSE_SETBOUNDARY 0x8
+#define PS2MOUSE_GETBOUNDARY 0x9
+#define PS2MOUSE_SETPOSITION 0xA
+#define PS2MOUSE_RESET 0xB
+#define PS2MOUSE_ENUM 0xC
+#define PS2MOUSE_SETDBLCLICKTIME 0xD
+#define PS2MOUSE_GETDBLCLICKTIME 0xE
+#define PS2MOUSE_GETVERSION 0x20
+#define PS2MOUSE_AURORA_STATUS 0x21
+
+#endif

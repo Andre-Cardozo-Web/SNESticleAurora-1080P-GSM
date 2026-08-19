@@ -18,6 +18,7 @@ extern "C" {
 #include "memcard.h"
 #include "uiCover.h"
 #include "mainloop_bgm.h"
+#include "mainloop_state.h"
 #include "mainloop_smb.h"
 #include "audmixbuffer.h"
 #include "embedded_irx.h"   /* HddSupportIsEnabled / HddSupportSetEnabled */
@@ -35,9 +36,10 @@ void MainResetEmulator(void);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 22
-/* AURORA_MODE7_HALF_DEFAULT_V22_ONLY
- * v22 keeps the exact v21 layout; bump is migration-only. */
+#define VIDEOCFG_VERSION 24
+/* AURORA_CONFIG_V24_STORAGE_OBJ_LIMIT_MODE
+ * v24 appends OBJ limiter mode. v23 imports its limiter/storage fields and
+ * defaults the new mode to Per Scanline; v21/v22 retain exact import. */
 /* AURORA_V85_SOFTWARE_HACKS_CONFIG
  * v20 only appends renderer-hack preferences. Old configs migrate with all
  * hacks disabled and all layers enabled. */
@@ -67,6 +69,9 @@ typedef struct
 	Int32  sneshacklayersoff;
 	Int32  sneshackflags;
 	Int32  compatflags;
+	Int32  objlimit;
+	Int32  sramdevice;
+	Int32  objlimitmode;
 } VideoCfgT;
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -187,6 +192,64 @@ typedef struct
 	Int32  sneshackflags;
 } VideoCfgV20T;
 
+/* Exact byte layout written by v21 and v22. */
+typedef struct
+{
+	Uint32 magic;
+	Int32  version;
+	Int32  mode;
+	Int32  offx;
+	Int32  offy;
+	Int32  overscan;
+	Int32  widescreen;
+	Int32  covers;
+	Int32  bgmvol;
+	Int32  bgmrate;
+	Int32  gamevol;
+	Int32  hddenable;
+	Int32  mmceenable;
+	Int32  massenable;
+	Int32  smbenable;
+	Int32  mx4sioenable;
+	Int32  colorprofile;
+	Int32  famicloneaudio;
+	Int32  fakesramsize;
+	Int32  forceregion;
+	Int32  sneshacklayersoff;
+	Int32  sneshackflags;
+	Int32  compatflags;
+} VideoCfgV22T;
+
+/* Exact byte layout written by Aurora V1/V1.1 (video.cfg v23). */
+typedef struct
+{
+	Uint32 magic;
+	Int32  version;
+	Int32  mode;
+	Int32  offx;
+	Int32  offy;
+	Int32  overscan;
+	Int32  widescreen;
+	Int32  covers;
+	Int32  bgmvol;
+	Int32  bgmrate;
+	Int32  gamevol;
+	Int32  hddenable;
+	Int32  mmceenable;
+	Int32  massenable;
+	Int32  smbenable;
+	Int32  mx4sioenable;
+	Int32  colorprofile;
+	Int32  famicloneaudio;
+	Int32  fakesramsize;
+	Int32  forceregion;
+	Int32  sneshacklayersoff;
+	Int32  sneshackflags;
+	Int32  compatflags;
+	Int32  objlimit;
+	Int32  sramdevice;
+} VideoCfgV23T;
+
 typedef struct
 {
 	Uint32 magic;
@@ -255,6 +318,9 @@ void VideoSettingsSave(void)
 		 SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
 	cfg.sneshackflags = SNPPURenderGetSoftwareHackFlags();
 	cfg.compatflags = g_VideoCompatFlags & VIDEO_COMPAT_ALL;
+	cfg.objlimit = SNPPURenderGetObjLimitLevel();
+	cfg.sramdevice = MainLoopSramGetDevice();
+	cfg.objlimitmode = SNPPURenderGetObjLimitMode();
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -274,6 +340,9 @@ void VideoSettingsLoad(void)
 		SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
 		SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
 	SNPPURenderSetSoftwareHackFlags(SNPPU_HACK_MODE7_HALF);
+	SNPPURenderSetObjLimitLevel(SNPPU_OBJ_LIMIT_OFF);
+	SNPPURenderSetObjLimitMode(SNPPU_OBJ_LIMIT_MODE_SCANLINE);
+	MainLoopSramSetDevice(MAINLOOP_SRAMDEVICE_AUTO);
 	_VideoApplyCompatFlags(0);
 	_VideoCfgPath(path);
 
@@ -285,12 +354,29 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
-		else if (header.version == 21)
+		else if (header.version == 23)
 		{
-			/* v21 and v22 are byte-identical VideoCfgT layouts. */
-			if (MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg)))
+			VideoCfgV23T oldcfg23;
+			memset(&oldcfg23, 0, sizeof(oldcfg23));
+			if (MemCardReadFile(path, (Uint8 *)&oldcfg23, sizeof(oldcfg23)))
 			{
+				memcpy(&cfg, &oldcfg23, sizeof(oldcfg23));
 				cfg.version = VIDEOCFG_VERSION;
+				cfg.objlimitmode = SNPPU_OBJ_LIMIT_MODE_SCANLINE;
+				loaded = TRUE;
+			}
+		}
+		else if (header.version == 22 || header.version == 21)
+		{
+			VideoCfgV22T oldcfg22;
+			memset(&oldcfg22, 0, sizeof(oldcfg22));
+			if (MemCardReadFile(path, (Uint8 *)&oldcfg22, sizeof(oldcfg22)))
+			{
+				memcpy(&cfg, &oldcfg22, sizeof(oldcfg22));
+				cfg.version = VIDEOCFG_VERSION;
+				cfg.objlimit = SNPPU_OBJ_LIMIT_OFF;
+				cfg.sramdevice = MAINLOOP_SRAMDEVICE_AUTO;
+				cfg.objlimitmode = SNPPU_OBJ_LIMIT_MODE_SCANLINE;
 				loaded = TRUE;
 			}
 		}
@@ -363,7 +449,7 @@ void VideoSettingsLoad(void)
 
 	/* New policy applies exactly once to every pre-v22 config. Once the
 	 * user saves v22, a manual Full selection remains persistent. */
-	if (loaded && header.version < VIDEOCFG_VERSION)
+	if (loaded && header.version < 22)
 		cfg.sneshackflags |= SNPPU_HACK_MODE7_HALF;
 
 	if (loaded && cfg.magic == VIDEOCFG_MAGIC)
@@ -430,6 +516,14 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 				(Uint8)(uLayerBits & ~cfg.sneshacklayersoff));
 		if ((cfg.sneshackflags & ~SNPPU_HACK_ALL) == 0)
 			SNPPURenderSetSoftwareHackFlags((Uint8)cfg.sneshackflags);
+		if (cfg.objlimit >= SNPPU_OBJ_LIMIT_OFF && cfg.objlimit < SNPPU_OBJ_LIMIT_NUM)
+			SNPPURenderSetObjLimitLevel((Uint8)cfg.objlimit);
+		if (cfg.objlimitmode >= SNPPU_OBJ_LIMIT_MODE_SCANLINE &&
+		    cfg.objlimitmode < SNPPU_OBJ_LIMIT_MODE_NUM)
+			SNPPURenderSetObjLimitMode((Uint8)cfg.objlimitmode);
+		if (cfg.sramdevice >= MAINLOOP_SRAMDEVICE_AUTO &&
+		    cfg.sramdevice < MAINLOOP_SRAMDEVICE_NUM)
+			MainLoopSramSetDevice((MainLoopSramDeviceE)cfg.sramdevice);
 		if ((cfg.compatflags & ~VIDEO_COMPAT_ALL) == 0)
 			_VideoApplyCompatFlags(cfg.compatflags);
 	}
@@ -549,6 +643,24 @@ static const char *_VideoHackMode7Status()
 		? "Half" : "Full";
 }
 
+static const char *_VideoHackSpriteLimiterStatus()
+{
+	switch (SNPPURenderGetObjLimitLevel())
+	{
+		case SNPPU_OBJ_LIMIT_LIGHT:   return "Light (28)";
+		case SNPPU_OBJ_LIMIT_MEDIUM:  return "Medium (24)";
+		case SNPPU_OBJ_LIMIT_STRONG:  return "Strong (20)";
+		case SNPPU_OBJ_LIMIT_EXTREME: return "Extreme (16)";
+		default:                      return "Off (34)";
+	}
+}
+
+static const char *_VideoHackSpriteLimiterModeStatus()
+{
+	return SNPPURenderGetObjLimitMode() == SNPPU_OBJ_LIMIT_MODE_SCREEN
+		? "Per Screen" : "Per Scanline";
+}
+
 static const char *_VideoHackFrameSkipStatus()
 {
 	return (SNPPURenderGetSoftwareHackFlags() & SNPPU_HACK_FRAME_SKIP)
@@ -615,7 +727,7 @@ void CVideoScreen::Draw()
 	int   m = _VideoModeIndex(g_GskVideoMode);
 	const char *pMode = _VideoModes[m].name;
 	/* AURORA_V85_SOFTWARE_HACKS_PAGE */
-	int   iPage = (m_iSelect >= 28) ? 3 :
+	int   iPage = (m_iSelect >= 30) ? 3 :
 	              ((m_iSelect >= 19) ? 2 : ((m_iSelect >= 10) ? 1 : 0));
 	const char *pWide = "Off";
 	const char *pColor = (SNPPUColorGetProfile() == SNPPU_COLOR_PROFILE_COMPOSITE)
@@ -720,21 +832,25 @@ _VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;
 			_VideoHackAccurateStatus(SNPPU_HACK_WINDOWS_OFF)); vy += 12;
 		_VideoRow(vy, 26, m_iSelect, "Mode 7 Quality",
 			_VideoHackMode7Status()); vy += 12;
-		_VideoRow(vy, 27, m_iSelect, "Frame Skip",
+		_VideoRow(vy, 27, m_iSelect, "Sprite Limiter",
+			_VideoHackSpriteLimiterStatus()); vy += 12;
+		_VideoRow(vy, 28, m_iSelect, "Limiter Mode",
+			_VideoHackSpriteLimiterModeStatus()); vy += 12;
+		_VideoRow(vy, 29, m_iSelect, "Frame Skip",
 			_VideoHackFrameSkipStatus()); vy += 12;
 	}
 	else
 	{
 		_VideoHeader(vy, "Compatibility"); vy += 14;
-		_VideoRow(vy, 28, m_iSelect, "Profile",
+		_VideoRow(vy, 30, m_iSelect, "Profile",
 			_VideoCompatProfileStatus()); vy += 12;
-		_VideoRow(vy, 29, m_iSelect, "GS Cache Sync",
+		_VideoRow(vy, 31, m_iSelect, "GS Cache Sync",
 			_VideoCompatGsCacheStatus()); vy += 12;
-		_VideoRow(vy, 30, m_iSelect, "GIF DMA Wait",
+		_VideoRow(vy, 32, m_iSelect, "GIF DMA Wait",
 			_VideoCompatGifWaitStatus()); vy += 12;
-		_VideoRow(vy, 31, m_iSelect, "Audio RPC Chunk",
+		_VideoRow(vy, 33, m_iSelect, "Audio RPC Chunk",
 			_VideoCompatAudioRpcStatus()); vy += 12;
-		_VideoRow(vy, 32, m_iSelect, "Audio Queue",
+		_VideoRow(vy, 34, m_iSelect, "Audio Queue",
 			_VideoCompatAudioQueueStatus()); vy += 12;
 	}
 
@@ -765,7 +881,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 	{
 		if (m_iSelect < 10)       m_iSelect = 10;
 		else if (m_iSelect < 19)  m_iSelect = 19;
-		else if (m_iSelect < 28)  m_iSelect = 28;
+		else if (m_iSelect < 30)  m_iSelect = 30;
 		else                      m_iSelect = 0;
 	}
 
@@ -773,8 +889,8 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		int lo, hi;
 		if (m_iSelect < 10)      { lo = 0;  hi = 9;  }
 		else if (m_iSelect < 19) { lo = 10; hi = 18; }
-		else if (m_iSelect < 28) { lo = 19; hi = 27; }
-		else                     { lo = 28; hi = 32; }
+		else if (m_iSelect < 30) { lo = 19; hi = 29; }
+		else                     { lo = 30; hi = 34; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1022,26 +1138,42 @@ case 17: /* Famiclone Audio */
 				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_MODE7_HALF);
 			break;
 		case 27:
+			{
+				Int32 level = (Int32)SNPPURenderGetObjLimitLevel() + dir;
+				if (level < 0) level = SNPPU_OBJ_LIMIT_NUM - 1;
+				if (level >= SNPPU_OBJ_LIMIT_NUM) level = 0;
+				SNPPURenderSetObjLimitLevel((Uint8)level);
+			}
+			break;
+		case 28:
+			{
+				Int32 mode = (Int32)SNPPURenderGetObjLimitMode() + dir;
+				if (mode < 0) mode = SNPPU_OBJ_LIMIT_MODE_NUM - 1;
+				if (mode >= SNPPU_OBJ_LIMIT_MODE_NUM) mode = 0;
+				SNPPURenderSetObjLimitMode((Uint8)mode);
+			}
+			break;
+		case 29:
 			SNPPURenderSetSoftwareHackFlags(
 				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_FRAME_SKIP);
 			break;
-		case 28:
+		case 30:
 			_VideoApplyCompatFlags(
 				g_VideoCompatFlags == VIDEO_COMPAT_ALL ? 0 : VIDEO_COMPAT_ALL);
 			break;
-		case 29:
+		case 31:
 			_VideoApplyCompatFlags(
 				g_VideoCompatFlags ^ VIDEO_COMPAT_GS_FULL_CACHE);
 			break;
-		case 30:
+		case 32:
 			_VideoApplyCompatFlags(
 				g_VideoCompatFlags ^ VIDEO_COMPAT_GIF_LONG_WAIT);
 			break;
-		case 31:
+		case 33:
 			_VideoApplyCompatFlags(
 				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_SMALL_RPC);
 			break;
-		case 32:
+		case 34:
 			_VideoApplyCompatFlags(
 				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_DEEP_Q);
 			break;
@@ -1050,14 +1182,14 @@ case 17: /* Famiclone Audio */
 
 	}
 
-	/* AURORA_VIDEO_SQUARE_PREV_PAGE
-	 * Square: previous configuration page. */
+	/* AURORA_RUNTIME_SAFE_VIDEO_PAGES_V1_4_1
+	 * Square: previous page using the v24 0/10/19/30 boundaries. */
 	if (trigger & PAD_SQUARE)
 	{
-		if (m_iSelect >= 28)      m_iSelect = 19;
+		if (m_iSelect >= 30)      m_iSelect = 19;
 		else if (m_iSelect >= 19) m_iSelect = 10;
 		else if (m_iSelect >= 10) m_iSelect = 0;
-		else                      m_iSelect = 28;
+		else                      m_iSelect = 30;
 	}
 
 /* Cross / Start: persist all video settings to the memory card. */

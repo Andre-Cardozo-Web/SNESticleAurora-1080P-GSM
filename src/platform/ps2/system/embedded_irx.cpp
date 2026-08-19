@@ -41,6 +41,7 @@ extern "C" {
 
 /* Stack BDM moderna fixada (FreeUsbd mini + FAT/exFAT/GPT). */
 #include "usbd_irx.h"
+#include "ps2mouse_irx.h"
 #include "bdm_irx.h"
 #include "bdmfs_fatfs_irx.h"
 #include "usbmass_bd_irx.h"
@@ -310,7 +311,15 @@ extern "C" int MemCardLoadEmbeddedIrx(void)
  * interno.  Cada passo loga via ScrPrintf, visivel no splash de boot --
  * se der b.o., a ultima linha na tela mostra qual modulo falhou. */
 static int s_usb_bdm_loaded_result = 1; /* 1 = not yet attempted */
+/* AURORA_USB_SNES_MOUSE_V1_5
+ * Mouse is optional: failure must never take mass:/ down with it. */
+static int s_usb_mouse_loaded_result = 1; /* 1=not tried, 0=ready, <0=failed */
 static int s_dev9_loaded_result = 1;    /* shared by HDD and network */
+
+extern "C" int UsbMouseDriverAvailable(void)
+{
+    return s_usb_mouse_loaded_result == 0;
+}
 
 static int Dev9LoadEmbeddedIrxOnce(void)
 {
@@ -362,6 +371,21 @@ extern "C" int UsbBdmLoadEmbeddedIrx(void)
         printf("UsbBdm: usbd_mini.irx failed (%d)\n", ret);
         s_usb_bdm_loaded_result = -3;
         return s_usb_bdm_loaded_result;
+    }
+
+    /* PS2SDK's HID boot-mouse driver attaches to the already-live
+       usbd_mini bus. This is deliberately best-effort: an unusual HID or
+       an import mismatch must not break USB mass storage. */
+    ret = EmbeddedIrxLoad(ps2mouse_irx, sizeof(ps2mouse_irx), 0, NULL);
+    BootImport("ps2mouse", ret);
+    if (ret < 0)
+    {
+        printf("UsbMouse: ps2mouse.irx unavailable (%d) -- continuing without mouse\n", ret);
+        s_usb_mouse_loaded_result = ret;
+    }
+    else
+    {
+        s_usb_mouse_loaded_result = 0;
     }
 
     ret = EmbeddedIrxLoad(usbmass_bd_irx, sizeof(usbmass_bd_irx), 0, NULL);
@@ -930,6 +954,7 @@ extern "C" void EmbeddedIrxResetRuntimeState(void)
     s_memcard_loaded = 0;
     s_cdfs_loaded_result = 1;
     s_usb_bdm_loaded_result = 1;
+    s_usb_mouse_loaded_result = 1;
     s_dev9_loaded_result = 1;
     s_hdd_loaded = 0;
     s_hdd_mounted[0] = 0;

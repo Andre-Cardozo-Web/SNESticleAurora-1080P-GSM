@@ -53,8 +53,23 @@ class SnesIO
 {
 	Emu::SysInputT	m_Input;
 
+	/* AURORA_SNES_MOUSE_V1_5
+	 * Port-1 mouse state stays outside SysInputT so NES/netplay/movie layouts
+	 * and the legacy save-state payload size remain untouched. */
+	Bool			m_bMouse0Connected;
+	Int32			m_nMousePendingX;
+	Int32			m_nMousePendingY;
+	Uint32			m_uMouseHostButtons;
+	Uint32			m_uMousePacket;
+	Uint8			m_uMouseSpeed;
+	Uint8			m_uMouseReadIndex;
+
 	Uint8			ReadSerialPad(Uint32 uPad);
 	void			ShiftSerialPad(Uint32 uPad);
+	Uint8			ReadSerialMouse0();
+	void			CaptureMousePacket();
+	void			UpdateMousePacketSpeed();
+	Uint16			GetMouseAutoWord() const;
 
 public:
 	SnesIORegsT		m_Regs;
@@ -67,6 +82,7 @@ public:
 	void	RestoreState(struct SNStateIOT *pState);
 
 	void	LatchInput(Emu::SysInputT *pInput);
+	void	SetMouseInput(Bool bConnected, Int32 nDeltaX, Int32 nDeltaY, Uint32 uButtons);
 	void	WriteSerial(Uint8 uData);
 	Uint8	ReadSerial0();
 	Uint8	ReadSerial1();

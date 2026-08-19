@@ -321,7 +321,20 @@ Bool MainLoopInit()
 	ScrPrintf("BootDir: %s", MainGetBootDir());
 
 	// set boot dir
-	strcpy(_MainLoop_BootDir, MainGetBootDir());
+	/* AURORA_RUNTIME_SAFE_BOOTDIR_V1_4_2 */
+	{
+		const char *pBootDir = MainGetBootDir();
+		if (!pBootDir || strlen(pBootDir) >= sizeof(_MainLoop_BootDir))
+		{
+			_MainLoop_BootDir[0] = ' ';
+			ScrPrintf("[boot] BootDir too long; sidecar search disabled");
+		}
+		else
+		{
+			snprintf(_MainLoop_BootDir, sizeof(_MainLoop_BootDir),
+			         "%s", pBootDir);
+		}
+	}
     _MainLoopLoadModules(_MainLoop_IOPModulePaths);
 
     /* Video settings live on the memory card, which only comes up inside
@@ -493,6 +506,11 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	_MainLoop_pStateDeviceScreen->SetMsgFunc(_MainLoopStateDeviceMenuEvent);
 	_MainLoop_pStateDeviceScreen->SetTitle("Save State Location");
 	_MainLoop_pStateDeviceScreen->SetTop(20);
+
+	_MainLoop_pStateConfirmScreen = new CMenuScreen();
+	_MainLoop_pStateConfirmScreen->SetMsgFunc(_MainLoopStateConfirmMenuEvent);
+	_MainLoop_pStateConfirmScreen->SetTop(40);
+	_MainLoop_pStateConfirmScreen->SetHorizontal(TRUE);
 
 	_MainLoop_pMemCardFormatScreen = new CMenuScreen();
 	_MainLoop_pMemCardFormatScreen->SetMsgFunc(

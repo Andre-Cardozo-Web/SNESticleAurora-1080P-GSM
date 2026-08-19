@@ -1,8 +1,10 @@
+#include <libpad.h>
 #include <stdio.h>
 
 #include "types.h"
 #include "mainloop_install.h"
 #include "mainloop_input.h"
+#include "input.h"
 #include "mainloop_menu.h"
 #include "mainloop_iop.h"
 #include "mainloop_shared.h"
@@ -147,18 +149,22 @@ static CScreen *_MainLoop_StateBrowserPreviousScreen = NULL;
 
 static char _MainLoop_StateManagerBrowseEntry[] = "Browse State Files";
 static char _MainLoop_StateManagerBrowseSramEntry[] = "Browse SRAM Files";
+static char _MainLoop_StateManagerSramEntry[48];
 static char _MainLoop_StateManagerStorageEntry[48];
 static char _MainLoop_StateManagerSlotEntry[32];
 static char _MainLoop_StateManagerResetEntry[] = "Ask Save Location Again";
+static char _MainLoop_StateManagerMouseEntry[48];
 static char _MainLoop_StateManagerStatus[64];
 
 char *_MainLoopStateMenuEntries[] =
 {
         _MainLoop_StateManagerBrowseEntry,
         _MainLoop_StateManagerBrowseSramEntry,
+        _MainLoop_StateManagerSramEntry,
         _MainLoop_StateManagerStorageEntry,
         _MainLoop_StateManagerSlotEntry,
         _MainLoop_StateManagerResetEntry,
+        _MainLoop_StateManagerMouseEntry,
         NULL
 };
 
@@ -236,6 +242,16 @@ void _MainLoopStateMenuRefresh()
         }
 
         _MainLoopStateManagerNormalizeStorage();
+        snprintf(_MainLoop_StateManagerSramEntry,
+                 sizeof(_MainLoop_StateManagerSramEntry),
+                 "SRAM Storage: %s", MainLoopSramGetDeviceName());
+        snprintf(
+                _MainLoop_StateManagerMouseEntry,
+                sizeof(_MainLoop_StateManagerMouseEntry),
+                "SNES Mouse: %s",
+                InputSnesMouseGetModeName()
+        );
+
         pQuickTarget = MainLoopStateHasDeviceChoice()
                 ? MainLoopStateGetDeviceName()
                 : "Not chosen";
@@ -309,14 +325,20 @@ int _MainLoopStateMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
         }
     }
 
-_MainLoop_pStateBrowserScreen =
-    new CBrowserScreen(1024);
+    /* AURORA_RUNTIME_SAFE_STATE_BROWSER_V1_4_1
+     * Reuse the browser allocated once in MainLoopInit. Reallocating it on
+     * every visit leaked the old entry buffer and could exhaust EE RAM. */
+    if (!_MainLoop_pStateBrowserScreen)
+    {
+        MainLoopStatusPrintf(180, "State browser unavailable.");
+        break;
+    }
 
-_MainLoop_pStateBrowserScreen->SetMsgFunc(
-    _MainLoopStateBrowserEvent
-);
-
-_MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
+    _MainLoop_StateBrowserPreviousScreen = _MainLoop_pStateScreen;
+    _MainLoop_pStateBrowserScreen->SetMsgFunc(
+        _MainLoopStateBrowserEvent
+    );
+    _MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
     _MainLoop_pStateBrowserScreen->SetSramManager(FALSE);
 
     _MainLoopSetScreen(
@@ -332,6 +354,12 @@ _MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
 
                 case 1:
 {
+    if (!_MainLoop_pStateBrowserScreen)
+    {
+        MainLoopStatusPrintf(180, "SRAM browser unavailable.");
+        break;
+    }
+
     const Char *pSystemDir =
         (_pSystem == _pNes) ? "NES" : "SNES";
 
@@ -347,7 +375,7 @@ _MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
         SramDir,
         sizeof(SramDir),
         "%s/%s/",
-        _SramPath,
+        MainLoopSramGetBrowseRoot(),
         pSystemDir
     );
 
@@ -360,11 +388,17 @@ _MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
 }
 
                 case 2:
-                        _MainLoopStateManagerCycleStorage();
+                        MainLoopSramCycleDevice();
+                        VideoSettingsSave();
                         _MainLoopStateMenuRefresh();
                         break;
 
                 case 3:
+                        _MainLoopStateManagerCycleStorage();
+                        _MainLoopStateMenuRefresh();
+                        break;
+
+                case 4:
                         MainLoopStateCycleSlot();
                         if (MainLoopStateHasDeviceChoice())
                         {
@@ -373,7 +407,7 @@ _MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
                         _MainLoopStateMenuRefresh();
                         break;
 
-                case 4:
+                case 5:
                         MainLoopStateForgetDeviceChoice();
                         _MainLoopStateMenuRefresh();
                         MainLoopModalPrintf(
@@ -381,8 +415,111 @@ _MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
                                 "Next L2+X will ask the save location."
                         );
                         break;
+
+                case 6:
+                        InputSnesMouseCycleMode();
+                        _MainLoopStateMenuRefresh();
+                        break;
         }
 
+        return 0;
+}
+
+/* AURORA_STATE_CONFIRM_V1 */
+static char _MainLoop_StateConfirmNoEntry[]  = "NO";
+static char _MainLoop_StateConfirmYesEntry[] = "YES";
+static char *_MainLoop_StateConfirmEntries[] =
+{
+        _MainLoop_StateConfirmNoEntry,
+        _MainLoop_StateConfirmYesEntry,
+        NULL
+};
+static Bool _MainLoop_StateConfirmSave = FALSE;
+static Bool _MainLoop_StateConfirmArmed = FALSE;
+static CScreen *_MainLoop_StateConfirmPreviousScreen = NULL;
+
+static void _MainLoopStateConfirmPromptClose()
+{
+        CScreen *pReturn = _MainLoop_StateConfirmPreviousScreen;
+        if (!pReturn || pReturn == (CScreen *)_MainLoop_pStateConfirmScreen)
+                pReturn = (CScreen *)_MainLoop_pBrowserScreen;
+
+        _MainLoopInputSuppressUntilRelease();
+        _MainLoopSetScreen(pReturn);
+        _MainLoop_StateConfirmPreviousScreen = NULL;
+        _MainLoop_StateConfirmArmed = FALSE;
+        _MenuEnable(FALSE);
+}
+
+void _MainLoopStateConfirmPromptOpen(Bool bSave)
+{
+        if (!_MainLoop_pStateConfirmScreen || _bMenu || !_pSystem)
+                return;
+
+        _MainLoop_StateConfirmSave = bSave;
+        _MainLoop_StateConfirmArmed = FALSE;
+        _MainLoop_StateConfirmPreviousScreen = _MainLoop_pScreen;
+        _MainLoop_pStateConfirmScreen->SetEntries(_MainLoop_StateConfirmEntries);
+        _MainLoop_pStateConfirmScreen->SetSelection(0);
+        _MainLoop_pStateConfirmScreen->SetTitle(bSave ? "Save state?" : "Load state?");
+        _MainLoop_pStateConfirmScreen->SetText(0, "Left/Right: choose   X: confirm");
+        _MainLoop_pStateConfirmScreen->SetText(1, "Default: NO");
+        _MainLoop_pStateConfirmScreen->SetText(2, "");
+        _MainLoop_pStateConfirmScreen->SetText(3, "");
+
+        /* Do not call _MenuEnable(TRUE): quick-state confirmation must not
+           schedule the ordinary L2+R2 SRAM flush. */
+        _bMenu = TRUE;
+        _MainLoopSetScreen((CScreen *)_MainLoop_pStateConfirmScreen);
+}
+
+void _MainLoopStateConfirmPromptCancel()
+{
+        if (_MainLoop_pScreen == (CScreen *)_MainLoop_pStateConfirmScreen)
+                _MainLoopStateConfirmPromptClose();
+}
+
+void _MainLoopStateConfirmPromptInput(Uint32 buttons, Uint32 trigger)
+{
+        const Uint32 NeutralMask = PAD_LEFT | PAD_RIGHT | PAD_CROSS |
+            PAD_CIRCLE | PAD_START | PAD_L2 | PAD_R2;
+
+        if (_MainLoop_pScreen != (CScreen *)_MainLoop_pStateConfirmScreen)
+                return;
+
+        /* Hard input flush: no choice is accepted until one completely
+           neutral frame occurs after the opening L2+X/L2+O combination. */
+        if (!_MainLoop_StateConfirmArmed)
+        {
+                if (!(buttons & NeutralMask))
+                        _MainLoop_StateConfirmArmed = TRUE;
+                return;
+        }
+
+        if (trigger & PAD_CIRCLE)
+        {
+                _MainLoopStateConfirmPromptClose();
+                return;
+        }
+        _MainLoop_pStateConfirmScreen->Input(buttons, trigger);
+}
+
+int _MainLoopStateConfirmMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
+{
+        Bool bSave;
+        (void)Parm2;
+        if (Type != 1 || Parm1 > 1)
+                return 0;
+
+        bSave = _MainLoop_StateConfirmSave;
+        if (Parm1 == 0)
+        {
+                _MainLoopStateConfirmPromptClose();
+                return 0;
+        }
+
+        _MainLoopStateConfirmPromptClose();
+        _MainLoopQuickStateExecuteConfirmed(bSave);
         return 0;
 }
 

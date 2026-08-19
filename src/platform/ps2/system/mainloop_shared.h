@@ -139,6 +139,7 @@ extern CNetworkScreen *_MainLoop_pNetworkScreen;
 extern CMenuScreen    *_MainLoop_pMenuScreen;
 extern CMenuScreen    *_MainLoop_pStateScreen;
 extern CMenuScreen    *_MainLoop_pStateDeviceScreen;
+extern CMenuScreen    *_MainLoop_pStateConfirmScreen;
 extern CMenuScreen    *_MainLoop_pMemCardFormatScreen;
 extern CLogScreen     *_MainLoop_pLogScreen;
 extern CVideoScreen   *_MainLoop_pVideoScreen;

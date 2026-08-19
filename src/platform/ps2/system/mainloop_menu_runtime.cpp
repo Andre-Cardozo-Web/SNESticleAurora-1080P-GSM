@@ -58,7 +58,8 @@ static void _MenuSavePendingSRAM(void)
 
 	BgmIOBegin();
 	#if MAINLOOP_MEMCARD
-	if (MemCardGetStatus(0) == MEMCARD_STATUS_UNFORMATTED)
+	if (MainLoopSramNeedsMemoryCardPreflight() &&
+	    MemCardGetStatus(0) == MEMCARD_STATUS_UNFORMATTED)
 	{
 		BgmIOEnd();
 		_MainLoopMemCardFormatPromptOpen(
@@ -70,6 +71,21 @@ static void _MenuSavePendingSRAM(void)
 	#endif
 
 	bSaved = _MainLoopSaveSRAM(TRUE);
+
+	/* Second-stage check: AUTO may have seen mass0 as mounted, failed the
+	   actual USB write, and then discovered an unformatted MC fallback. */
+	#if MAINLOOP_MEMCARD
+	if (!bSaved &&
+	    MainLoopSramGetDevice() != MAINLOOP_SRAMDEVICE_USB &&
+	    MemCardGetStatus(0) == MEMCARD_STATUS_UNFORMATTED)
+	{
+		BgmIOEnd();
+		_MainLoopMemCardFormatPromptOpen(
+			0, MAINLOOP_MEMCARDFORMAT_SRAM_SAVE);
+		return;
+	}
+	#endif
+
 	BgmIOEnd();
 	MainLoopStatusPrintf(
 		bSaved ? 90 : 180,

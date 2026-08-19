@@ -616,7 +616,7 @@ SDK_EXTRA_IRX := ioptrap.irx poweroff.irx
 # The legacy iaddis CDVD.IRX is also no longer needed. The in-tree
 # cdfs_stream.irx registers cdfs: and streams directories instead of using
 # PS2SDK cdfs.irx's fixed 256-entry table.
-EMBED_IRX_NAMES := audsrv freesd sio2man mcman mcserv padman mtapman ps2dev9 netman smap ps2ip smbman cdfs_stream usbd bdm bdmfs_fatfs usbmass_bd ps2atad ps2hdd mmceman mx4sio_bd
+EMBED_IRX_NAMES := audsrv freesd sio2man mcman mcserv padman mtapman ps2dev9 netman smap ps2ip smbman cdfs_stream usbd ps2mouse bdm bdmfs_fatfs usbmass_bd ps2atad ps2hdd mmceman mx4sio_bd
 
 # Pin the complete SIO2 storage/input group to one verified PS2SDK revision.
 # This prevents a future SDK update from mixing an incompatible sio2man with
@@ -659,6 +659,8 @@ PS2IP_IRX_PATH   ?= $(PS2SDK)/iop/irx/ps2ip.irx
 # reais.  usbd_mini e' o FreeUsbd compativel usado pelo OPL para BDM.  Os
 # caminhos continuam substituiveis na linha de comando para testes de driver.
 USBD_IRX_PATH        ?= $(CURDIR)/irx/usbd_mini.irx
+AURORA_PS2MOUSE_DIR  ?= $(CURDIR)/src/platform/ps2/iop/aurora_ps2mouse
+PS2MOUSE_IRX_PATH    ?= $(AURORA_PS2MOUSE_DIR)/aurora_ps2mouse.irx
 BDM_IRX_PATH         ?= $(CURDIR)/irx/bdm.irx
 BDMFS_FATFS_IRX_PATH ?= $(CURDIR)/irx/bdmfs_fatfs.irx
 USBMASS_BD_IRX_PATH  ?= $(CURDIR)/irx/usbmass_bd.irx
@@ -687,6 +689,7 @@ check-env: ensure-ps2dev
 	@test -f "$(CDFS_STREAM_IRX_PATH)" || (echo "ERROR: required streaming CDFS IRX not found: $(CDFS_STREAM_IRX_PATH)"; exit 1)
 	@test -f "$(SMBMAN_IRX_PATH)" || (echo "ERROR: required SMB filesystem IRX not found: $(SMBMAN_IRX_PATH)"; exit 1)
 	@test -f "$(USBD_IRX_PATH)" || (echo "ERROR: required FreeUsbd mini IRX not found: $(USBD_IRX_PATH)"; exit 1)
+	@test -f "$(PS2MOUSE_IRX_PATH)" || (echo "ERROR: required PS2 USB mouse IRX not found: $(PS2MOUSE_IRX_PATH)"; exit 1)
 	@test -f "$(BDM_IRX_PATH)" || (echo "ERROR: required BDM IRX not found: $(BDM_IRX_PATH)"; exit 1)
 	@test -f "$(BDMFS_FATFS_IRX_PATH)" || (echo "ERROR: required FAT/exFAT IRX not found: $(BDMFS_FATFS_IRX_PATH)"; exit 1)
 	@test -f "$(USBMASS_BD_IRX_PATH)" || (echo "ERROR: required USB mass IRX not found: $(USBMASS_BD_IRX_PATH)"; exit 1)
@@ -748,6 +751,28 @@ $(EMBED_DIR)/cdfs_stream_irx.h: $(CDFS_STREAM_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,cdfs_stream_irx)
 $(EMBED_DIR)/usbd_irx.h: $(USBD_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,usbd_irx)
+# AURORA_COMPOSITE_MOUSE_V1
+AURORA_PS2MOUSE_SOURCES := \
+	$(AURORA_PS2MOUSE_DIR)/Makefile \
+	$(AURORA_PS2MOUSE_DIR)/ps2mouse.c \
+	$(AURORA_PS2MOUSE_DIR)/ps2mouse.h \
+	$(AURORA_PS2MOUSE_DIR)/imports.lst \
+	$(AURORA_PS2MOUSE_DIR)/irx_imports.h
+
+$(PS2MOUSE_IRX_PATH): $(AURORA_PS2MOUSE_SOURCES)
+	PATH="$(PS2DEV)/iop/bin:$(PS2DEV)/bin:$(PS2SDK)/bin:$$PATH" $(MAKE) -C $(AURORA_PS2MOUSE_DIR) PS2SDK="$(PS2SDK)" all
+
+# Build the local mouse IRX before the existing check-env recipe tests it.
+check-env: $(PS2MOUSE_IRX_PATH)
+
+.PHONY: aurora-ps2mouse-clean
+aurora-ps2mouse-clean:
+	$(MAKE) -C $(AURORA_PS2MOUSE_DIR) PS2SDK="$(PS2SDK)" clean
+
+clean: aurora-ps2mouse-clean
+
+$(EMBED_DIR)/ps2mouse_irx.h: $(PS2MOUSE_IRX_PATH) | $(EMBED_DIR)
+	$(call RUN_BIN2C,$<,$@,ps2mouse_irx)
 $(EMBED_DIR)/bdm_irx.h: $(BDM_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,bdm_irx)
 $(EMBED_DIR)/bdmfs_fatfs_irx.h: $(BDMFS_FATFS_IRX_PATH) | $(EMBED_DIR)

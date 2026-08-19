@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 /* BOOTLOG: route through DLog (defined in modules/sjpcm/sjpcm_rpc.c).
    Plain EE printf never reaches PCSX2/NetherSX2's emulator log in this
@@ -129,6 +130,14 @@ static int _LoadMcModule(const char *path, int argc, const char *argv)
 	{
 		return -1;
 	}
+
+	/* AURORA_RUNTIME_SAFE_IOP_FILE_SIZE_V1_4_4
+	 * Avoid narrowing an invalid/oversized sidecar into a negative int and
+	 * feeding that value to SifAllocIopHeap(). */
+	if (st.st_size <= 0 || st.st_size > INT_MAX)
+	{
+		return -1;
+	}
 	size = (int)st.st_size;
 
 	/* Verify the path is actually readable before we go reserve IOP
@@ -146,8 +155,9 @@ static int _LoadMcModule(const char *path, int argc, const char *argv)
 	if (iop_mem == NULL) {
 		return -2;
 	}
+	/* AURORA_RUNTIME_SAFE_IOP_HEAP_LOAD_V1_4_3
+	 * Preserve the actual transfer result before executing the IOP buffer. */
 	ret = SifLoadIopHeap(path, iop_mem);
-	ret=0;
 	if (ret < 0) {
 		SifFreeIopHeap(iop_mem);
 		return -3;
@@ -164,6 +174,10 @@ Int32 IOPLoadModule(const Char *pModuleName, Char **ppSearchPaths, int arglen, c
 {
 	int ret = -1;
 	char ModulePath[256];
+
+	/* AURORA_RUNTIME_SAFE_IOP_MODULE_NAME_V1_4_3 */
+	if (!pModuleName || !pModuleName[0])
+		return -1;
 
 	/* If we have a copy of this module embedded in the ELF, prefer it
 	   unconditionally. The host:/cdrom: search paths used by ppSearchPaths
@@ -193,20 +207,25 @@ Int32 IOPLoadModule(const Char *pModuleName, Char **ppSearchPaths, int arglen, c
 		{
 			if (strlen(*ppSearchPaths) > 0)
 			{
-				strcpy(ModulePath, *ppSearchPaths);
-				strcat(ModulePath, pModuleName);
-				if (ModulePath[0] == 'm' && ModulePath[1]=='c')
+				/* AURORA_RUNTIME_SAFE_IOP_PATH_V1_4_2 */
+				int nPath = snprintf(
+					ModulePath, sizeof(ModulePath), "%s%s",
+					*ppSearchPaths, pModuleName);
+				if (nPath >= 0 && nPath < (int)sizeof(ModulePath))
 				{
-					ret = _LoadMcModule(ModulePath, arglen, pArgs);
-				} else
-				{
-					ret = SifLoadModule(ModulePath, arglen, pArgs);
-				}
+					if (ModulePath[0] == 'm' && ModulePath[1]=='c')
+					{
+						ret = _LoadMcModule(ModulePath, arglen, pArgs);
+					} else
+					{
+						ret = SifLoadModule(ModulePath, arglen, pArgs);
+					}
 
-				if (ret >= 0)
-				{
-					// success!
-					break;
+					if (ret >= 0)
+					{
+						// success!
+						break;
+					}
 				}
 			}
 
@@ -214,8 +233,11 @@ Int32 IOPLoadModule(const Char *pModuleName, Char **ppSearchPaths, int arglen, c
 		}
 	} else
 	{
-		strcpy(ModulePath, pModuleName);
-		ret = SifLoadModule(ModulePath, arglen, pArgs);
+		int nPath = snprintf(
+			ModulePath, sizeof(ModulePath), "%s", pModuleName);
+		ret = (nPath >= 0 && nPath < (int)sizeof(ModulePath))
+			? SifLoadModule(ModulePath, arglen, pArgs)
+			: -1;
 	}
 
 

@@ -701,17 +701,28 @@ static void _StarfieldDraw(void)
 
 int CBrowserScreen::GetEntryPath(char *pStr, int nChars)
 {
-	if (m_iSelect >=0 && m_iSelect < m_nEntries)
-		return snprintf(pStr, nChars, "%s%s", m_Dir, m_pDirEntries[m_iSelect].name);
-	else 
+	int nWritten;
+
+	/* AURORA_RUNTIME_SAFE_BROWSER_PATH_V1_4_2 */
+	if (!pStr || nChars <= 0 ||
+	    m_iSelect < 0 || m_iSelect >= m_nEntries)
 		return 0;
+
+	nWritten = snprintf(
+		pStr, nChars, "%s%s", m_Dir, m_pDirEntries[m_iSelect].name);
+	if (nWritten <= 0 || nWritten >= nChars)
+	{
+		pStr[0] = ' ';
+		return 0;
+	}
+	return nWritten;
 }
 
 char *CBrowserScreen::GetEntryName()
 {
 	if (m_iSelect >=0 && m_iSelect < m_nEntries)
 		return m_pDirEntries[m_iSelect].name;
-	else 
+	else
 		return NULL;
 }
 
@@ -719,7 +730,7 @@ BrowserEntryTypeE CBrowserScreen::GetEntryType()
 {
 	if (m_iSelect >=0 && m_iSelect < m_nEntries)
 		return m_pDirEntries[m_iSelect].eType;
-	else 
+	else
 		return BROWSER_ENTRYTYPE_OTHER;
 }
 
@@ -763,9 +774,19 @@ int CBrowserScreen::MenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
 						case BROWSER_ENTRYTYPE_DIR:
 							break;
 						default:
-							pBrowser->m_SubMenu.SetText(0, str);
-							pBrowser->m_SubMenu.SetText(1, pBrowser->GetEntryName());
+						pBrowser->m_SubMenu.SetText(0, str);
+						/* SetText is bounded in V1.4.2. If the complete
+						   source path did not fit, do not arm Paste with a
+						   different/truncated path. */
+						if (strcmp(pBrowser->m_SubMenu.GetText(0), str) != 0)
+						{
+							pBrowser->m_SubMenu.SetText(0, "");
+							pBrowser->m_SubMenu.SetText(1, "");
+							MainLoopStatusPrintf(180, "Copy path too long.");
 							break;
+						}
+						pBrowser->m_SubMenu.SetText(1, pBrowser->GetEntryName());
+						break;
 					}
 					break;
 				case 1: // Paste file
@@ -785,7 +806,7 @@ int CBrowserScreen::MenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
 						pExt = strrchr(strDestFileName, '.');
 						if (pExt)
 						{
-							// special case .gz extensions							
+							// special case .gz extensions
 							if (!strcmp(pExt, ".gz"))
 							{
 								*pExt = '\0';
@@ -805,7 +826,7 @@ int CBrowserScreen::MenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
 						}
 						// truncate file name
 						PathTruncFileName(strDestShortName, strDestFileName, PathGetMaxFileNameLength(pBrowser->m_Dir) - strlen(strDestFileExt));
-						
+
 						snprintf(strDestPath, sizeof(strDestPath), "%s%s%s", pBrowser->m_Dir, strDestShortName, strDestFileExt);
 						snprintf(strSrcPath, sizeof(strSrcPath), "%s", pBrowser->m_SubMenu.GetText(0));
 
@@ -920,6 +941,8 @@ void CBrowserScreen::ResetEntries()
 	m_iScroll  = 0;
 	m_bCapacityError = FALSE;
 	m_bHasExecutables = FALSE;
+	/* AURORA_RUNTIME_SAFE_BROWSER_RESET_V1_4_1 */
+	m_bSubMenu = FALSE;
 }
 
 
@@ -933,11 +956,11 @@ static Int32 _BrowserEntryQSort(const void *pA, const void *pB)
 	if (pDirA->eType == pDirB->eType)
 	{
 		return strcasecmp(pDirA->name, pDirB->name);
-	} 
+	}
 	else
 	{
 		return pDirA->eType - pDirB->eType;
-	}	
+	}
 }
 
 void CBrowserScreen::SortEntries()
@@ -1093,8 +1116,8 @@ void CBrowserScreen::Draw()
     PolyBlend(TRUE);
 
 
-//    PolyColor4f(0.0f, 0.2f, 0.2f, 0.5f); 
-    PolyColor4f(0.0f, 0.2f, 0.2f, 0.9f); 
+//    PolyColor4f(0.0f, 0.2f, 0.2f, 0.5f);
+    PolyColor4f(0.0f, 0.2f, 0.2f, 0.9f);
 	PolyRect(0, vy, 256, 9);
 
 	FontColor4f(0.0, 0.8f, 0.8f, 1.0f);
@@ -1315,9 +1338,9 @@ void CBrowserScreen::Draw()
 			if (iEntry == m_iSelect)
 			{
 				if (iEntry == m_iSelect)
-					PolyColor4f(0.0f, 1.0f, 0.0f, 0.5f); 
+					PolyColor4f(0.0f, 1.0f, 0.0f, 0.5f);
 					else
-					PolyColor4f(0.0f, 0.0f, 0.0f, 0.25f); 
+					PolyColor4f(0.0f, 0.0f, 0.0f, 0.25f);
 
 				Int32 selW = FontGetStrWidth(str);
 				if (selW > nameMaxPx) selW = nameMaxPx;
@@ -1460,12 +1483,12 @@ void CBrowserScreen::Input(Uint32 buttons, Uint32 trigger)
 			(GetEntryPath(selectedPath, sizeof(selectedPath)) != 0 &&
 			 BrowserIsSmbPath(selectedPath)) ? TRUE : FALSE;
 
-		if (!bSmbSelection)
+		if (m_nEntries > 0 && !bSmbSelection)
 			m_bSubMenu = !m_bSubMenu;
 		  /*
 		if (m_bSubMenu)
 		{
-	    	Char str[256];
+            Char str[256];
 
 //	        sprintf(str, "%s%s", m_Dir, m_pDirEntries[m_iSelect].name);
 	        sprintf(str, "%s", m_pDirEntries[m_iSelect].name);
@@ -1490,6 +1513,19 @@ void CBrowserScreen::Input(Uint32 buttons, Uint32 trigger)
 		m_iSelect++;
 	}
 
+	/* AURORA_BROWSER_PAGE_JUMP_V1_3
+	 * Left/Right act as fixed 10-entry page jumps. The existing clamp below
+	 * saturates at entry 0 and m_nEntries - 1, so these can never wrap. */
+	if (trigger & PAD_LEFT)
+	{
+		m_iSelect -= 10;
+	}
+
+	if (trigger & PAD_RIGHT)
+	{
+		m_iSelect += 10;
+	}
+
 	if (trigger & (PAD_SQUARE))
 	{
 		/* With covers on, Square swaps the artwork (boxart / title /
@@ -1505,9 +1541,19 @@ void CBrowserScreen::Input(Uint32 buttons, Uint32 trigger)
 		m_iSelect+= m_MaxLines-1;
 	}
 
-	// scroll
-	if (m_iSelect < 0) m_iSelect = 0;
- 	if (m_iSelect > (m_nEntries - 1)) m_iSelect = (m_nEntries - 1);
+	/* AURORA_RUNTIME_SAFE_BROWSER_EMPTY_V1_4_1
+	 * m_nEntries==0 used to make the old upper clamp assign -1, then
+	 * propagate -1 into m_iScroll. Keep both invariants non-negative. */
+	if (m_nEntries <= 0)
+	{
+		m_iSelect = 0;
+		m_iScroll = 0;
+	}
+	else
+	{
+		if (m_iSelect < 0) m_iSelect = 0;
+		if (m_iSelect >= m_nEntries) m_iSelect = m_nEntries - 1;
+	}
 
 	// scroll
 	if (m_iSelect < m_iScroll)
@@ -1560,7 +1606,7 @@ if (trigger & PAD_TRIANGLE)
 				CoverFreeCache();
 				SendMessage(1, m_pDirEntries[m_iSelect].eType, (void *)str);
 	            break;
-	            
+
 			}
 		}
 		return;
@@ -1582,6 +1628,18 @@ void CBrowserScreen::SetDir(const Char *pDir)
 {
     Char openBuf[1024];
     const Char *openPath = pDir;
+
+    /* AURORA_RUNTIME_SAFE_BROWSER_SETDIR_V1_4_2
+     * m_Dir is persistent 512-byte state. Reject, rather than truncate, a
+     * path that cannot be represented: a truncated filesystem path could
+     * point at a different entry while an overflow would corrupt the ELF. */
+    if (!pDir)
+        return;
+    if (strlen(pDir) >= sizeof(m_Dir))
+    {
+        MainLoopStatusPrintf(180, "Path too long.");
+        return;
+    }
     /* 0=nao-hdd, 1=dentro de particao (pfs0:), 2=lista de particoes, -1=falha */
     int hddKind = 0;
     int mmceUnavailable = 0;

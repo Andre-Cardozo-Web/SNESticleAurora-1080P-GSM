@@ -67,6 +67,9 @@ Uint8 g_SnesSoftwareLayerMask = (Uint8)(
     SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
     SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
 Uint8 g_SnesSoftwareHackFlags = 0;
+Uint8 g_SnesObjLimitLevel = SNPPU_OBJ_LIMIT_OFF;
+Uint8 g_SnesObjLimitMode = SNPPU_OBJ_LIMIT_MODE_SCANLINE;
+static Bool g_SnesObjLimitVisibilityDirty = TRUE;
 
 /* AURORA_SONIC_BLAST_MAN_COLOR_V7
  * Set by the ROM loader only for exact Sonic Blast Man CRCs. */
@@ -99,6 +102,65 @@ Bool SNPPURenderShouldRenderFrame(void)
     Bool bRender = (g_SoftwareFramePhase == 0);
     g_SoftwareFramePhase ^= 1;
     return bRender;
+}
+
+
+/* AURORA_OBJ_LIMIT_V1_2
+ * Runtime performance limiter. Per-scanline keeps the physical 34-tile
+ * buffer and only lowers its fetch budget. Per-screen instead keeps the
+ * normal 34-tile line rule but restricts the distinct visible OBJ list. */
+void SNPPURenderSetObjLimitLevel(Uint8 uLevel)
+{
+    if (uLevel >= SNPPU_OBJ_LIMIT_NUM)
+        uLevel = SNPPU_OBJ_LIMIT_OFF;
+    if (g_SnesObjLimitLevel != uLevel)
+    {
+        g_SnesObjLimitLevel = uLevel;
+        g_SnesObjLimitVisibilityDirty = TRUE;
+    }
+}
+
+void SNPPURenderSetObjLimitMode(Uint8 uMode)
+{
+    if (uMode >= SNPPU_OBJ_LIMIT_MODE_NUM)
+        uMode = SNPPU_OBJ_LIMIT_MODE_SCANLINE;
+    if (g_SnesObjLimitMode != uMode)
+    {
+        g_SnesObjLimitMode = uMode;
+        g_SnesObjLimitVisibilityDirty = TRUE;
+    }
+}
+
+Int32 SNPPURenderGetObjTileBudget(void)
+{
+    if (g_SnesObjLimitMode != SNPPU_OBJ_LIMIT_MODE_SCANLINE)
+        return SNPPU_MAXOBJCHR;
+
+    switch (g_SnesObjLimitLevel)
+    {
+        case SNPPU_OBJ_LIMIT_LIGHT:   return 28;
+        case SNPPU_OBJ_LIMIT_MEDIUM:  return 24;
+        case SNPPU_OBJ_LIMIT_STRONG:  return 20;
+        case SNPPU_OBJ_LIMIT_EXTREME: return 16;
+        case SNPPU_OBJ_LIMIT_OFF:
+        default:                      return SNPPU_MAXOBJCHR;
+    }
+}
+
+Int32 SNPPURenderGetObjScreenBudget(void)
+{
+    if (g_SnesObjLimitMode != SNPPU_OBJ_LIMIT_MODE_SCREEN)
+        return SNESPPU_OBJ_NUM;
+
+    switch (g_SnesObjLimitLevel)
+    {
+        case SNPPU_OBJ_LIMIT_LIGHT:   return 28;
+        case SNPPU_OBJ_LIMIT_MEDIUM:  return 24;
+        case SNPPU_OBJ_LIMIT_STRONG:  return 20;
+        case SNPPU_OBJ_LIMIT_EXTREME: return 16;
+        case SNPPU_OBJ_LIMIT_OFF:
+        default:                      return SNESPPU_OBJ_NUM;
+    }
 }
 
 
@@ -275,7 +337,8 @@ static Bool bPrint = TRUE;
 			m_UpdateFlags &= ~SNESPPURENDER_UPDATE_PAL;
 		}
 
-		if (m_UpdateFlags & SNESPPURENDER_UPDATE_OBJ)
+		if ((m_UpdateFlags & SNESPPURENDER_UPDATE_OBJ) ||
+		    g_SnesObjLimitVisibilityDirty)
 		{
 #if SNDBG_LOG
 			Uint32 _tObjUpdate = ProfCtrGetCycle();
@@ -294,6 +357,7 @@ static Bool bPrint = TRUE;
 #endif
 
 			m_UpdateFlags &= ~SNESPPURENDER_UPDATE_OBJ;
+			g_SnesObjLimitVisibilityDirty = FALSE;
 		}
 
 		/* Tiles and decoded character rows are cached across scanlines. A VRAM

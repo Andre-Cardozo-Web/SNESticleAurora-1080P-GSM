@@ -252,7 +252,18 @@ void CNetworkScreen::InputText(Uint32 trigger)
 void CNetworkScreen::Input(Uint32 buttons, Uint32 trigger)
 {
     (void)buttons;
-    LoadConfig();
+
+    /* AURORA_NETWORK_LAZY_OPTIONS_V1_4
+     * Merely visiting the Network tab must never probe MC/USB/MMCE/CDFS.
+     * X/Start explicitly opts in to the one-time config scan. m_bLoaded
+     * already persists for the lifetime of this screen, so revisits in the
+     * same emulator run remain instant. */
+    if (!m_bLoaded)
+    {
+        if (trigger & (PAD_CROSS | PAD_START))
+            LoadConfig();
+        return;
+    }
 
     if (m_iDigitIP >= 0)
     {
@@ -394,7 +405,23 @@ void CNetworkScreen::Draw()
     const char *path;
     int y = 15;
 
-    LoadConfig();
+    FontSelect(0);
+
+    /* AURORA_NETWORK_LAZY_OPTIONS_V1_4_DRAW
+     * Keep the first visit purely visual. No filesystem/network/config
+     * probing happens until the user explicitly asks for the options. */
+    if (!m_bLoaded)
+    {
+        SmbHeader(y, "SMB Network");
+        y += 34;
+        FontColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        SmbCenter(128, y, "Press X to show Internet options");
+        y += 15;
+        FontColor4f(0.55f, 0.55f, 0.55f, 1.0f);
+        SmbCenter(128, y, "Start also works");
+        return;
+    }
+
     snprintf(port, sizeof(port), "%d", m_Config.serverPort);
     BuildDisplayText(share, sizeof(share), m_Config.share, 0,
                      m_iEditField == 2);

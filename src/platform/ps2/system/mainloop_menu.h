@@ -13,10 +13,14 @@ int _MainLoopMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2);
 int _MainLoopStateMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2);
 int _MainLoopStateBrowserEvent(Uint32 Type, Uint32 Parm1, void *Parm2);
 int _MainLoopStateDeviceMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2);
+int _MainLoopStateConfirmMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2);
 int _MainLoopMemCardFormatMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2);
 void _MainLoopStateMenuRefresh();
 void _MainLoopStateDevicePromptOpen();
 void _MainLoopStateDevicePromptCancel();
+void _MainLoopStateConfirmPromptOpen(Bool bSave);
+void _MainLoopStateConfirmPromptCancel();
+void _MainLoopStateConfirmPromptInput(Uint32 buttons, Uint32 trigger);
 void _MainLoopMemCardFormatPromptOpen(
 	Int32 iPort,
 	MainLoopMemCardFormatActionE eAction

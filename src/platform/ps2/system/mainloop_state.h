@@ -2,6 +2,14 @@
 
 #include "types.h"
 
+enum MainLoopSramDeviceE
+{
+    MAINLOOP_SRAMDEVICE_AUTO,
+    MAINLOOP_SRAMDEVICE_USB,
+    MAINLOOP_SRAMDEVICE_MEMCARD,
+    MAINLOOP_SRAMDEVICE_NUM
+};
+
 enum MainLoopStateDeviceE
 {
 	MAINLOOP_STATEDEVICE_AUTO,
@@ -21,6 +29,12 @@ Bool _MainLoopSaveSRAM(Bool bSync);
 void _MainLoopLoadSRAM();
 Bool _MainLoopCheckSRAM();
 Bool _MainLoopForceCheckSRAM();
+void MainLoopSramSetDevice(MainLoopSramDeviceE eDevice);
+void MainLoopSramCycleDevice();
+MainLoopSramDeviceE MainLoopSramGetDevice();
+const Char *MainLoopSramGetDeviceName();
+const Char *MainLoopSramGetBrowseRoot();
+Bool MainLoopSramNeedsMemoryCardPreflight();
 Bool _MainLoopLoadState();
 Bool _MainLoopSaveState();
 

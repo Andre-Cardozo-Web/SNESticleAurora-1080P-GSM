@@ -109,8 +109,21 @@ Bool MainLoopProcess()
         pSurface = _fbTexture[_iframetex];
 	
 		Emu::SysInputT Input;
+		Bool bSnesMouse = FALSE;
+		Int32 nSnesMouseX = 0;
+		Int32 nSnesMouseY = 0;
+		Uint32 uSnesMouseButtons = 0;
 	
 		Int32 iPad;
+
+		/* AURORA_AUTO_SNES_MOUSE_V1_5
+		 * Mouse replaces only SNES gameplay port 1. Pads remain polled for
+		 * menus and frontend hotkeys. */
+		if (_pSystem == _pSnes && InputSnesMouseShouldUse())
+		{
+			bSnesMouse = TRUE;
+			InputGetMouseData(&nSnesMouseX, &nSnesMouseY, &uSnesMouseButtons);
+		}
 
         /*
         if (_WavFile.IsOpen())
@@ -127,7 +140,11 @@ Bool MainLoopProcess()
 		// read inputs
 		for (iPad=0; iPad < 5; iPad++)
 		{
-			if (InputIsPadConnected(iPad))
+			if (bSnesMouse && iPad == 0)
+			{
+				Input.uPad[iPad] = EMUSYS_DEVICE_DISCONNECTED;
+			}
+			else if (InputIsPadConnected(iPad))
 			{
 				/* OR the digital pad bits with d-pad bits synthesised from
 				   the left analog stick so the analog stick drives the SNES
@@ -255,7 +272,14 @@ Bool MainLoopProcess()
                     GSK_GetRefreshRate(&uRateNum, &uRateDen);
                     _AudMix->SetFrameRateRational(uRateNum, uRateDen);
                 }
-                _ExecuteSnes(pSurface, pMixBuffer, &Input, eMode);
+				if (bSnesMouse)
+					Input.uPad[0] = EMUSYS_DEVICE_DISCONNECTED;
+				_pSnes->SetMouseInput(
+					bSnesMouse,
+					nSnesMouseX,
+					nSnesMouseY,
+					uSnesMouseButtons);
+				_ExecuteSnes(pSurface, pMixBuffer, &Input, eMode);
             }
 		    _iframetex^=1;
         }
@@ -272,6 +296,11 @@ Bool MainLoopProcess()
 	_MenuRuntimeUpdate();
 
 	MainLoopRender();
+
+	/* Mouse RPC is deliberately post-render/post-VBlank, like the audio
+	   fail-soft drain: never put synchronous SIF work in front of the frame. */
+	InputMousePollPostFrame(
+		(!_bMenu && _pSystem == _pSnes && !_MainLoop_BlackScreen) ? TRUE : FALSE);
 
     PROF_LEAVE("Frame");
 
