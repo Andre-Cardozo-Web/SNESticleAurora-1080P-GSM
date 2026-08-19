@@ -46,7 +46,7 @@ Emulation:
 * Turbo B/A for NES games
 * Turbo toggle (hold R2 + any button) for SNES games
 * In-game soft reset (L2+SELECT)
-* Experimental SNES mouse emulation
+* Experimental SNES mouse emulation *(I need a PS2 compatbile mouse, feedback appreciated if you own one)*
 
 User interface:
 
