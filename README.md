@@ -54,7 +54,7 @@ User interface:
 * Browse SRAM files
 * Confirmation prompt for saving and loading states
 * Faster UI navigation
-* * Many options to enable emulation hacks and compatibility modes (exchange accuracy for performance or vice-versa)
+* Many options to enable emulation hacks and compatibility modes (exchange accuracy for performance or vice-versa)
 * Option to reload the emulator's .elf (very useful for upgrading and testing new builds)
 * ~Changed font from 80 characters to 40 characters, more readable in 240p.~ *(I'll enable this very soon)*
 
