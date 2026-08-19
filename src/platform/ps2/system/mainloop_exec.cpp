@@ -29,11 +29,8 @@ Bool _ExecuteSnes(CRenderSurface *pSurface, CMixBuffer *pMixBuffer, Emu::SysInpu
 
             #if !MAINLOOP_SNESSTATEDEBUG
 //            pMixBuffer=NULL;
-            /* AURORA_CPU_OVERCLOCK_V3 */
-            if (SNCPUGetOverclockLevel() == SNCPU_OVERCLOCK_OFF)
-                SNCPUSetExecuteFunc(SNCPUExecute_ASM);
-            else
-                SNCPUSetExecuteFunc(SNCPUExecute_C);
+            /* CPU overclock UI removed: always use the original ASM core. */
+            SNCPUSetExecuteFunc(SNCPUExecute_ASM);
             SNSPCSetExecuteFunc(SNSPCExecute_C);
 
 		    PROF_ENTER("SnesExecuteFrame");

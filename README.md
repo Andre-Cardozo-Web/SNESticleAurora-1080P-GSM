@@ -44,9 +44,9 @@ Emulation:
 * Changed SRAM and RAM initialization for both NES and SNES. This will fix all the very few games that rely on specific initial values to work properly.
 * Fixes and improvements for the 240p display modes, improved screen positioning and overscan settings for each system and graphical resolution/modes.
 * Turbo B/A for NES games
-* Turbo toggle (hold R2 + any button) for SNES games
+* Turbo toggle (hold R2+ANY BUTTON) for SNES games
 * In-game soft reset (L2+SELECT)
-* Experimental SNES mouse emulation *(I need a PS2 compatbile mouse, feedback appreciated if you own one)*
+* SNES mouse emulation
 
 User interface:
 

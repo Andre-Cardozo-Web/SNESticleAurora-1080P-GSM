@@ -370,7 +370,7 @@ void VideoSettingsSave(void)
 	cfg.objlimitmode = SNPPURenderGetObjLimitMode();
 	cfg.snesmousemode = (Int32)InputSnesMouseGetMode();
 	cfg.turbospeed = (Int32)MainLoopTurboGetSpeed();
-	cfg.cpuoverclock = (Int32)SNCPUGetOverclockLevel();
+	cfg.cpuoverclock = SNCPU_OVERCLOCK_OFF;
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -617,10 +617,8 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 		if (cfg.turbospeed >= MAINLOOP_TURBO_SPEED_NORMAL &&
 		    cfg.turbospeed < MAINLOOP_TURBO_SPEED_NUM)
 			MainLoopTurboSetSpeed((MainLoopTurboSpeedE)cfg.turbospeed);
-		if (cfg.cpuoverclock >= SNCPU_OVERCLOCK_OFF &&
-		    cfg.cpuoverclock < SNCPU_OVERCLOCK_NUM)
-			SNCPUSetOverclockLevel(_pSnes ? _pSnes->GetCpu() : NULL,
-			                         (Uint8)cfg.cpuoverclock);
+		SNCPUSetOverclockLevel(_pSnes ? _pSnes->GetCpu() : NULL,
+		                         SNCPU_OVERCLOCK_OFF);
 	}
 }
 
@@ -946,8 +944,6 @@ _VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;
 			_VideoHackSpriteLimiterStatus()); vy += 12;
 		_VideoRow(vy, 28, m_iSelect, "Limiter Mode",
 			_VideoHackSpriteLimiterModeStatus()); vy += 12;
-		_VideoRow(vy, 29, m_iSelect, "CPU Overclock",
-			_VideoHackCpuOverclockStatus()); vy += 12;
 	}
 	else
 	{
@@ -1009,7 +1005,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		int lo, hi;
 		if (m_iSelect < 10)      { lo = 0;  hi = 9;  }
 		else if (m_iSelect < 19) { lo = 10; hi = 18; }
-		else if (m_iSelect < 30) { lo = 19; hi = 29; }
+		else if (m_iSelect < 30) { lo = 19; hi = 28; }
 		else                     { lo = 30; hi = 37; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
@@ -1273,14 +1269,6 @@ case 17: /* Famiclone Audio */
 				SNPPURenderSetObjLimitMode((Uint8)mode);
 			}
 			break;
-		case 29:
-		{
-			Int32 level = (Int32)SNCPUGetOverclockLevel() + dir;
-			if (level < 0) level = SNCPU_OVERCLOCK_NUM - 1;
-			if (level >= SNCPU_OVERCLOCK_NUM) level = SNCPU_OVERCLOCK_OFF;
-			SNCPUSetOverclockLevel(_pSnes ? _pSnes->GetCpu() : NULL, (Uint8)level);
-		}
-			break;
 		case 30:
 			_VideoApplyCompatFlags(
 				g_VideoCompatFlags == VIDEO_COMPAT_ALL ? 0 : VIDEO_COMPAT_ALL);
@@ -1326,14 +1314,12 @@ case 17: /* Famiclone Audio */
 		else                      m_iSelect = 30;
 	}
 
-/* Cross / Start: persist all video settings to the memory card. */
+/* Cross / Start: persist settings, except Reset emulator. */
 if (trigger & (PAD_CROSS | PAD_START))
 {
-    VideoSettingsSave();
-
-if (m_iSelect == 18)
-{
-    MainResetEmulator();
-}
+    if (m_iSelect == 18)
+        MainResetEmulator();
+    else
+        VideoSettingsSave();
 }
 }

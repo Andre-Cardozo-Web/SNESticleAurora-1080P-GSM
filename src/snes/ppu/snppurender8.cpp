@@ -1567,7 +1567,10 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 		Uint8 *list=m_ObjLine[iLine];
 		Int32 count=m_nObjLine[iLine];
 		Int32 budget=SNPPURenderGetObjTileBudget();
-		if (count>1 && m_nObjTilePotential[iLine]>(Uint16)budget)
+		/* AURORA_SAFE_HOTPATH_V4: when budget is the physical 34-tile limit, limiter
+		   pressure is inactive and the potential cache is intentionally ignored. */
+		if (budget<SNPPU_MAXOBJCHR && count>1 &&
+		    m_nObjTilePotential[iLine]>(Uint16)budget)
 		{
 			Int32 shift=(Int32)(g_SnesObjLimitFramePhase%(Uint32)count);
 			for (Int32 i=0;i<count;i++) rotated[i]=list[(i+shift)%count];

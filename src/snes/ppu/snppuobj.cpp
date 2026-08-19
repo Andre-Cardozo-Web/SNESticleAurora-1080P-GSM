@@ -474,7 +474,10 @@ void SnesPPURender::UpdateOBJVisibility(Uint8 *pObjY, Uint8 *pObjSize, Int32 iOb
 	Bool screenLimited=screenBudget<SNESPPU_OBJ_NUM;
 	Bool trackTiles=SNPPURenderGetObjTileBudget()<SNPPU_MAXOBJCHR;
 	memset(m_nObjLine,0,sizeof(m_nObjLine));
-	memset(m_nObjTilePotential,0,sizeof(m_nObjTilePotential));
+	/* AURORA_SAFE_HOTPATH_V4: stale pressure is harmless whenever trackTiles is false;
+	   RenderLine8 now short-circuits before consulting it in that case. */
+	if (trackTiles)
+		memset(m_nObjTilePotential,0,sizeof(m_nObjTilePotential));
 
 	if (!screenLimited && !trackTiles)
 	{
