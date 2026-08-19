@@ -27,6 +27,10 @@ Bool g_SnesCompatZeroInit = FALSE;
  */
 Bool g_SnesCompatHongKong97SPCBoot = FALSE;
 
+/* AURORA_TOP_GEAR_FASTROM_V1
+ * Exact clean normalized/headerless ROMs only. No ROM bytes are modified. */
+Bool g_SnesCompatTopGearFastRom = FALSE;
+
 #ifndef SNES_HK97_SPC_BOOT
 #define SNES_HK97_SPC_BOOT 1
 #endif
@@ -68,8 +72,11 @@ static Uint32 _SNRomHK97CRC32(const Uint8 *pData, Uint32 nBytes)
 #ifndef SNES_CRC_ZERO_INIT
 #define SNES_CRC_ZERO_INIT 1
 #endif
+#ifndef SNES_TOP_GEAR_FASTROM_HACK
+#define SNES_TOP_GEAR_FASTROM_HACK 1
+#endif
 
-#if SNES_CRC_ZERO_INIT
+#if SNES_CRC_ZERO_INIT || SNES_TOP_GEAR_FASTROM_HACK
 /* AURORA_CRC_ZERO_INIT_DB_V8
  * Exact CRC32 allow-list. CRC is computed after copier-header removal /
  * deinterleaving and before V6 mutates any ROM bytes.
@@ -1071,15 +1078,27 @@ if (m_pRomData && m_uRomBytes == 0x80000u)
 }
 #endif
 
-/* AURORA_CRC_ZERO_INIT_DB_V8
- * Reset on every load, then identify the untouched normalized ROM before
- * V6 applies any in-memory compatibility bytes. */
+/* AURORA_CRC_ZERO_INIT_DB_V8 + AURORA_TOP_GEAR_FASTROM_V1
+ * Compute the untouched normalized/headerless CRC once, before V6 can mutate
+ * compatibility bytes. The Top Gear timing flag is reset every load. */
 g_SnesCompatZeroInit = FALSE;
-#if SNES_CRC_ZERO_INIT
+g_SnesCompatTopGearFastRom = FALSE;
+#if SNES_CRC_ZERO_INIT || SNES_TOP_GEAR_FASTROM_HACK
 if (m_pRomData && m_uRomBytes)
 {
-    const Uint32 uZeroInitCRC = _SNRomZeroInitCRC32(m_pRomData, m_uRomBytes);
-    g_SnesCompatZeroInit = _SNRomNeedsZeroInit(uZeroInitCRC);
+    const Uint32 uCompatIdentityCRC = _SNRomZeroInitCRC32(m_pRomData, m_uRomBytes);
+#if SNES_CRC_ZERO_INIT
+    g_SnesCompatZeroInit = _SNRomNeedsZeroInit(uCompatIdentityCRC);
+#endif
+#if SNES_TOP_GEAR_FASTROM_HACK
+    if (m_uRomBytes == 0x80000u)
+    {
+        g_SnesCompatTopGearFastRom =
+            (uCompatIdentityCRC == 0xD34C49B7u) || /* Top Gear USA */
+            (uCompatIdentityCRC == 0xB0150052u) || /* Top Gear Europe */
+            (uCompatIdentityCRC == 0xE5A57B12u);   /* Top Racer Japan */
+    }
+#endif
 }
 #endif
 

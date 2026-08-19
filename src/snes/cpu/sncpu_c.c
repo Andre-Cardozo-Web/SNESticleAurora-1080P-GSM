@@ -83,12 +83,12 @@
 
 #define SNCPU_SUBCYCLES(_nCycles) \
 	do { \
-		pCpu->Cycles-=(_nCycles)*SNCPU_CYCLE_FAST; \
+		pCpu->Cycles-=(_nCycles)*g_SnesCpuInternalCycle; \
 		SNCPU_TESTCYCLES(_nCycles) \
 	} while (0);
 #define SNCPU_SUBCYCLESSLOW(_nCycles) \
 	do { \
-		pCpu->Cycles-=(_nCycles)*SNCPU_CYCLE_SLOW; \
+		pCpu->Cycles-=(_nCycles)*g_SnesCpuSlowCycle; \
 		SNCPU_TESTCYCLES(_nCycles) \
 	} while (0);
 #define SNCPU_SUBMEMCYCLES(_Addr, _nBytes) \
@@ -230,7 +230,7 @@
 			R_DPMASK = ((Uint32)(R_DP & 0xFF00) << 16) | 0x00FF; \
 		else										\
 			R_DPMASK = (R_DP & 0x00FF ?				\
-				((Uint32)SNCPU_CYCLE_FAST << 16) : 0) | 0xFFFF; \
+				((Uint32)g_SnesCpuInternalCycle << 16) : 0) | 0xFFFF; \
 	} while (0);
 
 #define SNCPU_WRAP_DP_INDEX(_Addr)						\
@@ -276,7 +276,7 @@
 			!(R_P & SNCPU_FLAG_I))                             \
 		{                                                     \
 			Int32 nRemain = pCpu->Cycles -                     \
-				(_TailCycles) * SNCPU_CYCLE_FAST;               \
+				(_TailCycles) * g_SnesCpuInternalCycle;        \
 			if (nRemain > 0)                                   \
 			{                                                   \
 				pCpu->nAbortCycles = nRemain;                    \

@@ -49,6 +49,8 @@ static Uint32 _iframetex=0;
  * Host-audio warmup state only; no emulated/save-state state. */
 static Bool _AudioGameplayWasActive = FALSE;
 static Emu::System *_AudioGameplaySystem = NULL;
+static Bool _SnesMouseWasActive = FALSE;
+static Bool _UsbMouseGameplayWasActive = FALSE;
 
 
 Bool MainLoopProcess()
@@ -274,11 +276,13 @@ Bool MainLoopProcess()
                 }
 				if (bSnesMouse)
 					Input.uPad[0] = EMUSYS_DEVICE_DISCONNECTED;
-				_pSnes->SetMouseInput(
-					bSnesMouse,
-					nSnesMouseX,
-					nSnesMouseY,
-					uSnesMouseButtons);
+				if (bSnesMouse || _SnesMouseWasActive)
+					_pSnes->SetMouseInput(
+						bSnesMouse,
+						nSnesMouseX,
+						nSnesMouseY,
+						uSnesMouseButtons);
+				_SnesMouseWasActive = bSnesMouse;
 				_ExecuteSnes(pSurface, pMixBuffer, &Input, eMode);
             }
 		    _iframetex^=1;
@@ -297,10 +301,18 @@ Bool MainLoopProcess()
 
 	MainLoopRender();
 
-	/* Mouse RPC is deliberately post-render/post-VBlank, like the audio
-	   fail-soft drain: never put synchronous SIF work in front of the frame. */
-	InputMousePollPostFrame(
-		(!_bMenu && _pSystem == _pSnes && !_MainLoop_BlackScreen) ? TRUE : FALSE);
+	/* AURORA_MOUSE_EXPLICIT_V3: no SIF mouse RPC in Off/Controller,
+	   menus, or NES. First resumed USB frame only drains stale motion. */
+	{
+		Bool bUsbGameplay =
+			(!_bMenu && _pSystem == _pSnes && !_MainLoop_BlackScreen &&
+			 InputSnesMouseGetMode() == INPUT_SNES_MOUSE_USB) ? TRUE : FALSE;
+		if (bUsbGameplay)
+			InputMousePollPostFrame(_UsbMouseGameplayWasActive ? TRUE : FALSE);
+		else if (_UsbMouseGameplayWasActive)
+			InputMouseClearSnapshot();
+		_UsbMouseGameplayWasActive = bUsbGameplay;
+	}
 
     PROF_LEAVE("Frame");
 

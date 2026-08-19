@@ -632,6 +632,14 @@ void SnesSystem::MapMem(SNRomMappingE eRomMapping, Uint32 uFlags)
 			break;
 	}
 
+	/* AURORA_TOP_GEAR_FASTROM_V1
+	 * The published FastROM patch for Top Gear gains speed by making ROM
+	 * accesses fast. Aurora does the equivalent at the mapper timing layer
+	 * for exact U/E/J CRCs, so no ROM bank-rewrite or ROM-byte mutation is
+	 * needed. SNCPUSetRomSpeed changes direct ROM descriptors only. */
+	if (g_SnesCompatTopGearFastRom)
+		SNCPUSetRomSpeed(&m_Cpu, 0x000000, 0x1000000, SNCPU_CYCLE_FAST);
+
 	/* Indexed/16-bit accesses can transiently carry past $FFFFFF.  Publish
 	   bank $00 into the overflow page after every cartridge/system override
 	   has been installed, preserving the 24-bit bus wrap in the ASM core. */
@@ -695,6 +703,13 @@ void SnesSystem::SetFastRom()
 
 void SnesSystem::SetSlowRom()
 {
+	/* AURORA_TOP_GEAR_FASTROM_V1: keep exact-CRC Top Gear/Top Racer ROM
+	 * fast across hard/soft reset and MEMSEL=0 writes. */
+	if (g_SnesCompatTopGearFastRom)
+	{
+		SNCPUSetRomSpeed(&m_Cpu, 0x000000, 0x1000000, SNCPU_CYCLE_FAST);
+		return;
+	}
 	SNCPUSetRomSpeed(&m_Cpu, 0x800000, 0x800000, SNCPU_CYCLE_SLOW);
 }
 

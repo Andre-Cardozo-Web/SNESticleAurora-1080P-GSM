@@ -43,15 +43,6 @@ Bool _SnesPPUOBJVisibleX(Uint16 uPosX, Uint8 uWidth)
 	return TRUE;
 }
 
-Bool _SnesPPUOBJTileCountedX(Uint16 uObjectX, Int32 iTileX)
-{
-	/* OBJ X=256 is a hardware quirk: its tiles consume the 34-tile budget
-	   even though no pixel is visible. A tile ending exactly at x=-1 is the
-	   first ordinary off-left tile that counts. */
-	return ((uObjectX & 0x1FF) == 0x100) ||
-	       (iTileX > -8 && iTileX < 256);
-}
-
 
 #if SNDBG_DEEP
 static Uint32 _ObjCountBits8(Uint32 v)
@@ -479,65 +470,65 @@ static Bool _SnesPPUOBJScreenLimiterVisibleY(Uint32 uObjY, Uint32 uObjSize)
 
 void SnesPPURender::UpdateOBJVisibility(Uint8 *pObjY, Uint8 *pObjSize, Int32 iObj, Int32 nObjs)
 {
-	Int32 nObjBudget = SNPPURenderGetObjScreenBudget();
-	Int32 nObjSelected = 0;
-	Bool bScreenLimited = nObjBudget < SNESPPU_OBJ_NUM;
+	Int32 screenBudget=SNPPURenderGetObjScreenBudget();
+	Bool screenLimited=screenBudget<SNESPPU_OBJ_NUM;
+	Bool trackTiles=SNPPURenderGetObjTileBudget()<SNPPU_MAXOBJCHR;
+	memset(m_nObjLine,0,sizeof(m_nObjLine));
+	memset(m_nObjTilePotential,0,sizeof(m_nObjTilePotential));
 
-    memset(m_nObjLine, 0, sizeof(m_nObjLine));
-
-	while (nObjs > 0)
+	if (!screenLimited && !trackTiles)
 	{
-		Uint32 uObjY, uObjSize;
-		Bool bKeep;
-
-		if (bScreenLimited && nObjSelected >= nObjBudget)
-			break;
-
-		iObj &= 0x7F;
-
-		// get pointer to object
-        uObjSize = pObjSize[iObj];
-		uObjY    = pObjY[iObj];
-
-		bKeep = _SnesPPUOBJVisibleX(m_Objs[iObj].uPosX,
-		                            m_Objs[iObj].uWidth);
-		if (bKeep && bScreenLimited)
+		while (nObjs>0)
 		{
-			bKeep = _SnesPPUOBJScreenLimiterVisibleX(
-				m_Objs[iObj].uPosX, m_Objs[iObj].uWidth) &&
-				_SnesPPUOBJScreenLimiterVisibleY(uObjY, uObjSize);
+			Uint32 y,h; iObj&=0x7F; h=pObjSize[iObj]; y=pObjY[iObj];
+			if (_SnesPPUOBJVisibleX(m_Objs[iObj].uPosX,m_Objs[iObj].uWidth))
+				while (h > 0) { if (y<SNPPU_MAXLINE && m_nObjLine[y]<SNPPU_MAXOBJ) m_ObjLine[y][m_nObjLine[y]++]=(Uint8)iObj; y++; h--; }
+			iObj++; nObjs--;
 		}
-
-		if (bKeep)
+		return;
+	}
+	if (!screenLimited)
+	{
+		while (nObjs>0)
 		{
-			if (bScreenLimited)
-				nObjSelected++;
-
-			while (uObjSize > 0)
-        {
-            if (uObjY < SNPPU_MAXLINE)
-            {
-                if (m_nObjLine[uObjY] < SNPPU_MAXOBJ)
-                {
-                    m_ObjLine[uObjY][m_nObjLine[uObjY]] = (Uint8)iObj;
-                    m_nObjLine[uObjY]++;
-                }
-            }
-
-            uObjY++;
-            uObjSize--;
-    		uObjY&= 0xFF;
-        }
+			Uint32 y,h; Int32 counted=0; iObj&=0x7F; h=pObjSize[iObj]; y=pObjY[iObj];
+			if (_SnesPPUOBJVisibleX(m_Objs[iObj].uPosX,m_Objs[iObj].uWidth))
+			{
+				Int32 x=(m_Objs[iObj].uPosX&0x100)?((Int32)(m_Objs[iObj].uPosX&0x1FF)-512):(Int32)(m_Objs[iObj].uPosX&0x1FF);
+				for (Int32 t=0;t<(m_Objs[iObj].uWidth>>3);t++) if (_SnesPPUOBJTileCountedX(m_Objs[iObj].uPosX,x+(t<<3))) counted++;
+				while (h > 0) { if (y<SNPPU_MAXLINE && m_nObjLine[y]<SNPPU_MAXOBJ) { m_ObjLine[y][m_nObjLine[y]++]=(Uint8)iObj; m_nObjTilePotential[y]+=(Uint16)counted; } y++; h--; }
+			}
+			iObj++; nObjs--;
 		}
-
-		iObj++;
-		nObjs--;
+		return;
+	}
+	{
+		Uint8 candidates[SNESPPU_OBJ_NUM],selected[SNESPPU_OBJ_NUM]; Int32 nc=0,so=iObj,sn=nObjs,io=iObj,nn=nObjs;
+		memset(selected,0,sizeof(selected));
+		while (nn>0)
+		{
+			Uint32 y,h; Bool keep; io&=0x7F; h=pObjSize[io]; y=pObjY[io];
+			keep=_SnesPPUOBJVisibleX(m_Objs[io].uPosX,m_Objs[io].uWidth) &&
+			     _SnesPPUOBJScreenLimiterVisibleX(m_Objs[io].uPosX,m_Objs[io].uWidth) &&
+			     _SnesPPUOBJScreenLimiterVisibleY(y,h);
+			if (keep && nc<SNESPPU_OBJ_NUM) candidates[nc++]=(Uint8)io;
+			io++; nn--;
+		}
+		if (nc)
+		{
+			Int32 keep=nc<screenBudget?nc:screenBudget,start=0;
+			if (nc>screenBudget) start=(Int32)(((g_SnesObjLimitFramePhase%(Uint32)nc)*(Uint32)screenBudget)%(Uint32)nc);
+			for (Int32 i=0;i<keep;i++) selected[candidates[(start+i)%nc]]=1;
+		}
+		iObj=so; nObjs=sn;
+		while (nObjs>0)
+		{
+			Uint32 y,h; iObj&=0x7F; h=pObjSize[iObj]; y=pObjY[iObj];
+			if (selected[iObj]) while (h > 0) { if (y<SNPPU_MAXLINE && m_nObjLine[y]<SNPPU_MAXOBJ) m_ObjLine[y][m_nObjLine[y]++]=(Uint8)iObj; y++; h--; }
+			iObj++; nObjs--;
+		}
 	}
 }
-
-
-
-
 
 
 void SnesPPURender::UpdateOBJ(Uint8 *pObjY, Uint8 *pObjSize)

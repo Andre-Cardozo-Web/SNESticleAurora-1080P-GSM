@@ -23,6 +23,8 @@ void QuicknesBridge_UnloadGame(void);
 void QuicknesBridge_Reset(void);
 void QuicknesBridge_SoftReset(void);
 void QuicknesBridge_SetDutySwap(bool enabled);
+/* AURORA_CONTROLLER_OPTIONS_V2 */
+void QuicknesBridge_SetTurboSpeed(unsigned speedShift);
 void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
                              CRenderSurface *pTarget,
                              CMixBuffer *pMixBuf);

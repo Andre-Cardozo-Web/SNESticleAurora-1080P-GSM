@@ -11,6 +11,7 @@
 #include "mainloop_shared.h"
 #include "mainloop.h"
 #include "input.h"
+#include "nes/quicknes/quicknes_bridge.h"
 #include "memcard.h"
 #include "prof.h"
 
@@ -33,6 +34,47 @@ extern "C" {
 #define SNES_TURBO_HOST_BUTTONS (     PAD_SQUARE | PAD_TRIANGLE | PAD_CROSS | PAD_CIRCLE |     PAD_L1 | PAD_R1 | PAD_SELECT | PAD_START )
 
 #define SNES_GAMEPLAY_HOST_BUTTONS (     SNES_DIRECTION_HOST_BUTTONS | SNES_TURBO_HOST_BUTTONS )
+
+/* AURORA_CONTROLLER_OPTIONS_V2 */
+static MainLoopTurboSpeedE _MainLoop_TurboSpeed = MAINLOOP_TURBO_SPEED_NORMAL;
+
+void MainLoopTurboSetSpeed(MainLoopTurboSpeedE eSpeed)
+{
+    if (eSpeed < MAINLOOP_TURBO_SPEED_NORMAL || eSpeed >= MAINLOOP_TURBO_SPEED_NUM)
+        eSpeed = MAINLOOP_TURBO_SPEED_NORMAL;
+    _MainLoop_TurboSpeed = eSpeed;
+    QuicknesBridge_SetTurboSpeed((unsigned)eSpeed);
+}
+
+MainLoopTurboSpeedE MainLoopTurboGetSpeed(void) { return _MainLoop_TurboSpeed; }
+
+void MainLoopTurboCycleSpeedDir(Int32 dir)
+{
+    Int32 speed;
+    if (dir == 0) return;
+    speed = (Int32)_MainLoop_TurboSpeed + (dir < 0 ? -1 : 1);
+    if (speed < MAINLOOP_TURBO_SPEED_NORMAL) speed = MAINLOOP_TURBO_SPEED_NUM - 1;
+    if (speed >= MAINLOOP_TURBO_SPEED_NUM) speed = MAINLOOP_TURBO_SPEED_NORMAL;
+    MainLoopTurboSetSpeed((MainLoopTurboSpeedE)speed);
+}
+
+const char *MainLoopTurboGetSpeedName(void)
+{
+    switch (_MainLoop_TurboSpeed)
+    {
+        case MAINLOOP_TURBO_SPEED_HALF:    return "Half";
+        case MAINLOOP_TURBO_SPEED_QUARTER: return "Quarter";
+        case MAINLOOP_TURBO_SPEED_NORMAL:
+        default:                           return "Max";
+    }
+}
+
+static Bool _MainLoopTurboIsOn(Uint32 uFrame)
+{
+    Uint32 shift = (Uint32)_MainLoop_TurboSpeed;
+    /* Max=1 ON/1 OFF; Half=2 ON/2 OFF; Quarter=4 ON/4 OFF. */
+    return (((uFrame >> shift) & 1U) == 0U) ? TRUE : FALSE;
+}
 
 static Bool _MainLoop_bSuppressGameInputUntilRelease = FALSE;
 
@@ -87,8 +129,9 @@ Uint16 _MainLoopInput(Uint32 pad)
 
 			/* AURORA_SNES_R2_TURBO_NO_DPAD_RUNTIME_V1_4_4
 			   Directions are never phase-gated. Turbo-eligible buttons
-			   use the same 1-frame ON / 1-frame OFF cadence as QuickNES. */
-			if ((_pSystem->GetFrame() & 1) != 0)
+			   use the cadence selected in Controller options. Max remains
+   the historical 1-frame ON / 1-frame OFF behavior. */
+			if (!_MainLoopTurboIsOn((Uint32)_pSystem->GetFrame()))
 				uTurboButtons = 0;
 
 			/* Examples:

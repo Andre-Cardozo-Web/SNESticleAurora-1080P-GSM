@@ -49,7 +49,7 @@ static Int32  _Input_MouseDeltaY = 0;
 static Uint32 _Input_MouseButtons = 0;
 static Uint32 _Input_MouseEnumCountdown = 0;
 static Uint32 _Input_MouseAuroraStatus = 0;
-static InputSnesMouseModeE _Input_SnesMouseMode = INPUT_SNES_MOUSE_AUTO;
+static InputSnesMouseModeE _Input_SnesMouseMode = INPUT_SNES_MOUSE_OFF;
 
 /* AURORA_COMPOSITE_MOUSE_V1 status bits from the project-local IOP driver. */
 #define INPUT_MOUSE_STATUS_DRIVER     0x01U
@@ -58,7 +58,7 @@ static InputSnesMouseModeE _Input_SnesMouseMode = INPUT_SNES_MOUSE_AUTO;
 #define INPUT_MOUSE_STATUS_CONNECTED  0x08U
 #define INPUT_MOUSE_STATUS_BOOT_PROTO 0x10U
 
-#define INPUT_MOUSE_ENUM_PERIOD       30
+#define INPUT_MOUSE_ENUM_PERIOD       60
 #define INPUT_MOUSE_BIND_TRIES       250
 #define INPUT_MOUSE_BIND_SLEEP_US   2000
 
@@ -159,6 +159,13 @@ static void _Input_MouseInit(void)
            (unsigned)_Input_MouseAuroraStatus);
 }
 
+void InputMouseClearSnapshot(void)
+{
+    _Input_MouseDeltaX = 0;
+    _Input_MouseDeltaY = 0;
+    _Input_MouseButtons = 0;
+}
+
 void InputMousePollPostFrame(Bool bCaptureMotion)
 {
     Uint32 nDevices = 0;
@@ -167,61 +174,43 @@ void InputMousePollPostFrame(Bool bCaptureMotion)
     if (!_Input_bInitialized)
         return;
 
-    _Input_MouseDeltaX = 0;
-    _Input_MouseDeltaY = 0;
+    InputMouseClearSnapshot();
+    if (_Input_SnesMouseMode != INPUT_SNES_MOUSE_USB)
+        return;
 
     if (!_Input_bMouseRpcReady)
     {
         _Input_bMouseConnected = FALSE;
-        _Input_MouseButtons = 0;
         return;
     }
 
-    if (_Input_MouseEnumCountdown == 0)
+    if (!_Input_bMouseConnected)
     {
-        _Input_MouseRpcCall(PS2MOUSE_AURORA_STATUS,
-                            &_Input_MouseAuroraStatus,
-                            sizeof(_Input_MouseAuroraStatus));
-        if (_Input_MouseRpcCall(PS2MOUSE_ENUM, &nDevices, sizeof(nDevices)) == 0)
+        if (_Input_MouseEnumCountdown > 0)
         {
-            Bool bNow = nDevices > 0 ? TRUE : FALSE;
-            if (bNow != _Input_bMouseConnected)
-                printf("Input: USB mouse %s\n", bNow ? "connected" : "disconnected");
-            _Input_bMouseConnected = bNow;
+            _Input_MouseEnumCountdown--;
+            return;
         }
+        if (_Input_MouseRpcCall(PS2MOUSE_ENUM, &nDevices, sizeof(nDevices)) == 0)
+            _Input_bMouseConnected = nDevices > 0 ? TRUE : FALSE;
         _Input_MouseEnumCountdown = INPUT_MOUSE_ENUM_PERIOD;
-    }
-    else
-    {
-        _Input_MouseEnumCountdown--;
-    }
-
-    if (!_Input_bMouseConnected &&
-        _Input_SnesMouseMode != INPUT_SNES_MOUSE_FORCE)
-    {
-        _Input_MouseButtons = 0;
-        return;
+        if (!_Input_bMouseConnected)
+            return;
     }
 
     memset(&data, 0, sizeof(data));
     if (_Input_MouseRpcCall(PS2MOUSE_READ, &data, sizeof(data)) < 0)
     {
-        _Input_MouseButtons = 0;
+        _Input_bMouseConnected = FALSE;
+        _Input_MouseEnumCountdown = 0;
         return;
     }
 
-    /* No host acceleration/normalisation here. Keep exact raw relative
-       counts so X/Y and diagonals use the same sensitivity. Menu polling
-       drains the differential driver but deliberately discards motion. */
     if (bCaptureMotion)
     {
         _Input_MouseDeltaX = (Int32)data.x;
         _Input_MouseDeltaY = (Int32)data.y;
         _Input_MouseButtons = (Uint32)data.buttons & 0x03U;
-    }
-    else
-    {
-        _Input_MouseButtons = 0;
     }
 }
 
@@ -546,10 +535,16 @@ void InputGetMouseData(Int32 *pDeltaX, Int32 *pDeltaY, Uint32 *pButtons)
 
 void InputSnesMouseSetMode(InputSnesMouseModeE eMode)
 {
-    if (eMode < INPUT_SNES_MOUSE_AUTO ||
+    if (eMode < INPUT_SNES_MOUSE_OFF ||
         eMode >= INPUT_SNES_MOUSE_MODE_NUM)
-        eMode = INPUT_SNES_MOUSE_AUTO;
+        eMode = INPUT_SNES_MOUSE_OFF;
+
     _Input_SnesMouseMode = eMode;
+    InputMouseClearSnapshot();
+    if (eMode == INPUT_SNES_MOUSE_USB && !_Input_bMouseRpcReady)
+        _Input_MouseInit();
+    if (eMode != INPUT_SNES_MOUSE_USB)
+        _Input_MouseEnumCountdown = 0;
 }
 
 InputSnesMouseModeE InputSnesMouseGetMode(void)
@@ -565,12 +560,12 @@ void InputSnesMouseCycleModeDir(Int32 dir)
         return;
 
     mode = (Int32)_Input_SnesMouseMode + (dir < 0 ? -1 : 1);
-    if (mode < INPUT_SNES_MOUSE_AUTO)
+    if (mode < INPUT_SNES_MOUSE_OFF)
         mode = INPUT_SNES_MOUSE_MODE_NUM - 1;
     if (mode >= INPUT_SNES_MOUSE_MODE_NUM)
-        mode = INPUT_SNES_MOUSE_AUTO;
+        mode = INPUT_SNES_MOUSE_OFF;
 
-    _Input_SnesMouseMode = (InputSnesMouseModeE)mode;
+    InputSnesMouseSetMode((InputSnesMouseModeE)mode);
 }
 
 void InputSnesMouseCycleMode(void)
@@ -582,33 +577,21 @@ Bool InputSnesMouseShouldUse(void)
 {
     if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_CONTROLLER)
         return InputIsPadConnected(0);
-    if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_PAD_ONLY)
-        return FALSE;
-    if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_FORCE)
-        return _Input_bMouseRpcReady;
-    return _Input_bMouseConnected;
+    if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_USB)
+        return _Input_bMouseRpcReady && _Input_bMouseConnected;
+    return FALSE;
 }
 
 const char *InputSnesMouseGetModeName(void)
 {
     if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_CONTROLLER)
-        return InputIsPadConnected(0)
-            ? "Controller" : "Controller (no P1)";
-    if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_PAD_ONLY)
-        return "Pad only";
-    if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_FORCE)
-        return _Input_bMouseRpcReady ? "Mouse force" : "Force (driver off)";
-
-    if (_Input_bMouseConnected)
-        return (_Input_MouseAuroraStatus & INPUT_MOUSE_STATUS_BOOT_PROTO)
-            ? "Auto (USB boot)" : "Auto (USB)";
-    if (_Input_MouseAuroraStatus & INPUT_MOUSE_STATUS_BOOT_SEEN)
-        return "Auto (boot seen)";
-    if (_Input_MouseAuroraStatus & INPUT_MOUSE_STATUS_HID_SEEN)
-        return "Auto (HID non-boot)";
-    if (_Input_bMouseRpcReady)
-        return "Auto (no mouse)";
-    return "Auto (driver off)";
+        return InputIsPadConnected(0) ? "Controller" : "Controller (no P1)";
+    if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_USB)
+    {
+        if (!_Input_bMouseRpcReady) return "USB (driver off)";
+        return _Input_bMouseConnected ? "USB" : "USB (no mouse)";
+    }
+    return "Off";
 }
 
 
@@ -663,9 +646,11 @@ void InputInit(Bool bXLib)
                        _Input_PadBuf[iPad]);
     }
 
-    _Input_MouseInit();
-
+    /* AURORA_MOUSE_EXPLICIT_V3: Off/Controller do no mouse RPC.
+       Re-init USB only if it was already an explicit persisted runtime mode. */
     _Input_bInitialized = TRUE;
+    if (_Input_SnesMouseMode == INPUT_SNES_MOUSE_USB)
+        _Input_MouseInit();
 }
 
 void InputShutdown(void)

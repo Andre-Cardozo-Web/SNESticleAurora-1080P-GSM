@@ -31,20 +31,20 @@ void   InputPoll(void);
 Uint32 InputGetPadData(Uint32 uPad);
 Bool   InputIsPadConnected(Uint32 uPad);
 
-/* SNES mouse snapshot. USB mode returns raw HID relative counts;
-   Controller mode synthesizes relative counts from P1. Button bits are
-   1=left, 2=right. */
+/* AURORA_MOUSE_EXPLICIT_V3
+ * No automatic USB probing. Off/Controller perform no mouse SIF RPC.
+ * USB is explicit and lazy-initialized. */
 Bool   InputIsMouseConnected(void);
 void   InputGetMouseData(Int32 *pDeltaX, Int32 *pDeltaY, Uint32 *pButtons);
+void   InputMouseClearSnapshot(void);
 void   InputMousePollPostFrame(Bool bCaptureMotion);
 
 
 typedef enum InputSnesMouseModeE
 {
-    INPUT_SNES_MOUSE_AUTO = 0,
+    INPUT_SNES_MOUSE_OFF = 0,
     INPUT_SNES_MOUSE_CONTROLLER,
-    INPUT_SNES_MOUSE_PAD_ONLY,
-    INPUT_SNES_MOUSE_FORCE,
+    INPUT_SNES_MOUSE_USB,
     INPUT_SNES_MOUSE_MODE_NUM
 } InputSnesMouseModeE;
 

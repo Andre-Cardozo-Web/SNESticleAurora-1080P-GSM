@@ -9,6 +9,7 @@
 #include "poly.h"
 #include "uiVideo.h"
 #include "snrom.h"
+#include "snes.h"
 extern "C" {
 #include "gskit_backend.h"
 #include "gpfifo.h"
@@ -19,6 +20,7 @@ extern "C" {
 #include "uiCover.h"
 #include "mainloop_bgm.h"
 #include "mainloop_state.h"
+#include "mainloop_input.h"
 #include "input.h"
 #include "mainloop_smb.h"
 #include "audmixbuffer.h"
@@ -29,6 +31,7 @@ extern "C" {
 
 /* mc0:/SNESticle (defined in mainloop_globals.cpp). */
 extern Char _SramPath[256];
+extern SnesSystem *_pSnes;
 
 void MainResetEmulator(void);
 
@@ -37,7 +40,8 @@ void MainResetEmulator(void);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 25
+#define VIDEOCFG_VERSION 26
+/* AURORA_AUG19_BUNDLE_V3: v26 appends Turbo Speed + CPU Overclock. */
 /* AURORA_CONFIG_V24_STORAGE_OBJ_LIMIT_MODE
  * v24 appends OBJ limiter mode. v23 imports its limiter/storage fields and
  * defaults the new mode to Per Scanline; v21/v22 retain exact import. */
@@ -74,6 +78,8 @@ typedef struct
 	Int32  sramdevice;
 	Int32  objlimitmode;
 	Int32  snesmousemode;
+	Int32  turbospeed;
+	Int32  cpuoverclock;
 } VideoCfgT;
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -254,6 +260,13 @@ typedef struct
 	Int32  objlimitmode;
 } VideoCfgV24T;
 
+/* Exact byte layout written by Aurora video.cfg v25. */
+typedef struct
+{
+	VideoCfgV24T v24;
+	Int32 snesmousemode;
+} VideoCfgV25T;
+
 /* Exact byte layout written by Aurora V1/V1.1 (video.cfg v23). */
 typedef struct
 {
@@ -356,6 +369,8 @@ void VideoSettingsSave(void)
 	cfg.sramdevice = MainLoopSramGetDevice();
 	cfg.objlimitmode = SNPPURenderGetObjLimitMode();
 	cfg.snesmousemode = (Int32)InputSnesMouseGetMode();
+	cfg.turbospeed = (Int32)MainLoopTurboGetSpeed();
+	cfg.cpuoverclock = (Int32)SNCPUGetOverclockLevel();
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -378,7 +393,9 @@ void VideoSettingsLoad(void)
 	SNPPURenderSetObjLimitLevel(SNPPU_OBJ_LIMIT_OFF);
 	SNPPURenderSetObjLimitMode(SNPPU_OBJ_LIMIT_MODE_SCANLINE);
 	MainLoopSramSetDevice(MAINLOOP_SRAMDEVICE_AUTO);
-	InputSnesMouseSetMode(INPUT_SNES_MOUSE_AUTO);
+	InputSnesMouseSetMode(INPUT_SNES_MOUSE_OFF);
+	MainLoopTurboSetSpeed(MAINLOOP_TURBO_SPEED_NORMAL);
+	SNCPUSetOverclockLevel(_pSnes ? _pSnes->GetCpu() : NULL, SNCPU_OVERCLOCK_OFF);
 	_VideoApplyCompatFlags(0);
 	_VideoCfgPath(path);
 
@@ -390,6 +407,25 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
+		else if (header.version == 25)
+		{
+			VideoCfgV25T oldcfg25;
+			memset(&oldcfg25, 0, sizeof(oldcfg25));
+			if (MemCardReadFile(path, (Uint8 *)&oldcfg25, sizeof(oldcfg25)))
+			{
+				memcpy(&cfg, &oldcfg25, sizeof(oldcfg25));
+				cfg.version = VIDEOCFG_VERSION;
+				switch (oldcfg25.snesmousemode)
+				{
+					case 1: cfg.snesmousemode = INPUT_SNES_MOUSE_CONTROLLER; break;
+					case 3: cfg.snesmousemode = INPUT_SNES_MOUSE_USB; break;
+					default: cfg.snesmousemode = INPUT_SNES_MOUSE_OFF; break;
+				}
+				cfg.turbospeed = MAINLOOP_TURBO_SPEED_NORMAL;
+				cfg.cpuoverclock = SNCPU_OVERCLOCK_OFF;
+				loaded = TRUE;
+			}
+		}
 		else if (header.version == 24)
 		{
 			VideoCfgV24T oldcfg24;
@@ -398,7 +434,7 @@ void VideoSettingsLoad(void)
 			{
 				memcpy(&cfg, &oldcfg24, sizeof(oldcfg24));
 				cfg.version = VIDEOCFG_VERSION;
-				cfg.snesmousemode = INPUT_SNES_MOUSE_AUTO;
+				cfg.snesmousemode = INPUT_SNES_MOUSE_OFF;
 				loaded = TRUE;
 			}
 		}
@@ -574,10 +610,17 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 			MainLoopSramSetDevice((MainLoopSramDeviceE)cfg.sramdevice);
 		if ((cfg.compatflags & ~VIDEO_COMPAT_ALL) == 0)
 			_VideoApplyCompatFlags(cfg.compatflags);
-		if (cfg.snesmousemode >= INPUT_SNES_MOUSE_AUTO &&
+		if (cfg.snesmousemode >= INPUT_SNES_MOUSE_OFF &&
 		    cfg.snesmousemode < INPUT_SNES_MOUSE_MODE_NUM)
 			InputSnesMouseSetMode(
 				(InputSnesMouseModeE)cfg.snesmousemode);
+		if (cfg.turbospeed >= MAINLOOP_TURBO_SPEED_NORMAL &&
+		    cfg.turbospeed < MAINLOOP_TURBO_SPEED_NUM)
+			MainLoopTurboSetSpeed((MainLoopTurboSpeedE)cfg.turbospeed);
+		if (cfg.cpuoverclock >= SNCPU_OVERCLOCK_OFF &&
+		    cfg.cpuoverclock < SNCPU_OVERCLOCK_NUM)
+			SNCPUSetOverclockLevel(_pSnes ? _pSnes->GetCpu() : NULL,
+			                         (Uint8)cfg.cpuoverclock);
 	}
 }
 
@@ -720,6 +763,18 @@ static const char *_VideoHackFrameSkipStatus()
 {
 	return (SNPPURenderGetSoftwareHackFlags() & SNPPU_HACK_FRAME_SKIP)
 		? "1" : "Off";
+}
+
+static const char *_VideoHackCpuOverclockStatus()
+{
+	switch (SNCPUGetOverclockLevel())
+	{
+		case SNCPU_OVERCLOCK_120: return "120%";
+		case SNCPU_OVERCLOCK_150: return "150%";
+		case SNCPU_OVERCLOCK_200: return "200%";
+		case SNCPU_OVERCLOCK_300: return "300%";
+		default:                  return "Off";
+	}
 }
 
 static const char *_VideoCompatProfileStatus()
@@ -891,8 +946,8 @@ _VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;
 			_VideoHackSpriteLimiterStatus()); vy += 12;
 		_VideoRow(vy, 28, m_iSelect, "Limiter Mode",
 			_VideoHackSpriteLimiterModeStatus()); vy += 12;
-		_VideoRow(vy, 29, m_iSelect, "Frame Skip",
-			_VideoHackFrameSkipStatus()); vy += 12;
+		_VideoRow(vy, 29, m_iSelect, "CPU Overclock",
+			_VideoHackCpuOverclockStatus()); vy += 12;
 	}
 	else
 	{
@@ -908,9 +963,15 @@ _VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;
 		_VideoRow(vy, 34, m_iSelect, "Audio Queue",
 			_VideoCompatAudioQueueStatus()); vy += 12;
 
-		_VideoHeader(vy, "Controller / Mouse"); vy += 14;
-		_VideoRow(vy, 35, m_iSelect, "SNES Mouse",
+		_VideoHeader(vy, "Performance"); vy += 14;
+		_VideoRow(vy, 35, m_iSelect, "Frame Skip",
+			_VideoHackFrameSkipStatus()); vy += 12;
+
+		_VideoHeader(vy, "Controller options"); vy += 14;
+		_VideoRow(vy, 36, m_iSelect, "SNES Mouse",
 			InputSnesMouseGetModeName()); vy += 12;
+		_VideoRow(vy, 37, m_iSelect, "Turbo Speed",
+			MainLoopTurboGetSpeedName()); vy += 12;
 	}
 
 	/* controls / hints (clear of the vy=215 footer) */
@@ -949,7 +1010,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		if (m_iSelect < 10)      { lo = 0;  hi = 9;  }
 		else if (m_iSelect < 19) { lo = 10; hi = 18; }
 		else if (m_iSelect < 30) { lo = 19; hi = 29; }
-		else                     { lo = 30; hi = 35; }
+		else                     { lo = 30; hi = 37; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1213,8 +1274,12 @@ case 17: /* Famiclone Audio */
 			}
 			break;
 		case 29:
-			SNPPURenderSetSoftwareHackFlags(
-				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_FRAME_SKIP);
+		{
+			Int32 level = (Int32)SNCPUGetOverclockLevel() + dir;
+			if (level < 0) level = SNCPU_OVERCLOCK_NUM - 1;
+			if (level >= SNCPU_OVERCLOCK_NUM) level = SNCPU_OVERCLOCK_OFF;
+			SNCPUSetOverclockLevel(_pSnes ? _pSnes->GetCpu() : NULL, (Uint8)level);
+		}
 			break;
 		case 30:
 			_VideoApplyCompatFlags(
@@ -1237,7 +1302,14 @@ case 17: /* Famiclone Audio */
 				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_DEEP_Q);
 			break;
 		case 35:
+			SNPPURenderSetSoftwareHackFlags(
+				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_FRAME_SKIP);
+			break;
+		case 36:
 			InputSnesMouseCycleModeDir(dir);
+			break;
+		case 37:
+			MainLoopTurboCycleSpeedDir(dir);
 			break;
 		}
 

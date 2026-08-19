@@ -72,6 +72,10 @@ enum
 
 extern Uint8 g_SnesObjLimitLevel;
 extern Uint8 g_SnesObjLimitMode;
+/* AURORA_OBJ_LIMIT_HOTPATH_V3 */
+extern Int32 g_SnesObjLimitTileBudget;
+extern Int32 g_SnesObjLimitScreenBudget;
+extern Uint32 g_SnesObjLimitFramePhase;
 
 _INLINE Uint8 SNPPURenderGetSoftwareLayerMask(void)
 {
@@ -95,8 +99,14 @@ _INLINE Uint8 SNPPURenderGetObjLimitMode(void)
 {
     return g_SnesObjLimitMode;
 }
-Int32 SNPPURenderGetObjTileBudget(void);
-Int32 SNPPURenderGetObjScreenBudget(void);
+_INLINE Int32 SNPPURenderGetObjTileBudget(void)
+{
+    return g_SnesObjLimitTileBudget;
+}
+_INLINE Int32 SNPPURenderGetObjScreenBudget(void)
+{
+    return g_SnesObjLimitScreenBudget;
+}
 
 enum 
 {
@@ -141,7 +151,11 @@ struct SnesRenderObjT
 };
 
 Bool _SnesPPUOBJVisibleX(Uint16 uPosX, Uint8 uWidth);
-Bool _SnesPPUOBJTileCountedX(Uint16 uObjectX, Int32 iTileX);
+_INLINE Bool _SnesPPUOBJTileCountedX(Uint16 uObjectX, Int32 iTileX)
+{
+	return ((uObjectX & 0x1FF) == 0x100) ||
+	       (iTileX > -8 && iTileX < 256);
+}
 
 _INLINE Uint32 _SnesPPUOBJNameSelect(Uint8 uOBSEL)
 {
@@ -250,6 +264,7 @@ private:
 	CRenderSurface	*m_pTarget;
 
     Uint8           m_nObjLine[SNPPU_MAXLINE];
+    Uint16          m_nObjTilePotential[SNPPU_MAXLINE];
     Uint8           m_ObjLine[SNPPU_MAXLINE][SNPPU_MAXOBJ];
 
     ISNPPUBlend    *m_pBlend;

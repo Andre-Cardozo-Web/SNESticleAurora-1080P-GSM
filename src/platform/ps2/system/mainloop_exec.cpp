@@ -29,8 +29,11 @@ Bool _ExecuteSnes(CRenderSurface *pSurface, CMixBuffer *pMixBuffer, Emu::SysInpu
 
             #if !MAINLOOP_SNESSTATEDEBUG
 //            pMixBuffer=NULL;
-//            SNCPUSetExecuteFunc(SNCPUExecute_C);
-            SNCPUSetExecuteFunc(SNCPUExecute_ASM);
+            /* AURORA_CPU_OVERCLOCK_V3 */
+            if (SNCPUGetOverclockLevel() == SNCPU_OVERCLOCK_OFF)
+                SNCPUSetExecuteFunc(SNCPUExecute_ASM);
+            else
+                SNCPUSetExecuteFunc(SNCPUExecute_C);
             SNSPCSetExecuteFunc(SNSPCExecute_C);
 
 		    PROF_ENTER("SnesExecuteFrame");

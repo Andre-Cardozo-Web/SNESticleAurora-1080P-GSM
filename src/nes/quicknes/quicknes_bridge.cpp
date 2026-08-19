@@ -40,6 +40,9 @@ static bool s_Initialized = false;
 static bool s_GameLoaded  = false;
 static bool s_DutySwap    = false;
 static bool s_TurboPhase  = false;
+/* AURORA_CONTROLLER_OPTIONS_V2: Max/Half/Quarter cadence. */
+static unsigned s_TurboSpeedShift = 0;
+static uint32_t s_TurboFrame = 0;
 
 /* Reuse one native emulator for the process lifetime. Its constructor does
  * not allocate the cart/audio buffers; those are initialized lazily by
@@ -84,6 +87,7 @@ static void qResetTransient(void)
     s_PendingCount = 0;
     s_PaletteValid = false;
     s_TurboPhase = false;
+    s_TurboFrame = 0;
 }
 
 static Uint8 qMapPad(Uint16 pad)
@@ -334,6 +338,7 @@ void QuicknesBridge_Reset(void)
     s_PendingCount = 0;
     s_PaletteValid = false;
     s_TurboPhase = false;
+    s_TurboFrame = 0;
 }
 
 void QuicknesBridge_SoftReset(void)
@@ -343,12 +348,18 @@ void QuicknesBridge_SoftReset(void)
     s_PendingCount = 0;
     s_PaletteValid = false;
     s_TurboPhase = false;
+    s_TurboFrame = 0;
 }
 
 void QuicknesBridge_SetDutySwap(bool enabled)
 {
     s_DutySwap = enabled;
     quicknes_snesticle_set_duty_swap(enabled ? 1 : 0);
+}
+
+void QuicknesBridge_SetTurboSpeed(unsigned speedShift)
+{
+    s_TurboSpeedShift = (speedShift <= 2U) ? speedShift : 0U;
 }
 
 void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
@@ -360,7 +371,8 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
 
     Uint8 p1 = 0;
     Uint8 p2 = 0;
-    s_TurboPhase = !s_TurboPhase;
+    s_TurboPhase = (((s_TurboFrame >> s_TurboSpeedShift) & 1U) == 0U);
+    ++s_TurboFrame;
 
     if (pInput)
     {

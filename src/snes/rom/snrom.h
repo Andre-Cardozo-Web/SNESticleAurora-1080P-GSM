@@ -33,6 +33,8 @@ enum SnesForceRegionE
 };
 
 extern SnesForceRegionE g_SnesForceRegion;
+/* AURORA_TOP_GEAR_FASTROM_V1: exact-CRC runtime flag. */
+extern Bool g_SnesCompatTopGearFastRom;
 
 enum SNRomMappingE
 {

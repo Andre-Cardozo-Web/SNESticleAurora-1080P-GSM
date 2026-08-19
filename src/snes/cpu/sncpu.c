@@ -64,6 +64,84 @@ static Int32 _SNCPUDefaultExecuteFunc(SNCpuT *pCpu)
 //
 
 
+/* AURORA_CPU_OVERCLOCK_V1
+ * The two spare bytes at SNCpuBankT::uPad[] are already inside the fixed
+ * 16-byte bank descriptor used by the PS2 assembly ABI. uPad[0] remembers
+ * the hardware/base access cost, so changing OC level is fully reversible
+ * without changing SNCpuT/SNCpuBankT layout or save-state structure size. */
+Uint8 g_SnesCpuOverclockLevel = SNCPU_OVERCLOCK_OFF;
+Uint8 g_SnesCpuInternalCycle = SNCPU_CYCLE_FAST;
+Uint8 g_SnesCpuSlowCycle = SNCPU_CYCLE_SLOW;
+
+static const Uint8 _SNCPUOverclockInternal[SNCPU_OVERCLOCK_NUM] = { 6, 5, 4, 3, 2 };
+static const Uint8 _SNCPUOverclockFast[SNCPU_OVERCLOCK_NUM]     = { 6, 5, 4, 3, 2 };
+static const Uint8 _SNCPUOverclockSlow[SNCPU_OVERCLOCK_NUM]     = { 8, 7, 5, 4, 3 };
+static const Uint16 _SNCPUOverclockPercent[SNCPU_OVERCLOCK_NUM] = { 100, 120, 150, 200, 300 };
+
+static Uint8 _SNCPUScaleBaseCycle(Uint8 uBase)
+{
+	Uint8 uLevel = g_SnesCpuOverclockLevel;
+	Uint32 uScaled;
+
+	if (uLevel >= SNCPU_OVERCLOCK_NUM)
+		uLevel = SNCPU_OVERCLOCK_OFF;
+	if (uBase == SNCPU_CYCLE_FAST)
+		return _SNCPUOverclockFast[uLevel];
+	if (uBase == SNCPU_CYCLE_SLOW)
+		return _SNCPUOverclockSlow[uLevel];
+	if (uLevel == SNCPU_OVERCLOCK_OFF || uBase == 0)
+		return uBase;
+
+	/* Preserve any unusual/custom bank cost proportionally instead of
+	 * silently classifying it as FastROM or SlowROM. */
+	uScaled = ((Uint32)uBase * 100U +
+	           _SNCPUOverclockPercent[uLevel] - 1U) /
+	          _SNCPUOverclockPercent[uLevel];
+	if (uScaled < 1U) uScaled = 1U;
+	if (uScaled > 255U) uScaled = 255U;
+	return (Uint8)uScaled;
+}
+
+void SNCPUSetOverclockLevel(SNCpuT *pCpu, Uint8 uLevel)
+{
+	Uint8 uOldLevel = g_SnesCpuOverclockLevel;
+
+	if (uOldLevel >= SNCPU_OVERCLOCK_NUM)
+		uOldLevel = SNCPU_OVERCLOCK_OFF;
+	if (uLevel >= SNCPU_OVERCLOCK_NUM)
+		uLevel = SNCPU_OVERCLOCK_OFF;
+
+	g_SnesCpuOverclockLevel = uLevel;
+	g_SnesCpuInternalCycle = _SNCPUOverclockInternal[uLevel];
+	g_SnesCpuSlowCycle = _SNCPUOverclockSlow[uLevel];
+
+	if (pCpu)
+	{
+		Int32 iBank;
+		for (iBank = 0; iBank < SNCPU_BANK_NUM; iBank++)
+		{
+			Uint8 uBase = pCpu->Bank[iBank].uPad[0];
+
+			/* Compatibility with a CPU object/state created before this patch:
+			 * recover the base class from the previous profile once, then cache it. */
+			if (uBase == 0)
+			{
+				Uint8 uCurrent = pCpu->Bank[iBank].uBankCycle;
+				if (uCurrent == _SNCPUOverclockFast[uOldLevel])
+					uBase = SNCPU_CYCLE_FAST;
+				else if (uCurrent == _SNCPUOverclockSlow[uOldLevel])
+					uBase = SNCPU_CYCLE_SLOW;
+				else
+					uBase = uCurrent;
+				pCpu->Bank[iBank].uPad[0] = uBase;
+			}
+
+			pCpu->Bank[iBank].uBankCycle = _SNCPUScaleBaseCycle(uBase);
+		}
+	}
+}
+
+
 void SNCPUNew(SNCpuT *pCpu)
 {
 	memset(pCpu, 0, sizeof(*pCpu));
@@ -209,7 +287,8 @@ void SNCPUSetMemSpeed(SNCpuT *pCpu, Uint32 Addr, Uint32 Size, Uint32 uCycles)
 	while ((nBanks > 0) && (iBank < SNCPU_BANK_NUM))
 	{
 		// set cycle count
-		pCpu->Bank[iBank].uBankCycle = uCycles;
+		pCpu->Bank[iBank].uPad[0] = (Uint8)uCycles;
+		pCpu->Bank[iBank].uBankCycle = _SNCPUScaleBaseCycle((Uint8)uCycles);
 
 		// next bank
 		iBank++;
@@ -235,7 +314,8 @@ void SNCPUSetRomSpeed(SNCpuT *pCpu, Uint32 Addr, Uint32 Size, Uint32 uCycles)
 		if (pBank->pMem!=NULL && !pBank->bRAM)
 		{
 			// set cycle count
-			pBank->uBankCycle = uCycles;
+			pBank->uPad[0] = (Uint8)uCycles;
+			pBank->uBankCycle = _SNCPUScaleBaseCycle((Uint8)uCycles);
 		}
 
 		// next bank

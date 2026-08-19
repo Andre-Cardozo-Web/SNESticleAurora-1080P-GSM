@@ -1562,9 +1562,20 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	Uint32 _tObjA = ProfCtrGetCycle();
 #endif
 	if (uFetchLayers & SNESPPU_MASK_OBJ)
-		nObjLine = _FetchOBJ(m_Objs, m_ObjLine[iLine], m_nObjLine[iLine],
-			ObjLine, SNPPURenderGetObjTileBudget(), iLine, (pRegs->obsel & 7) << 13,
-			_SnesPPUOBJNameSelect(pRegs->obsel), m_pPPU->GetVramPtr(0));
+	{
+		Uint8 rotated[SNPPU_MAXOBJ];
+		Uint8 *list=m_ObjLine[iLine];
+		Int32 count=m_nObjLine[iLine];
+		Int32 budget=SNPPURenderGetObjTileBudget();
+		if (count>1 && m_nObjTilePotential[iLine]>(Uint16)budget)
+		{
+			Int32 shift=(Int32)(g_SnesObjLimitFramePhase%(Uint32)count);
+			for (Int32 i=0;i<count;i++) rotated[i]=list[(i+shift)%count];
+			list=rotated;
+		}
+		nObjLine=_FetchOBJ(m_Objs,list,count,ObjLine,budget,iLine,(pRegs->obsel&7)<<13,
+			_SnesPPUOBJNameSelect(pRegs->obsel),m_pPPU->GetVramPtr(0));
+	}
 	else
 		nObjLine = 0;
 #if SNDBG_LOG
@@ -1767,6 +1778,15 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 		}
 #endif
 	}
+
+#if CODE_PLATFORM == CODE_PS2
+	/* AURORA_DIRECT_MAIN_SUB_ELIDE_V3 */
+	if (cgadsub==0 && (cgwsel&0xC0)==0 && m_pPPU->GetIntensity()==15)
+	{
+		PROF_LEAVE("RenderBG");
+		return;
+	}
+#endif
 
 #if SNDBG_LOG
 	Uint32 _tBGSub = ProfCtrGetCycle();
