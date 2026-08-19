@@ -48,11 +48,12 @@ void BgmNext(void);
 void BgmIOBegin(void);
 void BgmIOEnd(void);
 
-/* Volume da trilha de menu: 0 = OFF (libera o decoder, nao carrega nem
-   consome RAM), 1..100 = liga e toca nesse volume.  Vale para SNES e NES
-   (a trilha do menu e' compartilhada). */
+/* Volume da trilha de menu: 0..100.  O liga/desliga e independente e
+   controlado por BgmSetEnabled/BgmIsEnabled. */
 void BgmSetVolume(int vol);
 int  BgmGetVolume(void);
+void BgmSetEnabled(int enabled);
+int  BgmIsEnabled(void);
 
 /* Numero de faixas .mod/.xm achadas. Dispositivos locais sao escaneados
    imediatamente; o CD/DVD e' acrescentado depois de uma sondagem segura. */

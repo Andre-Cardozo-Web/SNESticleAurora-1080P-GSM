@@ -16,19 +16,17 @@ extern "C" {
    raise the PCM amplitude here, with int16 saturation (loud games clip
    rather than wrap around).
 
-   The user-facing "Game Volume" (Video Config) is 0..100, where 100 maps
-   to AUDMIXBUFFER_BASE_GAIN_PCT (the loudness this build shipped with) and
-   0 mutes:  gainPct = s_gameVolume * BASE / 100.  This single AudMixBuffer
-   instance (_AudMix) is shared by SNES and NES, so the control applies to
-   both. */
-#define AUDMIXBUFFER_BASE_GAIN_PCT 200
-
-static int s_gameVolume = 100;   /* 0..100 (Video Config); 100 = base gain */
+   The internal Game Volume value is the actual PCM gain percentage:
+   0 = mute, 100 = unity, 200 = Aurora's shipped/default gain, 400 = max.
+   Video Config deliberately shows half of this value, so 200 internal is
+   displayed as 100 and 400 internal as 200.  The single AudMixBuffer
+   instance (_AudMix) is shared by SNES and NES. */
+static int s_gameVolume = 200;   /* internal gain percent: 0..400 */
 
 extern "C" void AudMixGameSetVolume(int vol)
 {
     if (vol < 0)   vol = 0;
-    if (vol > 100) vol = 100;
+    if (vol > 400) vol = 400;
     s_gameVolume = vol;
 }
 
@@ -283,9 +281,9 @@ void AudMixBuffer::Flush()
            so it covers every sample-rate path (32k resampled and 48k
            passthrough).  gainPct==100 (Game Volume 50) is unity -> skip. */
         {
-            Int32 gainPct = (s_gameVolume * AUDMIXBUFFER_BASE_GAIN_PCT) / 100;
+            Int32 gainPct = s_gameVolume;
             /* AURORA_MEGA_V4_AUDIO_GAIN_FASTPATH
-             * Game Volume 100 is the shipped 200% base gain. For every int16
+             * Internal Game Volume 200 (shown as 100) is the shipped 200% gain. For every int16
              * input, (sample * 200) / 100 is exactly sample * 2; retain the
              * identical saturation but avoid a division per channel/sample.
              * Muting is likewise exactly an all-zero byte plane. Every other

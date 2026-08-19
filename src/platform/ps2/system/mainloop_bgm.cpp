@@ -152,6 +152,7 @@ enum BgmStateE {
 
 static int  s_state    = BGM_UNTRIED;
 static int  s_volume   = 100;          /* 0 = off; 1..100 (Video Config)  */
+static Bool s_enabled  = TRUE;         /* Menu Music on/off, independent of volume */
 static int  s_rate     = BGM_RATE;     /* taxa de sintese (Hz), Video Config */
 static Bool s_volSet   = FALSE;        /* ja' firmamos o volume p/ tocar? */
 static int  s_drainWait = 0;           /* frames esperando dreno da cauda */
@@ -976,7 +977,7 @@ void BgmSetVolume(int vol)
     else if (s_volSet && Aud_IsInitialized())
     {
         /* ja' tocando: ajusta o volume ao vivo */
-        Aud_Setvol((unsigned int)(vol * 0x3FFF / 100));
+        Aud_Setvol((unsigned int)((s_enabled ? vol : 0) * 0x3FFF / 100));
     }
 
     s_volume = vol;
@@ -991,6 +992,27 @@ int BgmGetVolume(void)
     _BgmUnlock();
     return result;
 }
+
+void BgmSetEnabled(int enabled)
+{
+    _BgmLock();
+    s_enabled = enabled ? TRUE : FALSE;
+
+    /* Keep the decoder/position cached while disabled; only stop feeding it.
+       This makes Off -> On immediate and leaves Menu Volume untouched. */
+    if (!s_enabled)
+        Aud_Setvol(0);
+    else if (s_volume > 0)
+        Aud_Setvol((unsigned int)(s_volume * 0x3FFF / 100));
+
+    _BgmUnlock();
+}
+
+int BgmIsEnabled(void)
+{
+    return s_enabled ? 1 : 0;
+}
+
 
 int BgmTrackCount(void)
 {
@@ -1075,7 +1097,7 @@ static void _BgmUpdateLocked(Bool allowFilesystem)
 {
     int avail, n, j;
 
-    if (s_volume <= 0)         return;   /* OFF: nem toca o drive */
+    if (!s_enabled || s_volume <= 0) return;   /* disabled/zero: nem toca o drive */
     if (s_indexCount < 0)
     {
         if (!allowFilesystem) return;

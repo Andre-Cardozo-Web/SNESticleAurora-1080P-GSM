@@ -418,7 +418,7 @@ void CNetworkScreen::Draw()
         SmbCenter(128, y, "Press X to show Internet options");
         y += 15;
         FontColor4f(0.55f, 0.55f, 0.55f, 1.0f);
-        SmbCenter(128, y, "Start also works");
+        SmbCenter(128, y, "");
         return;
     }
 

@@ -56,8 +56,8 @@ public:
 };
 
 
-/* Game (emulator) audio volume: 0..100, where 100 = the build's base gain.
-   Shared by SNES and NES (single _AudMix).  Exposed for the Video Config. */
+/* Game (emulator) audio gain: internal 0..400 percent, default 200.
+   Video Config displays internal/2 (0..200). Shared by SNES and NES. */
 #ifdef __cplusplus
 extern "C" {
 #endif

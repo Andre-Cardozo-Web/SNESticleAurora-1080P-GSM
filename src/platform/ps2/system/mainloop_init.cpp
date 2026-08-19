@@ -494,7 +494,7 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 
 	_MainLoop_pStateScreen = new CMenuScreen();
 	_MainLoop_pStateScreen->SetMsgFunc(_MainLoopStateMenuEvent);
-	_MainLoop_pStateScreen->SetTitle("Save States");
+	_MainLoop_pStateScreen->SetTitle("Save Management");
 	_MainLoop_pStateScreen->SetTop(20);
 	_MainLoop_pStateScreen->SetEntries(_MainLoopStateMenuEntries);
 	_MainLoopStateMenuRefresh();
