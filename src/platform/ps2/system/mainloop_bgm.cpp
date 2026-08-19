@@ -152,7 +152,7 @@ enum BgmStateE {
 
 static int  s_state    = BGM_UNTRIED;
 static int  s_volume   = 200;          /* internal PCM gain 0..400; UI /2 */
-static Bool s_enabled  = TRUE;         /* Menu Music on/off, independent of volume */
+static Bool s_enabled  = FALSE;        /* Menu Music default Off; volume independent */
 static int  s_rate     = BGM_RATE;     /* taxa de sintese (Hz), Settings Menu */
 static Bool s_volSet   = FALSE;        /* ja' firmamos o volume p/ tocar? */
 static int  s_drainWait = 0;           /* frames esperando dreno da cauda */

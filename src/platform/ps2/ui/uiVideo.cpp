@@ -40,7 +40,13 @@ void MainResetEmulator(void);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 29
+#define VIDEOCFG_VERSION 31
+/* v31 establishes Menu Volume UI 100 (internal 200) as the migration
+ * default for every older config. Once saved as v31+, the user's selected
+ * Menu Volume persists normally. */
+/* v30 fixes the temporary v29 Menu Audio defaults:
+ * Menu Volume defaults to internal 200 (UI 100) and Menu Music to Off.
+ * Once saved as v30, both settings persist independently. */
 /* v29 changes Menu Volume semantics to match Game Volume:
  * internal 0..400, UI displays /2 (0..200). v28 is byte-compatible. */
 /* v27 changes only Game Volume semantics: gamevol is now internal 0..400
@@ -413,6 +419,24 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
+		else if (header.version == 30)
+		{
+			/* v30 has the same byte layout as v31. */
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+			if (loaded) cfg.version = VIDEOCFG_VERSION;
+		}
+		else if (header.version == 29)
+		{
+			/* v29 was a temporary test config with broken menu-audio defaults.
+			 * Import its layout, then reset only those two settings once. */
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+			if (loaded)
+			{
+				cfg.version = VIDEOCFG_VERSION;
+				cfg.bgmvol = 200;   /* UI 100 */
+				cfg.bgmenable = 0;  /* Off */
+			}
+		}
 		else if (header.version == 28)
 		{
 			/* v28 has the same byte layout; only Menu Volume semantics changed. */
@@ -555,9 +579,10 @@ void VideoSettingsLoad(void)
 		}
 	}
 
-	/* v27 and older had no independent Menu Music switch; historically it was on. */
+	/* v27 and older had no independent Menu Music switch.
+	 * New default policy is Off; Menu Volume remains independent. */
 	if (loaded && header.version <= 27)
-		cfg.bgmenable = 1;
+		cfg.bgmenable = 0;
 
 	/* v26 and older stored Game Volume as the old 0..100 UI value.
 	 * Preserve the audible setting (old 100 -> internal 200 -> UI 100). */
@@ -571,6 +596,11 @@ void VideoSettingsLoad(void)
 	if (loaded && header.version <= 28 &&
 	    cfg.bgmvol >= 0 && cfg.bgmvol <= 100)
 		cfg.bgmvol *= 2;
+
+	/* v31 establishes a clean Menu Volume default for every older config.
+	 * UI 100 == internal 200. From v31 onward, preserve the saved value. */
+	if (loaded && header.version <= 30)
+		cfg.bgmvol = 200;
 
 	/* New policy applies exactly once to every pre-v22 config. Once the
 	 * user saves v22, a manual Full selection remains persistent. */
@@ -877,8 +907,10 @@ void CVideoScreen::Draw()
 	int   m = _VideoModeIndex(g_GskVideoMode);
 	const char *pMode = _VideoModes[m].name;
 	/* AURORA_V85_SOFTWARE_HACKS_PAGE */
-	int   iPage = (m_iSelect >= 30) ? 3 :
-	              ((m_iSelect >= 20) ? 2 : ((m_iSelect >= 10) ? 1 : 0));
+	/* Display order: page 1 = 0..9, page 2 = 30..38,
+	 * page 3 = 20..29, page 4 = 10..19. */
+	int   iPage = (m_iSelect >= 30) ? 1 :
+	              ((m_iSelect >= 20) ? 2 : ((m_iSelect >= 10) ? 3 : 0));
 	const char *pWide = "Off";
 	const char *pColor = (SNPPUColorGetProfile() == SNPPU_COLOR_PROFILE_COMPOSITE)
 	                   ? "Composite" : "Original";
@@ -934,7 +966,7 @@ void CVideoScreen::Draw()
 		_VideoRow(vy, 9, m_iSelect, "Menu Music", musicStatus); vy += 12;
 	}
 	}
-	else if (iPage == 1)
+	else if (iPage == 3)
 	{
 		_VideoHeader(vy, "Storage / Devices"); vy += 14;
 
@@ -1035,13 +1067,13 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
 	int dir = 0;
 
-	/* Circle: Video/Audio -> Devices/Misc -> Software Hacks -> Performance. */
+	/* Circle: Video/Audio -> Performance -> Software Hacks -> Devices/Misc. */
 	if (trigger & PAD_CIRCLE)
 	{
-		if (m_iSelect < 10)       m_iSelect = 10;
-		else if (m_iSelect < 20)  m_iSelect = 20;
-		else if (m_iSelect < 30)  m_iSelect = 30;
-		else                      m_iSelect = 0;
+		if (m_iSelect < 10)       m_iSelect = 30;
+		else if (m_iSelect < 20)  m_iSelect = 0;
+		else if (m_iSelect < 30)  m_iSelect = 10;
+		else                      m_iSelect = 20;
 	}
 
 	{
@@ -1350,22 +1382,28 @@ case 17: /* Famiclone Audio */
 
 	}
 
-	/* Square: previous page using the 0/10/20/30 boundaries. */
+	/* Square: previous page in the displayed 1 -> 2 -> 3 -> 4 order. */
 	if (trigger & PAD_SQUARE)
 	{
-		if (m_iSelect >= 30)      m_iSelect = 20;
-		else if (m_iSelect >= 20) m_iSelect = 10;
-		else if (m_iSelect >= 10) m_iSelect = 0;
-		else                      m_iSelect = 30;
+		if (m_iSelect >= 30)      m_iSelect = 0;
+		else if (m_iSelect >= 20) m_iSelect = 30;
+		else if (m_iSelect >= 10) m_iSelect = 20;
+		else                      m_iSelect = 10;
 	}
 
 /* Cross / Start: persist ordinary settings; immediate actions never save. */
 if (trigger & (PAD_CROSS | PAD_START))
 {
     if (m_iSelect == 18)
+    {
+        if (Aud_IsInitialized()) Aud_Setvol(0);
         MainResetEmulator();
+    }
     else if (m_iSelect == 19)
+    {
+        if (Aud_IsInitialized()) Aud_Setvol(0);
         ExecOSD(0, NULL);
+    }
     else
         VideoSettingsSave();
 }
