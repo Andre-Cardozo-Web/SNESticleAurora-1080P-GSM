@@ -18,6 +18,7 @@ void PicoDriveBridge_SoftReset(void);
 void PicoDriveBridge_Set6Button(bool enabled);
 bool PicoDriveBridge_Get6Button(void);
 bool PicoDriveBridge_IsMasterSystem(void);
+bool PicoDriveBridge_Is8Bit(void);
 
 /* Aurora Region Select values are passed straight in:
  * Off/Auto=0, NTSC-U, NTSC-J, PAL. */

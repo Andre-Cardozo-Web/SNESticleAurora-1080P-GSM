@@ -149,7 +149,7 @@ Uint16 _MainLoopInput(Uint32 pad)
 	 * MD: SNES-style R2 turbo. SMS: NES-style Circle/Triangle turbo. */
 	if (_pSystem == _pSega)
 	{
-		if (PicoDriveBridge_IsMasterSystem())
+		if (PicoDriveBridge_Is8Bit())
 		{
 			Uint32 uSms = pad & ~(PAD_CIRCLE | PAD_TRIANGLE | PAD_R2);
 			if (_MainLoopTurboIsOn((Uint32)_pSystem->GetFrame()))
@@ -617,6 +617,10 @@ if (_pSystem && (buttons & PAD_L2))
 		if (trigger & PAD_SELECT)
 		{
 			_pSystem->SoftReset();
+
+			/* A reset is an audio timeline discontinuity. Discard samples
+			 * and resampler history belonging to the pre-reset machine. */
+			MainLoopAudioResumeGame();
 			return;
 		}
 	}

@@ -273,6 +273,7 @@ static bool pdPadHas(Uint16 p, Uint16 bit)
     return p != EMUSYS_DEVICE_DISCONNECTED && (p & bit) != 0;
 }
 
+static bool pdIs8Bit();
 static bool pdIsMasterSystem();
 
 static int16_t pdJoyMask(unsigned port)
@@ -301,7 +302,7 @@ static int16_t pdJoyMask(unsigned port)
     if (pdPadHas(p, SNESIO_JOY_LEFT))  m |= 1u << RETRO_DEVICE_ID_JOYPAD_LEFT;
     if (pdPadHas(p, SNESIO_JOY_RIGHT)) m |= 1u << RETRO_DEVICE_ID_JOYPAD_RIGHT;
 
-    if (pdIsMasterSystem())
+    if (pdIs8Bit())
     {
         if (pdPadHas(p, SNESIO_JOY_B))     m |= 1u << RETRO_DEVICE_ID_JOYPAD_B;
         if (pdPadHas(p, SNESIO_JOY_A))     m |= 1u << RETRO_DEVICE_ID_JOYPAD_A;
@@ -349,9 +350,9 @@ static int16_t pdInputState(unsigned port, unsigned device,
     if (p == EMUSYS_DEVICE_DISCONNECTED)
         return 0;
 
-    /* AURORA_PICODRIVE_STAGE3_SMS_BUTTONS
-     * NES-like host layout is converted to SMS B/A here. */
-    if (pdIsMasterSystem())
+    /* AURORA_PICODRIVE_8BIT_INPUT_V1
+     * NES-like host layout is converted to SMS/GG B/C here. */
+    if (pdIs8Bit())
     {
         switch (id)
         {
@@ -428,6 +429,11 @@ static bool pdIsGameGear()
 {
     return (PicoIn.AHW & PAHW_GG) != 0 ||
            (Pico.m.hardware & PMS_HW_LCD) != 0;
+}
+
+static bool pdIs8Bit()
+{
+    return (PicoIn.AHW & PAHW_8BIT) != 0;
 }
 
 static bool pdIsMasterSystem()
@@ -816,6 +822,11 @@ bool PicoDriveBridge_Get6Button(void)
 bool PicoDriveBridge_IsMasterSystem(void)
 {
     return s_GameLoaded && pdIsMasterSystem();
+}
+
+bool PicoDriveBridge_Is8Bit(void)
+{
+    return s_GameLoaded && pdIs8Bit();
 }
 
 void PicoDriveBridge_SetRegion(int auroraRegion)
