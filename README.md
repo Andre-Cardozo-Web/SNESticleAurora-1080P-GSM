@@ -13,7 +13,7 @@ Mega Drive and Master System emulation through **PicoDrive** is based on the Pic
 
 SNESticle Aurora focuses on 240p CRT output, NES/QuickNES integration and experiments, real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
 
-**Any changes made in SNESticle Aurora are also available to anyone** who wants to cherry-pick, pull, or otherwise incorporate them into SNESticle Revive or any other fork as they see fit.
+**Changes made in SNESticle Aurora may be reused, cherry-picked, pulled or incorporated into other projects subject to the applicable licenses.** Aurora code covered by the GPL remains under GNU GPLv2; separately licensed third-party components remain under their own terms.
 
 Project lineage and attribution are documented in [CREDITS.md](CREDITS.md). See LICENSE and the third-party license files for licensing details.
 
