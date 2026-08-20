@@ -678,6 +678,14 @@ static void pdRenderToAurora(CRenderSurface *pTarget)
     }
 }
 
+/* AURORA_GS_VRAM_EPOCH_V4_2
+ * Direct T8 rows are uploaded every frame, but the CLUT has a residency cache.
+ * Reinitialising gsKit destroys that residency even if PicoDrive stays alive. */
+void PicoDriveBridge_InvalidateGsResources(void)
+{
+    s_DirectClutValid = false;
+}
+
 bool PicoDriveBridge_Init(void)
 {
     if (s_Initialized)

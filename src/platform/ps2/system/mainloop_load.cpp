@@ -54,9 +54,10 @@ void _MainLoopGetName(Char *pName, const Char *pPath)
  * Decide the 240p physical raster before PicoDrive is initialised.
  *
  * This is deliberately conservative. Known 8-bit/32X images stay on
- * Aurora's 256x240 raster. Standard MD .md/.bin images use 320x240.
- * Unknown .bin files fall back to 256 rather than forcing a GS reinit
- * after the emulated machine is already alive. */
+ * Aurora's 256x240 raster. Standard MD images use 320x240. Ambiguous
+ * .bin images get one additional 68000-vector probe (V4) before the safe
+ * 256 fallback, so 240p does not unnecessarily lose PicoDrive's direct-T8
+ * path while the same title can use it in 480i. */
 static int _MainLoopAsciiLower(int c)
 {
     if (c >= 'A' && c <= 'Z')
@@ -88,6 +89,44 @@ static Bool _MainLoopSegaExtEquals(const char *pName, const char *pExt)
     return (*p == '\0' && *pExt == '\0') ? TRUE : FALSE;
 }
 
+/* AURORA_MD_PRELOAD_VECTOR_PROBE_V4_2
+ *
+ * Mega Drive begins with big-endian 68000 reset vectors. A normal initial
+ * stack pointer is in $FF0000-$FFFFFF, and the even reset PC points into the
+ * cartridge image. This is only a fallback for ambiguous .bin content:
+ * explicit SMS/GG/SG/SC/32X tests below still win first.
+ */
+static Uint32 _MainLoopReadBE32(const Uint8 *p)
+{
+    return ((Uint32)p[0] << 24) |
+           ((Uint32)p[1] << 16) |
+           ((Uint32)p[2] << 8)  |
+           (Uint32)p[3];
+}
+
+static Bool _MainLoopLooksLikeMegaDriveVectors(
+    const Uint8 *pData, Int32 nBytes, Uint32 uFileBase)
+{
+    Uint32 sp, pc, payloadBytes;
+
+    if (!pData || nBytes <= 0 ||
+        uFileBase > (Uint32)nBytes ||
+        (Uint32)nBytes - uFileBase < 8U)
+        return FALSE;
+
+    payloadBytes = (Uint32)nBytes - uFileBase;
+    sp = _MainLoopReadBE32(pData + uFileBase);
+    pc = _MainLoopReadBE32(pData + uFileBase + 4U);
+
+    if ((sp & 0xFFFF0000U) != 0x00FF0000U)
+        return FALSE;
+
+    if ((pc & 1U) != 0U || pc < 0x100U || pc >= payloadBytes)
+        return FALSE;
+
+    return TRUE;
+}
+
 static Bool _MainLoopSegaWantsNative320(
     const Uint8 *pData, Int32 nBytes, const char *pName)
 {
@@ -109,21 +148,36 @@ static Bool _MainLoopSegaWantsNative320(
         return FALSE;
 
     /* A .bin may actually be SMS/GG. Mirror PicoDrive's TMR SEGA test
-     * before assuming Mega Drive. */
+     * before assuming Mega Drive. Also accept a conventional 0x200-byte
+     * copier header when probing ambiguous .bin content. */
     for (unsigned i = 0;
          i < sizeof(smsHeaderOffsets) / sizeof(smsHeaderOffsets[0]);
          ++i)
     {
         Uint32 off = smsHeaderOffsets[i];
+
         if ((Uint32)nBytes >= off + 8U &&
             memcmp(pData + off, "TMR SEGA", 8) == 0)
             return FALSE;
+
+        if ((Uint32)nBytes >= off + 0x200U + 8U &&
+            memcmp(pData + off + 0x200U, "TMR SEGA", 8) == 0)
+            return FALSE;
     }
 
-    /* 32X carts use the Mega Drive-style header too, so reject their
-     * explicit console signature before the generic SEGA test. */
-    if (nBytes >= 0x108 &&
-        memcmp(pData + 0x100, "SEGA 32X", 8) == 0)
+    /* 32X/Pico use Mega-Drive-style headers too, so reject their explicit
+     * signatures before the generic SEGA/vector tests. Check both raw and
+     * conventional +0x200 header locations. */
+    if ((nBytes >= 0x108 &&
+         memcmp(pData + 0x100, "SEGA 32X", 8) == 0) ||
+        (nBytes >= 0x308 &&
+         memcmp(pData + 0x300, "SEGA 32X", 8) == 0))
+        return FALSE;
+
+    if ((nBytes >= 0x109 &&
+         memcmp(pData + 0x100, "SEGA PICO", 9) == 0) ||
+        (nBytes >= 0x309 &&
+         memcmp(pData + 0x300, "SEGA PICO", 9) == 0))
         return FALSE;
 
     if (_MainLoopSegaExtEquals(pName, "md")  ||
@@ -137,6 +191,30 @@ static Bool _MainLoopSegaWantsNative320(
         (memcmp(pData + 0x100, "SEGA", 4) == 0 ||
          memcmp(pData + 0x100, " SEG", 4) == 0))
         return TRUE;
+
+    /* AURORA_MD_PRELOAD_VECTOR_PROBE_V4_2
+     *
+     * Some valid/headerless MD .bin files do not carry the SEGA console
+     * string. 480i can learn they are MD after PicoDrive starts and still
+     * use direct T8; 240p must know before core init so its physical raster
+     * is already 320 wide.
+     *
+     * Try raw 68000 vectors first. A conventional +0x200 copier header is
+     * accepted only when the file-size shape also matches +0x200.
+     * Ambiguous content that fails both probes deliberately stays 256/RGBA.
+     */
+    if (_MainLoopSegaExtEquals(pName, "bin"))
+    {
+        if (_MainLoopLooksLikeMegaDriveVectors(pData, nBytes, 0))
+            return TRUE;
+
+        if ((((Uint32)nBytes & 0x3FFFU) == 0x0200U) &&
+            _MainLoopLooksLikeMegaDriveVectors(
+                pData, nBytes, 0x200U))
+        {
+            return TRUE;
+        }
+    }
 
     /* Safe fallback: 256/RGBA is preferable to rebuilding the GS
      * after PicoDrive has already allocated its machine. */

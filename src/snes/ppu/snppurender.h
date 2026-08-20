@@ -95,6 +95,11 @@ _INLINE Uint8 SNPPURenderGetObjLimitLevel(void)
     return g_SnesObjLimitLevel;
 }
 void  SNPPURenderSetObjLimitMode(Uint8 uMode);
+
+/* AURORA_GS_VRAM_EPOCH_V4_2
+ * Recreate the lazy PS2 GS blender after a gsKit VRAM reallocation. */
+void  SNPPURenderInvalidateGsResources(void);
+
 _INLINE Uint8 SNPPURenderGetObjLimitMode(void)
 {
     return g_SnesObjLimitMode;

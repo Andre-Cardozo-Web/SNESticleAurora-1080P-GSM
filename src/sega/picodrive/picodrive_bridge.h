@@ -38,6 +38,10 @@ int PicoDriveBridge_GetSRAMBytes(void);
 Uint8 *PicoDriveBridge_GetSRAMData(void);
 unsigned PicoDriveBridge_GetSampleRate(void);
 
+/* AURORA_GS_VRAM_EPOCH_V4_2
+ * A new gsKit VRAM epoch invalidates direct-T8 CLUT residency. */
+void PicoDriveBridge_InvalidateGsResources(void);
+
 /* AURORA_PD_NATIVE320_DIRECT_T8_V1 */
 bool PicoDriveBridge_IsMegaDrive(void);
 bool PicoDriveBridge_CanDirectGsVideo(void);

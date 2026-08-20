@@ -669,21 +669,27 @@ void GSK_ResetFrame(void)
      * Menu/boot/black-screen: retain the historical full physical clear.
      *
      * Gameplay: MainLoopRender immediately draws the game texture across the
-     * complete framebuffer width and all the way to the bottom edge. Current
-     * layouts leave at most 16 physical rows uncovered at the top (SNES in the
-     * 640x480 source). Clear 32 rows for a 2x safety margin, then restore the
-     * full scissor before any later primitive. Nothing visible is left stale;
-     * we simply avoid rasterizing black underneath pixels that the game blit
-     * overwrites later in the same queue.
+     * complete framebuffer width and all the way to the bottom edge.
      *
-     * AURORA_GS_PARTIAL_GAMEPLAY_CLEAR_V1 */
+     * AURORA_GS_240P_CLEAR_BUDGET_V4_2
+     *
+     * The largest uncovered top margin in the current native-240p layouts is
+     * 8 framebuffer rows. The same logical margin is 16 framebuffer rows in
+     * the 640x480 source modes. Clear exactly that mode-wide maximum instead
+     * of the old fixed 32-row safety margin, then restore the full scissor.
+     *
+     * This changes only a black GS fill that is otherwise overwritten later
+     * in the same frame; it does not resample or modify game/source pixels. */
     {
         u8 previous_alpha = gs->PrimAlphaEnable;
         gs->PrimAlphaEnable = GS_SETTING_OFF;
 
         if (_gsk_gameplay_fast_clear && gs->Width > 0 && gs->Height > 0)
         {
-            int clear_rows = (gs->Height < 32) ? gs->Height : 32;
+            int wanted_rows =
+                (_gsk_active_mode == GSK_VIDMODE_240P) ? 8 : 16;
+            int clear_rows =
+                (gs->Height < wanted_rows) ? gs->Height : wanted_rows;
             u64 top_scissor = GS_SETREG_SCISSOR(
                 0, gs->Width - 1, 0, clear_rows - 1);
             u64 full_scissor = GS_SETREG_SCISSOR(

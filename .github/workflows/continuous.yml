@@ -19,14 +19,54 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+
+      # AURORA_CONTINUOUS_PICODRIVE_SOURCE_V4_2
+      #
+      # Continuous intentionally remains the COMPLETE build, including
+      # PicoDrive. Package the exact checked-out source tree BEFORE building,
+      # while the recursive submodules are populated, so the release carries
+      # the source corresponding to the linked binary.
+      #
+      # This packaging is a redistribution/compliance aid; it is not a claim
+      # that every license in the combined binary is mutually compatible.
+      - name: Package checked-out source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          short_sha="${GITHUB_SHA:0:12}"
+          source_name="SNESticleAurora-${short_sha}-source.tar.gz"
+
+          {
+            printf 'SNESticleAurora commit: %s\n' "$GITHUB_SHA"
+            printf 'Recursive submodules:\n'
+            git submodule status --recursive
+          } > /tmp/SOURCE-MANIFEST.txt
+
+          tar             --exclude='./.git'             --exclude='*/.git'             --exclude='./build'             --exclude='./.aurora_picodrive_stage2_backup'             -czf "/tmp/${source_name}"             -C "$GITHUB_WORKSPACE" .             -C /tmp SOURCE-MANIFEST.txt
+
+          echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
+          echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
+
       - name: Build
         run: make AUTO_INSTALL=yes
+
+      - name: Checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            (cd build && sha256sum SNESticle.elf)
+            (cd /tmp && sha256sum "$AURORA_SOURCE_NAME")
+          } > /tmp/SHA256SUMS.txt
+
       - name: Continuous release
-        # AURORA_PICODRIVE_NO_PUBLIC_COMBINED_ELF: licensing safety.
-        # CI may build/test PicoDrive but this step must not publish the linked ELF.
-        if: ${{ false }}
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           gh release delete continuous --cleanup-tag --yes || true
-          gh release create continuous build/SNESticle.elf --target "$GITHUB_SHA" --title "Continuous Build" --prerelease --notes "Automatically built from the latest commit on main."
+
+          gh release create continuous             build/SNESticle.elf             "$AURORA_SOURCE_BUNDLE"             /tmp/SOURCE-MANIFEST.txt             /tmp/SHA256SUMS.txt             LICENSE             LICENSES/PicoDrive-COPYING.txt             LICENSES/QuickNES-GPL-2.0.txt             THIRD_PARTY.md             --target "$GITHUB_SHA"             --title "Continuous Build"             --prerelease             --notes "Automatically built from the latest commit on main. Includes PicoDrive. The checked-out source tree (including recursive submodules), manifest, checksums and third-party notices are attached. PicoDrive has additional redistribution/non-commercial terms; see PicoDrive-COPYING.txt."

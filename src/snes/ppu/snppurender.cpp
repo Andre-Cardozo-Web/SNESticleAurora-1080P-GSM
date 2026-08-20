@@ -485,6 +485,22 @@ static SNPPUBlendGS *_Blend;
 static SNPPUBlendC _Blend;
 #endif
 
+/* AURORA_GS_VRAM_EPOCH_V4_2
+ * SNPPUBlendGS caches uPalAddr/uInputAddr/uTempAddr/uOutAddr at construction.
+ * After GSK_ReinitVideo() those TBPs no longer belong to the current gsKit
+ * allocation epoch. Delete only while no frame is active; BeginRender lazily
+ * creates a fresh blender with the current globals on the next SNES frame. */
+void SNPPURenderInvalidateGsResources(void)
+{
+#if CODE_PLATFORM == CODE_PS2
+    if (_Blend)
+    {
+        delete _Blend;
+        _Blend = NULL;
+    }
+#endif
+}
+
 #if !SNPPURENDER_INFOSCRATCHPAD
 static SnesRender8pInfoT _RenderInfo;
 #endif

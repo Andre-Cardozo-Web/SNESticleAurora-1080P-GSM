@@ -38,6 +38,8 @@
 #include "audmixbuffer.h"
 #include "pathext.h"
 #include "snppucolor.h"
+#include "snppurender.h"
+#include "sega/picodrive/picodrive_bridge.h"
 #include "emumovie.h"
 
 #include <sifrpc.h>
@@ -160,6 +162,13 @@ static Bool _MainLoopAllocVideoVram(void)
 	Uint32 fontTBP;
 	Uint32 coverTBP;
 	Uint32 blenderTBP;
+
+    /* AURORA_GS_VRAM_EPOCH_V4_2
+     * GSK_Init/Reinit starts a new VRAM allocation epoch. Retire every
+     * renderer cache that stores GS addresses/residency from the old epoch.
+     * Cold boot is harmless: both invalidators are no-ops before first use. */
+    SNPPURenderInvalidateGsResources();
+    PicoDriveBridge_InvalidateGsResources();
 
 	outTBP = GSK_VramAllocTBP(
 		_MainLoopAlignVramBytes(MAINLOOP_OUT_TEX_BYTES));
