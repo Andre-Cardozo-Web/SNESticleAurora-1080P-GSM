@@ -72,6 +72,36 @@ const char *MainLoopTurboGetSpeedName(void)
     }
 }
 
+/* AURORA_MD_PAD_LAYOUT_V1 */
+static MainLoopMdPadLayoutE _MainLoop_MdPadLayout = MAINLOOP_MD_PAD_ABC;
+
+void MainLoopMdPadSetLayout(MainLoopMdPadLayoutE eLayout)
+{
+	if (eLayout < MAINLOOP_MD_PAD_ABC || eLayout >= MAINLOOP_MD_PAD_NUM)
+		eLayout = MAINLOOP_MD_PAD_ABC;
+	_MainLoop_MdPadLayout = eLayout;
+}
+
+MainLoopMdPadLayoutE MainLoopMdPadGetLayout(void)
+{
+	return _MainLoop_MdPadLayout;
+}
+
+void MainLoopMdPadCycleLayoutDir(Int32 dir)
+{
+	if (dir == 0)
+		return;
+	MainLoopMdPadSetLayout(
+		_MainLoop_MdPadLayout == MAINLOOP_MD_PAD_ABC
+			? MAINLOOP_MD_PAD_BCA
+			: MAINLOOP_MD_PAD_ABC);
+}
+
+const char *MainLoopMdPadGetLayoutName(void)
+{
+	return _MainLoop_MdPadLayout == MAINLOOP_MD_PAD_BCA ? "BCA" : "ABC";
+}
+
 static Bool _MainLoopTurboIsOn(Uint32 uFrame)
 {
     Uint32 shift = (Uint32)_MainLoop_TurboSpeed;
@@ -121,9 +151,40 @@ static Uint16 _MainLoopSegaInput(Uint32 cond)
 	if (cond & PAD_LEFT)     out |= SNESIO_JOY_LEFT;
 	if (cond & PAD_RIGHT)    out |= SNESIO_JOY_RIGHT;
 
-	if (cond & PAD_SQUARE)   out |= SNESIO_JOY_A; /* carrier -> MD A */
-	if (cond & PAD_CROSS)    out |= SNESIO_JOY_B; /* carrier -> MD B */
-	if (cond & PAD_CIRCLE)   out |= SNESIO_JOY_Y; /* carrier -> MD C */
+	/* AURORA_MD_PAD_LAYOUT_V1
+	 * MD:
+	 *   ABC = Square A, Cross B, Circle C
+	 *   BCA = Square B, Cross C, Circle A
+	 *
+	 * SMS/GG use only the logical B/C positions:
+	 *   ABC = Cross B, Circle C
+	 *   BCA = Square B, Cross C
+	 */
+	if (PicoDriveBridge_Is8Bit())
+	{
+		if (_MainLoop_MdPadLayout == MAINLOOP_MD_PAD_BCA)
+		{
+			if (cond & PAD_SQUARE) out |= SNESIO_JOY_B; /* logical B */
+			if (cond & PAD_CROSS)  out |= SNESIO_JOY_A; /* logical C */
+		}
+		else
+		{
+			if (cond & PAD_CROSS)  out |= SNESIO_JOY_B; /* logical B */
+			if (cond & PAD_CIRCLE) out |= SNESIO_JOY_A; /* logical C */
+		}
+	}
+	else if (_MainLoop_MdPadLayout == MAINLOOP_MD_PAD_BCA)
+	{
+		if (cond & PAD_SQUARE) out |= SNESIO_JOY_B; /* carrier -> MD B */
+		if (cond & PAD_CROSS)  out |= SNESIO_JOY_Y; /* carrier -> MD C */
+		if (cond & PAD_CIRCLE) out |= SNESIO_JOY_A; /* carrier -> MD A */
+	}
+	else
+	{
+		if (cond & PAD_SQUARE) out |= SNESIO_JOY_A; /* carrier -> MD A */
+		if (cond & PAD_CROSS)  out |= SNESIO_JOY_B; /* carrier -> MD B */
+		if (cond & PAD_CIRCLE) out |= SNESIO_JOY_Y; /* carrier -> MD C */
+	}
 	if (cond & PAD_L1)       out |= SNESIO_JOY_L; /* MD X */
 	if (cond & PAD_TRIANGLE) out |= SNESIO_JOY_X; /* MD Y */
 	if (cond & PAD_R1)       out |= SNESIO_JOY_R; /* MD Z */
@@ -151,13 +212,20 @@ Uint16 _MainLoopInput(Uint32 pad)
 	{
 		if (PicoDriveBridge_Is8Bit())
 		{
-			Uint32 uSms = pad & ~(PAD_CIRCLE | PAD_TRIANGLE | PAD_R2);
-			if (_MainLoopTurboIsOn((Uint32)_pSystem->GetFrame()))
+			/* AURORA_MD_PAD_LAYOUT_V1
+			 * Circle is now a normal logical C button in ABC, so use R2 as
+			 * the unambiguous turbo modifier for SMS/GG too. */
+			if (pad & PAD_R2)
 			{
-				if (pad & PAD_CIRCLE)   uSms |= PAD_CROSS;
-				if (pad & PAD_TRIANGLE) uSms |= PAD_SQUARE;
+				const Uint32 uContinuous =
+					pad & (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT | PAD_START);
+				Uint32 uTurboButtons =
+					pad & (PAD_SQUARE | PAD_CROSS | PAD_CIRCLE);
+				if (!_MainLoopTurboIsOn((Uint32)_pSystem->GetFrame()))
+					uTurboButtons = 0;
+				return _MainLoopSegaInput(uContinuous | uTurboButtons);
 			}
-			return _MainLoopSegaInput(uSms);
+			return _MainLoopSegaInput(pad);
 		}
 		if (pad & PAD_R2)
 		{

@@ -47,6 +47,42 @@ static bool s_VariablesChanged = false;
 static Uint8 *s_pSramData = NULL;
 static Int32  s_SramBytes = 0;
 
+/* AURORA_MD_MENU_MAPPING_SRAM_FIX_V4
+ * PicoDrive cria 0x200000..0x203fff como janela SRAM genérica quando o
+ * header não oferece uma faixa válida. Isso é útil internamente para
+ * compatibilidade, mas não deve sozinho significar "este cartucho tem
+ * bateria" para o frontend.
+ *
+ * Mantemos save real quando:
+ *   - o header Sega contém "RA" (mesmo se a faixa do header for ruim);
+ *   - carthw detectou EEPROM;
+ *   - carthw selecionou uma faixa diferente do fallback genérico.
+ *
+ * SMS/GG/Pico/MCD/32X mantêm a política própria do PicoDrive. */
+static bool pdHasFrontendSaveMemory(void)
+{
+    if (PicoIn.AHW & (PAHW_SMS | PAHW_PICO | PAHW_MCD | PAHW_32X))
+        return true;
+
+    if (!(Pico.sv.flags & SRF_ENABLED) ||
+        !Pico.sv.data || Pico.sv.size <= 0)
+        return false;
+
+    if (Pico.sv.flags & SRF_EEPROM)
+        return true;
+
+    /* Pico.rom está word-swapped dentro do core. */
+    if (Pico.rom && Pico.romsize > 0x1b1 &&
+        Pico.rom[MEM_BE2(0x1b0)] == 'R' &&
+        Pico.rom[MEM_BE2(0x1b1)] == 'A')
+        return true;
+
+    if (Pico.sv.start != 0x200000 || Pico.sv.end != 0x203fff)
+        return true;
+
+    return false;
+}
+
 static Emu::SysInputT *s_pInput = NULL;
 static CMixBuffer *s_pMix = NULL;
 
@@ -1219,12 +1255,14 @@ bool PicoDriveBridge_LoadState(const void *pData, int nBytes)
 
 int PicoDriveBridge_GetSRAMBytes(void)
 {
-    return s_GameLoaded ? s_SramBytes : 0;
+    if (!s_GameLoaded || !pdHasFrontendSaveMemory())
+        return 0;
+    return s_SramBytes;
 }
 
 Uint8 *PicoDriveBridge_GetSRAMData(void)
 {
-    return (s_GameLoaded && s_SramBytes > 0) ? s_pSramData : NULL;
+    return PicoDriveBridge_GetSRAMBytes() > 0 ? s_pSramData : NULL;
 }
 
 unsigned PicoDriveBridge_GetSampleRate(void)

@@ -17,6 +17,21 @@ MainLoopTurboSpeedE MainLoopTurboGetSpeed(void);
 void MainLoopTurboCycleSpeedDir(Int32 dir);
 const char *MainLoopTurboGetSpeedName(void);
 
+/* AURORA_MD_PAD_LAYOUT_V1
+ * Ordem dos três botões frontais do DualShock: Square / Cross / Circle.
+ * ABC = A/B/C. BCA = B/C/A. SMS/GG usam somente os lógicos B/C. */
+enum MainLoopMdPadLayoutE
+{
+	MAINLOOP_MD_PAD_ABC = 0,
+	MAINLOOP_MD_PAD_BCA,
+	MAINLOOP_MD_PAD_NUM
+};
+
+void MainLoopMdPadSetLayout(MainLoopMdPadLayoutE eLayout);
+MainLoopMdPadLayoutE MainLoopMdPadGetLayout(void);
+void MainLoopMdPadCycleLayoutDir(Int32 dir);
+const char *MainLoopMdPadGetLayoutName(void);
+
 Uint16 _MainLoopInput(Uint32 pad);
 void _MainLoopInputProcess(Uint32 buttons);
 void _MainLoopInputSuppressUntilRelease();

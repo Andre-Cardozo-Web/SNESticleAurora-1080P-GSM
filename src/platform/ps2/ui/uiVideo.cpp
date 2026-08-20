@@ -93,7 +93,7 @@ typedef struct
 	Int32  turbospeed;
 	Int32  cpuoverclock;
 	Int32  bgmenable;   /* Menu Music: 0=off, 1=on */
-	Int32  md6button;   /* PicoDrive MD pad: 0=3-button, 1=6-button */
+	Int32  md6button;   /* bit0=6-button, bit1=BCA */
 } VideoCfgT;
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -386,7 +386,10 @@ void VideoSettingsSave(void)
 	cfg.snesmousemode = (Int32)InputSnesMouseGetMode();
 	cfg.turbospeed = (Int32)MainLoopTurboGetSpeed();
 	cfg.cpuoverclock = SNCPU_OVERCLOCK_OFF;
-	cfg.md6button = PicoDriveBridge_Get6Button() ? 1 : 0;
+	/* AURORA_MD_PAD_LAYOUT_V1: keep video.cfg v32 byte-identical. */
+	cfg.md6button =
+		(PicoDriveBridge_Get6Button() ? 1 : 0) |
+		(MainLoopMdPadGetLayout() == MAINLOOP_MD_PAD_BCA ? 2 : 0);
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -701,9 +704,15 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 		if (cfg.turbospeed >= MAINLOOP_TURBO_SPEED_NORMAL &&
 		    cfg.turbospeed < MAINLOOP_TURBO_SPEED_NUM)
 			MainLoopTurboSetSpeed((MainLoopTurboSpeedE)cfg.turbospeed);
-		/* AURORA_PICODRIVE_CURRENT_CFG_APPLY */
-		if (cfg.md6button == 0 || cfg.md6button == 1)
-			PicoDriveBridge_Set6Button(cfg.md6button == 1);
+		/* AURORA_PICODRIVE_CURRENT_CFG_APPLY
+		 * AURORA_MD_PAD_LAYOUT_V1: valores antigos 0/1 = ABC. */
+		if (cfg.md6button >= 0 && cfg.md6button <= 3)
+		{
+			PicoDriveBridge_Set6Button((cfg.md6button & 1) != 0);
+			MainLoopMdPadSetLayout(
+				(cfg.md6button & 2) ? MAINLOOP_MD_PAD_BCA
+				                     : MAINLOOP_MD_PAD_ABC);
+		}
 		SNCPUSetOverclockLevel(_pSnes ? _pSnes->GetCpu() : NULL,
 		                         SNCPU_OVERCLOCK_OFF);
 	}
@@ -921,11 +930,13 @@ void CVideoScreen::Draw()
 	char  buf[16];
 	int   m = _VideoModeIndex(g_GskVideoMode);
 	const char *pMode = _VideoModes[m].name;
-	/* AURORA_V85_SOFTWARE_HACKS_PAGE */
-	/* Display order: page 1 = 0..9, page 2 = 30..38,
-	 * page 3 = 20..29, page 4 = 10..19. */
-	int   iPage = (m_iSelect >= 30) ? 1 :
-	              ((m_iSelect >= 20) ? 2 : ((m_iSelect >= 10) ? 3 : 0));
+	/* AURORA_V85_SOFTWARE_HACKS_PAGE
+	 * AURORA_MD_MENU_MAPPING_SRAM_FIX_V4: controller page dedicada.
+	 * Display order: 0..9, 30..36, 40..43, 20..29, 10..19. */
+	int   iPage = (m_iSelect >= 40) ? 2 :
+	              ((m_iSelect >= 30) ? 1 :
+	              ((m_iSelect >= 20) ? 3 :
+	              ((m_iSelect >= 10) ? 4 : 0)));
 	const char *pWide = "Off";
 	const char *pColor = (SNPPUColorGetProfile() == SNPPU_COLOR_PROFILE_COMPOSITE)
 	                   ? "Composite" : "Original";
@@ -936,10 +947,11 @@ void CVideoScreen::Draw()
 	FontSelect(0);
 
 	_VideoHeader(vy,
-		iPage == 0 ? "Settings Menu (1/4)" :
-		iPage == 1 ? "Settings Menu (2/4)" :
-		iPage == 2 ? "Settings Menu (3/4)" :
-		             "Settings Menu (4/4)");
+		iPage == 0 ? "Settings Menu (1/5)" :
+		iPage == 1 ? "Settings Menu (2/5)" :
+		iPage == 2 ? "Settings Menu (3/5)" :
+		iPage == 3 ? "Settings Menu (4/5)" :
+		             "Settings Menu (5/5)");
 	vy += 18;
 
 	if (iPage == 0) {
@@ -981,7 +993,7 @@ void CVideoScreen::Draw()
 		_VideoRow(vy, 9, m_iSelect, "Menu Music", musicStatus); vy += 12;
 	}
 	}
-	else if (iPage == 3)
+	else if (iPage == 4)
 	{
 		_VideoHeader(vy, "Storage / Devices"); vy += 14;
 
@@ -1011,7 +1023,7 @@ _VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;
 _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 
 	}
-	else if (iPage == 2)
+	else if (iPage == 3)
 	{
 		_VideoHeader(vy, "Software Hacks"); vy += 14;
 		_VideoRow(vy, 20, m_iSelect, "BG1 Layer",
@@ -1035,7 +1047,7 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 		_VideoRow(vy, 29, m_iSelect, "Limiter Mode",
 			_VideoHackSpriteLimiterModeStatus()); vy += 12;
 	}
-	else
+	else if (iPage == 1)
 	{
 		_VideoHeader(vy, "Performance"); vy += 14;
 		_VideoRow(vy, 30, m_iSelect, "Profile",
@@ -1053,12 +1065,18 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 		_VideoRow(vy, 36, m_iSelect, "Frame Skip",
 			_VideoHackFrameSkipStatus()); vy += 12;
 
+	}
+	else
+	{
+		/* AURORA_MD_MENU_MAPPING_SRAM_FIX_V4 */
 		_VideoHeader(vy, "Controller options"); vy += 14;
-		_VideoRow(vy, 37, m_iSelect, "Use mouse",
+		_VideoRow(vy, 40, m_iSelect, "Use mouse",
 			InputSnesMouseGetModeName()); vy += 12;
-		_VideoRow(vy, 38, m_iSelect, "MD 6-button",
-			PicoDriveBridge_Get6Button() ? "On" : "Off"); vy += 12;
-		_VideoRow(vy, 39, m_iSelect, "Turbo Speed",
+		_VideoRow(vy, 41, m_iSelect, "MD pad",
+			PicoDriveBridge_Get6Button() ? "6-button" : "3-button"); vy += 12;
+		_VideoRow(vy, 42, m_iSelect, "MD mapping",
+			MainLoopMdPadGetLayoutName()); vy += 12;
+		_VideoRow(vy, 43, m_iSelect, "Turbo Speed",
 			MainLoopTurboGetSpeedName()); vy += 12;
 	}
 
@@ -1084,12 +1102,14 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
 	int dir = 0;
 
-	/* Circle: Video/Audio -> Performance -> Software Hacks -> Devices/Misc. */
+	/* AURORA_MD_MENU_MAPPING_SRAM_FIX_V4
+	 * Circle: Video/Audio -> Performance -> Controller -> Hacks -> Devices. */
 	if (trigger & PAD_CIRCLE)
 	{
 		if (m_iSelect < 10)       m_iSelect = 30;
 		else if (m_iSelect < 20)  m_iSelect = 0;
 		else if (m_iSelect < 30)  m_iSelect = 10;
+		else if (m_iSelect < 40)  m_iSelect = 40;
 		else                      m_iSelect = 20;
 	}
 
@@ -1098,7 +1118,8 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		if (m_iSelect < 10)      { lo = 0;  hi = 9;  }
 		else if (m_iSelect < 20) { lo = 10; hi = 19; }
 		else if (m_iSelect < 30) { lo = 20; hi = 29; }
-		else                     { lo = 30; hi = 39; }
+		else if (m_iSelect < 40) { lo = 30; hi = 36; }
+		else                     { lo = 40; hi = 43; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1388,14 +1409,17 @@ case 17: /* Famiclone Audio */
 			SNPPURenderSetSoftwareHackFlags(
 				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_FRAME_SKIP);
 			break;
-		case 37:
+		case 40:
 			InputSnesMouseCycleModeDir(dir);
 			break;
-		case 38:
+		case 41:
 			/* AURORA_PICODRIVE_CURRENT_6BUTTON */
 			PicoDriveBridge_Set6Button(!PicoDriveBridge_Get6Button());
 			break;
-		case 39:
+		case 42:
+			MainLoopMdPadCycleLayoutDir(dir);
+			break;
+		case 43:
 			MainLoopTurboCycleSpeedDir(dir);
 			break;
 		}
@@ -1403,11 +1427,12 @@ case 17: /* Famiclone Audio */
 
 	}
 
-	/* Square: previous page in the displayed 1 -> 2 -> 3 -> 4 order. */
+	/* Square: previous page in the displayed 1 -> 2 -> 3 -> 4 -> 5 order. */
 	if (trigger & PAD_SQUARE)
 	{
-		if (m_iSelect >= 30)      m_iSelect = 0;
-		else if (m_iSelect >= 20) m_iSelect = 30;
+		if (m_iSelect >= 40)      m_iSelect = 30;
+		else if (m_iSelect >= 30) m_iSelect = 0;
+		else if (m_iSelect >= 20) m_iSelect = 40;
 		else if (m_iSelect >= 10) m_iSelect = 20;
 		else                      m_iSelect = 10;
 	}
