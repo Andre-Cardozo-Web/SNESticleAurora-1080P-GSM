@@ -269,8 +269,11 @@ Bool MainLoopProcess()
             else if (_pSystem == _pSega)
             {
                 /* AURORA_PICODRIVE_STAGE2_EXECUTE */
-                Bool bDirectMd = PicoDriveBridge_CanDirectGsVideo()
-                               ? TRUE : FALSE;
+                Bool bDirectMd =
+                    (PicoDriveBridge_CanDirectGsVideo() &&
+                     (g_GskVideoMode != GSK_VIDMODE_240P ||
+                      GSK_Get240pFramebufferWidth() == 320))
+                    ? TRUE : FALSE;
 
                 PicoDriveBridge_SetRegion((int)g_SnesForceRegion);
                 PicoDriveBridge_SetMouseInput(

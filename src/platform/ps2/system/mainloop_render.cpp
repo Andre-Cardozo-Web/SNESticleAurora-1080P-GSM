@@ -59,21 +59,46 @@ void MainLoopRender()
 	static Uint32 _iFrame=0;
         static int whichdrawbuf = 0;
 
-        /* AURORA_MD_UI_RASTER_SWITCH_V1
-         * _bMenu is also used by save/load prompts. So every UI/prompt gets
-         * Aurora's normal 256x240 raster; plain MD gameplay gets 320x240. */
+        /* AURORA_SEGA_UI_PRESENTATION_V3
+         *
+         * Keep two different host presentations:
+         *
+         *   UI / browser / prompts -> Aurora's normal 256-wide raster
+         *   plain MD gameplay      -> native 320-wide raster in 240p
+         *   SMS and other systems  -> normal 256-wide raster
+         *
+         * The important distinction from the old late-init path is that
+         * the FIRST MD 320 raster is still selected in mainloop_load.cpp
+         * before PicoDrive is initialised. These later switches happen
+         * only when entering/leaving Aurora's internal UI.
+         *
+         * In 480i/1080i MainLoopEnsureGameplayRasterWidth() does not
+         * rebuild the GS; those modes keep their normal 640 framebuffer.
+         */
         {
-            static Int32 s_lastWantedRaster = -1;
-            Int32 wantedRaster =
-                (!_bMenu && _pSystem == _pSega &&
-                 PicoDriveBridge_IsMegaDrive()) ? 320 : 256;
+            Int32 wantedRaster = 256;
 
-            if (wantedRaster != s_lastWantedRaster)
+            if (!_bMenu &&
+                _pSystem == _pSega &&
+                PicoDriveBridge_IsMegaDrive())
             {
-                if (MainLoopEnsureGameplayRasterWidth(wantedRaster))
-                    s_lastWantedRaster = wantedRaster;
+                wantedRaster = 320;
+            }
+
+            /* The menu must never inherit the Sega gameplay PCRTC PAR.
+             * Do this before a possible 320->256 240p reinit so the newly
+             * created UI raster starts with Aurora's normal presentation. */
+            if (_bMenu)
+                GSK_SetNative240pPar(0);
+
+            if (!MainLoopEnsureGameplayRasterWidth(wantedRaster))
+            {
+                printf("[video] warning: could not switch to %d-wide presentation
+",
+                       (int)wantedRaster);
             }
         }
+
 
 
         /*
@@ -85,7 +110,11 @@ void MainLoopRender()
         static int s_native240pPar = -1;
         int native240pPar =
             (g_GskVideoMode == GSK_VIDMODE_240P &&
-             (_pSystem == _pNes || _pSystem == _pSnes || (_pSystem == _pSega && PicoDriveBridge_IsMegaDrive())) &&
+             (_pSystem == _pNes ||
+              _pSystem == _pSnes ||
+              (_pSystem == _pSega &&
+               (PicoDriveBridge_IsMegaDrive() ||
+                PicoDriveBridge_IsMasterSystem()))) &&
              !_bMenu) ? 1 : 0;
 
         if (native240pPar != s_native240pPar)
@@ -181,7 +210,9 @@ void MainLoopRender()
 
 
         if (_pSystem == _pSega &&
-            PicoDriveBridge_CanDirectGsVideo())
+            PicoDriveBridge_CanDirectGsVideo() &&
+            (g_GskVideoMode != GSK_VIDMODE_240P ||
+             GSK_Get240pFramebufferWidth() == 320))
         {
             /* AURORA_PD_DIRECT_T8_RENDER */
             PicoDriveBridge_DrawDirectGs(

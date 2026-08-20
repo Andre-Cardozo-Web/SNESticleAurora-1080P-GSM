@@ -1099,19 +1099,14 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     if (fbW <= 0 || fbH <= 0)
         return false;
 
-    /* 320 source samples define MD's canonical scanline.
-     * H40: whole framebuffer. H32: exact 80% width, centred. */
-    /* AURORA_MD_H32_NATIVE_WIDTH_V1
-     * H40 = 320 samples.
-     * H32/low-res = 256 samples, kept native and centred.
-     * 240p: 256 of 320 columns. 480i: 512 of 640 columns.
-     * No horizontal interpolation/resampling. */
-    if (srcW == 320)
+    /* AURORA_MD_H32_FULL_SCANLINE_V2
+     * H40 and H32 both represent a full-width Mega Drive scanline.
+     * H32 has 256 active samples because the VDP uses a lower dot clock;
+     * those pixels must therefore occupy the same physical display width
+     * as H40's 320 samples. Keep NEAREST sampling: this changes geometry,
+     * not filtering, and introduces no blur. */
+    if (srcW == 320 || srcW == 256)
         dstW = fbW;
-    else if (srcW == 256)
-        dstW = (fbW == 320) ? 256 :
-               ((fbW == 640) ? 512 :
-                (fbW * 4 + 2) / 5);
     else
         dstW = (fbW * srcW + 160) / 320;
 

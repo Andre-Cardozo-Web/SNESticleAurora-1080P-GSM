@@ -50,6 +50,100 @@ void _MainLoopGetName(Char *pName, const Char *pPath)
         strcpy(pName, pFileName);
 }
 
+/* AURORA_MD_PRELOAD_RASTER_PROBE_V2
+ * Decide the 240p physical raster before PicoDrive is initialised.
+ *
+ * This is deliberately conservative. Known 8-bit/32X images stay on
+ * Aurora's 256x240 raster. Standard MD .md/.bin images use 320x240.
+ * Unknown .bin files fall back to 256 rather than forcing a GS reinit
+ * after the emulated machine is already alive. */
+static int _MainLoopAsciiLower(int c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return c + ('a' - 'A');
+    return c;
+}
+
+static Bool _MainLoopSegaExtEquals(const char *pName, const char *pExt)
+{
+    const char *p;
+
+    if (!pName || !pExt)
+        return FALSE;
+
+    p = strrchr(pName, '.');
+    if (!p || !p[1])
+        return FALSE;
+    ++p;
+
+    while (*p && *pExt)
+    {
+        if (_MainLoopAsciiLower((unsigned char)*p) !=
+            _MainLoopAsciiLower((unsigned char)*pExt))
+            return FALSE;
+        ++p;
+        ++pExt;
+    }
+
+    return (*p == '\0' && *pExt == '\0') ? TRUE : FALSE;
+}
+
+static Bool _MainLoopSegaWantsNative320(
+    const Uint8 *pData, Int32 nBytes, const char *pName)
+{
+    static const Uint32 smsHeaderOffsets[] =
+    {
+        0x7ff0U, 0x3ff0U, 0x1ff0U
+    };
+
+    if (!pData || nBytes <= 0)
+        return FALSE;
+
+    /* Explicit non-MD extensions always keep Aurora's 256 raster. */
+    if (_MainLoopSegaExtEquals(pName, "sms") ||
+        _MainLoopSegaExtEquals(pName, "gg")  ||
+        _MainLoopSegaExtEquals(pName, "sg")  ||
+        _MainLoopSegaExtEquals(pName, "sc")  ||
+        _MainLoopSegaExtEquals(pName, "32x") ||
+        _MainLoopSegaExtEquals(pName, "pco"))
+        return FALSE;
+
+    /* A .bin may actually be SMS/GG. Mirror PicoDrive's TMR SEGA test
+     * before assuming Mega Drive. */
+    for (unsigned i = 0;
+         i < sizeof(smsHeaderOffsets) / sizeof(smsHeaderOffsets[0]);
+         ++i)
+    {
+        Uint32 off = smsHeaderOffsets[i];
+        if ((Uint32)nBytes >= off + 8U &&
+            memcmp(pData + off, "TMR SEGA", 8) == 0)
+            return FALSE;
+    }
+
+    /* 32X carts use the Mega Drive-style header too, so reject their
+     * explicit console signature before the generic SEGA test. */
+    if (nBytes >= 0x108 &&
+        memcmp(pData + 0x100, "SEGA 32X", 8) == 0)
+        return FALSE;
+
+    if (_MainLoopSegaExtEquals(pName, "md")  ||
+        _MainLoopSegaExtEquals(pName, "gen") ||
+        _MainLoopSegaExtEquals(pName, "smd"))
+        return TRUE;
+
+    /* Normal commercial .bin MD dumps identify themselves here. */
+    if (_MainLoopSegaExtEquals(pName, "bin") &&
+        nBytes >= 0x104 &&
+        (memcmp(pData + 0x100, "SEGA", 4) == 0 ||
+         memcmp(pData + 0x100, " SEG", 4) == 0))
+        return TRUE;
+
+    /* Safe fallback: 256/RGBA is preferable to rebuilding the GS
+     * after PicoDrive has already allocated its machine. */
+    return FALSE;
+}
+
+
 int _MainLoopReadBinaryData(Uint8 *pBuffer, Int32 nBufferBytes, const char *pRomFile)
 {
         int fd;
@@ -206,6 +300,13 @@ void _MainLoopUnloadRom()
 	/* AURORA_PICODRIVE_STAGE2_UNLOAD: SetRom(NULL) fully deinitializes PicoDrive. */
 	if (_pSega) _pSega->SetRom(NULL);
 	if (_pSegaRom) _pSegaRom->Unload();
+
+    /* AURORA_MD_STABLE_RASTER_V2
+     * Only rebuild the 240p GS after PicoDrive has been shut down.
+     * Browser/SNES/NES/SMS/GG use Aurora's normal physical raster. */
+    if (!MainLoopEnsureGameplayRasterWidth(256))
+        printf("[video] warning: could not restore 256 raster after unload\n");
+
     _bStateSaved = FALSE;
     _pSystem = NULL;
     _RomPath[0] = 0;
@@ -426,6 +527,35 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 		}
 	}
 
+    /* AURORA_MD_PRELOAD_RASTER_V2
+     * Select the final physical 240p raster BEFORE the ROM wrapper/core
+     * gets initialised. GSK_ReinitVideo must not run while PicoDrive owns
+     * live EE allocations. */
+    {
+        Int32 rasterWidth = 256;
+
+        if (eType == MAINLOOP_ENTRYTYPE_SEGAROM &&
+            _MainLoopSegaWantsNative320(
+                pBuffer, nRomBytes, SegaContentName))
+        {
+            rasterWidth = 320;
+        }
+
+        if (!MainLoopEnsureGameplayRasterWidth(rasterWidth))
+        {
+            printf("[video] failed to prepare %d raster before ROM init\n",
+                   (int)rasterWidth);
+
+            /* Best-effort recovery so the error/UI remains usable. */
+            if (rasterWidth != 256)
+                MainLoopEnsureGameplayRasterWidth(256);
+
+            MainLoopModalPrintf(60 * 3,
+                "ERROR: cannot configure video raster");
+            return FALSE;
+        }
+    }
+
 	if (pRom)
 	{
 		// attempt to load rom for that system
@@ -490,24 +620,10 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         return FALSE;
     }
 
-    /* AURORA_PD_SELECT_NATIVE_RASTER_V1
-     * This is also the SNES non-regression boundary: every non-plain-MD
-     * system explicitly restores the historical 256-sample 240p raster. */
-    {
-        Int32 rasterWidth =
-            (pSystem == _pSega && PicoDriveBridge_IsMegaDrive())
-            ? 320 : 256;
-
-        if (!MainLoopEnsureGameplayRasterWidth(rasterWidth))
-        {
-            printf("[video] failed to switch gameplay raster to %d\n",
-                   (int)rasterWidth);
-            _MainLoopUnloadRom();
-            MainLoopModalPrintf(60 * 3,
-                "ERROR: cannot configure video raster");
-            return FALSE;
-        }
-    }
+    /* AURORA_MD_PRELOAD_RASTER_V2
+     * Physical raster was selected before SetRom(). Do not rebuild the
+     * GS here: PicoDrive is now live and must keep a stable host video
+     * environment until the ROM is unloaded. */
 
     _pSystem = pSystem;
     snprintf(_RomPath, sizeof(_RomPath), "%s", OriginalPath);
