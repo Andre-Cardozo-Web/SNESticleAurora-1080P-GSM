@@ -50,6 +50,11 @@ extern int g_GskWidescreen;   /* 0 = 4:3, 1 = safe mode-specific 16:9           
 /* Set the display offset live (no VRAM realloc) and remember it for the
    next GSK_Init. X is in VCK units, matching FCEUmm-PS2. */
 void GSK_SetDisplayOffset(int x, int y);
+/* Runtime-only game bias; does not change/save g_GskDispOffY. */
+void GSK_SetGameplayYOffsetBias(int y);
+/* 240p physical sample raster: 256 (SNES/NES) or 320 (plain MD). */
+void GSK_Set240pFramebufferWidth(int width);
+int GSK_Get240pFramebufferWidth(void);
 
 /* Apply overscan (0..100) live by re-emitting the GS DISPLAY register.
    0 reproduces gsKit's normal output exactly. */

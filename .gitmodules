@@ -2,3 +2,6 @@
 	path = src/third_party/quicknes
 	url = https://github.com/itsveenee/QuickNES_Core.git
 	branch = master
+[submodule "src/third_party/picodrive"]
+	path = src/third_party/picodrive
+	url = https://github.com/itsveenee/picodrive.git

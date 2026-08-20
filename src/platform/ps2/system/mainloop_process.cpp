@@ -19,6 +19,7 @@
 #include "mainloop_state.h"
 #include "mainloop_exec.h"
 #include "mainloop_iop.h"
+#include "sega/picodrive/picodrive_bridge.h"
 #include "gskit_backend.h"
 
 #include "types.h"
@@ -121,7 +122,7 @@ Bool MainLoopProcess()
 		/* AURORA_AUTO_SNES_MOUSE_V1_5
 		 * Mouse replaces only SNES gameplay port 1. Pads remain polled for
 		 * menus and frontend hotkeys. */
-		if (_pSystem == _pSnes && InputSnesMouseShouldUse())
+		if ((_pSystem == _pSnes || _pSystem == _pSega) && InputSnesMouseShouldUse())
 		{
 			bSnesMouse = TRUE;
 			InputGetMouseData(&nSnesMouseX, &nSnesMouseY, &uSnesMouseButtons);
@@ -262,6 +263,33 @@ Bool MainLoopProcess()
                 PROF_ENTER("NesTexUpload");
                 TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
                 PROF_LEAVE("NesTexUpload");
+            }
+            else if (_pSystem == _pSega)
+            {
+                /* AURORA_PICODRIVE_STAGE2_EXECUTE */
+                Bool bDirectMd = PicoDriveBridge_CanDirectGsVideo()
+                               ? TRUE : FALSE;
+
+                PicoDriveBridge_SetRegion((int)g_SnesForceRegion);
+                PicoDriveBridge_SetMouseInput(
+                    bSnesMouse ? true : false,
+                    (int)nSnesMouseX,
+                    (int)nSnesMouseY,
+                    (unsigned)uSnesMouseButtons);
+
+                PROF_ENTER("SegaExecuteFrame");
+                /* AURORA_PD_DIRECT_T8_EXECUTE */
+                _pSega->ExecuteFrame(
+                    &Input, bDirectMd ? NULL : pSurface, pMixBuffer, eMode);
+                PROF_LEAVE("SegaExecuteFrame");
+
+                if (!bDirectMd)
+                {
+                    /* SMS/GG/32X retain the proven RGBA path. */
+                    PROF_ENTER("SegaTexUpload");
+                    TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
+                    PROF_LEAVE("SegaTexUpload");
+                }
             }
             else
             {

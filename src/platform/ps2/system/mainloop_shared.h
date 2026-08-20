@@ -19,6 +19,8 @@
 #include "nessystem.h"
 #include "nesrom.h"
 #include "nesstate.h"
+#include "segasystem.h"
+#include "segarom.h"
 #include "emusys.h"
 #include "emumovie.h"
 #include "rendersurface.h"
@@ -108,6 +110,10 @@ extern NesStateT       _NesState;
 extern Int32           _MainLoop_iDisk;
 extern Bool            _MainLoop_bDiskInserted;
 
+/* AURORA_PICODRIVE_STAGE2 */
+extern SegaSystem     *_pSega;
+extern SegaRom        *_pSegaRom;
+
 /* ---- ROM / framebuffer / audio buffers ---------------------------- */
 
 extern Uint8           _RomData[8 * 1024 * 1024 + 1024];
@@ -167,6 +173,8 @@ extern Float32 _MainLoop_fOutputIntensity;
 /* ---- Function entrypoints across mainloop_*.cpp ------------------- */
 
 void MainLoopRender();
+/* System-load-only 240p physical raster switch. */
+Bool MainLoopEnsureGameplayRasterWidth(Int32 width);
 void _MenuEnable(Bool bEnable);
 void _MenuRuntimeUpdate(void);
 /* Drawn from MainLoopRender() (mainloop_render.cpp), defined in
@@ -185,6 +193,7 @@ enum
 	MAINLOOP_ENTRYTYPE_NESFDSBIOS  ,
 	MAINLOOP_ENTRYTYPE_SNESROM     ,
 	MAINLOOP_ENTRYTYPE_SNESPALETTE ,
+	MAINLOOP_ENTRYTYPE_SEGAROM      ,
 
 	MAINLOOP_ENTRYTYPE_NUM
 };

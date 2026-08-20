@@ -22,6 +22,8 @@ extern "C" {
    displayed as 100 and 400 internal as 200.  The single AudMixBuffer
    instance (_AudMix) is shared by SNES and NES. */
 static int s_gameVolume = 200;   /* internal gain percent: 0..400 */
+/* PicoDrive-only speed mode. SNES/NES retain cubic resampling. */
+static int s_fastResample = 0;
 
 extern "C" void AudMixGameSetVolume(int vol)
 {
@@ -33,6 +35,11 @@ extern "C" void AudMixGameSetVolume(int vol)
 extern "C" int AudMixGameGetVolume(void)
 {
     return s_gameVolume;
+}
+
+extern "C" void AudMixSetFastResample(int enabled)
+{
+    s_fastResample = enabled ? 1 : 0;
 }
 
 
@@ -190,6 +197,35 @@ Int32 AudMixBuffer::ConvertSamples2to3(Int16 *pOut, Int16 *pIn, Int32 nSamples, 
 }
 
 
+
+/* AURORA_PICODRIVE_FAST_RESAMPLE
+ * Low-cost 32 -> 48 kHz converter for the experimental PicoDrive path.
+ * SNES/NES still use the higher-quality cubic converter below. */
+static Int32 AudMixConvertSamples2to3Fast(
+    Int16 *pOut, Int16 *pIn, Int32 nSamples, Int32 *pPrevSample)
+{
+    Int16 *pOutStart = pOut;
+    Int32 i;
+
+    for (i = 0; i + 1 < nSamples; i += 2)
+    {
+        Int32 s0 = pIn[i];
+        Int32 s1 = pIn[i + 1];
+        Int32 s2 = (i + 2 < nSamples) ? pIn[i + 2] : s1;
+
+        pOut[0] = (Int16)s0;
+        pOut[1] = (Int16)((s0 + 2 * s1) / 3);
+        pOut[2] = (Int16)((2 * s1 + s2) / 3);
+        pOut += 3;
+    }
+
+    if (nSamples > 0)
+        *pPrevSample = pIn[nSamples - 1];
+
+    return (Int32)(pOut - pOutStart);
+}
+
+
 Int32 AudMixBuffer::ConvertSamplesStereo_32000(Int16 *pLeftSamples, Int16 *pRightSamples, Int16 *pOutLeft, Int16 *pOutRight, Int32 nInSamples)
 {
     Int32 nOutSamples;
@@ -197,8 +233,20 @@ Int32 AudMixBuffer::ConvertSamplesStereo_32000(Int16 *pLeftSamples, Int16 *pRigh
     if (nInSamples > AUDMIXBUFFER_MAXENQUEUE*2/3) nInSamples = AUDMIXBUFFER_MAXENQUEUE*2/3;
 
     PROF_ENTER("Aud_Convert");
-    ConvertSamples2to3(pOutLeft, pLeftSamples, nInSamples, &m_iPrevSample[0]);
-    nOutSamples=ConvertSamples2to3(pOutRight, pRightSamples, nInSamples, &m_iPrevSample[1]);
+    if (s_fastResample)
+    {
+        AudMixConvertSamples2to3Fast(
+            pOutLeft, pLeftSamples, nInSamples, &m_iPrevSample[0]);
+        nOutSamples = AudMixConvertSamples2to3Fast(
+            pOutRight, pRightSamples, nInSamples, &m_iPrevSample[1]);
+    }
+    else
+    {
+        ConvertSamples2to3(
+            pOutLeft, pLeftSamples, nInSamples, &m_iPrevSample[0]);
+        nOutSamples = ConvertSamples2to3(
+            pOutRight, pRightSamples, nInSamples, &m_iPrevSample[1]);
+    }
     PROF_LEAVE("Aud_Convert");
 
     return nOutSamples;

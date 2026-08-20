@@ -12,6 +12,7 @@
 #include "mainloop.h"
 #include "input.h"
 #include "nes/quicknes/quicknes_bridge.h"
+#include "sega/picodrive/picodrive_bridge.h"
 #include "memcard.h"
 #include "prof.h"
 
@@ -37,12 +38,14 @@ extern "C" {
 
 /* AURORA_CONTROLLER_OPTIONS_V2 */
 static MainLoopTurboSpeedE _MainLoop_TurboSpeed = MAINLOOP_TURBO_SPEED_NORMAL;
+static Uint32 _MainLoop_TurboPhaseBase = 0;
 
 void MainLoopTurboSetSpeed(MainLoopTurboSpeedE eSpeed)
 {
     if (eSpeed < MAINLOOP_TURBO_SPEED_NORMAL || eSpeed >= MAINLOOP_TURBO_SPEED_NUM)
         eSpeed = MAINLOOP_TURBO_SPEED_NORMAL;
     _MainLoop_TurboSpeed = eSpeed;
+    _MainLoop_TurboPhaseBase = _pSystem ? (Uint32)_pSystem->GetFrame() : 0;
     QuicknesBridge_SetTurboSpeed((unsigned)eSpeed);
 }
 
@@ -72,8 +75,9 @@ const char *MainLoopTurboGetSpeedName(void)
 static Bool _MainLoopTurboIsOn(Uint32 uFrame)
 {
     Uint32 shift = (Uint32)_MainLoop_TurboSpeed;
-    /* Max=1 ON/1 OFF; Half=2 ON/2 OFF; Quarter=4 ON/4 OFF. */
-    return (((uFrame >> shift) & 1U) == 0U) ? TRUE : FALSE;
+    Uint32 elapsed = uFrame - _MainLoop_TurboPhaseBase;
+    /* Every speed selection begins in the ON half of its cadence. */
+    return (((elapsed >> shift) & 1U) == 0U) ? TRUE : FALSE;
 }
 
 static Bool _MainLoop_bSuppressGameInputUntilRelease = FALSE;
@@ -105,6 +109,29 @@ static Uint16 _MainLoopSnesInput(Uint32 cond)
 	return pad;
 }
 
+/* AURORA_PICODRIVE_STAGE2_SEGA_INPUT
+ * Carrier bits are SNESIO names only because SysInputT is a 16-bit legacy
+ * structure. PicoDriveBridge translates them into the real Mega Drive pad.
+ * Host: Square=A, Cross=B, Circle=C, L1=X, Triangle=Y, R1=Z, R3=MODE. */
+static Uint16 _MainLoopSegaInput(Uint32 cond)
+{
+	Uint16 out = 0;
+	if (cond & PAD_UP)       out |= SNESIO_JOY_UP;
+	if (cond & PAD_DOWN)     out |= SNESIO_JOY_DOWN;
+	if (cond & PAD_LEFT)     out |= SNESIO_JOY_LEFT;
+	if (cond & PAD_RIGHT)    out |= SNESIO_JOY_RIGHT;
+
+	if (cond & PAD_SQUARE)   out |= SNESIO_JOY_A; /* carrier -> MD A */
+	if (cond & PAD_CROSS)    out |= SNESIO_JOY_B; /* carrier -> MD B */
+	if (cond & PAD_CIRCLE)   out |= SNESIO_JOY_Y; /* carrier -> MD C */
+	if (cond & PAD_L1)       out |= SNESIO_JOY_L; /* MD X */
+	if (cond & PAD_TRIANGLE) out |= SNESIO_JOY_X; /* MD Y */
+	if (cond & PAD_R1)       out |= SNESIO_JOY_R; /* MD Z */
+	if (cond & PAD_R3)       out |= SNESIO_JOY_SELECT; /* MD MODE */
+	if (cond & PAD_START)    out |= SNESIO_JOY_START;
+	return out;
+}
+
 Uint16 _MainLoopInput(Uint32 pad)
 {
 	if (_MainLoop_bSuppressGameInputUntilRelease)
@@ -117,6 +144,32 @@ Uint16 _MainLoopInput(Uint32 pad)
 	   SNES gameplay while held. */
 	if (pad & PAD_L2)
 		return 0;
+
+	/* AURORA_PICODRIVE_STAGE3_INPUT_DISPATCH
+	 * MD: SNES-style R2 turbo. SMS: NES-style Circle/Triangle turbo. */
+	if (_pSystem == _pSega)
+	{
+		if (PicoDriveBridge_IsMasterSystem())
+		{
+			Uint32 uSms = pad & ~(PAD_CIRCLE | PAD_TRIANGLE | PAD_R2);
+			if (_MainLoopTurboIsOn((Uint32)_pSystem->GetFrame()))
+			{
+				if (pad & PAD_CIRCLE)   uSms |= PAD_CROSS;
+				if (pad & PAD_TRIANGLE) uSms |= PAD_SQUARE;
+			}
+			return _MainLoopSegaInput(uSms);
+		}
+		if (pad & PAD_R2)
+		{
+			const Uint32 uDirections = pad & (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT);
+			Uint32 uTurboButtons = pad & (PAD_SQUARE | PAD_CROSS | PAD_CIRCLE |
+				PAD_L1 | PAD_TRIANGLE | PAD_R1 | PAD_R3 | PAD_START);
+			if (!_MainLoopTurboIsOn((Uint32)_pSystem->GetFrame()))
+				uTurboButtons = 0;
+			return _MainLoopSegaInput(uDirections | uTurboButtons);
+		}
+		return _MainLoopSegaInput(pad);
+	}
 
 	if (pad & PAD_R2)
 	{
@@ -162,11 +215,7 @@ void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 		_MainLoopStateDevicePromptOpen();
 		return;
 	}
-
-	if (_MainLoop_bAudioReady)
-	{
-		Aud_Setvol(0);
-	}
+	MainLoopAudioHardCut();
 
 	MainLoopModalPrintf(
 		1,
@@ -180,10 +229,7 @@ void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 	{
 		Int32 iPort = MainLoopStateGetUnformattedCard();
 
-		if (_MainLoop_bAudioReady)
-		{
-			Aud_Setvol(0x3FFF);
-		}
+		MainLoopAudioResumeGame();
 		_MainLoopMemCardFormatPromptOpen(
 			iPort,
 			MAINLOOP_MEMCARDFORMAT_STATE_SAVE
@@ -191,10 +237,7 @@ void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 		return;
 	}
 
-	if (_MainLoop_bAudioReady)
-	{
-		Aud_Setvol(0x3FFF);
-	}
+	MainLoopAudioResumeGame();
 
 	MainLoopStatusPrintf(
 		bOK ? 90 : 180,
@@ -203,9 +246,30 @@ void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 	);
 }
 
+/* AURORA_STATE_PROMPT_AUDIO_GUARD_V3
+ * Final semantics: a prompt is a real audio discontinuity, not a mute. */
+static Bool s_StatePromptAudioMuted = FALSE;
+static void _MainLoopStatePromptMuteAudio(void)
+{
+    if (!s_StatePromptAudioMuted)
+    {
+        MainLoopAudioHardCut();
+        s_StatePromptAudioMuted = TRUE;
+    }
+}
+static void _MainLoopStatePromptRestoreAudio(void)
+{
+    if (s_StatePromptAudioMuted)
+        MainLoopAudioResumeGame();
+    s_StatePromptAudioMuted = FALSE;
+}
+
 static void _MainLoopQuickStateAction(Bool bSave)
 {
+	_MainLoopStatePromptMuteAudio();
 	_MainLoopStateConfirmPromptOpen(bSave);
+	if (_MainLoop_pScreen != (CScreen *)_MainLoop_pStateConfirmScreen)
+		_MainLoopStatePromptRestoreAudio();
 }
 
 void _MainLoopInputProcess(Uint32 buttons)
@@ -277,6 +341,8 @@ void _MainLoopInputProcess(Uint32 buttons)
 	    _MainLoop_pScreen == (CScreen *)_MainLoop_pStateConfirmScreen)
 	{
 		_MainLoopStateConfirmPromptInput(buttons, trigger);
+		if (_MainLoop_pScreen != (CScreen *)_MainLoop_pStateConfirmScreen)
+			_MainLoopStatePromptRestoreAudio();
 		return;
 	}
 

@@ -22,6 +22,8 @@
 #include "nessystem.h"
 #include "nesrom.h"
 #include "nesstate.h"
+#include "segasystem.h"
+#include "segarom.h"
 #include "emusys.h"
 #include "emumovie.h"
 #include "rendersurface.h"
@@ -73,6 +75,10 @@ NesFDSBios  *_pNesFDSBios;
 NesDisk     *_pNesFDSDisk;
 Int32        _MainLoop_iDisk          = 0;
 Bool         _MainLoop_bDiskInserted  = FALSE;
+
+/* AURORA_PICODRIVE_STAGE2 */
+SegaSystem  *_pSega;
+SegaRom     *_pSegaRom;
 
 Char _RomName[256];
 Char _RomPath[1024];

@@ -63,6 +63,8 @@ extern "C" {
 #endif
 void AudMixGameSetVolume(int vol);
 int  AudMixGameGetVolume(void);
+/* Experimental fast 32->48 kHz path used only by PicoDrive. */
+void AudMixSetFastResample(int enabled);
 #ifdef __cplusplus
 }
 #endif

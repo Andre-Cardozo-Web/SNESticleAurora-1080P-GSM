@@ -16,7 +16,7 @@ BUILD_TOTAL ?= $(words $(OBJS))
 # VERBOSE=1 mostra a mensagem de warning/erro COMPLETA (sem o corte de
 # 58 colunas do resumo) e despeja o log inteiro do compilador em
 # warnings (erros ja' fazem 'cat' do log sempre). Ex.: make VERBOSE=1
-VERBOSE ?= 0
+VERBOSE ?= 1
 SHOW_WARN_LOG ?= $(VERBOSE)
 # Largura do resumo de 1 linha; VERBOSE solta o limite (mostra tudo).
 MSG_WIDTH ?= $(if $(filter 1,$(VERBOSE)),100000,58)
@@ -33,7 +33,7 @@ PS2DEV_ENV ?= $(PS2DEV)/env.sh
 PS2DEV_REF ?= master
 PS2DEV_REPO ?= https://github.com/ps2dev/ps2dev.git
 PS2DEV_BUILD_DIR ?= $(HOME)/.cache/snesticle-ps2dev
-JOBS ?= 1
+JOBS ?= 8
 LOAD_LIMIT ?= $(JOBS)
 OUTPUT_SYNC ?= --output-sync=target
 .DEFAULT_GOAL := fast
@@ -58,10 +58,63 @@ QUICKNES_INC := $(QUICKNES_DIR)/libretro/libretro-common/include
 QUICKNES_NATIVE_INC := $(QUICKNES_DIR)/nes_emu
 # QUICKNES_SNESTICLE_END
 
+# AURORA_PICODRIVE_STAGE2
+PICODRIVE_DIR ?= $(CURDIR)/src/third_party/picodrive
+PICODRIVE_LIB ?= $(PICODRIVE_DIR)/picodrive_libretro_ps2.a
+PICODRIVE_INC := $(PICODRIVE_DIR)/platform/libretro/libretro-common/include
+
+# PicoDrive is intentionally built with STATIC_LINKING=0 so its libretro-common
+# helpers are self-contained in the archive. PicoDrive's root Makefile enables
+# -flto in that mode, therefore the archive must be indexed by GCC's plugin-
+# aware gcc-ar rather than plain binutils ar.
+
+# PicoDrive and QuickNES both embed emu2413 and export the same OPLL_* C API.
+# Keep the implementations isolated by namespacing PicoDrive's copy at compile
+# time. The macros affect PicoDrive only because they are injected through the
+# PicoDrive sub-make CC command.
+PICODRIVE_OPLL_NS_FLAGS := \
+	-DOPLL_RateConv_new=PD_OPLL_RateConv_new \
+	-DOPLL_RateConv_reset=PD_OPLL_RateConv_reset \
+	-DOPLL_RateConv_putData=PD_OPLL_RateConv_putData \
+	-DOPLL_RateConv_getData=PD_OPLL_RateConv_getData \
+	-DOPLL_RateConv_delete=PD_OPLL_RateConv_delete \
+	-DOPLL_new=PD_OPLL_new \
+	-DOPLL_delete=PD_OPLL_delete \
+	-DOPLL_reset=PD_OPLL_reset \
+	-DOPLL_resetPatch=PD_OPLL_resetPatch \
+	-DOPLL_setRate=PD_OPLL_setRate \
+	-DOPLL_setQuality=PD_OPLL_setQuality \
+	-DOPLL_setPan=PD_OPLL_setPan \
+	-DOPLL_setPanFine=PD_OPLL_setPanFine \
+	-DOPLL_setChipType=PD_OPLL_setChipType \
+	-DOPLL_writeIO=PD_OPLL_writeIO \
+	-DOPLL_writeReg=PD_OPLL_writeReg \
+	-DOPLL_calc=PD_OPLL_calc \
+	-DOPLL_calcStereo=PD_OPLL_calcStereo \
+	-DOPLL_setPatch=PD_OPLL_setPatch \
+	-DOPLL_copyPatch=PD_OPLL_copyPatch \
+	-DOPLL_forceRefresh=PD_OPLL_forceRefresh \
+	-DOPLL_dumpToPatch=PD_OPLL_dumpToPatch \
+	-DOPLL_patchToDump=PD_OPLL_patchToDump \
+	-DOPLL_getDefaultPatch=PD_OPLL_getDefaultPatch \
+	-DOPLL_setMask=PD_OPLL_setMask \
+	-DOPLL_toggleMask=PD_OPLL_toggleMask
+PICODRIVE_AR ?= $(shell \
+	if command -v mips64r5900el-ps2-elf-gcc-ar >/dev/null 2>&1; then \
+		command -v mips64r5900el-ps2-elf-gcc-ar; \
+	elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-gcc-ar" ]; then \
+		echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-gcc-ar"; \
+	elif command -v ee-gcc-ar >/dev/null 2>&1; then \
+		command -v ee-gcc-ar; \
+	else \
+		echo "$(EE_AR)"; \
+	fi)
+
 
 
 EE_CC ?= $(shell if command -v ee-gcc >/dev/null 2>&1; then echo ee-gcc; elif command -v mips64r5900el-ps2-elf-gcc >/dev/null 2>&1; then echo mips64r5900el-ps2-elf-gcc; elif [ -x "$(PS2DEV)/ee/bin/ee-gcc" ]; then echo "$(PS2DEV)/ee/bin/ee-gcc"; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-gcc" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-gcc"; fi)
 EE_CXX ?= $(shell if command -v ee-g++ >/dev/null 2>&1; then echo ee-g++; elif command -v mips64r5900el-ps2-elf-g++ >/dev/null 2>&1; then echo mips64r5900el-ps2-elf-g++; elif [ -x "$(PS2DEV)/ee/bin/ee-g++" ]; then echo "$(PS2DEV)/ee/bin/ee-g++"; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-g++" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-g++"; fi)
+EE_AR ?= $(shell if command -v ee-ar >/dev/null 2>&1; then echo ee-ar; elif command -v mips64r5900el-ps2-elf-ar >/dev/null 2>&1; then echo mips64r5900el-ps2-elf-ar; elif [ -x "$(PS2DEV)/ee/bin/ee-ar" ]; then echo "$(PS2DEV)/ee/bin/ee-ar"; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-ar" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-ar"; fi)
 EE_STRIP ?= $(shell if command -v ee-strip >/dev/null 2>&1; then echo ee-strip; elif command -v mips64r5900el-ps2-elf-strip >/dev/null 2>&1; then echo mips64r5900el-ps2-elf-strip; elif [ -x "$(PS2DEV)/ee/bin/ee-strip" ]; then echo "$(PS2DEV)/ee/bin/ee-strip"; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-strip" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-strip"; fi)
 # ps2-packer is Pixel's LZMA self-extracting ELF packer
 # (https://github.com/ps2dev/ps2-packer, shipped with ps2dev/ps2dev).
@@ -359,7 +412,11 @@ INCS := \
 	-I$(PS2SDK)/ports/include \
 	-I$(GSKIT)/include \
 	-I$(QUICKNES_INC) \
-	-I$(QUICKNES_NATIVE_INC)
+	-I$(QUICKNES_NATIVE_INC) \
+	-I$(PICODRIVE_INC) \
+	-I$(PICODRIVE_DIR) \
+	-I$(SRC_DIR)/sega/system \
+	-I$(SRC_DIR)/sega/picodrive
 
 LIBDIRS := \
 	-L$(PS2SDK)/ee/lib \
@@ -546,7 +603,10 @@ SRCS := \
 	src/platform/ps2/system/embedded_irx.cpp \
 	src/nes/system/nesrom.cpp \
 	src/nes/quicknes/quicknes_bridge.cpp \
-	src/nes/quicknes/nessystem_quicknes.cpp
+	src/nes/quicknes/nessystem_quicknes.cpp \
+	src/sega/system/segarom.cpp \
+	src/sega/picodrive/picodrive_bridge.cpp \
+	src/sega/picodrive/segasystem_picodrive.cpp
 
 OBJS := \
 	$(patsubst src/%.c,$(OBJ_DIR)/%.o,$(filter %.c,$(SRCS))) \
@@ -900,8 +960,17 @@ $(QUICKNES_LIB): FORCE_QUICKNES
 		all
 
 
-$(TARGET): $(OBJS) $(QUICKNES_LIB) | $(OBJ_DIR)
-	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) "$(QUICKNES_LIB)" $(LIBDIRS) $(LIBS))
+
+.PHONY: FORCE_PICODRIVE
+FORCE_PICODRIVE:
+
+$(PICODRIVE_LIB): FORCE_PICODRIVE
+	@printf '[ PicoDrive ] building PS2 static core\n'
+	@$(MAKE) -C "$(PICODRIVE_DIR)" -f Makefile.libretro \
+		platform=ps2 CC="$(EE_CC) $(PICODRIVE_OPLL_NS_FLAGS)" AR="$(PICODRIVE_AR)" PS2DEV="$(PS2DEV)" PS2SDK="$(PS2SDK)" use_libchdr=0 STATIC_LINKING=0 STATIC_LINKING_LINK=1 all
+
+$(TARGET): $(OBJS) $(PICODRIVE_LIB) $(QUICKNES_LIB) | $(OBJ_DIR)
+	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) "$(PICODRIVE_LIB)" "$(QUICKNES_LIB)" $(LIBDIRS) $(LIBS))
 
 $(TARGET_STRIPPED): $(TARGET)
 	@cp -f "$(TARGET)" "$@"

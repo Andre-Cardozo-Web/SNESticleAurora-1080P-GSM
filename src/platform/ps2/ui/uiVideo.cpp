@@ -28,6 +28,7 @@ extern "C" {
 #include "snppucolor.h"
 #include "snppurender.h"
 #include "nes/quicknes/quicknes_bridge.h" /* QUICKNES_FAMICLONE_HOOK */
+#include "sega/picodrive/picodrive_bridge.h"
 
 /* mc0:/SNESticle (defined in mainloop_globals.cpp). */
 extern Char _SramPath[256];
@@ -40,7 +41,8 @@ void MainResetEmulator(void);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 31
+#define VIDEOCFG_VERSION 32
+/* AURORA_PICODRIVE_CURRENT_UI_V4: v32 appends md6button only. */
 /* v31 establishes Menu Volume UI 100 (internal 200) as the migration
  * default for every older config. Once saved as v31+, the user's selected
  * Menu Volume persists normally. */
@@ -91,6 +93,7 @@ typedef struct
 	Int32  turbospeed;
 	Int32  cpuoverclock;
 	Int32  bgmenable;   /* Menu Music: 0=off, 1=on */
+	Int32  md6button;   /* PicoDrive MD pad: 0=3-button, 1=6-button */
 } VideoCfgT;
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -383,6 +386,7 @@ void VideoSettingsSave(void)
 	cfg.snesmousemode = (Int32)InputSnesMouseGetMode();
 	cfg.turbospeed = (Int32)MainLoopTurboGetSpeed();
 	cfg.cpuoverclock = SNCPU_OVERCLOCK_OFF;
+	cfg.md6button = PicoDriveBridge_Get6Button() ? 1 : 0;
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -419,17 +423,25 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
+		else if (header.version == 31)
+		{
+			/* AURORA_PICODRIVE_CURRENT_CFG_V32 */
+			memset(&cfg, 0, sizeof(cfg));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
+			        sizeof(cfg) - sizeof(cfg.md6button));
+			if (loaded) cfg.version = VIDEOCFG_VERSION;
+		}
 		else if (header.version == 30)
 		{
 			/* v30 has the same byte layout as v31. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 29)
 		{
 			/* v29 was a temporary test config with broken menu-audio defaults.
 			 * Import its layout, then reset only those two settings once. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button));
 			if (loaded)
 			{
 				cfg.version = VIDEOCFG_VERSION;
@@ -440,19 +452,19 @@ void VideoSettingsLoad(void)
 		else if (header.version == 28)
 		{
 			/* v28 has the same byte layout; only Menu Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 27)
 		{
 			/* v27 is the v28/v29 prefix without bgmenable. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 26)
 		{
 			/* v26 has the same byte layout; only Game Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 25)
@@ -689,6 +701,9 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 		if (cfg.turbospeed >= MAINLOOP_TURBO_SPEED_NORMAL &&
 		    cfg.turbospeed < MAINLOOP_TURBO_SPEED_NUM)
 			MainLoopTurboSetSpeed((MainLoopTurboSpeedE)cfg.turbospeed);
+		/* AURORA_PICODRIVE_CURRENT_CFG_APPLY */
+		if (cfg.md6button == 0 || cfg.md6button == 1)
+			PicoDriveBridge_Set6Button(cfg.md6button == 1);
 		SNCPUSetOverclockLevel(_pSnes ? _pSnes->GetCpu() : NULL,
 		                         SNCPU_OVERCLOCK_OFF);
 	}
@@ -1039,9 +1054,11 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 			_VideoHackFrameSkipStatus()); vy += 12;
 
 		_VideoHeader(vy, "Controller options"); vy += 14;
-		_VideoRow(vy, 37, m_iSelect, "SNES Mouse",
+		_VideoRow(vy, 37, m_iSelect, "Use mouse",
 			InputSnesMouseGetModeName()); vy += 12;
-		_VideoRow(vy, 38, m_iSelect, "Turbo Speed",
+		_VideoRow(vy, 38, m_iSelect, "MD 6-button",
+			PicoDriveBridge_Get6Button() ? "On" : "Off"); vy += 12;
+		_VideoRow(vy, 39, m_iSelect, "Turbo Speed",
 			MainLoopTurboGetSpeedName()); vy += 12;
 	}
 
@@ -1081,7 +1098,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		if (m_iSelect < 10)      { lo = 0;  hi = 9;  }
 		else if (m_iSelect < 20) { lo = 10; hi = 19; }
 		else if (m_iSelect < 30) { lo = 20; hi = 29; }
-		else                     { lo = 30; hi = 38; }
+		else                     { lo = 30; hi = 39; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1375,6 +1392,10 @@ case 17: /* Famiclone Audio */
 			InputSnesMouseCycleModeDir(dir);
 			break;
 		case 38:
+			/* AURORA_PICODRIVE_CURRENT_6BUTTON */
+			PicoDriveBridge_Set6Button(!PicoDriveBridge_Get6Button());
+			break;
+		case 39:
 			MainLoopTurboCycleSpeedDir(dir);
 			break;
 		}

@@ -936,6 +936,12 @@ void BgmMenuEnter(void)
        never scan a drive or reload a module before the first frame appears. */
     _BgmLock();
     s_menuActive = TRUE;
+    /* AURORA_BGM_MENU_REARM_V1: _MenuEnable may have hard-cleared audsrv. */
+    if (s_enabled && s_volume > 0 && Aud_IsInitialized())
+    {
+        Aud_Setvol(0x3FFFu);
+        Aud_Play();
+    }
     _BgmUnlock();
 }
 
@@ -995,15 +1001,42 @@ int BgmGetVolume(void)
 
 void BgmSetEnabled(int enabled)
 {
-    _BgmLock();
-    s_enabled = enabled ? TRUE : FALSE;
+    Bool next;
 
-    /* Keep the decoder/position cached while disabled; only stop feeding it.
-       This makes Off -> On immediate and leaves Menu Volume untouched. */
-    if (!s_enabled)
+    _BgmLock();
+    next = enabled ? TRUE : FALSE;
+
+    if (next == s_enabled)
+    {
+        _BgmUnlock();
+        return;
+    }
+
+    s_enabled = next;
+
+    /* AURORA_BGM_TRUE_OFF_V1
+     * OFF destroys the decoder/module and the queued PCM. The track index is
+     * intentionally preserved, so the next ON reloads that same track from
+     * position zero instead of resuming an old xmp position. */
+    _BgmFree();
+
+    if (!s_enabled || s_volume <= 0)
+    {
+        if (Aud_IsInitialized())
+        {
+            Aud_Setvol(0);
+            Aud_Clearbuff();
+        }
+    }
+    else if (Aud_IsInitialized())
+    {
+        /* ON starts from a completely empty audio service. BgmUpdate will
+           reload s_trackIdx from the beginning and feed fresh PCM. */
         Aud_Setvol(0);
-    else if (s_volume > 0)
+        Aud_Clearbuff();
         Aud_Setvol(0x3FFFu);
+        Aud_Play();
+    }
 
     _BgmUnlock();
 }

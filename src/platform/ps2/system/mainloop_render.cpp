@@ -14,6 +14,7 @@
 #include "mainloop_shared.h"
 #include "mainloop_ui.h"
 #include "mainloop_bgm.h"
+#include "sega/picodrive/picodrive_bridge.h"
 
 #include "types.h"
 #include "console.h"
@@ -58,6 +59,23 @@ void MainLoopRender()
 	static Uint32 _iFrame=0;
         static int whichdrawbuf = 0;
 
+        /* AURORA_MD_UI_RASTER_SWITCH_V1
+         * _bMenu is also used by save/load prompts. So every UI/prompt gets
+         * Aurora's normal 256x240 raster; plain MD gameplay gets 320x240. */
+        {
+            static Int32 s_lastWantedRaster = -1;
+            Int32 wantedRaster =
+                (!_bMenu && _pSystem == _pSega &&
+                 PicoDriveBridge_IsMegaDrive()) ? 320 : 256;
+
+            if (wantedRaster != s_lastWantedRaster)
+            {
+                if (MainLoopEnsureGameplayRasterWidth(wantedRaster))
+                    s_lastWantedRaster = wantedRaster;
+            }
+        }
+
+
         /*
          * NES/SNES 240p: keep the framebuffer strictly 256x240 (1 source
          * pixel = 1 framebuffer pixel) and correct horizontal size at
@@ -67,13 +85,26 @@ void MainLoopRender()
         static int s_native240pPar = -1;
         int native240pPar =
             (g_GskVideoMode == GSK_VIDMODE_240P &&
-             (_pSystem == _pNes || _pSystem == _pSnes) &&
+             (_pSystem == _pNes || _pSystem == _pSnes || (_pSystem == _pSega && PicoDriveBridge_IsMegaDrive())) &&
              !_bMenu) ? 1 : 0;
 
         if (native240pPar != s_native240pPar)
         {
             GSK_SetNative240pPar(native240pPar);
             s_native240pPar = native240pPar;
+        }
+
+        /* AURORA_MD_YOFFSET_MINUS9_V1
+         * Plain MD only: effective Y = configured menu Y - 9. */
+        {
+            static int s_lastMdYBias = 9999;
+            int mdYBias = 0;
+
+            if (mdYBias != s_lastMdYBias)
+            {
+                GSK_SetGameplayYOffsetBias(mdYBias);
+                s_lastMdYBias = mdYBias;
+            }
         }
 
 
@@ -149,33 +180,50 @@ void MainLoopRender()
 		}
 
 
-        PolyBlend(FALSE);
-        PolyTexture(&_OutTex);
-        PolyUV(0,0,256,240);
-		PolyColor4f(fColor, fColor, fColor, 1.0f);
-
-
-                if (g_GskVideoMode == GSK_VIDMODE_240P && _pSystem == _pNes)
+        if (_pSystem == _pSega &&
+            PicoDriveBridge_CanDirectGsVideo())
         {
-/*
- * InfoNES 240p overscan compensation.
- *
- * Keep the NES framebuffer at its native 256x240 size and
- * preserve a 1:1 pixel mapping. Only reposition the image
- * to compensate for CRT overscan.
- */
-PolyRect(0.0f, 2.0f, 256.0f, 240.0f);
-        }
-        else if (_pSystem == _pSnes)
-        {
-PolyRect(0.0f, 8.0f, 256.0f, 240.0f);
+            /* AURORA_PD_DIRECT_T8_RENDER */
+            PicoDriveBridge_DrawDirectGs(
+                _MainLoop_uOutTexTBP, fColor);
         }
         else
         {
-PolyRect(0.0f, 4.0f, 256.0f, 240.0f);
+            PolyBlend(FALSE);
+            PolyTexture(&_OutTex);
+            PolyUV(0,0,256,240);
+    		PolyColor4f(fColor, fColor, fColor, 1.0f);
+    
+    
+                    if (g_GskVideoMode == GSK_VIDMODE_240P && _pSystem == _pNes)
+            {
+    /*
+     * InfoNES 240p overscan compensation.
+     *
+     * Keep the NES framebuffer at its native 256x240 size and
+     * preserve a 1:1 pixel mapping. Only reposition the image
+     * to compensate for CRT overscan.
+     */
+    PolyRect(0.0f, 2.0f, 256.0f, 240.0f);
+            }
+            else if (g_GskVideoMode == GSK_VIDMODE_240P && _pSystem == _pSega)
+            {
+    /* AURORA_SEGA_NATIVE_240P_V1
+     * PicoDriveBridge already composes MD/SMS/GG into an exact 256x240 logical
+     * raster. Present that raster 1:1; PCRTC handles the CRT pixel aspect. */
+    PolyRect(0.0f, 0.0f, 256.0f, 240.0f);
+            }
+            else if (_pSystem == _pSnes)
+            {
+    PolyRect(0.0f, 8.0f, 256.0f, 240.0f);
+            }
+            else
+            {
+    PolyRect(0.0f, 4.0f, 256.0f, 240.0f);
+            }
+    
+            PolyBlend(TRUE);
         }
-
-        PolyBlend(TRUE);
         //PolyTexture(NULL);
         //PolyRect(dx,dy,128,120);
     }

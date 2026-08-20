@@ -135,7 +135,11 @@ extern "C" void DLog(const char *fmt, ...);
    gsKit has already reserved the active mode's FB0/FB1 when this helper
    runs, so the same layout remains valid for 480i and 1080i. */
 #define MAINLOOP_VRAM_FRAME_ALIGN   8192U
-#define MAINLOOP_OUT_TEX_BYTES      (256U * 256U * 4U)
+/* AURORA_PD_DIRECT_T8_VRAM
+ * Original RGBA _OutTex remains first and unchanged. Reserve native MD T8
+ * (384x256 destination pitch) + one aligned CLUT page after it. */
+#define MAINLOOP_OUT_TEX_BYTES      ((256U * 256U * 4U) + \
+                                     (384U * 256U) + 8192U)
 /* Highest blender address is base + 0x200 TBP (temporary 256px RGBA
    surface). Reserve through +0x280 TBP so the complete GS page span is
    private to the blender. */
@@ -188,6 +192,40 @@ static Bool _MainLoopAllocVideoVram(void)
 	       (unsigned)coverTBP, (unsigned)blenderTBP);
 	return TRUE;
 }
+
+/* AURORA_PD_NATIVE320_RASTER_SWITCH_V1
+ * SNES/NES/SMS/GG stay on 256x240. Plain MD can request 320x240 so an H40
+ * source sample maps to one physical framebuffer column in 240p. */
+Bool MainLoopEnsureGameplayRasterWidth(Int32 width)
+{
+    if (width != 256 && width != 320)
+        width = 256;
+
+    if (GSK_Get240pFramebufferWidth() == width)
+        return TRUE;
+
+    GSK_Set240pFramebufferWidth(width);
+
+    if (g_GskVideoMode != GSK_VIDMODE_240P)
+        return TRUE;
+
+    if (width == 256)
+        GSK_SetGameplayYOffsetBias(0);
+
+    GSK_ReinitVideo();
+    if (!_MainLoopAllocVideoVram())
+        return FALSE;
+
+    FontInit(s_FontTexTBP);
+    CoverInit(s_CoverTexTBP);
+
+    TextureSetAddr(&_OutTex, _MainLoop_uOutTexTBP);
+    if (_fbTexture[0])
+        TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
+
+    return TRUE;
+}
+
 
 
 /* Browser starting directory. On real PS2 you typically want "mass:/"
@@ -450,6 +488,15 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	for (Uint32 iExt=0; iExt < _pNesRom->GetNumExts(); iExt++)
 	{
 		PathExtAdd(MAINLOOP_ENTRYTYPE_NESROM, _pNesRom->GetExtName(iExt));
+	}
+
+	/* AURORA_PICODRIVE_STAGE2_INIT */
+	_pSega = new SegaSystem();
+	_pSega->Reset();
+	_pSegaRom = new SegaRom();
+	for (Uint32 iExt=0; iExt < _pSegaRom->GetNumExts(); iExt++)
+	{
+		PathExtAdd(MAINLOOP_ENTRYTYPE_SEGAROM, _pSegaRom->GetExtName(iExt));
 	}
 
 	_pNesFDSDisk = new NesDisk();

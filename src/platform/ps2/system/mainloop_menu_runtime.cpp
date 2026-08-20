@@ -34,6 +34,7 @@
 #include "memcard.h"
 #include "uiScreen.h"
 #include "mainloop_bgm.h"
+#include "audmixbuffer.h"
 
 extern "C" {
 #include "audio.h"
@@ -106,6 +107,37 @@ void _MenuRuntimeUpdate(void)
 }
 
 
+/* AURORA_FINAL_AUDIO_VIDEO_MD_V1
+ * A transition must discard THREE places where an old sample can survive:
+ *   1) AudMixBuffer's local EE frame accumulator,
+ *   2) the EE async FIFO,
+ *   3) audsrv's IOP/SPU2 queue.
+ * Aud_Clearbuff() performs (2)+(3); Reset() performs (1). */
+void MainLoopAudioHardCut(void)
+{
+    if (_AudMix)
+        _AudMix->Reset();
+
+    if (_MainLoop_bAudioReady)
+    {
+        Aud_Setvol(0);
+        Aud_Clearbuff();
+    }
+}
+
+void MainLoopAudioResumeGame(void)
+{
+    /* Clear once more before waking audsrv. This is intentional: closing a
+       modal must never replay a sample generated before the modal opened. */
+    MainLoopAudioHardCut();
+
+    if (_MainLoop_bAudioReady)
+    {
+        Aud_Setvol(0x3FFF);
+        Aud_Play();
+    }
+}
+
 void _MenuEnable(Bool bEnable)
 {
 	if (bEnable!=_bMenu)
@@ -115,14 +147,8 @@ void _MenuEnable(Bool bEnable)
 			/* Publish the menu state before any storage RPC. MainLoopProcess
 			   will render two frames, then run the pending save below. */
 			_bMenu = TRUE;
+			MainLoopAudioHardCut();
 			BgmMenuEnter();
-			if (_MainLoop_bAudioReady)
-			{
-				/* AURORA_AUDIO_ASYNC_FIFO_MENU_CUT
-				 * Staged gameplay PCM must not leak into menu BGM/resume. */
-				Aud_AsyncDiscardPending();
-				Aud_Setvol(0);
-			}
 
 			/* Preserve a write performed in the <30-frame checksum window. */
 			_MainLoopForceCheckSRAM();
@@ -142,8 +168,7 @@ void _MenuEnable(Bool bEnable)
 			s_sramSaveDelay = 0;
 			_bMenu = FALSE;
 			BgmStop();
-			if (_MainLoop_bAudioReady)
-				Aud_Setvol(0x3FFF);
+			MainLoopAudioResumeGame();
 		}
 	}
 }

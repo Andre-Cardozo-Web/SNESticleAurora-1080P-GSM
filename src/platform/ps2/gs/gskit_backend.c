@@ -58,6 +58,8 @@ static int _gsk_fb_width    = 640; /* active FB width                     */
 static int _gsk_fb_height   = 480; /* active FB height                    */
 static int _gsk_active_mode = GSK_VIDMODE_480I; /* mode the GS is in now   */
 static int _gsk_native240p_par = 0;
+static int _gsk_240p_fb_width = 256;
+static int _gsk_game_y_bias = 0;
 
 /* gsKit's computed DISPLAY params, captured after gsKit_init_screen so
    overscan/widescreen can be recomputed from a clean baseline. */
@@ -170,7 +172,7 @@ void GSK_Init(int width, int height,
         _pGsGlobal->Mode      = _gsk_DetectTvMode();
         _pGsGlobal->Interlace = GS_NONINTERLACED;
         _pGsGlobal->Field     = GS_FRAME;
-        _gsk_fb_width         = 256;
+        _gsk_fb_width         = _gsk_240p_fb_width;
         _gsk_fb_height        = 240;
         _gsk_vck              = 4;
         break;
@@ -373,7 +375,7 @@ static void _GskApplyDisplay(void)
          * new_magh1 is 10 here, so 2 source pixels = 20 PCRTC units.
          * Do this at scanout level so no framebuffer columns are clipped.
          */
-        startx += (dw - new_dw) / 2 - (2 * new_magh1);
+        startx += (dw - new_dw) / 2 - ((_gsk_fb_width == 256 ? 2 : 0) * new_magh1);
         dw      = new_dw;
         magh    = new_magh1 - 1;
 
@@ -420,7 +422,8 @@ static void _GskApplyDisplay(void)
     gs->StartY = starty;
 
     /* Re-emit DISPLAY1/2 (also folds in the user X/Y offset). */
-    gsKit_set_display_offset(gs, g_GskDispOffX * _gsk_vck, g_GskDispOffY);
+    gsKit_set_display_offset(gs, g_GskDispOffX * _gsk_vck,
+                             g_GskDispOffY + _gsk_game_y_bias);
     _GskApplyRenderTransform();
 }
 
@@ -429,6 +432,27 @@ void GSK_SetDisplayOffset(int x, int y)
     g_GskDispOffX = x;
     g_GskDispOffY = y;
     _GskApplyDisplay();
+}
+
+void GSK_SetGameplayYOffsetBias(int y)
+{
+    if (_gsk_game_y_bias == y)
+        return;
+
+    _gsk_game_y_bias = y;
+    _GskApplyDisplay();
+}
+
+void GSK_Set240pFramebufferWidth(int width)
+{
+    if (width != 256 && width != 320)
+        width = 256;
+    _gsk_240p_fb_width = width;
+}
+
+int GSK_Get240pFramebufferWidth(void)
+{
+    return _gsk_240p_fb_width;
 }
 
 void GSK_SetOverscan(int percent)
@@ -458,14 +482,24 @@ void GSK_SetNative240pPar(int on)
 
 void GSK_ReinitVideo(void)
 {
-    if (!_gsk_initialised) {
+    GSGLOBAL *oldGlobal;
+
+    if (!_gsk_initialised || !_pGsGlobal) {
         return;
     }
-    /* Allow GSK_Init to run again; it re-programs the PCRTC and
-       reallocates VRAM for the (possibly new) g_GskVideoMode.  The
-       caller is responsible for re-uploading its textures (FontInit)
-       since the VRAM allocator is reset. */
+
+    /* AURORA_GSK_REINIT_FREE_V1
+     * Saved 240p/1080i is applied after the initial 480i boot. The old code
+     * created a second GSGLOBAL without destroying the first one. PicoDrive
+     * allocates its core lazily at ROM launch, so it is especially sensitive
+     * to heap lost during that earlier video reinitialisation. */
+    GSK_DrainAndWait();
+    oldGlobal = _pGsGlobal;
+
     _gsk_initialised = 0;
+    _pGsGlobal = NULL;
+    gsKit_deinit_global(oldGlobal);
+
     GSK_Init(_gsk_arg_w, _gsk_arg_h, _gsk_arg_dispx, _gsk_arg_dispy,
              _gsk_arg_psm, _gsk_arg_psmz, _gsk_arg_mode, _gsk_arg_interlace);
 }

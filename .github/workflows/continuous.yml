@@ -22,6 +22,9 @@ jobs:
       - name: Build
         run: make AUTO_INSTALL=yes
       - name: Continuous release
+        # AURORA_PICODRIVE_NO_PUBLIC_COMBINED_ELF: licensing safety.
+        # CI may build/test PicoDrive but this step must not publish the linked ELF.
+        if: ${{ false }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

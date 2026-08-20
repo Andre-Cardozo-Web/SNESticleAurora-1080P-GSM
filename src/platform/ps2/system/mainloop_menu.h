@@ -31,3 +31,7 @@ extern const char *_MainLoopMenuEntries[];
 extern char *_MainLoopStateMenuEntries[];
 void _MainLoopStateBrowserReturn(void);
 extern char *_MainLoop_pInstallFiles[];
+
+/* Hard audio transition helpers: clear EE mixer + audsrv/IOP queue. */
+void MainLoopAudioHardCut(void);
+void MainLoopAudioResumeGame(void);

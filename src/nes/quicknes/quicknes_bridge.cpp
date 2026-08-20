@@ -359,7 +359,14 @@ void QuicknesBridge_SetDutySwap(bool enabled)
 
 void QuicknesBridge_SetTurboSpeed(unsigned speedShift)
 {
-    s_TurboSpeedShift = (speedShift <= 2U) ? speedShift : 0U;
+    /* AURORA_TURBO_SPEED_REARM_V1 */
+    unsigned next = (speedShift <= 2U) ? speedShift : 0U;
+    if (s_TurboSpeedShift != next)
+    {
+        s_TurboSpeedShift = next;
+        s_TurboFrame = 0;
+        s_TurboPhase = true;
+    }
 }
 
 void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,

@@ -352,7 +352,8 @@ int _MainLoopStateMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
     }
 
     const Char *pSystemDir =
-        (_pSystem == _pNes) ? "NES" : "SNES";
+        (_pSystem == _pNes) ? "NES" :
+        ((_pSystem == _pSega) ? "SEGA" : "SNES");
 
     Char SramDir[1024];
 
@@ -441,6 +442,9 @@ void _MainLoopStateConfirmPromptOpen(Bool bSave)
 {
         if (!_MainLoop_pStateConfirmScreen || _bMenu || !_pSystem)
                 return;
+
+        /* AURORA_STATE_PROMPT_HARDCUT_OPEN_V1 */
+        MainLoopAudioHardCut();
 
         _MainLoop_StateConfirmSave = bSave;
         _MainLoop_StateConfirmArmed = FALSE;

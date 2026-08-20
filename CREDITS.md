@@ -54,3 +54,11 @@ SNESticle Aurora includes or integrates third-party components including InfoNES
 Their original copyright notices, authorship information and license files remain authoritative and must be preserved.
 
 See the repository LICENSE and the license files shipped with the corresponding third-party components.
+
+<!-- AURORA_PICODRIVE_CURRENT_CREDITS -->
+## PicoDrive
+
+Experimental Mega Drive / Genesis, Master System, Game Gear and 32X support
+uses PicoDrive (notaz and contributors; current development/fork contributors).
+Aurora's PS2 bridge/integration is maintained in `itsveenee/SNESticleAurora`.
+See `THIRD_PARTY.md` and `LICENSES/PicoDrive-COPYING.txt`.

@@ -14,6 +14,7 @@
 #include "emurom.h"
 #include "mainloop.h"
 #include "mainloop_shared.h"
+#include "sega/picodrive/picodrive_bridge.h"
 #include "mainloop_state.h"
 #include "mainloop_ui.h"
 #include "snes.h"
@@ -22,6 +23,7 @@
 #include "audmixbuffer.h"
 #include "emumovie.h"
 #include "mainloop_load.h"
+#include "mainloop_menu.h"
 #include "embedded_irx.h"   /* HddMapPath (hdd0:/PART -> pfs0:) */
 #include "sndbglog.h"
 
@@ -122,7 +124,13 @@ Bool _MainLoopLoadRomData(Emu::Rom *pRom, Uint8 *pRomData, Int32 nRomBytes)
         romfile.Open(pRomData, nRomBytes);
 
         // load rom
-        eError = pRom->LoadRom(&romfile);
+        /* AURORA_PICODRIVE_STAGE2_ROM_BUFFER: Sega attaches Aurora's
+           already-loaded _RomData directly. No duplicate buffer and no
+           in-place CMemFileIO memcpy. SNES/NES retain the old path. */
+        if (pRom == _pSegaRom)
+            eError = _pSegaRom->AttachBuffer(pRomData, (Uint32)nRomBytes);
+        else
+            eError = pRom->LoadRom(&romfile);
         romfile.Close();
 
         if (eError!=Emu::Rom::LoadErrorE::LOADERROR_NONE)
@@ -168,6 +176,9 @@ Bool _MainLoopLoadSnesPalette(const char *pFileName)
 
 void _MainLoopUnloadRom()
 {
+    /* AURORA_AUDIO_HARDCUT_ROM_UNLOAD_V1 */
+    MainLoopAudioHardCut();
+
 
     // stop recording if we are recording
     if (s_pMovieClip->IsRecording())
@@ -192,6 +203,9 @@ void _MainLoopUnloadRom()
 	_pNes->SetRom(NULL);
 	_pNesRom->Unload();
 	_pNesFDSDisk->Unload();
+	/* AURORA_PICODRIVE_STAGE2_UNLOAD: SetRom(NULL) fully deinitializes PicoDrive. */
+	if (_pSega) _pSega->SetRom(NULL);
+	if (_pSegaRom) _pSegaRom->Unload();
     _bStateSaved = FALSE;
     _pSystem = NULL;
     _RomPath[0] = 0;
@@ -215,6 +229,8 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	   silently overflows the old FileName[256] in strcpy() below. */
 	char FileName[1024];
 	char OriginalPath[1024];
+	/* AURORA_PICODRIVE_STAGE2_CONTENT_NAME */
+	char SegaContentName[1024];
 
 	if (pFileName==NULL)
 	{
@@ -236,6 +252,7 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 
 	// make copy of filename
 	snprintf(FileName, sizeof(FileName), "%s", pFileName);
+	snprintf(SegaContentName, sizeof(SegaContentName), "%s", pFileName);
 
 	// resolve file extension of filename
 	if (!PathExtResolve(FileName, &eType, TRUE))
@@ -267,6 +284,8 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	if (eType == MAINLOOP_ENTRYTYPE_GZ)
 	{
 		// if its a GZ file, then the next extension is the one we use
+		/* AURORA_PICODRIVE_STAGE2_GZ_NAME: FileName still has .md/.sms/etc here. */
+		snprintf(SegaContentName, sizeof(SegaContentName), "%s", FileName);
 		if (!PathExtResolve(FileName, &eType, TRUE))
 		{
 			return FALSE;
@@ -282,6 +301,8 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 		nRomBytes = _MainLoopReadZipData(pBuffer, nBufferBytes, pFileName, FileName);
 		if (nRomBytes > 0)
 		{
+			/* AURORA_PICODRIVE_STAGE2_ZIP_NAME */
+			snprintf(SegaContentName, sizeof(SegaContentName), "%s", FileName);
 			// resolve extension of unzipped file
 			if (!PathExtResolve(FileName, &eType, TRUE))
 			{
@@ -349,6 +370,12 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 			pRom    = NULL;
 			pBios   = _pNesFDSBios;
 			_MainLoop_fOutputIntensity = 0.8f;
+			break;
+		case MAINLOOP_ENTRYTYPE_SEGAROM:
+			pSystem = _pSega;
+			pRom    = _pSegaRom;
+			pBios   = NULL;
+			_MainLoop_fOutputIntensity = 1.0f;
 			break;
 		case MAINLOOP_ENTRYTYPE_SNESROM:
 			pSystem = _pSnes;
@@ -428,6 +455,12 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	} 
 	else
 	{
+		/* AURORA_PICODRIVE_STAGE2_SETROM */
+		if (pSystem == _pSega && _pSegaRom)
+		{
+			_pSegaRom->SetSourceName(SegaContentName);
+			PicoDriveBridge_SetRegion((int)g_SnesForceRegion);
+		}
 		pSystem->SetRom(pRom);
 	}
 
@@ -445,6 +478,35 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         MainLoopModalPrintf(60 * 3,
             "ERROR: QuickNES cannot run this NES image (format/mapper/FDS)");
         return FALSE;
+    }
+
+    /* AURORA_PICODRIVE_STAGE2_REQUIRE_READY */
+    if (pSystem == _pSega && !_pSega->IsRomReady())
+    {
+        printf("[PicoDrive] ROM rejected; aborting launch before mainloop\n");
+        _MainLoopUnloadRom();
+        MainLoopModalPrintf(60 * 3,
+            "ERROR: PicoDrive cannot run this SEGA image");
+        return FALSE;
+    }
+
+    /* AURORA_PD_SELECT_NATIVE_RASTER_V1
+     * This is also the SNES non-regression boundary: every non-plain-MD
+     * system explicitly restores the historical 256-sample 240p raster. */
+    {
+        Int32 rasterWidth =
+            (pSystem == _pSega && PicoDriveBridge_IsMegaDrive())
+            ? 320 : 256;
+
+        if (!MainLoopEnsureGameplayRasterWidth(rasterWidth))
+        {
+            printf("[video] failed to switch gameplay raster to %d\n",
+                   (int)rasterWidth);
+            _MainLoopUnloadRom();
+            MainLoopModalPrintf(60 * 3,
+                "ERROR: cannot configure video raster");
+            return FALSE;
+        }
     }
 
     _pSystem = pSystem;
