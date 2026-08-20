@@ -66,6 +66,22 @@ enum { PD_AUDIO_CHUNK = 1024 };
 static Int16 s_AudioL[PD_AUDIO_CHUNK];
 static Int16 s_AudioR[PD_AUDIO_CHUNK];
 
+/* AURORA_PICODRIVE_AUDIO_ODD_TAIL_V1
+ * PicoDrive at 32 kHz/60 Hz naturally emits odd-sized batches
+ * (typically 533/533/534 stereo frames). Aurora's fast 32->48 kHz
+ * converter consumes input in pairs, so keep one unmatched stereo
+ * frame for the next callback instead of dropping it. */
+static bool  s_AudioTailValid = false;
+static Int16 s_AudioTailL = 0;
+static Int16 s_AudioTailR = 0;
+
+static void pdAudioTailReset()
+{
+    s_AudioTailValid = false;
+    s_AudioTailL = 0;
+    s_AudioTailR = 0;
+}
+
 
 /* AURORA_PICODRIVE_LAST_CHANCE_PERF_V1
  * The fast PicoDrive renderer emits 8-bit palette indices. Keep conversion
@@ -231,36 +247,90 @@ static void pdVideoRefresh(const void *data, unsigned width,
      * hardware interface. The bridge copies it after retro_run(). */
 }
 
+static void pdAudioOutputInterleaved(const int16_t *data, size_t frames)
+{
+    size_t pos = 0;
+
+    if (!data || frames == 0)
+        return;
+
+    /* If a frame is deliberately run without a mixer, its audio is
+     * discarded. Do not carry an older tail across that discontinuity. */
+    if (!s_pMix)
+    {
+        pdAudioTailReset();
+        return;
+    }
+
+    /* Prepend a pending frame to an odd number of new frames. This makes
+     * an even chunk while retaining normal lookahead for interpolation. */
+    if (s_AudioTailValid)
+    {
+        size_t take = frames;
+        if (take > PD_AUDIO_CHUNK - 1)
+            take = PD_AUDIO_CHUNK - 1;
+        if ((take & 1u) == 0)
+            --take;
+
+        s_AudioL[0] = s_AudioTailL;
+        s_AudioR[0] = s_AudioTailR;
+
+        for (size_t i = 0; i < take; ++i)
+        {
+            s_AudioL[i + 1] = data[i * 2 + 0];
+            s_AudioR[i + 1] = data[i * 2 + 1];
+        }
+
+        s_AudioTailValid = false;
+        s_pMix->OutputSamplesStereo(
+            s_AudioL, s_AudioR, (Int32)(take + 1));
+
+        pos = take;
+    }
+
+    /* Aurora's fast 2:3 converter is pair-based. Feed it only even
+     * input counts and retain, rather than discard, a final odd frame. */
+    while (pos < frames)
+    {
+        size_t n = frames - pos;
+
+        if (n > PD_AUDIO_CHUNK)
+            n = PD_AUDIO_CHUNK;
+
+        n &= ~(size_t)1;
+
+        if (n == 0)
+            break;
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            s_AudioL[i] = data[(pos + i) * 2 + 0];
+            s_AudioR[i] = data[(pos + i) * 2 + 1];
+        }
+
+        s_pMix->OutputSamplesStereo(
+            s_AudioL, s_AudioR, (Int32)n);
+
+        pos += n;
+    }
+
+    if (pos < frames)
+    {
+        s_AudioTailL = data[pos * 2 + 0];
+        s_AudioTailR = data[pos * 2 + 1];
+        s_AudioTailValid = true;
+    }
+}
+
 static void pdAudioSample(int16_t left, int16_t right)
 {
-    if (!s_pMix)
-        return;
-    Int16 l = left, r = right;
-    s_pMix->OutputSamplesStereo(&l, &r, 1);
+    const int16_t frame[2] = { left, right };
+    pdAudioOutputInterleaved(frame, 1);
 }
 
 static size_t pdAudioBatch(const int16_t *data, size_t frames)
 {
-    if (!data)
-        return frames;
-    if (!s_pMix)
-        return frames;
-
-    size_t done = 0;
-    while (done < frames)
-    {
-        size_t n = frames - done;
-        if (n > PD_AUDIO_CHUNK)
-            n = PD_AUDIO_CHUNK;
-
-        for (size_t i = 0; i < n; ++i)
-        {
-            s_AudioL[i] = data[(done + i) * 2 + 0];
-            s_AudioR[i] = data[(done + i) * 2 + 1];
-        }
-        s_pMix->OutputSamplesStereo(s_AudioL, s_AudioR, (Int32)n);
-        done += n;
-    }
+    pdAudioOutputInterleaved(data, frames);
     return frames;
 }
 
@@ -723,6 +793,7 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes, const char *pNam
         return false;
     }
 
+    pdAudioTailReset();
     s_GameLoaded = true;
     /* AURORA_MD_CLUT_GAME_LIFETIME_V1 */
     s_DirectClutValid = false;
@@ -779,6 +850,7 @@ void PicoDriveBridge_UnloadGame(void)
 
     s_GameLoaded = false;
     s_DirectClutValid = false;
+    pdAudioTailReset();
     AudMixSetFastResample(0);
     s_LastPortType[0] = s_LastPortType[1] = -1;
     s_MapLeft = s_MapTop = -1;
@@ -799,12 +871,14 @@ void PicoDriveBridge_Reset(void)
 {
     if (s_GameLoaded)
         retro_reset();
+    pdAudioTailReset();
 }
 
 void PicoDriveBridge_SoftReset(void)
 {
     if (s_GameLoaded)
         retro_reset();
+    pdAudioTailReset();
 }
 
 void PicoDriveBridge_Set6Button(bool enabled)
@@ -835,6 +909,9 @@ void PicoDriveBridge_SetRegion(int auroraRegion)
         return;
     s_AuroraRegion = auroraRegion;
     s_VariablesChanged = true;
+
+    /* A region change may switch the 50/60 Hz audio cadence. */
+    pdAudioTailReset();
 }
 
 void PicoDriveBridge_SetMouseInput(bool active, int dx, int dy, unsigned buttons)
@@ -1097,6 +1174,9 @@ bool PicoDriveBridge_LoadState(const void *pData, int nBytes)
     {
         /* AURORA_MD_STATE_CLUT_INVALIDATE_V1 */
         s_DirectClutValid = false;
+
+        /* Pending PCM belongs to the pre-load timeline. */
+        pdAudioTailReset();
     }
     return ok;
 }
