@@ -93,8 +93,7 @@ void MainLoopRender()
 
             if (!MainLoopEnsureGameplayRasterWidth(wantedRaster))
             {
-                printf("[video] warning: could not switch to %d-wide presentation
-",
+                printf("[video] warning: could not switch to %d-wide presentation\n",
                        (int)wantedRaster);
             }
         }

@@ -364,7 +364,7 @@ Bool MainLoopInit()
 		const char *pBootDir = MainGetBootDir();
 		if (!pBootDir || strlen(pBootDir) >= sizeof(_MainLoop_BootDir))
 		{
-			_MainLoop_BootDir[0] = ' ';
+			_MainLoop_BootDir[0] = '\0';
 			ScrPrintf("[boot] BootDir too long; sidecar search disabled");
 		}
 		else

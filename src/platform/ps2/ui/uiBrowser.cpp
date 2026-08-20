@@ -712,7 +712,7 @@ int CBrowserScreen::GetEntryPath(char *pStr, int nChars)
 		pStr, nChars, "%s%s", m_Dir, m_pDirEntries[m_iSelect].name);
 	if (nWritten <= 0 || nWritten >= nChars)
 	{
-		pStr[0] = ' ';
+		pStr[0] = '\0';
 		return 0;
 	}
 	return nWritten;
