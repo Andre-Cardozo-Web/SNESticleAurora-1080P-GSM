@@ -758,6 +758,36 @@ static void _MainLoopStateReleaseSegaScratch()
     _MainLoop_SegaCompressedCapacity = 0;
 }
 
+/* AURORA_PD_STATE_SCRATCH_RELEASE_V3
+ *
+ * PicoDrive state data is temporary working memory. Keep the raw state and
+ * optional compression buffer alive for the whole Save/Load operation, then
+ * release them automatically on every exit path. This avoids leaving both
+ * buffers pinned on the 32 MiB EE heap after a Sega state operation.
+ */
+class MainLoopSegaStateScratchGuard
+{
+public:
+    MainLoopSegaStateScratchGuard()
+        : m_bActive(_pSystem == _pSega ? TRUE : FALSE)
+    {
+    }
+
+    ~MainLoopSegaStateScratchGuard()
+    {
+        if (m_bActive)
+            _MainLoopStateReleaseSegaScratch();
+    }
+
+private:
+    Bool m_bActive;
+
+    MainLoopSegaStateScratchGuard(
+        const MainLoopSegaStateScratchGuard &);
+    MainLoopSegaStateScratchGuard &operator=(
+        const MainLoopSegaStateScratchGuard &);
+};
+
 static Uint8 *_MainLoopStateEnsureSegaStateData(Uint32 nBytes)
 {
     if (!nBytes)
@@ -1465,7 +1495,10 @@ static const Char *_MainLoopStateGetUnsupportedChip(Uint32 uFlags)
     if (uFlags & SNROM_FLAG_DSP3)    return "DSP-3";
     if (uFlags & SNROM_FLAG_DSP4)    return "DSP-4";
     if (uFlags & SNROM_FLAG_OBC1)    return "OBC1";
-    if (uFlags & SNROM_FLAG_CX4)     return "CX4";
+    /* AURORA_CX4_STATE_V7 */
+    if ((uFlags & SNROM_FLAG_CX4) &&
+        (!_pSnes || !_pSnes->CanSerializeCX4State()))
+        return "CX4";
     if (uFlags & SNROM_FLAG_SDD1)    return "S-DD1";
     if (uFlags & SNROM_FLAG_SRTC)    return "S-RTC";
     return NULL;
@@ -2246,6 +2279,7 @@ static void _MainLoopStateSortCandidates(Int32 nCandidates)
 
 Bool _MainLoopLoadState()
 {
+    MainLoopSegaStateScratchGuard SegaScratchGuard;
     Char Reason[192];
     Uint32 uRomCRC;
     Uint32 nRomBytes;
@@ -2372,6 +2406,7 @@ Bool _MainLoopLoadState()
 
 Bool _MainLoopSaveState()
 {
+    MainLoopSegaStateScratchGuard SegaScratchGuard;
     Char Reason[192];
     Uint32 uRomCRC;
     Uint32 nRomBytes;

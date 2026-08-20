@@ -201,6 +201,57 @@ void SNCX4::Reset()
     m_tanval = 0;
 }
 
+/* AURORA_CX4_STATE_V7 */
+void SNCX4::SaveState(SNCX4StateT *pState) const
+{
+    if (!pState)
+        return;
+
+    memset(pState, 0, sizeof(*pState));
+    memcpy(pState->Ram, m_Ram, sizeof(m_Ram));
+
+    pState->C4WFXVal = C4WFXVal;
+    pState->C4WFYVal = C4WFYVal;
+    pState->C4WFZVal = C4WFZVal;
+    pState->C4WFX2Val = C4WFX2Val;
+    pState->C4WFY2Val = C4WFY2Val;
+    pState->C4WFDist = C4WFDist;
+    pState->C4WFScale = C4WFScale;
+
+    pState->C41FXVal = C41FXVal;
+    pState->C41FYVal = C41FYVal;
+    pState->C41FAngleRes = C41FAngleRes;
+    pState->C41FDist = C41FDist;
+    pState->C41FDistVal = C41FDistVal;
+
+    pState->tanval = m_tanval;
+}
+
+Bool SNCX4::RestoreState(const SNCX4StateT *pState)
+{
+    if (!pState)
+        return FALSE;
+
+    memcpy(m_Ram, pState->Ram, sizeof(m_Ram));
+
+    C4WFXVal = pState->C4WFXVal;
+    C4WFYVal = pState->C4WFYVal;
+    C4WFZVal = pState->C4WFZVal;
+    C4WFX2Val = pState->C4WFX2Val;
+    C4WFY2Val = pState->C4WFY2Val;
+    C4WFDist = pState->C4WFDist;
+    C4WFScale = pState->C4WFScale;
+
+    C41FXVal = pState->C41FXVal;
+    C41FYVal = pState->C41FYVal;
+    C41FAngleRes = pState->C41FAngleRes;
+    C41FDist = pState->C41FDist;
+    C41FDistVal = pState->C41FDistVal;
+
+    m_tanval = pState->tanval;
+    return TRUE;
+}
+
 // ---------------------------------------------------------------------------
 // Nucleo matematico
 // ---------------------------------------------------------------------------

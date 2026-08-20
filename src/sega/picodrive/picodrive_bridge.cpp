@@ -29,6 +29,10 @@ extern "C" {
 #include <libretro_gskit_ps2.h>
 #include <pico/pico.h>
 #include <pico/pico_int.h>
+
+/* AURORA_PD_BORROW_AURORA_ROM_V1 */
+void PicoCartSetExternalRomBuffer(const unsigned char *rom,
+                                  unsigned int capacity);
 }
 
 static bool s_Initialized = false;
@@ -61,6 +65,9 @@ static char s_ContentBaseName[1024] = "game";
 static char s_ContentExt[16] = "md";
 static struct retro_game_info_ext s_ContentInfoExt;
 static const char s_DotPath[] = ".";
+
+/* Keep in sync with _RomData in mainloop_globals.cpp. */
+enum { PD_AURORA_ROM_BUFFER_CAPACITY = 8 * 1024 * 1024 + 1024 };
 
 enum { PD_AUDIO_CHUNK = 1024 };
 static Int16 s_AudioL[PD_AUDIO_CHUNK];
@@ -163,6 +170,19 @@ static bool pdEnvironment(unsigned cmd, void *data)
                 var->value = "disabled";
             else if (!strcmp(var->key, "picodrive_ggghost"))
                 var->value = "off";
+            else if (!strcmp(var->key, "picodrive_smstms"))
+            {
+                /* AURORA_PD_SG1000_TMS_PALETTE_V6
+                 * PicoDrive's SMS VDP can run the legacy TMS graphics modes
+                 * used by SG-1000/SC-3000 software. The SMS replacement
+                 * palette is substantially darker; ask PicoDrive to use its
+                 * original SG-1000/TMS palette for those modes instead.
+                 *
+                 * This core option only changes TMS-mode palette selection:
+                 * normal SMS mode 4, Game Gear and Mega Drive rendering are
+                 * unaffected. */
+                var->value = "SG-1000";
+            }
             else if (!strcmp(var->key, "picodrive_drc"))
                 var->value = "enabled";
             else if (!strcmp(var->key, "picodrive_frameskip"))
@@ -786,8 +806,21 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes, const char *pNam
         s_ContentInfoExt.persistent_data = true;
     }
 
+    /* AURORA_PD_BORROW_AURORA_ROM_V1
+     * SegaRom already points at Aurora's _RomData. Lend that storage
+     * to PicoDrive instead of allocating/copying a second cartridge. */
+    PicoCartSetExternalRomBuffer(
+        (const unsigned char *)pData,
+        (unsigned int)PD_AURORA_ROM_BUFFER_CAPACITY);
+
     s_VariablesChanged = true;
-    if (!retro_load_game(&info))
+    bool loadOk = retro_load_game(&info);
+
+    /* Offer is only for this load; cart.c separately tracks ownership
+     * of the active borrowed Pico.rom until PicoCartUnload(). */
+    PicoCartSetExternalRomBuffer(NULL, 0);
+
+    if (!loadOk)
     {
         printf("[PicoDrive] retro_load_game failed: %s (%u bytes)\n",
                s_ContentName, (unsigned)nBytes);

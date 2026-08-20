@@ -11,6 +11,49 @@
    old padding, so existing state payload size must remain identical. */
 typedef char SNStateCPUSizeMustRemain44[(sizeof(SNStateCPUT) == 44) ? 1 : -1];
 
+/* AURORA_CX4_STATE_V7
+ *
+ * SnesStateT already carries a fixed 256 KiB SRAM image for compatibility.
+ * Put a tagged CX4 snapshot at the END of its unused SRAM tail rather than
+ * growing SnesStateT and invalidating every pre-existing normal SNES state.
+ */
+struct SNCX4StateEnvelopeT
+{
+    Uint8 Tag[8];
+    Uint32 Version;
+    SNCX4StateT CX4;
+};
+
+static const Uint8 _SNCX4StateTag[8] =
+    { 'C', 'X', '4', 'S', 'T', '7', 0, 0 };
+
+static SNCX4StateEnvelopeT *_SNCX4StateEnvelope(SnesStateT *pState)
+{
+    return (SNCX4StateEnvelopeT *)
+        (pState->SRam + sizeof(pState->SRam) - sizeof(SNCX4StateEnvelopeT));
+}
+
+static const SNCX4StateEnvelopeT *_SNCX4StateEnvelope(
+    const SnesStateT *pState)
+{
+    return (const SNCX4StateEnvelopeT *)
+        (pState->SRam + sizeof(pState->SRam) - sizeof(SNCX4StateEnvelopeT));
+}
+
+Bool SnesSystem::CanSerializeCX4State()
+{
+    Uint32 nSramBytes;
+
+    if (!m_pRom || !(m_pRom->m_Flags & SNROM_FLAG_CX4))
+        return FALSE;
+
+    nSramBytes = m_pRom->GetSRAMBytes();
+
+    return nSramBytes <=
+        (Uint32)(SNES_SRAMSIZE - sizeof(SNCX4StateEnvelopeT))
+        ? TRUE : FALSE;
+}
+
 void SnesSystem::SaveState(void *pState, Int32 nStateBytes)
 {
     if (nStateBytes == sizeof(SnesStateT))
@@ -81,6 +124,17 @@ void SnesSystem::SaveState(SnesStateT *pState)
 	memcpy(pState->Ram, m_Ram, sizeof(pState->Ram));
 	memcpy(pState->SRam, m_SRam, sizeof(pState->SRam));
 
+    /* AURORA_CX4_STATE_V7 */
+    if (m_pRom && (m_pRom->m_Flags & SNROM_FLAG_CX4) &&
+        CanSerializeCX4State())
+    {
+        SNCX4StateEnvelopeT *pCX4 = _SNCX4StateEnvelope(pState);
+        memset(pCX4, 0, sizeof(*pCX4));
+        memcpy(pCX4->Tag, _SNCX4StateTag, sizeof(pCX4->Tag));
+        pCX4->Version = 1;
+        m_CX4.SaveState(&pCX4->CX4);
+    }
+
     // copy spc ram
     pState->SPC.bRomEnable = m_Spc.bRomEnable;
 
@@ -95,6 +149,17 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
 	{
 		return FALSE;
 	}
+
+    if (m_pRom && (m_pRom->m_Flags & SNROM_FLAG_CX4))
+    {
+        const SNCX4StateEnvelopeT *pCX4 = _SNCX4StateEnvelope(pState);
+        if (!CanSerializeCX4State() ||
+            memcmp(pCX4->Tag, _SNCX4StateTag, sizeof(pCX4->Tag)) != 0 ||
+            pCX4->Version != 1)
+        {
+            return FALSE;
+        }
+    }
 
 	m_uFrame = pState->uFrame;
 	m_uLine  = pState->uLine;
@@ -140,6 +205,14 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
 	// restore memory state
 	memcpy(m_Ram, pState->Ram, sizeof(m_Ram));
 	memcpy(m_SRam, pState->SRam, sizeof(m_SRam));
+
+    /* AURORA_CX4_STATE_V7 */
+    if (m_pRom && (m_pRom->m_Flags & SNROM_FLAG_CX4))
+    {
+        const SNCX4StateEnvelopeT *pCX4 = _SNCX4StateEnvelope(pState);
+        if (!m_CX4.RestoreState(&pCX4->CX4))
+            return FALSE;
+    }
 
     // copy spc ram
     SNSPCSetRomEnable(&m_Spc, FALSE);

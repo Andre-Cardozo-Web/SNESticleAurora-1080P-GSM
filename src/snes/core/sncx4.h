@@ -33,6 +33,35 @@
 // callback: le um byte do espaco de enderecamento SNES de 24 bits (ROM/RAM)
 typedef Uint8 (*CX4ReadMemFn)(void *pCtx, Uint32 uAddr24);
 
+/* AURORA_CX4_STATE_V7
+ *
+ * Pointer-free CX4 state. The HLE core executes every command synchronously
+ * (status is always "ready"), so no coprocessor instruction is in flight at
+ * a host save point. Preserve all internal RAM plus the HLE working
+ * registers; the ROM-read callback/context deliberately stay owned by the
+ * live SnesSystem instance and are never serialized.
+ */
+struct SNCX4StateT
+{
+    Uint8 Ram[0x8000];
+
+    Int16 C4WFXVal;
+    Int16 C4WFYVal;
+    Int16 C4WFZVal;
+    Int16 C4WFX2Val;
+    Int16 C4WFY2Val;
+    Int16 C4WFDist;
+    Int16 C4WFScale;
+
+    Int16 C41FXVal;
+    Int16 C41FYVal;
+    Int16 C41FAngleRes;
+    Int16 C41FDist;
+    Int16 C41FDistVal;
+
+    Int32 tanval;
+};
+
 class SNCX4
 {
 public:
@@ -40,6 +69,9 @@ public:
 
     void  Reset();
     void  SetMemReader(CX4ReadMemFn fn, void *pCtx) { m_pReadMem = fn; m_pReadCtx = pCtx; }
+
+    void  SaveState(SNCX4StateT *pState) const;
+    Bool  RestoreState(const SNCX4StateT *pState);
 
     // uAddr = 16 bits baixos do acesso da CPU ($6000-$7FFF)
     Uint8 Read (Uint32 uAddr);

@@ -10,8 +10,8 @@
  * e' o unico produtor de audio -- nao briga com o AudMixBuffer do jogo.
  *
  * Descoberta de arquivo: procura todas as faixas .mod/.xm em BGM_PATH
- * (define do Makefile) e em pastas padrao, indexa-as e toca como uma
- * playlist: ao terminar uma faixa avanca para a proxima. Ao voltar de uma ROM
+ * (define do Makefile) e em pastas padrao e indexa todas. A faixa selecionada
+ * repete continuamente; somente BgmNext() muda de faixa. Ao voltar de uma ROM
  * o decoder carregado e' retomado sem reler o dispositivo.
  *
  * O player anterior (jar_mod/jar_xm) implementava apenas parte dos efeitos
@@ -200,6 +200,10 @@ static int          s_ioLock       = -1;
 static int          s_ioThread     = -1;
 static volatile int s_ioDepth      = 0;
 static Bool         s_menuActive   = FALSE;
+/* AURORA_BGM_SELECTED_TRACK_LOOP_V4
+ * Cold boot has no game-audio tail. Once BgmStop() is called for gameplay,
+ * later menu entries keep the normal protective drain. */
+static Bool         s_gameHasRun   = FALSE;
 static unsigned char s_ioStack[BGM_IO_THREAD_STACK_BYTES]
     __attribute__((aligned(64)));
 
@@ -480,6 +484,9 @@ static int _ScanDir(const char *scanDir, int depth)
 
 static void _WakeAfterNewSource(int before)
 {
+    if (s_indexCount != before)
+        printf("[BGM] indexed tracks: %d\n", s_indexCount);
+
     if (before == 0 && s_indexCount > 0)
     {
         unsigned int seed = (unsigned int)clock();
@@ -689,6 +696,8 @@ static void _BuildIndex(void)
         unsigned int seed = (unsigned int)clock();
         s_trackIdx = (int)(seed % (unsigned int)s_indexCount);
     }
+
+    printf("[BGM] initial indexed tracks: %d\n", s_indexCount);
 }
 
 /* Um passo curto por frame. Nenhum acesso a cdfs: acontece antes de o
@@ -902,22 +911,10 @@ static void _BgmFree(void)
     s_gapFrames = 0;
 }
 
-/* Avanca para a proxima faixa do indice (sequencial, circular) e libera o
-   decoder atual SEM re-armar o dreno -- usado pelo auto-advance quando a
-   faixa atual termina uma passada inteira.  Retorna TRUE se trocou; com
-   0/1 faixa nao ha "outra": retorna FALSE (o chamador deixa a faixa unica
-   seguir em loop normal, sem reload nem hitch). */
-static Bool _BgmAdvance(void)
-{
-    if (s_indexCount <= 1) return FALSE;
-    s_trackIdx = (s_trackIdx + 1) % s_indexCount;
-    _BgmFreeDecoder();   /* mantem s_volSet: proxima faixa toca na hora */
-    return TRUE;
-}
-
 void BgmStop(void)
 {
     _BgmLock();
+    s_gameHasRun = TRUE;
     /* Para de alimentar SEM liberar o decoder: a faixa fica carregada,
        entao reabrir o menu e' instantaneo (sem reler do disco -> sem a
        travadinha).  So' re-arma a logica de volume/dreno para a proxima
@@ -1182,7 +1179,9 @@ static void _BgmUpdateLocked(Bool allowFilesystem)
            nunca drena -- sem o timeout a musica so' comecava depois de
            entrar num jogo e voltar.  O timeout cobre a cauda real (~107ms)
            e destrava o caso do boot. */
-        if (Aud_Buffered() > BGM_DRAIN_THRESH && s_drainWait < BGM_DRAIN_MAXFRAMES)
+        if (s_gameHasRun &&
+            Aud_Buffered() > BGM_DRAIN_THRESH &&
+            s_drainWait < BGM_DRAIN_MAXFRAMES)
         {
             s_drainWait++;
             return;
@@ -1218,38 +1217,41 @@ static void _BgmUpdateLocked(Bool allowFilesystem)
         append = needed - s_sourceFrames;
         if (append > 0)
         {
-            struct xmp_frame_info fi;
-            int loopLimit = (s_indexCount > 1) ? 1 : 0;
             int ret;
 
-            memset(&fi, 0, sizeof(fi));
+            /* AURORA_BGM_SELECTED_TRACK_LOOP_V4
+             *
+             * The selected module is the BGM until the user explicitly asks
+             * for Next. libxmp's loop=0 disables loop-boundary checking and
+             * therefore lets the module repeat naturally forever.
+             *
+             * The previous code changed loop from 0 to 1 when asynchronous
+             * discovery made s_indexCount grow above one. That meant playback
+             * semantics could change underneath an already-running song.
+             */
             ret = xmp_play_buffer(
                 s_xmp,
                 &s_inter[s_sourceFrames * 2],
                 append * 2 * (int)sizeof(short),
-                loopLimit);
-            xmp_get_frame_info(s_xmp, &fi);
+                0);
 
-            /* Com playlist, libxmp interrompe no primeiro loop completo.
-               Assim nao vazam amostras do recomeco da faixa nem um pattern
-               preso. Com uma faixa apenas, ela continua em loop infinito. */
-            if (s_indexCount > 1 && fi.loop_count > 0)
+            if (ret == -XMP_END)
             {
-                if (_BgmAdvance())
-                {
-                    s_gapFrames = BGM_GAP_FRAMES;
-                    return;
-                }
+                /* Defensive fallback. loop=0 normally prevents XMP_END at a
+                 * normal module loop; if the player was stopped internally,
+                 * restart THIS selected track rather than silently advancing
+                 * or leaving menu music dead. */
+                xmp_restart_module(s_xmp);
+                _ResetResampler();
+                return;
             }
             if (ret < 0)
             {
-                if (_BgmAdvance())
-                    s_gapFrames = BGM_GAP_FRAMES;
-                else
-                {
-                    _BgmFreeDecoder();
-                    s_state = BGM_FAILED;
-                }
+                /* A real decoder/state error should not make us wander to a
+                 * different track and hide the failure. Stop BGM cleanly
+                 * instead of reopening the same file on every video frame. */
+                _BgmFreeDecoder();
+                s_state = BGM_FAILED;
                 return;
             }
 

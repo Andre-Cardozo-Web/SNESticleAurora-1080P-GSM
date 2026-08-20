@@ -362,6 +362,7 @@ Bool MainLoopInit()
 	ScrPrintf("Original SNESticle by Icer Addis");
 	ScrPrintf("Thanks to Icer Addis for the original");
 	ScrPrintf("QuickNES core by Shay Green / libretro");
+	ScrPrintf("PicoDrive core by notaz / contributors");
 	ScrPrintf("Copyright (c) 1997-2004 Icer Addis");
 
 	ScrPrintf("BootPath: %s", MainGetBootPath());

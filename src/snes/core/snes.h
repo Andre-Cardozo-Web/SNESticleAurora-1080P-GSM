@@ -65,6 +65,11 @@ public:
     void    RestoreState(void *pState, Int32 nStateBytes);
     Int32   GetStateSize();
 
+    /* AURORA_CX4_STATE_V7
+     * CX4 data is packed into unused tail bytes of the legacy 256 KiB SRAM
+     * field, preserving sizeof(SnesStateT) and normal SNES state files. */
+    Bool    CanSerializeCX4State();
+
     Int32   GetSRAMBytes();
     Uint8   *GetSRAMData();
 
