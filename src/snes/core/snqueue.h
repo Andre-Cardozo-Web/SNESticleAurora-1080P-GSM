@@ -37,6 +37,21 @@ public:
 			Reset();
 		}
 
+		/* AURORA_QUEUE_COMPACT_V1
+		 * m_iHead advances as writes are consumed, but the original linear
+		 * queue could still report "full" when m_iTail reached 512 even if
+		 * many slots at the front were already free. Compact only at that
+		 * boundary. FIFO order and the maximum number of pending writes
+		 * remain unchanged; this merely avoids a needless forced sync. */
+		if (m_iTail >= SNQUEUE_SIZE && m_iHead > 0)
+		{
+			Int32 nRemain = m_iTail - m_iHead;
+			for (Int32 i = 0; i < nRemain; ++i)
+				m_Elements[i] = m_Elements[m_iHead + i];
+			m_iHead = 0;
+			m_iTail = nRemain;
+		}
+
 		if (m_iTail < SNQUEUE_SIZE)
 		{
 			SNQueueElementT *pElement = &m_Elements[m_iTail++];
@@ -48,7 +63,7 @@ public:
 			return TRUE;
 		} else
 		{
-			// write cannot be enqueued, buffer full
+			// write cannot be enqueued, buffer genuinely full
 			return FALSE;
 		}
 	}

@@ -132,24 +132,21 @@ static _INLINE Uint8 SnesHDMARead8(SNCpuT *pCPU, Uint32 uAddr)
 	return SnesDMAReadA(pCPU, uAddr);
 }
 
-/* AURORA_HDMA_MODE7_FASTQUEUE_V1
+/* AURORA_HDMA_PPU_FASTQUEUE_V2
  *
- * Snes9x historically optimized Mode 7-heavy games which rewrite the matrix
- * every scanline through HDMA. Aurora already preserves per-scanline PPU
- * state with its write queue, so do not change rendering/timing semantics:
- * only avoid generic CPU trap dispatch for the hot Mode 7 B-bus ports.
+ * Universal, semantics-preserving HDMA fast path for S-PPU writes.
+ * B-bus $2100-$213F normally reaches SnesSystem::Write2000(), whose PPU
+ * path enqueues the same (scanline, address, data) tuple. Queue it here
+ * directly to avoid generic CPU bank/trap dispatch on every HDMA byte.
  *
- * $210D/$210E : Mode 7 H/V offset (shared BG1 ports)
- * $211A-$2120 : M7SEL, matrix A-D, centre X/Y
- *
- * Queue-full deliberately returns FALSE so the caller falls back to the old
- * SnesDMAWriteB path, whose Write2000 loop performs the required SyncPPU().
+ * No transfer is skipped, reordered or made cheaper in emulated cycles.
+ * Queue-full returns FALSE so the caller takes the original path, which
+ * performs SyncPPU() as needed and retries the write.
  */
-static _INLINE Bool SnesHDMATryQueueMode7Write(
+static _INLINE Bool SnesHDMATryQueuePPUWrite(
     SnesPPU *pPPU, Uint32 uLine, Uint8 uPortB, Uint8 uData)
 {
-    if (uPortB == 0x0D || uPortB == 0x0E ||
-        (uPortB >= 0x1A && uPortB <= 0x20))
+    if (uPortB < 0x40)
     {
         return pPPU->EnqueueWrite(
             uLine, 0x2100u | (Uint32)uPortB, uData);
@@ -1054,11 +1051,11 @@ void SnesDMAC::ProcessHDMACh(Uint32 uChan, Uint32 uLine)
 		{
 			uData = SnesDMAReadA(m_pCPU, uAddrA);
 
-			/* AURORA_HDMA_MODE7_FASTQUEUE_V1
-			 * Preserve the exact old fallback for every non-Mode-7 port and
+			/* AURORA_HDMA_PPU_FASTQUEUE_V2
+			 * Preserve the exact old fallback for every non-PPU port and
 			 * whenever the PPU queue is full. Emulated HDMA cycle charging
 			 * remains below, unchanged. */
-			if (!SnesHDMATryQueueMode7Write(
+			if (!SnesHDMATryQueuePPUWrite(
 			        m_pPPU, uLine, uPortB, uData))
 			{
 				SnesDMAWriteB(m_pCPU, uAddrA, uPortB, uData);

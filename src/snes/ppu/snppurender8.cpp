@@ -1556,7 +1556,22 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 #endif
 
 	PROF_ENTER("DecodeBGInfo");
-	DecodeBGInfo(BGInfo);
+	if (uBGMode == 7)
+	{
+		/* AURORA_MODE7_MIN_BGINFO_V2
+		 * _FetchMode7 reads PPU registers directly. The generic compositor
+		 * only needs these BG1 fields afterwards. */
+		BGInfo[0].uBitDepth = 8;
+		BGInfo[0].uScrollX = 0;
+		BGInfo[0].Priority = 7;
+		BGInfo[1].uBitDepth = 0;
+		BGInfo[2].uBitDepth = 0;
+		BGInfo[3].uBitDepth = 0;
+	}
+	else
+	{
+		DecodeBGInfo(BGInfo);
+	}
 	PROF_LEAVE("DecodeBGInfo");
 #if SNDBG_LOG
 	g_TmgCycBGInfo += ProfCtrGetCycle() - _tBGInfo;
@@ -1871,128 +1886,121 @@ void RenderLine8Mode7(Int32 iLine,  SnesRender8pInfoT *pRenderInfo)
  * Remove address work whose result is provably discarded/out-of-range while
  * preserving the exact existing repeat/clamp/black rules. VRAM is plain host
  * memory here, so skipped discarded reads have no emulated side effects. */
+/* AURORA_MODE7_TILEMAP_CACHE_V2
+ * Cache the Mode 7 tilemap byte while consecutive transformed pixels stay
+ * in the same 8x8 map tile. VRAM is stable during synchronous RenderLine(). */
 static void _FetchMode7_Repeat(Uint8 *pLine, Int32 nPixels, Uint8 *pVram, Int32 x, Int32 y, Int32 dx, Int32 dy)
 {
-	Int32 x2,y2;
+	Int32 x2, y2;
 	Uint32 uTileAddr;
+	Uint32 uLastTileAddr = 0xFFFFFFFFu;
+	Uint32 uChrBase = 0;
 	Uint32 uChrAddr;
 	Uint8 uChrData;
 
-	while (nPixels >0)
+	while (nPixels > 0)
 	{
-		// do matrix multiply
 		x2 = x >> 8;
 		y2 = y >> 8;
 
-		// increment x/y
-		x+=dx;
-		y+=dy;
+		x += dx;
+		y += dy;
 
-		// wrap
-		x2&=0x3FF;
-		y2&=0x3FF;
+		x2 &= 0x3FF;
+		y2 &= 0x3FF;
 
-		// get tile address
-		uTileAddr = ((y2>>3)<<7) | (x2>>3);
+		uTileAddr = ((y2 >> 3) << 7) | (x2 >> 3);
+		if (uTileAddr != uLastTileAddr)
+		{
+			uChrBase = (Uint32)pVram[uTileAddr * 2] << 6;
+			uLastTileAddr = uTileAddr;
+		}
 
-		// fetch chr address
-		uChrAddr = pVram[uTileAddr * 2 + 0];
-
-		// offset into pixel of tile
-		uChrAddr <<=6;
-		uChrAddr += (x2 & 7);
-		uChrAddr += (y2 & 7) << 3;
-
-		// fetch chr data
+		uChrAddr = uChrBase + (x2 & 7) + ((y2 & 7) << 3);
 		uChrData = pVram[uChrAddr * 2 + 1];
 
+		*pLine++ = uChrData;
 		nPixels--;
-		pLine[0] = uChrData;
-		pLine++;
 	}
 }
 
 static void _FetchMode7_Clamp(Uint8 *pLine, Int32 nPixels, Uint8 *pVram, Int32 x, Int32 y, Int32 dx, Int32 dy)
 {
-	Int32 x2,y2;
+	Int32 x2, y2;
 	Uint32 uTileAddr;
+	Uint32 uLastTileAddr = 0xFFFFFFFFu;
+	Uint32 uCachedChrBase = 0;
+	Uint32 uChrBase;
 	Uint32 uChrAddr;
 	Uint8 uChrData;
 
-	while (nPixels >0)
+	while (nPixels > 0)
 	{
-		// do matrix multiply
 		x2 = x >> 8;
 		y2 = y >> 8;
 
-		// increment x/y
-		x+=dx;
-		y+=dy;
+		x += dx;
+		y += dy;
 
-		// Outside the map this mode repeats character 0; the tile-map read
-		// would be discarded immediately, so avoid it.
-		if ((x2|y2) >> 10)
+		if ((x2 | y2) >> 10)
 		{
-			uChrAddr = 0;
+			uChrBase = 0;
 		}
 		else
 		{
-			uTileAddr = ((y2>>3)<<7) | (x2>>3);
-			uChrAddr = pVram[uTileAddr * 2];
+			uTileAddr = ((y2 >> 3) << 7) | (x2 >> 3);
+			if (uTileAddr != uLastTileAddr)
+			{
+				uCachedChrBase = (Uint32)pVram[uTileAddr * 2] << 6;
+				uLastTileAddr = uTileAddr;
+			}
+			uChrBase = uCachedChrBase;
 		}
 
-		// offset into pixel of tile
-		uChrAddr <<=6;
-		uChrAddr += (x2 & 7);
-		uChrAddr += (y2 & 7) << 3;
-
-		// fetch chr data
+		uChrAddr = uChrBase + (x2 & 7) + ((y2 & 7) << 3);
 		uChrData = pVram[uChrAddr * 2 + 1];
 
+		*pLine++ = uChrData;
 		nPixels--;
-		pLine[0] = uChrData;
-		pLine++;
 	}
 }
 
 static void _FetchMode7_Black(Uint8 *pLine, Int32 nPixels, Uint8 *pVram, Int32 x, Int32 y, Int32 dx, Int32 dy)
 {
-	Int32 x2,y2;
+	Int32 x2, y2;
 	Uint32 uTileAddr;
+	Uint32 uLastTileAddr = 0xFFFFFFFFu;
+	Uint32 uCachedChrBase = 0;
 	Uint32 uChrAddr;
 	Uint8 uChrData;
 
-	while (nPixels >0)
+	while (nPixels > 0)
 	{
-		// do matrix multiply
 		x2 = x >> 8;
 		y2 = y >> 8;
 
-		// increment x/y
-		x+=dx;
-		y+=dy;
+		x += dx;
+		y += dy;
 
-		if ((x2|y2) >> 10)
+		if ((x2 | y2) >> 10)
 		{
 			uChrData = 0;
 		}
 		else
 		{
-			// In-range coordinates are already 10-bit, hence this is 14-bit.
-			uTileAddr = ((y2>>3)<<7) | (x2>>3);
-			uChrAddr = pVram[uTileAddr * 2];
+			uTileAddr = ((y2 >> 3) << 7) | (x2 >> 3);
+			if (uTileAddr != uLastTileAddr)
+			{
+				uCachedChrBase = (Uint32)pVram[uTileAddr * 2] << 6;
+				uLastTileAddr = uTileAddr;
+			}
 
-			// offset into pixel of tile
-			uChrAddr <<= 6;
-			uChrAddr += (x2 & 7);
-			uChrAddr += (y2 & 7) << 3;
-
+			uChrAddr = uCachedChrBase + (x2 & 7) + ((y2 & 7) << 3);
 			uChrData = pVram[uChrAddr * 2 + 1];
 		}
 
+		*pLine++ = uChrData;
 		nPixels--;
-		pLine[0] = uChrData;
-		pLine++;
 	}
 }
 

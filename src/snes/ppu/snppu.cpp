@@ -33,15 +33,21 @@ void SnesPPU::WriteCGDATA(Uint8 uData)
 	{
 		Uint16 uColor = (Uint16)m_CGRAMLatch |
 		                ((Uint16)(uData & 0x7F) << 8);
+		Bool bChanged = m_CGRAM[uCGAddr] != uColor;
+
 		m_CGRAM[uCGAddr] = uColor;
-		m_pRender->UpdateCGRAM(uCGAddr, uColor);
+
+		/* AURORA_REDUNDANT_CGRAM_ELIDE_V2
+		 * The write and CGADD advance remain identical. Only host-side
+		 * palette conversion/upload is skipped when the color is unchanged. */
+		if (bChanged)
+			m_pRender->UpdateCGRAM(uCGAddr, uColor);
 	}
 
 	/* Aurora stores CGADD as a byte-phase address. Advancing once per port
 	 * access therefore reproduces the hardware's flip-flop and word increment. */
 	m_Regs.cgadd.w++;
 }
-
 
 Uint8 SnesPPU::ReadCGDATA()
 {
@@ -110,17 +116,18 @@ void SnesPPU::WriteVMDATAL(Uint8 uData)
 #endif
 	SnesReg16T *pVram = (SnesReg16T *)m_VRAM;
 	Uint32 uVramAddr;
+	Bool bChanged;
 
-	// calculate vram address
 	uVramAddr = _SwizzleVramAddr(m_Regs.vmaddr.w, (m_Regs.vmain >> 2) & 3);
 
-	// write to vram
+	bChanged = pVram[uVramAddr].b.l != uData;
 	pVram[uVramAddr].b.l = uData;
 
-	// increment vram addr
 	m_Regs.vmaddr.w += m_Regs.vminc[0];
 
-	m_pRender->UpdateVRAM(uVramAddr);
+	/* AURORA_REDUNDANT_VRAM_ELIDE_V2 */
+	if (bChanged)
+		m_pRender->UpdateVRAM(uVramAddr);
 }
 
 void SnesPPU::WriteVMDATAH(Uint8 uData)
@@ -130,20 +137,18 @@ void SnesPPU::WriteVMDATAH(Uint8 uData)
 #endif
 	SnesReg16T *pVram = (SnesReg16T *)m_VRAM;
 	Uint32 uVramAddr;
+	Bool bChanged;
 
-	// calculate vram address
 	uVramAddr = _SwizzleVramAddr(m_Regs.vmaddr.w, (m_Regs.vmain >> 2) & 3);
 
-	// write to vram
+	bChanged = pVram[uVramAddr].b.h != uData;
 	pVram[uVramAddr].b.h = uData;
 
-	// increment vram addr
 	m_Regs.vmaddr.w += m_Regs.vminc[1];
 
-	m_pRender->UpdateVRAM(uVramAddr);
+	if (bChanged)
+		m_pRender->UpdateVRAM(uVramAddr);
 }
-
-
 
 void SnesPPU::WriteVMDATALH(Uint8 uDataL, Uint8 uDataH)
 {
@@ -152,34 +157,38 @@ void SnesPPU::WriteVMDATALH(Uint8 uDataL, Uint8 uDataH)
 #endif
 	SnesReg16T *pVram = (SnesReg16T *)m_VRAM;
 	Uint32 uVramAddr, uFirstVramAddr;
+	Bool bFirstChanged, bSecondChanged;
 
-	// calculate vram address
 	uVramAddr = _SwizzleVramAddr(m_Regs.vmaddr.w, (m_Regs.vmain >> 2) & 3);
 	uFirstVramAddr = uVramAddr;
 
-	// write to vram
+	bFirstChanged = pVram[uVramAddr].b.l != uDataL;
 	pVram[uVramAddr].b.l = uDataL;
 
 	if (m_Regs.vminc[0])
 	{
-		// increment vram addr
 		m_Regs.vmaddr.w += m_Regs.vminc[0];
-
-		// re-calculate vram address
 		uVramAddr = _SwizzleVramAddr(m_Regs.vmaddr.w, (m_Regs.vmain >> 2) & 3);
 	}
 
-	// write to vram
+	bSecondChanged = pVram[uVramAddr].b.h != uDataH;
 	pVram[uVramAddr].b.h = uDataH;
 
-	// increment vram addr
 	m_Regs.vmaddr.w += m_Regs.vminc[1];
 
-	m_pRender->UpdateVRAM(uFirstVramAddr);
-	if (uVramAddr != uFirstVramAddr)
-		m_pRender->UpdateVRAM(uVramAddr);
+	if (uVramAddr == uFirstVramAddr)
+	{
+		if (bFirstChanged || bSecondChanged)
+			m_pRender->UpdateVRAM(uFirstVramAddr);
+	}
+	else
+	{
+		if (bFirstChanged)
+			m_pRender->UpdateVRAM(uFirstVramAddr);
+		if (bSecondChanged)
+			m_pRender->UpdateVRAM(uVramAddr);
+	}
 }
-
 
 void SnesPPU::WriteVMDATABlock(const Uint8 *pData, Int32 nBytes)
 {
