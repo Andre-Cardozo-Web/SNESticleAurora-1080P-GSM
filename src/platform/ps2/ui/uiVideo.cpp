@@ -1068,18 +1068,10 @@ void CVideoScreen::Draw()
 		_VideoRow(vy, 51, m_iSelect, "Game volume", buf); vy += 12;
 		_VideoRow(vy, 52, m_iSelect, "Menu music",
 		          BgmIsEnabled() ? "ON" : "OFF"); vy += 12;
-		{
-			int tracks = BgmTrackCount();
-			if (tracks > 0)
-				snprintf(buf, sizeof(buf), "%d/%d", BgmGetTrackIndex(), tracks);
-			else
-				snprintf(buf, sizeof(buf), "%d/?", BgmGetTrackIndex());
-			_VideoRow(vy, 53, m_iSelect, "Track index", buf); vy += 12;
-		}
 		snprintf(buf, sizeof(buf), "%d kHz", ((int)SnesAudioGetRate() + 500) / 1000);
-		_VideoRow(vy, 54, m_iSelect, "SNES audio", buf); vy += 12;
+		_VideoRow(vy, 53, m_iSelect, "SNES audio", buf); vy += 12;
 		snprintf(buf, sizeof(buf), "%d kHz", (PicoDriveBridge_GetAudioRate() + 500) / 1000);
-		_VideoRow(vy, 55, m_iSelect, "SEGA audio", buf); vy += 12;
+		_VideoRow(vy, 54, m_iSelect, "SEGA audio", buf); vy += 12;
 	}
 	else if (iPage == 5)
 	{
@@ -1208,7 +1200,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		else if (m_iSelect < 30) { lo = 20; hi = 29; }
 		else if (m_iSelect < 40) { lo = 30; hi = 36; }
 		else if (m_iSelect < 50) { lo = 40; hi = 43; }
-		else                     { lo = 50; hi = 55; }
+		else                     { lo = 50; hi = 54; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1300,24 +1292,13 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 			break;
 		case 53:
 			{
-				int maxTrack = BgmTrackCount();
-				int v;
-				if (maxTrack <= 0) maxTrack = 64;
-				v = BgmGetTrackIndex() + dir;
-				if (v < 1) v = maxTrack;
-				if (v > maxTrack) v = 1;
-				BgmSetTrackIndex(v);
-			}
-			break;
-		case 54:
-			{
 				Int32 v = _VideoCycleSystemAudioRate((Int32)SnesAudioGetRate(), dir);
 				SnesAudioSetRate((Uint32)v);
 				if (_pSystem == _pSnes && _AudMix)
 					_AudMix->SetSampleRate((Uint32)v);
 			}
 			break;
-		case 55:
+		case 54:
 			PicoDriveBridge_SetAudioRate(
 				_VideoCycleSystemAudioRate(PicoDriveBridge_GetAudioRate(), dir));
 			break;
