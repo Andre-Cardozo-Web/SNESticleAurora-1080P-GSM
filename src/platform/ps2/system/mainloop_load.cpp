@@ -28,9 +28,7 @@
 #include "sndbglog.h"
 
 extern "C" {
-#if SNDBG_LOG
 #include "miniz.h"
-#endif
 #include "miniz_compat.h"
 }
 
@@ -251,17 +249,28 @@ int _MainLoopReadGZData(Uint8 *pBuffer, Int32 nBufferBytes, const char *pRomFile
         return MinizReadGZToBuffer(pRomFile, pBuffer, nBufferBytes);
 }
 
-/* Filter callback for the .zip walk: accept only entries whose name
-   resolves to a recognised PathExtTypeE (i.e. a SNES rom / palette /
-   etc., not arbitrary text files that happened to be archived). */
+/* AURORA_PD_MEGA_FIX_20260820
+ * ZIP selection must be stricter than "PathExtResolve knows the suffix".
+ * Otherwise a recognised auxiliary file can win MinizReadZipFirstMatch()
+ * before the actual cartridge. */
 static int _MainLoopZipNameIsRom(const char *pName)
 {
         PathExtTypeE eType;
-        /* PathExtResolve so' escreve em pPath quando bTruncatePath=TRUE;
-           passamos FALSE, entao o cast que descarta o const e' seguro.
-           (O callback do MinizReadZipFirstMatch exige int(*)(const char*),
-            por isso pName e' const e nao da' pra mudar a assinatura.) */
-        return PathExtResolve((char *)pName, &eType, FALSE) ? 1 : 0;
+
+        if (!pName || !PathExtResolve((char *)pName, &eType, FALSE))
+                return 0;
+
+        switch (eType)
+        {
+                case MAINLOOP_ENTRYTYPE_SNESROM:
+                case MAINLOOP_ENTRYTYPE_NESROM:
+                case MAINLOOP_ENTRYTYPE_NESFDSDISK:
+                case MAINLOOP_ENTRYTYPE_NESFDSBIOS:
+                case MAINLOOP_ENTRYTYPE_SEGAROM:
+                        return 1;
+                default:
+                        return 0;
+        }
 }
 
 int _MainLoopReadZipData(Uint8 *pBuffer, Int32 nBufferBytes, const char *pZipFile, char *pFileName)
@@ -455,6 +464,7 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	int nRomBytes = 0;
 	Uint8 *pBuffer = _RomData;
 	Int32 nBufferBytes = sizeof(_RomData);
+	Uint32 uRomIdentityCRC = 0;
 #if SNDBG_LOG
 	Uint32 uRomCRC = 0;
 #endif
@@ -500,6 +510,11 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	{
 		return FALSE;
 	}
+
+	/* Save-state identity is the pristine file/archive payload. PicoDrive is
+	 * allowed to byte-swap or patch its borrowed buffer after this point. */
+	uRomIdentityCRC = (Uint32)mz_crc32(
+		MZ_CRC32_INIT, pBuffer, (size_t)nRomBytes);
 
 #if SNDBG_LOG
 	/* Hash the bytes exactly as they came from disk/archive, before a ROM
@@ -706,6 +721,7 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     _pSystem = pSystem;
     snprintf(_RomPath, sizeof(_RomPath), "%s", OriginalPath);
     MainLoopStateOnRomChanged();
+    MainLoopStatePrimeRomIdentityCRC(uRomIdentityCRC);
 
 	ConPrint("ROM Loaded: %s\n", pFileName);
 

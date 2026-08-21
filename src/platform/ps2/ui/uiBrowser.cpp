@@ -1514,16 +1514,16 @@ void CBrowserScreen::Input(Uint32 buttons, Uint32 trigger)
 	}
 
 	/* AURORA_BROWSER_PAGE_JUMP_V1_3
-	 * Left/Right act as fixed 10-entry page jumps. The existing clamp below
+	 * Left/Right use the same page jump as Circle/Square. The existing clamp below
 	 * saturates at entry 0 and m_nEntries - 1, so these can never wrap. */
 	if (trigger & PAD_LEFT)
 	{
-		m_iSelect -= 10;
+		m_iSelect -= m_MaxLines-1;
 	}
 
 	if (trigger & PAD_RIGHT)
 	{
-		m_iSelect += 10;
+		m_iSelect += m_MaxLines-1;
 	}
 
 	if (trigger & (PAD_SQUARE))

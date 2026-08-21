@@ -17,6 +17,7 @@
 #include "pixelformat.h"
 #include "mixbuffer.h"
 #include "audmixbuffer.h"
+extern AudMixBuffer *_AudMix;
 #include "snio.h"
 #include "snrom.h"
 
@@ -40,6 +41,9 @@ static bool s_GameLoaded = false;
 static bool s_Use6Button = false;
 static int  s_AuroraRegion = SNES_FORCE_REGION_OFF;
 static bool s_VariablesChanged = false;
+static int  s_RenderingMode = 1; /* AURORA_PD_MEGA_FIX_20260820: 0 Fast, 1 Good, 2 Accurate */
+static int  s_AudioRate = 24000; /* AURORA_PD_POLISH_V3_20260820: follows Settings/Audio Frequency */
+static char s_AudioRateText[16] = "24000";
 
 /* Cache SRAM metadata at load time. PicoDrive's libretro API intentionally
  * reports size 0 after frame 0 while SRAM is still all-zero; Aurora needs a
@@ -117,12 +121,16 @@ static Int16 s_AudioR[PD_AUDIO_CHUNK];
 static bool  s_AudioTailValid = false;
 static Int16 s_AudioTailL = 0;
 static Int16 s_AudioTailR = 0;
+static Int16 s_AudioPendingL[4];
+static Int16 s_AudioPendingR[4];
+static int   s_AudioPendingCount = 0;
 
 static void pdAudioTailReset()
 {
     s_AudioTailValid = false;
     s_AudioTailL = 0;
     s_AudioTailR = 0;
+    s_AudioPendingCount = 0;
 }
 
 
@@ -130,6 +138,8 @@ static void pdAudioTailReset()
  * The fast PicoDrive renderer emits 8-bit palette indices. Keep conversion
  * state small/hot and precompute scale coordinates only when geometry changes. */
 static Uint32 s_PaletteRGBA[256];
+static Uint32 s_Color555RGBA[32768];
+static bool s_Color555RGBAReady = false;
 /* AURORA_MD_DIRECT_CLUT_CACHE_V1 */
 static Uint16 s_DirectLastClut[256];
 static bool s_DirectClutValid = false;
@@ -160,6 +170,20 @@ static Uint32 pdColor555ToRGBA(Uint16 c)
     Uint32 g = (g5 << 3) | (g5 >> 2);
     Uint32 b = (b5 << 3) | (b5 >> 2);
     return 0xff000000u | (b << 16) | (g << 8) | r;
+}
+
+static void pdEnsureColor555Lut()
+{
+    if (s_Color555RGBAReady) return;
+    for (unsigned i = 0; i < 32768u; ++i)
+        s_Color555RGBA[i] = pdColor555ToRGBA((Uint16)i);
+    s_Color555RGBAReady = true;
+}
+
+static const char *pdRendererName()
+{
+    return s_RenderingMode == 0 ? "fast" :
+           s_RenderingMode == 1 ? "good" : "accurate";
 }
 
 static const char *pdRegionName()
@@ -197,9 +221,9 @@ static bool pdEnvironment(unsigned cmd, void *data)
             if (!var->key) return false;
 
             if (!strcmp(var->key, "picodrive_sound_rate"))
-                var->value = "32000"; /* must match Aurora AudMixBuffer */
+                var->value = s_AudioRateText;
             else if (!strcmp(var->key, "picodrive_renderer"))
-                var->value = "fast";  /* intermediate 8-bit renderer */
+                var->value = pdRendererName();
             else if (!strcmp(var->key, "picodrive_fm_filter"))
                 var->value = "off";
             else if (!strcmp(var->key, "picodrive_audio_filter"))
@@ -303,6 +327,14 @@ static void pdVideoRefresh(const void *data, unsigned width,
      * hardware interface. The bridge copies it after retro_run(). */
 }
 
+static inline Int16 pdGain50(int16_t sample)
+{
+    Int32 v = ((Int32)sample * 3) / 2;
+    if (v > 32767)  v = 32767;
+    if (v < -32768) v = -32768;
+    return (Int16)v;
+}
+
 static void pdAudioOutputInterleaved(const int16_t *data, size_t frames)
 {
     size_t pos = 0;
@@ -310,71 +342,58 @@ static void pdAudioOutputInterleaved(const int16_t *data, size_t frames)
     if (!data || frames == 0)
         return;
 
-    /* If a frame is deliberately run without a mixer, its audio is
-     * discarded. Do not carry an older tail across that discontinuity. */
     if (!s_pMix)
     {
         pdAudioTailReset();
         return;
     }
 
-    /* Prepend a pending frame to an odd number of new frames. This makes
-     * an even chunk while retaining normal lookahead for interpolation. */
-    if (s_AudioTailValid)
+    /* AURORA_PD_POLISH_V3_20260820_AUDIO_CALLBACK
+     * PicoDrive gets +50% before the shared Game-volume stage. At 32 kHz,
+     * retain 0..3 input frames so every call into Aurora's proven cubic 2:3
+     * converter is a multiple of four: its output is then always even and
+     * Flush() never has to discard a sample. Other rates are accepted as-is
+     * by the continuous rate -> 48 kHz path. */
+    while (pos < frames)
     {
-        size_t take = frames;
-        if (take > PD_AUDIO_CHUNK - 1)
-            take = PD_AUDIO_CHUNK - 1;
-        if ((take & 1u) == 0)
-            --take;
-
-        s_AudioL[0] = s_AudioTailL;
-        s_AudioR[0] = s_AudioTailR;
+        size_t room = PD_AUDIO_CHUNK - (size_t)s_AudioPendingCount;
+        size_t take = frames - pos;
+        if (take > room) take = room;
 
         for (size_t i = 0; i < take; ++i)
         {
-            s_AudioL[i + 1] = data[i * 2 + 0];
-            s_AudioR[i + 1] = data[i * 2 + 1];
+            s_AudioL[s_AudioPendingCount + i] =
+                pdGain50(data[(pos + i) * 2 + 0]);
+            s_AudioR[s_AudioPendingCount + i] =
+                pdGain50(data[(pos + i) * 2 + 1]);
         }
+        pos += take;
 
-        s_AudioTailValid = false;
-        s_pMix->OutputSamplesStereo(
-            s_AudioL, s_AudioR, (Int32)(take + 1));
-
-        pos = take;
-    }
-
-    /* Aurora's fast 2:3 converter is pair-based. Feed it only even
-     * input counts and retain, rather than discard, a final odd frame. */
-    while (pos < frames)
-    {
-        size_t n = frames - pos;
-
-        if (n > PD_AUDIO_CHUNK)
-            n = PD_AUDIO_CHUNK;
-
-        n &= ~(size_t)1;
-
-        if (n == 0)
-            break;
-
-        for (size_t i = 0; i < n; ++i)
         {
-            s_AudioL[i] = data[(pos + i) * 2 + 0];
-            s_AudioR[i] = data[(pos + i) * 2 + 1];
+            int total = s_AudioPendingCount + (int)take;
+            int flush = (s_AudioRate == 32000) ? (total & ~3) : total;
+            int remain = total - flush;
+
+            if (flush > 0)
+                s_pMix->OutputSamplesStereo(s_AudioL, s_AudioR, flush);
+
+            if (remain > 0)
+            {
+                memcpy(s_AudioPendingL, s_AudioL + flush,
+                       (size_t)remain * sizeof(s_AudioPendingL[0]));
+                memcpy(s_AudioPendingR, s_AudioR + flush,
+                       (size_t)remain * sizeof(s_AudioPendingR[0]));
+            }
+            s_AudioPendingCount = remain;
+
+            if (s_AudioPendingCount > 0)
+            {
+                memcpy(s_AudioL, s_AudioPendingL,
+                       (size_t)s_AudioPendingCount * sizeof(s_AudioL[0]));
+                memcpy(s_AudioR, s_AudioPendingR,
+                       (size_t)s_AudioPendingCount * sizeof(s_AudioR[0]));
+            }
         }
-
-        s_pMix->OutputSamplesStereo(
-            s_AudioL, s_AudioR, (Int32)n);
-
-        pos += n;
-    }
-
-    if (pos < frames)
-    {
-        s_AudioTailL = data[pos * 2 + 0];
-        s_AudioTailR = data[pos * 2 + 1];
-        s_AudioTailValid = true;
     }
 }
 
@@ -598,7 +617,8 @@ static Uint32 pdFetchRGBA(int x, int y, int texW)
     else
     {
         const Uint16 *p = (const Uint16 *)s_CoreTexture.Mem + y * texW + x;
-        return pdColor555ToRGBA(*p);
+        pdEnsureColor555Lut();
+        return s_Color555RGBA[*p & 0x7fffu];
     }
 }
 
@@ -874,7 +894,8 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes, const char *pNam
     s_GameLoaded = true;
     /* AURORA_MD_CLUT_GAME_LIFETIME_V1 */
     s_DirectClutValid = false;
-    AudMixSetFastResample(1);
+    /* Shared-rate path: 32 kHz uses Aurora's cubic converter; other rates use the continuous converter. */
+    AudMixSetFastResample(0);
     s_LastPortType[0] = s_LastPortType[1] = -1;
     s_MapLeft = s_MapTop = -1;
     s_MapSrcW = s_MapSrcH = s_MapDstW = s_MapDstH = -1;
@@ -970,6 +991,43 @@ bool PicoDriveBridge_Get6Button(void)
     return s_Use6Button;
 }
 
+void PicoDriveBridge_SetRenderingMode(int mode)
+{
+    if (mode < 0) mode = 0;
+    if (mode > 2) mode = 2;
+    if (s_RenderingMode == mode) return;
+    s_RenderingMode = mode;
+    s_VariablesChanged = true;
+    s_DirectClutValid = false;
+}
+
+int PicoDriveBridge_GetRenderingMode(void)
+{
+    return s_RenderingMode;
+}
+
+
+void PicoDriveBridge_SetAudioRate(int hz)
+{
+    if (hz < 8000) hz = 8000;
+    if (hz > 48000) hz = 48000;
+    if (s_AudioRate == hz)
+        return;
+
+    s_AudioRate = hz;
+    snprintf(s_AudioRateText, sizeof(s_AudioRateText), "%d", hz);
+    s_VariablesChanged = true;
+    pdAudioTailReset();
+
+    if (s_GameLoaded && _AudMix)
+        _AudMix->SetSampleRate((Uint32)hz);
+}
+
+int PicoDriveBridge_GetAudioRate(void)
+{
+    return s_AudioRate;
+}
+
 bool PicoDriveBridge_IsMasterSystem(void)
 {
     return s_GameLoaded && pdIsMasterSystem();
@@ -1034,7 +1092,10 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
     /* Aurora copies the core framebuffer itself: never request blur. */
     s_CoreTexture.Filter = GS_FILTER_NEAREST;
 
-    pdRenderToAurora(pTarget);
+    /* AURORA_PD_MEGA_FIX_20260820: all plain-MD renderer modes are GS-native
+     * (T8 Fast, CT16 Good/Accurate). Build RGBA only for non-direct systems. */
+    if (!PicoDriveBridge_CanDirectGsVideo())
+        pdRenderToAurora(pTarget);
 
     if (s_pMix)
         s_pMix->Flush();
@@ -1065,8 +1126,10 @@ bool PicoDriveBridge_IsMegaDrive(void)
 
 bool PicoDriveBridge_CanDirectGsVideo(void)
 {
-    /* Called before retro_run(); the first run installs Mem/Clut. */
-    return PicoDriveBridge_IsMegaDrive();
+    /* AURORA_PD_MEGA_FIX_20260820: Fast is T8; Good/Accurate are CT16. Both are
+     * already GS-native and should bypass the RGBA staging surface. */
+    return PicoDriveBridge_IsMegaDrive() && s_CoreTexture.Mem &&
+           (s_CoreTexture.PSM == GS_PSM_T8 || s_CoreTexture.PSM == GS_PSM_CT16);
 }
 
 static Uint32 pdPs2ClutBackdropRGBA(unsigned logicalIndex)
@@ -1083,7 +1146,7 @@ static Uint32 pdPs2ClutBackdropRGBA(unsigned logicalIndex)
     else if ((slot & 0x18U) == 0x10U)
         slot -= 8U;
 
-    if (s_CoreTexture.Clut)
+    if (s_CoreTexture.PSM == GS_PSM_T8 && s_CoreTexture.Clut)
     {
         const Uint16 *pal = (const Uint16 *)s_CoreTexture.Clut;
         return pdColor555ToRGBA(pal[slot]);
@@ -1121,8 +1184,10 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     if (!PicoDriveBridge_IsMegaDrive())
         return false;
 
-    if (!s_CoreTexture.Mem || !s_CoreTexture.Clut ||
-        s_CoreTexture.PSM != GS_PSM_T8)
+    if (!s_CoreTexture.Mem ||
+        (s_CoreTexture.PSM != GS_PSM_T8 && s_CoreTexture.PSM != GS_PSM_CT16))
+        return false;
+    if (s_CoreTexture.PSM == GS_PSM_T8 && !s_CoreTexture.Clut)
         return false;
 
     texW = (int)s_CoreTexture.Width;
@@ -1149,27 +1214,40 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     texTBP  = auroraOutBaseTBP + PD_GS_T8_TBP_OFFSET;
     clutTBP = auroraOutBaseTBP + PD_GS_CLUT_TBP_OFFSET;
 
-    /* AURORA_MD_ACTIVE_ROWS_DMA_V1
-     * Upload only active MD rows, not the whole 328x256 backing store. */
-    GPPrimUploadTexture(
-        (int)texTBP, PD_GS_T8_TBW, 0, 0, GS_PSM_T8,
-        ((Uint8 *)s_CoreTexture.Mem) + top * texW,
-        texW, srcH);
-
-    /* Avoid a second GS upload when PicoDrive's 512-byte CLUT is identical. */
-    if (!s_DirectClutValid ||
-        memcmp(s_DirectLastClut, s_CoreTexture.Clut,
-               sizeof(s_DirectLastClut)) != 0)
+    /* AURORA_PD_MEGA_FIX_20260820: upload PicoDrive's native framebuffer directly.
+     * Fast is T8+CLUT; Good/Accurate are CT16. This removes the expensive
+     * CT16 -> RGBA32 -> GS round-trip while preserving the exact MD geometry. */
+    if (s_CoreTexture.PSM == GS_PSM_T8)
     {
-        GPPrimUploadTexture((int)clutTBP, 64, 0, 0,
-                            GS_PSM_CT16, s_CoreTexture.Clut, 16, 16);
-        memcpy(s_DirectLastClut, s_CoreTexture.Clut,
-               sizeof(s_DirectLastClut));
-        s_DirectClutValid = true;
-    }
+        GPPrimUploadTexture(
+            (int)texTBP, PD_GS_T8_TBW, 0, 0, GS_PSM_T8,
+            ((Uint8 *)s_CoreTexture.Mem) + top * texW,
+            texW, srcH);
 
-    GPPrimSetTex(texTBP, PD_GS_T8_TBW, 9, 8, GS_PSM_T8,
-                 clutTBP, 64, GS_PSM_CT16, 0);
+        if (!s_DirectClutValid ||
+            memcmp(s_DirectLastClut, s_CoreTexture.Clut,
+                   sizeof(s_DirectLastClut)) != 0)
+        {
+            GPPrimUploadTexture((int)clutTBP, 64, 0, 0,
+                                GS_PSM_CT16, s_CoreTexture.Clut, 16, 16);
+            memcpy(s_DirectLastClut, s_CoreTexture.Clut,
+                   sizeof(s_DirectLastClut));
+            s_DirectClutValid = true;
+        }
+
+        GPPrimSetTex(texTBP, PD_GS_T8_TBW, 9, 8, GS_PSM_T8,
+                     clutTBP, 64, GS_PSM_CT16, 0);
+    }
+    else
+    {
+        const int ct16TBW = (texW + 63) & ~63;
+        GPPrimUploadTexture(
+            (int)texTBP, ct16TBW, 0, 0, GS_PSM_CT16,
+            ((Uint16 *)s_CoreTexture.Mem) + top * texW,
+            texW, srcH);
+        GPPrimSetTex(texTBP, ct16TBW, 9, 8, GS_PSM_CT16,
+                     0, 0, GS_PSM_CT16, 0);
+    }
 
     fbW = (int)(256.0f * GPPrimGetScaleX() + 0.5f);
     fbH = (int)(240.0f * GPPrimGetScaleY() + 0.5f);
@@ -1182,14 +1260,24 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
      * those pixels must therefore occupy the same physical display width
      * as H40's 320 samples. Keep NEAREST sampling: this changes geometry,
      * not filtering, and introduces no blur. */
-    if (srcW == 320 || srcW == 256)
-        dstW = fbW;
+    if (fbW == 320 && fbH == 240 && (srcW == 320 || srcW == 256))
+    {
+        /* AURORA_PD_POLISH_V3_20260820_240P_1TO1: exact same geometry, cheaper hot path. */
+        dstW = 320;
+        dstH = srcH;
+        dstX = 0;
+        dstY = (240 - srcH) / 2;
+    }
     else
-        dstW = (fbW * srcW + 160) / 320;
-
-    dstH = (fbH * srcH + 120) / 240;
-    dstX = (fbW - dstW) / 2;
-    dstY = (fbH - dstH) / 2;
+    {
+        if (srcW == 320 || srcW == 256)
+            dstW = fbW;
+        else
+            dstW = (fbW * srcW + 160) / 320;
+        dstH = (fbH * srcH + 120) / 240;
+        dstX = (fbW - dstW) / 2;
+        dstY = (fbH - dstH) / 2;
+    }
 
     /* VDP backdrop/border = CRAM index R7[5:0], using the exact CLUT
      * that PicoDrive prepared for the PS2 GS. */
@@ -1267,5 +1355,5 @@ Uint8 *PicoDriveBridge_GetSRAMData(void)
 
 unsigned PicoDriveBridge_GetSampleRate(void)
 {
-    return 32000;
+    return (unsigned)s_AudioRate;
 }

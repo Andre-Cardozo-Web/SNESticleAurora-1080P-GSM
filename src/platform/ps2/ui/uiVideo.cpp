@@ -35,13 +35,15 @@ extern Char _SramPath[256];
 extern SnesSystem *_pSnes;
 
 void MainResetEmulator(void);
+Bool MainLoopReinitVideoMode(Int32 mode);
 
 /* ------------------------------------------------------------------ */
 /* Persistence                                                         */
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 32
+#define VIDEOCFG_VERSION 33
+/* AURORA_PD_MEGA_FIX_20260820 */
 /* AURORA_PICODRIVE_CURRENT_UI_V4: v32 appends md6button only. */
 /* v31 establishes Menu Volume UI 100 (internal 200) as the migration
  * default for every older config. Once saved as v31+, the user's selected
@@ -94,6 +96,8 @@ typedef struct
 	Int32  cpuoverclock;
 	Int32  bgmenable;   /* Menu Music: 0=off, 1=on */
 	Int32  md6button;   /* bit0=6-button, bit1=BCA */
+	Int32  bgmtrack;    /* 1..64 */
+	Int32  mdrendering; /* 0=Fast, 1=Good, 2=Accurate */
 } VideoCfgT;
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -390,6 +394,8 @@ void VideoSettingsSave(void)
 	cfg.md6button =
 		(PicoDriveBridge_Get6Button() ? 1 : 0) |
 		(MainLoopMdPadGetLayout() == MAINLOOP_MD_PAD_BCA ? 2 : 0);
+	cfg.bgmtrack = BgmGetTrackIndex();
+	cfg.mdrendering = PicoDriveBridge_GetRenderingMode();
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -422,29 +428,35 @@ void VideoSettingsLoad(void)
 	if (MemCardReadFile(path, (Uint8 *)&header, sizeof(header)) &&
 	    header.magic == VIDEOCFG_MAGIC)
 	{
-				if (header.version == VIDEOCFG_VERSION)
+		if (header.version == VIDEOCFG_VERSION)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+		}
+		else if (header.version == 32)
+		{
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
+			        sizeof(cfg) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 31)
 		{
 			/* AURORA_PICODRIVE_CURRENT_CFG_V32 */
 			memset(&cfg, 0, sizeof(cfg));
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        sizeof(cfg) - sizeof(cfg.md6button));
+			        sizeof(cfg) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 30)
 		{
 			/* v30 has the same byte layout as v31. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 29)
 		{
 			/* v29 was a temporary test config with broken menu-audio defaults.
 			 * Import its layout, then reset only those two settings once. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded)
 			{
 				cfg.version = VIDEOCFG_VERSION;
@@ -455,19 +467,19 @@ void VideoSettingsLoad(void)
 		else if (header.version == 28)
 		{
 			/* v28 has the same byte layout; only Menu Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 27)
 		{
 			/* v27 is the v28/v29 prefix without bgmenable. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 26)
 		{
 			/* v26 has the same byte layout; only Game Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 25)
@@ -617,6 +629,12 @@ void VideoSettingsLoad(void)
 	if (loaded && header.version <= 30)
 		cfg.bgmvol = 200;
 
+	if (loaded && header.version <= 32)
+	{
+		cfg.bgmtrack = 1;
+		cfg.mdrendering = 1;
+	}
+
 	/* New policy applies exactly once to every pre-v22 config. Once the
 	 * user saves v22, a manual Full selection remains persistent. */
 	if (loaded && header.version < 22)
@@ -644,8 +662,15 @@ void VideoSettingsLoad(void)
 		if (cfg.covers == 0 || cfg.covers == 1) CoverSetEnabled(cfg.covers ? TRUE : FALSE);
 		if (cfg.bgmvol >= 0 && cfg.bgmvol <= 400) BgmSetVolume(cfg.bgmvol);
 		if (cfg.bgmenable == 0 || cfg.bgmenable == 1) BgmSetEnabled(cfg.bgmenable);
-		if (cfg.bgmrate >= 8000 && cfg.bgmrate <= 48000) BgmSetRate(cfg.bgmrate);
+		if (cfg.bgmrate >= 8000 && cfg.bgmrate <= 48000)
+		{
+			BgmSetRate(cfg.bgmrate);
+			PicoDriveBridge_SetAudioRate(BgmGetRate());
+		}
 		if (cfg.gamevol >= 0 && cfg.gamevol <= 400) AudMixGameSetVolume(cfg.gamevol);
+		if (cfg.bgmtrack >= 1 && cfg.bgmtrack <= 64) BgmSetTrackIndex(cfg.bgmtrack);
+		if (cfg.mdrendering >= 0 && cfg.mdrendering <= 2)
+			PicoDriveBridge_SetRenderingMode(cfg.mdrendering);
 		if (cfg.hddenable == 0 || cfg.hddenable == 1) HddSupportSetEnabled(cfg.hddenable);
 		if (cfg.mmceenable == 0 || cfg.mmceenable == 1) MmceSupportSetEnabled(cfg.mmceenable);
 		if (cfg.massenable == 0 || cfg.massenable == 1) MassStorageSetEnabled(cfg.massenable);
@@ -894,6 +919,16 @@ static const char *_VideoCompatAudioQueueStatus()
 	return (g_VideoCompatFlags & VIDEO_COMPAT_AUDIO_DEEP_Q) ? "Deep" : "Normal";
 }
 
+static const char *_VideoMdRenderingStatus()
+{
+	switch (PicoDriveBridge_GetRenderingMode())
+	{
+		case 0: return "Fast";
+		case 1: return "Good";
+		default: return "Accurate";
+	}
+}
+
 static const char *_VideoMx4sioStatus()
 {
 	if (!Mx4sioIsEnabled())       return "Off";
@@ -933,10 +968,11 @@ void CVideoScreen::Draw()
 	/* AURORA_V85_SOFTWARE_HACKS_PAGE
 	 * AURORA_MD_MENU_MAPPING_SRAM_FIX_V4: controller page dedicada.
 	 * Display order: 0..9, 30..36, 40..43, 20..29, 10..19. */
-	int   iPage = (m_iSelect >= 40) ? 2 :
-	              ((m_iSelect >= 30) ? 1 :
-	              ((m_iSelect >= 20) ? 3 :
-	              ((m_iSelect >= 10) ? 4 : 0)));
+	int   iPage = (m_iSelect >= 50) ? 1 :
+	              ((m_iSelect >= 40) ? 3 :
+	              ((m_iSelect >= 30) ? 2 :
+	              ((m_iSelect >= 20) ? 4 :
+	              ((m_iSelect >= 10) ? 5 : 0))));
 	const char *pWide = "Off";
 	const char *pColor = (SNPPUColorGetProfile() == SNPPU_COLOR_PROFILE_COMPOSITE)
 	                   ? "Composite" : "Original";
@@ -947,11 +983,12 @@ void CVideoScreen::Draw()
 	FontSelect(0);
 
 	_VideoHeader(vy,
-		iPage == 0 ? "Settings Menu (1/5)" :
-		iPage == 1 ? "Settings Menu (2/5)" :
-		iPage == 2 ? "Settings Menu (3/5)" :
-		iPage == 3 ? "Settings Menu (4/5)" :
-		             "Settings Menu (5/5)");
+		iPage == 0 ? "Settings Menu (1/6)" :
+		iPage == 1 ? "Settings Menu (2/6)" :
+		iPage == 2 ? "Settings Menu (3/6)" :
+		iPage == 3 ? "Settings Menu (4/6)" :
+		iPage == 4 ? "Settings Menu (5/6)" :
+		             "Settings Menu (6/6)");
 	vy += 18;
 
 	if (iPage == 0) {
@@ -975,25 +1012,20 @@ void CVideoScreen::Draw()
 
 	_VideoRow(vy, 6, m_iSelect, "Cover Art", CoverIsEnabled() ? "On" : "Off"); vy += 12;
 
-	_VideoHeader(vy, "Audio"); vy += 14;
-
-	snprintf(buf, sizeof(buf), "%d", AudMixGameGetVolume() / 2);
-	_VideoRow(vy, 7, m_iSelect, "Game Volume", buf); vy += 12;
-
-	snprintf(buf, sizeof(buf), "%d", BgmGetVolume() / 2);
-	_VideoRow(vy, 8, m_iSelect, "Menu Volume", buf); vy += 12;
+	}
+	else if (iPage == 1)
 	{
-		const char *musicStatus;
-		if (!BgmIsEnabled())
-			musicStatus = "Off";
-		else if (BgmTrackCount() <= 0)
-			musicStatus = BgmIsSearching() ? "Searching" : "No Track";
-		else
-			musicStatus = "On";
-		_VideoRow(vy, 9, m_iSelect, "Menu Music", musicStatus); vy += 12;
+		_VideoHeader(vy, "Audio"); vy += 14;
+		snprintf(buf, sizeof(buf), "%d", BgmGetVolume() / 2);
+		_VideoRow(vy, 50, m_iSelect, "Music volume", buf); vy += 12;
+		snprintf(buf, sizeof(buf), "%d", AudMixGameGetVolume() / 2);
+		_VideoRow(vy, 51, m_iSelect, "Game volume", buf); vy += 12;
+		_VideoRow(vy, 52, m_iSelect, "Menu music",
+		          BgmIsEnabled() ? "ON" : "OFF"); vy += 12;
+		snprintf(buf, sizeof(buf), "%d", BgmGetTrackIndex());
+		_VideoRow(vy, 53, m_iSelect, "Track index", buf); vy += 12;
 	}
-	}
-	else if (iPage == 4)
+	else if (iPage == 5)
 	{
 		_VideoHeader(vy, "Storage / Devices"); vy += 14;
 
@@ -1023,7 +1055,7 @@ _VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;
 _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 
 	}
-	else if (iPage == 3)
+	else if (iPage == 4)
 	{
 		_VideoHeader(vy, "Software Hacks"); vy += 14;
 		_VideoRow(vy, 20, m_iSelect, "BG1 Layer",
@@ -1047,7 +1079,7 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 		_VideoRow(vy, 29, m_iSelect, "Limiter Mode",
 			_VideoHackSpriteLimiterModeStatus()); vy += 12;
 	}
-	else if (iPage == 1)
+	else if (iPage == 2)
 	{
 		_VideoHeader(vy, "Performance"); vy += 14;
 		_VideoRow(vy, 30, m_iSelect, "Profile",
@@ -1064,9 +1096,11 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 		_VideoRow(vy, 35, m_iSelect, "Frequency", buf); vy += 12;
 		_VideoRow(vy, 36, m_iSelect, "Frame Skip",
 			_VideoHackFrameSkipStatus()); vy += 12;
+		_VideoRow(vy, 37, m_iSelect, "MD rendering",
+			_VideoMdRenderingStatus()); vy += 12;
 
 	}
-	else
+	else if (iPage == 3)
 	{
 		/* AURORA_MD_MENU_MAPPING_SRAM_FIX_V4 */
 		_VideoHeader(vy, "Controller options"); vy += 14;
@@ -1102,24 +1136,25 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
 	int dir = 0;
 
-	/* AURORA_MD_MENU_MAPPING_SRAM_FIX_V4
-	 * Circle: Video/Audio -> Performance -> Controller -> Hacks -> Devices. */
+	/* AURORA_PD_MEGA_FIX_20260820: Screen -> Audio -> Performance -> Controller -> Hacks -> Devices. */
 	if (trigger & PAD_CIRCLE)
 	{
-		if (m_iSelect < 10)       m_iSelect = 30;
+		if (m_iSelect < 10)       m_iSelect = 50;
 		else if (m_iSelect < 20)  m_iSelect = 0;
 		else if (m_iSelect < 30)  m_iSelect = 10;
 		else if (m_iSelect < 40)  m_iSelect = 40;
-		else                      m_iSelect = 20;
+		else if (m_iSelect < 50)  m_iSelect = 20;
+		else                      m_iSelect = 30;
 	}
 
 	{
 		int lo, hi;
-		if (m_iSelect < 10)      { lo = 0;  hi = 9;  }
+		if (m_iSelect < 10)      { lo = 0;  hi = 6;  }
 		else if (m_iSelect < 20) { lo = 10; hi = 19; }
 		else if (m_iSelect < 30) { lo = 20; hi = 29; }
-		else if (m_iSelect < 40) { lo = 30; hi = 36; }
-		else                     { lo = 40; hi = 43; }
+		else if (m_iSelect < 40) { lo = 30; hi = 37; }
+		else if (m_iSelect < 50) { lo = 40; hi = 43; }
+		else                     { lo = 50; hi = 53; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1131,13 +1166,13 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 	{
 		switch (m_iSelect)
 		{
-		case 0: /* video mode (applied on reboot) */
+		case 0: /* video mode (live GS reinit) */
 			{
 				Int32 count = (Int32)(sizeof(_VideoModes) / sizeof(_VideoModes[0]));
 				Int32 modeIndex = _VideoModeIndex(g_GskVideoMode) + dir;
 				if (modeIndex < 0)      modeIndex = count - 1;
 				if (modeIndex >= count) modeIndex = 0;
-				g_GskVideoMode = _VideoModes[modeIndex].mode;
+				MainLoopReinitVideoMode(_VideoModes[modeIndex].mode);
 			}
 			break;
 
@@ -1198,6 +1233,19 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 
 		case 9: /* Menu Music on/off; Menu Volume remains independent. */
 			BgmSetEnabled(!BgmIsEnabled());
+			break;
+
+		case 50: /* Music volume: UI 0..200, internal 0..400. */
+			{ int v = BgmGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; BgmSetVolume(v); }
+			break;
+		case 51: /* Game volume: UI 0..200, internal 0..400. */
+			{ int v = AudMixGameGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; AudMixGameSetVolume(v); }
+			break;
+		case 52:
+			BgmSetEnabled(!BgmIsEnabled());
+			break;
+		case 53:
+			{ int v = BgmGetTrackIndex() + dir; if (v < 1) v = 64; if (v > 64) v = 1; BgmSetTrackIndex(v); }
 			break;
 
 		case 10: /* Mass / USB on/off -- lista mass0:/mass1: (USB).  O USB core
@@ -1402,12 +1450,16 @@ case 17: /* Famiclone Audio */
 			_VideoApplyCompatFlags(
 				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_DEEP_Q);
 			break;
-		case 35: /* Menu-music synthesis frequency / performance. */
+		case 35: /* Shared menu/PicoDrive synthesis frequency. */
 			BgmCycleRate(dir);
+			PicoDriveBridge_SetAudioRate(BgmGetRate());
 			break;
 		case 36:
 			SNPPURenderSetSoftwareHackFlags(
 				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_FRAME_SKIP);
+			break;
+		case 37:
+			{ int v = PicoDriveBridge_GetRenderingMode() + dir; if (v < 0) v = 2; if (v > 2) v = 0; PicoDriveBridge_SetRenderingMode(v); }
 			break;
 		case 40:
 			InputSnesMouseCycleModeDir(dir);
@@ -1427,11 +1479,12 @@ case 17: /* Famiclone Audio */
 
 	}
 
-	/* Square: previous page in the displayed 1 -> 2 -> 3 -> 4 -> 5 order. */
+	/* Square: previous page in the displayed six-page order. */
 	if (trigger & PAD_SQUARE)
 	{
-		if (m_iSelect >= 40)      m_iSelect = 30;
-		else if (m_iSelect >= 30) m_iSelect = 0;
+		if (m_iSelect >= 50)      m_iSelect = 0;
+		else if (m_iSelect >= 40) m_iSelect = 30;
+		else if (m_iSelect >= 30) m_iSelect = 50;
 		else if (m_iSelect >= 20) m_iSelect = 40;
 		else if (m_iSelect >= 10) m_iSelect = 20;
 		else                      m_iSelect = 10;

@@ -236,6 +236,34 @@ Bool MainLoopEnsureGameplayRasterWidth(Int32 width)
 }
 
 
+/* AURORA_PD_POLISH_V3_20260820_LIVE_VIDEO_MODE
+ * Reuse the same gsKit reinitialisation and VRAM epoch rebuild already used
+ * at boot and by the MD 256/320 raster switch. Called from the settings menu,
+ * so a 240p mode change deliberately starts on the UI's 256-wide raster. */
+Bool MainLoopReinitVideoMode(Int32 mode)
+{
+    g_GskVideoMode = mode;
+    GSK_SetNative240pPar(0);
+    GSK_SetGameplayYOffsetBias(0);
+    if (mode == GSK_VIDMODE_240P)
+        GSK_Set240pFramebufferWidth(256);
+
+    GSK_ReinitVideo();
+    if (!_MainLoopAllocVideoVram())
+        return FALSE;
+
+    FontInit(s_FontTexTBP);
+    CoverInit(s_CoverTexTBP);
+
+    if (_fbTexture[0])
+    {
+        TextureSetAddr(&_OutTex, _MainLoop_uOutTexTBP);
+        TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
+    }
+    return TRUE;
+}
+
+
 
 /* Browser starting directory. On real PS2 you typically want "mass:/"
    (USB stick) or a memcard path. On PCSX2/AetherSX2/NetherSX2 the

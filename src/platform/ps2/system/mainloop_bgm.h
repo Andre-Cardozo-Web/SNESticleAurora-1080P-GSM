@@ -41,6 +41,9 @@ void BgmStop(void);
 /* Avanca explicitamente para a proxima faixa. So' troca se houver 2+
    faixas; a retomada normal do menu preserva o decoder e nao chama isto. */
 void BgmNext(void);
+void BgmSetTrackIndex(int track);
+int  BgmGetTrackIndex(void);
+/* AURORA_PD_MEGA_FIX_20260820 */
 
 /* Scope synchronous UI/file operations. While at least one scope is active,
    a small EE helper keeps an already-loaded tracker feeding audsrv without

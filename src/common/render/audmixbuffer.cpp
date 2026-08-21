@@ -60,6 +60,9 @@ void AudMixBuffer::Reset()
     m_nOutSamples = 0;
     m_uLastOutput = 0;
     m_uFrameSamplePhase = 0;
+    m_uLinearResamplePhase = 0;
+    m_iLinearPrev[0] = m_iLinearPrev[1] = 0;
+    m_bLinearHavePrev = FALSE;
     memset(m_OutData, 0, sizeof(m_OutData));
 }
 
@@ -252,8 +255,95 @@ Int32 AudMixBuffer::ConvertSamplesStereo_32000(Int16 *pLeftSamples, Int16 *pRigh
     return nOutSamples;
 }
 
+
+/* AURORA_PD_POLISH_V3_20260820_LINEAR_RESAMPLER
+ * PicoDrive may synthesize at the same Frequency selected for menu music.
+ * SNES and QuickNES remain on their existing 32 kHz cubic path unchanged.
+ * 16k and 24k get exact cheap integer-ratio paths; 22.05/38/44.1 use one
+ * continuous rational phase so chunk boundaries cannot introduce pitch jitter. */
+Int32 AudMixBuffer::ConvertSamplesStereo_Linear48(
+    Int16 *pLeftSamples, Int16 *pRightSamples,
+    Int16 *pOutLeft, Int16 *pOutRight,
+    Int32 nInSamples, Int32 nMaxOut)
+{
+    Int32 out = 0;
+    Int32 i = 0;
+
+    if (!pLeftSamples || !pRightSamples || nInSamples <= 0 ||
+        nMaxOut <= 0 || m_uSampleRate == 0)
+        return 0;
+
+    if (!m_bLinearHavePrev)
+    {
+        m_iLinearPrev[0] = pLeftSamples[0];
+        m_iLinearPrev[1] = pRightSamples[0];
+        m_uLinearResamplePhase = 0;
+        m_bLinearHavePrev = TRUE;
+        i = 1;
+    }
+
+    for (; i < nInSamples && out < nMaxOut; ++i)
+    {
+        Int32 l0 = m_iLinearPrev[0], r0 = m_iLinearPrev[1];
+        Int32 l1 = pLeftSamples[i],   r1 = pRightSamples[i];
+
+        if (m_uSampleRate == 16000)
+        {
+            if (out + 3 > nMaxOut) break;
+            pOutLeft[out] = (Int16)l0;
+            pOutRight[out++] = (Int16)r0;
+            pOutLeft[out] = (Int16)((2 * l0 + l1) / 3);
+            pOutRight[out++] = (Int16)((2 * r0 + r1) / 3);
+            pOutLeft[out] = (Int16)((l0 + 2 * l1) / 3);
+            pOutRight[out++] = (Int16)((r0 + 2 * r1) / 3);
+        }
+        else if (m_uSampleRate == 24000)
+        {
+            if (out + 2 > nMaxOut) break;
+            pOutLeft[out] = (Int16)l0;
+            pOutRight[out++] = (Int16)r0;
+            pOutLeft[out] = (Int16)((l0 + l1) / 2);
+            pOutRight[out++] = (Int16)((r0 + r1) / 2);
+        }
+        else
+        {
+            while (m_uLinearResamplePhase < 48000U && out < nMaxOut)
+            {
+                /* Q15 fraction. Worst-case delta*frac still fits Int32. */
+                Int32 frac = (Int32)((m_uLinearResamplePhase * 32768U) / 48000U);
+                pOutLeft[out] = (Int16)(l0 + (((l1 - l0) * frac) >> 15));
+                pOutRight[out] = (Int16)(r0 + (((r1 - r0) * frac) >> 15));
+                ++out;
+                m_uLinearResamplePhase += m_uSampleRate;
+            }
+            if (m_uLinearResamplePhase >= 48000U)
+                m_uLinearResamplePhase -= 48000U;
+        }
+
+        m_iLinearPrev[0] = l1;
+        m_iLinearPrev[1] = r1;
+    }
+
+    return out;
+}
+
 void AudMixBuffer::OutputSamplesStereo(Int16 *pLeftSamples, Int16 *pRightSamples, Int32 nSamples)
 {
+    /* AURORA_PD_POLISH_V3_20260820_RATE_DISPATCH */
+    if (m_uSampleRate != 32000 && m_uSampleRate != 48000)
+    {
+        Int32 room = AUDMIXBUFFER_MAXENQUEUE - m_nOutSamples;
+        if (room > 0)
+        {
+            Int16 *pOutLeft = m_OutData[0] + m_nOutSamples;
+            Int16 *pOutRight = m_OutData[1] + m_nOutSamples;
+            m_nOutSamples += ConvertSamplesStereo_Linear48(
+                pLeftSamples, pRightSamples, pOutLeft, pOutRight,
+                nSamples, room);
+        }
+        return;
+    }
+
     Int16 *pOutLeft, *pOutRight;
     Int32 nOutSamples;
 
@@ -307,7 +397,7 @@ void AudMixBuffer::Flush()
 
     if (nOutSamples > 0)
     {
-        if (nOutSamples & 1)
+        if ((nOutSamples & 1) && m_uSampleRate == 32000)
         {
             // uh oh
             #if CODE_DEBUG

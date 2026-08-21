@@ -920,6 +920,15 @@ void MainLoopStateOnRomChanged()
     }
 }
 
+/* AURORA_PD_MEGA_FIX_20260820
+ * Called immediately after MainLoopStateOnRomChanged(), with the CRC taken
+ * before the active core can transform the shared ROM buffer. */
+void MainLoopStatePrimeRomIdentityCRC(Uint32 uCRC)
+{
+    _MainLoop_StateRomCRC = uCRC;
+    _MainLoop_StateRomCRCValid = TRUE;
+}
+
 Int32 MainLoopStateGetSlot()
 {
     return _MainLoop_StateSlot;

@@ -17,6 +17,9 @@ class AudMixBuffer : public CMixBuffer
     Uint32  m_uSampleRate;
     Bool    m_bAsync;
     Uint32  m_uFrameSamplePhase;
+    Uint32  m_uLinearResamplePhase;
+    Int32   m_iLinearPrev[2];
+    Bool    m_bLinearHavePrev;
     /* AURORA_MEGA_V2_AUDIO_CLOCK_FIELDS */
     Uint32  m_uFrameRateNum;
     Uint32  m_uFrameRateDen;
@@ -25,6 +28,7 @@ class AudMixBuffer : public CMixBuffer
 
     Int32   ConvertSamples2to3(Int16 *pOut, Int16 *pIn, Int32 nSamples, Int32 *pPrevSample);
     Int32   ConvertSamplesStereo_32000(Int16 *pLeftSamples, Int16 *pRightSamples, Int16 *pOutLeft, Int16 *pOutRight, Int32 nInSamples);
+    Int32   ConvertSamplesStereo_Linear48(Int16 *pLeftSamples, Int16 *pRightSamples, Int16 *pOutLeft, Int16 *pOutRight, Int32 nInSamples, Int32 nMaxOut);
 
 
 public:
@@ -34,6 +38,10 @@ public:
     {
         m_uSampleRate = uSampleRate;
         m_uFrameSamplePhase = 0;
+        m_uLinearResamplePhase = 0;
+        m_iLinearPrev[0] = m_iLinearPrev[1] = 0;
+        m_bLinearHavePrev = FALSE;
+        m_iPrevSample[0] = m_iPrevSample[1] = 0;
     }
     void SetFrameRateRational(Uint32 uNumerator, Uint32 uDenominator)
     {

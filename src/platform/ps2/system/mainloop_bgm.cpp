@@ -175,6 +175,7 @@ typedef struct { char path[256]; int kind; } BgmTrackT; /* kind 1=mod 2=xm */
 static BgmTrackT s_index[BGM_INDEX_MAX];
 static int       s_indexCount = -1;    /* -1 = ainda nao escaneado */
 static int       s_trackIdx   = 0;     /* faixa atual no indice    */
+static int       s_requestedTrackIdx = 0; /* AURORA_PD_MEGA_FIX_20260820: UI 1..64 */
 
 enum BgmDiscScanE {
     BGM_DISC_PENDING = 0,
@@ -489,8 +490,7 @@ static void _WakeAfterNewSource(int before)
 
     if (before == 0 && s_indexCount > 0)
     {
-        unsigned int seed = (unsigned int)clock();
-        s_trackIdx = (int)(seed % (unsigned int)s_indexCount);
+        s_trackIdx = s_requestedTrackIdx % s_indexCount;
         if (s_state == BGM_FAILED)
             s_state = BGM_UNTRIED;
     }
@@ -689,13 +689,9 @@ static void _BuildIndex(void)
     _MmceScanStep();
     _HddScanStep();
 
-    /* faixa inicial pseudo-aleatoria (clock varia conforme o tempo de
-       boot); se nao houver entropia, cai no indice 0 -- sem problema. */
+    /* AURORA_PD_MEGA_FIX_20260820: honour the persistent 1..64 menu selection. */
     if (s_indexCount > 0)
-    {
-        unsigned int seed = (unsigned int)clock();
-        s_trackIdx = (int)(seed % (unsigned int)s_indexCount);
-    }
+        s_trackIdx = s_requestedTrackIdx % s_indexCount;
 
     printf("[BGM] initial indexed tracks: %d\n", s_indexCount);
 }
@@ -959,9 +955,35 @@ void BgmNext(void)
     }
 
     s_trackIdx = (s_trackIdx + 1) % s_indexCount;
+    s_requestedTrackIdx = s_trackIdx;
 
     if (s_state == BGM_MOD || s_state == BGM_XM) _BgmFree();
     _BgmUnlock();
+}
+
+void BgmSetTrackIndex(int track)
+{
+    int next;
+    _BgmLock();
+    if (track < 1) track = 1;
+    if (track > BGM_INDEX_MAX) track = BGM_INDEX_MAX;
+    s_requestedTrackIdx = track - 1;
+    next = s_indexCount > 0 ? (s_requestedTrackIdx % s_indexCount) : s_requestedTrackIdx;
+    if (next != s_trackIdx)
+    {
+        s_trackIdx = next;
+        if (s_state == BGM_MOD || s_state == BGM_XM) _BgmFree();
+    }
+    _BgmUnlock();
+}
+
+int BgmGetTrackIndex(void)
+{
+    int result;
+    _BgmLock();
+    result = s_requestedTrackIdx + 1;
+    _BgmUnlock();
+    return result;
 }
 
 void BgmSetVolume(int vol)

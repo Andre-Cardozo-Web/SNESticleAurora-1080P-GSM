@@ -175,6 +175,7 @@ extern Float32 _MainLoop_fOutputIntensity;
 void MainLoopRender();
 /* System-load-only 240p physical raster switch. */
 Bool MainLoopEnsureGameplayRasterWidth(Int32 width);
+Bool MainLoopReinitVideoMode(Int32 mode);
 void _MenuEnable(Bool bEnable);
 void _MenuRuntimeUpdate(void);
 /* Drawn from MainLoopRender() (mainloop_render.cpp), defined in

@@ -41,6 +41,8 @@ Bool _MainLoopSaveState();
 void MainLoopStateSettingsLoad();
 Bool MainLoopStateSettingsSave();
 void MainLoopStateOnRomChanged();
+void MainLoopStatePrimeRomIdentityCRC(Uint32 uCRC);
+/* AURORA_PD_MEGA_FIX_20260820 */
 Bool MainLoopStateHasDeviceChoice();
 void MainLoopStateForgetDeviceChoice();
 void MainLoopStateSetDevice(MainLoopStateDeviceE eDevice);

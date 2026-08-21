@@ -17,6 +17,11 @@ void PicoDriveBridge_SoftReset(void);
 
 void PicoDriveBridge_Set6Button(bool enabled);
 bool PicoDriveBridge_Get6Button(void);
+void PicoDriveBridge_SetRenderingMode(int mode);
+int  PicoDriveBridge_GetRenderingMode(void);
+void PicoDriveBridge_SetAudioRate(int hz);
+int  PicoDriveBridge_GetAudioRate(void);
+/* AURORA_PD_MEGA_FIX_20260820 */
 bool PicoDriveBridge_IsMasterSystem(void);
 bool PicoDriveBridge_Is8Bit(void);
 
