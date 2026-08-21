@@ -110,6 +110,18 @@ static Uint32 _SNSpcDsp_NoiseFreq[32]=
 
 
 
+/* AURORA_AUDIO_NATIVE_PHASE_V3
+ * Exact host-side fast path. No DSP clock, pitch or interpolation rule changes. */
+static _INLINE Int32 _SNSpcDspPhaseInc(Uint32 uPitch, Int32 nSampleRate)
+{
+	if (nSampleRate == SNSPCDSP_SAMPLERATE)
+		return (Int32)(uPitch << 4);
+
+	return (Int32)((uPitch * SNSPCDSP_SAMPLERATE / nSampleRate) << 4);
+}
+
+
+
 //
 //
 //
@@ -301,7 +313,6 @@ Int32 SNSpcDspMix::OutputEnvelope(Int32 iChannel, Uint8 *pOut, Int32 nSamples)
 	nEnvCount = pChannel->nEnvCount;
 	while (nSamples > 0)
 	{
-		// see if enough time elapsed between envelope updates
 		if (nEnvCount <= 0)
 		{
 			// update envelope
@@ -442,13 +453,34 @@ Int32 SNSpcDspMix::OutputEnvelope(Int32 iChannel, Uint8 *pOut, Int32 nSamples)
 			nEnvCount += nEnvRate;
 		}
 
-		// write envelope
-		*pOut = iEnvelope >> (SNSPCDSP_ENVELOPE_BITS - 7);
-		pOut++;
 
-		// next sample
-		nEnvCount-= 1 << 16;
-		nSamples--;
+		/* AURORA_AUDIO_ENVELOPE_RUNS_V3
+		 * nEnvCount is 16.16 samples-until-update. The envelope cannot
+		 * change while it remains positive, so emit that constant run
+		 * together. ceil(count / 65536) reproduces the old <= 0 test
+		 * exactly; a non-positive post-update count still emits the one
+		 * current sample before the next update, just like the old loop. */
+		Int32 nRun = (nEnvCount > 0)
+			? ((nEnvCount + 0xFFFF) >> 16) : 1;
+		if (nRun > nSamples)
+			nRun = nSamples;
+
+		Uint8 uEnv = (Uint8)(iEnvelope >>
+			(SNSPCDSP_ENVELOPE_BITS - 7));
+		if (nRun >= 8)
+		{
+			memset(pOut, uEnv, (size_t)nRun);
+		}
+		else
+		{
+			Int32 i;
+			for (i = 0; i < nRun; ++i)
+				pOut[i] = uEnv;
+		}
+
+		pOut += nRun;
+		nEnvCount -= nRun << 16;
+		nSamples -= nRun;
 	}
 
 	// cleanup
@@ -498,7 +530,12 @@ Int32 SNSpcDspMixFull::OutputNoise(Int16 *pOut, Uint16 *pFrac, Int32 nSamples, I
 	// get noise frequency
 	uNoiseFreq = _SNSpcDsp_NoiseFreq[m_pDsp->GetReg(SNSPCDSP_REG_FLG) & 0x1F];
 
-	iNoisePhaseInc = 0x10000 * uNoiseFreq / nSampleRate;
+	/* AURORA_AUDIO_NATIVE_NOISE_V3
+	 * 65536/32000 reduces exactly to 256/125. */
+	if (nSampleRate == SNSPCDSP_SAMPLERATE)
+		iNoisePhaseInc = (Int32)((uNoiseFreq << 8) / 125u);
+	else
+		iNoisePhaseInc = 0x10000 * uNoiseFreq / nSampleRate;
 
 	while (nSamples > 0)
 	{
@@ -616,8 +653,7 @@ Int32 SNSpcDspMixFull::OutputSample(Int32 iChannel, Int16 *pOut, Uint16 *pFrac, 
 	iPhase = pChannel->iPhase;
 	
 	// output at correct pitch based on sample rate
-	iPhaseInc = uPitch * SNSPCDSP_SAMPLERATE / nSampleRate; 
-	iPhaseInc <<= 4;
+	iPhaseInc = _SNSpcDspPhaseInc(uPitch, nSampleRate);
 
 
 	while (nSamples > 0)
@@ -1276,7 +1312,9 @@ void SNSpcDspMixFull::FilterEcho(Int16 *pLeftEcho, Int16 *pRightEcho, Int32 nSam
 
 	// calculate echo buffer size based on sample rate
 	uEchoSize = (m_pDsp->GetReg(SNSPCDSP_REG_EDL)&0xF) * 512 * 2;
-	uEchoSize = uEchoSize * nSampleRate / SNSPCDSP_SAMPLERATE;
+	/* AURORA_AUDIO_NATIVE_ECHO_V3: at 32 kHz scaling is exactly 1:1. */
+	if (nSampleRate != SNSPCDSP_SAMPLERATE)
+		uEchoSize = uEchoSize * nSampleRate / SNSPCDSP_SAMPLERATE;
 	if (uEchoSize > SNSPCDSP_ECHOBUFFER_SIZE) uEchoSize = SNSPCDSP_ECHOBUFFER_SIZE;
 
 	// set filter coefficients
@@ -1564,8 +1602,7 @@ Int32 SNSpcDspMixSilent::OutputSample(Int32 iChannel, Int32 nSamples, Int32 nSam
 	iPhase = pChannel->iPhase;
 	
 	// output at correct pitch based on sample rate
-	iPhaseInc = uPitch * SNSPCDSP_SAMPLERATE / nSampleRate; 
-	iPhaseInc <<= 4;
+	iPhaseInc = _SNSpcDspPhaseInc(uPitch, nSampleRate);
 
 	while (nSamples > 0)
 	{
