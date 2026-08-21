@@ -9,7 +9,7 @@ SNESticle Aurora is based on **SNESticle Revive by @ReyFxck (Thomas R.)**, whose
 <!-- AURORA_QUICKNES_CREDIT -->
 NES emulation through **QuickNES** is based on the **QuickNES core originally by Shay Green**, with the libretro core maintained by **libretro contributors**. Aurora uses `itsveenee/QuickNES_Core` as a pinned Git submodule for its PS2 integration. See [THIRD_PARTY.md](THIRD_PARTY.md) and the license notices inside the QuickNES submodule.
 
-Mega Drive and Master System emulation through **PicoDrive** is based on the PicoDrive emulator originally by **@notaz**, with its libretro core maintained by **@irixxxx and libretro contributors**. Aurora uses `itsveenee/picodrive` as a pinned Git submodule for its PS2 integration. See [THIRD_PARTY.md](THIRD_PARTY.md) and the license notices inside the PicoDrive submodule.
+Mega Drive and Master System emulation through **PicoDrive** is based on the PicoDrive emulator originally by **@notaz**, with its libretro core maintained by **@irixxxx and libretro contributors**, and it is in **experimental** state for now. Aurora uses `itsveenee/picodrive` as a pinned Git submodule for its PS2 integration. See [THIRD_PARTY.md](THIRD_PARTY.md) and the license notices inside the PicoDrive submodule.
 
 SNESticle Aurora focuses on 240p CRT output, NES/QuickNES integration and experiments, real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
 
