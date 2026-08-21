@@ -1080,8 +1080,6 @@ void CVideoScreen::Draw()
 		_VideoRow(vy, 54, m_iSelect, "SNES audio", buf); vy += 12;
 		snprintf(buf, sizeof(buf), "%d kHz", (PicoDriveBridge_GetAudioRate() + 500) / 1000);
 		_VideoRow(vy, 55, m_iSelect, "SEGA audio", buf); vy += 12;
-		snprintf(buf, sizeof(buf), "%d kHz", (BgmGetRate() + 500) / 1000);
-		_VideoRow(vy, 54, m_iSelect, "Frequency", buf); vy += 12;
 	}
 	else if (iPage == 5)
 	{
