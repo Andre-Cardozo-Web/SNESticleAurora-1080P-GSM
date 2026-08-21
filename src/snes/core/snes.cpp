@@ -29,7 +29,7 @@ Uint32 SnesAudioGetRate(void)
 }
 
 #ifndef SNES_HK97_SPC_BOOT
-#define SNES_HK97_SPC_BOOT 1
+#define SNES_HK97_SPC_BOOT 0
 #endif
 
 /* AURORA_HK97_SPC_PREWARM_V9
@@ -42,7 +42,7 @@ extern Bool g_SnesCompatHongKong97SPCBoot;
 extern "C" Int32 SNSPCExecute_C(SNSpcT *pCpu);
 
 #ifndef SNES_CRC_ZERO_INIT
-#define SNES_CRC_ZERO_INIT 1
+#define SNES_CRC_ZERO_INIT 0
 #endif
 
 /* AURORA_CRC_ZERO_INIT_CORE_V8
@@ -1838,7 +1838,7 @@ void SnesSystem::ExecuteLine()
 #if SNDBG_LOG
 		Uint32 _tHDMA = ProfCtrGetCycle();
 #endif
-		m_DMAC.ProcessHDMA();
+		m_DMAC.ProcessHDMA(m_uLine);
 #if SNDBG_LOG
 		g_TmgCycHDMA += ProfCtrGetCycle() - _tHDMA;
 #endif

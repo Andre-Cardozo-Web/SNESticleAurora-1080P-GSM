@@ -32,7 +32,7 @@ Bool g_SnesCompatHongKong97SPCBoot = FALSE;
 Bool g_SnesCompatTopGearFastRom = FALSE;
 
 #ifndef SNES_HK97_SPC_BOOT
-#define SNES_HK97_SPC_BOOT 1
+#define SNES_HK97_SPC_BOOT 0
 #endif
 
 #if SNES_HK97_SPC_BOOT
@@ -64,16 +64,16 @@ static Uint32 _SNRomHK97CRC32(const Uint8 *pData, Uint32 nBytes)
  * exact-CRC isolated and can all be disabled with SNES_ROM_COMPAT_REGIONAL=0.
  */
 #ifndef SNES_ROM_COMPAT_PATCHES
-#define SNES_ROM_COMPAT_PATCHES 1
+#define SNES_ROM_COMPAT_PATCHES 0
 #endif
 #ifndef SNES_ROM_COMPAT_REGIONAL
 #define SNES_ROM_COMPAT_REGIONAL 1
 #endif
 #ifndef SNES_CRC_ZERO_INIT
-#define SNES_CRC_ZERO_INIT 1
+#define SNES_CRC_ZERO_INIT 0
 #endif
 #ifndef SNES_TOP_GEAR_FASTROM_HACK
-#define SNES_TOP_GEAR_FASTROM_HACK 1
+#define SNES_TOP_GEAR_FASTROM_HACK 0
 #endif
 
 #if SNES_CRC_ZERO_INIT || SNES_TOP_GEAR_FASTROM_HACK

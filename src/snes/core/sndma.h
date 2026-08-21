@@ -41,7 +41,7 @@ public:
 
 	void                        ProcessMDMA();
 	void                        BeginHDMA();
-	void                        ProcessHDMA();
+	void                        ProcessHDMA(Uint32 uLine);
 
 	Uint8                       Read8(Uint32 uChan, Uint32 uAddr);
 	void                        Write8(Uint32 uChan, Uint32 uAddr, Uint8 uData);
@@ -75,7 +75,7 @@ private:
 	/* AURORA_MEGA_V2_DMA_ACCURATE_DECL */
 	void                        ProcessMDMAChAccurate(Uint32 uChan);
 	void                        ProcessMDMAChFast(Uint32 uChan);
-	void                        ProcessHDMACh(Uint32 uChan);
+	void                        ProcessHDMACh(Uint32 uChan, Uint32 uLine);
 
     //Uint32 ProcessMDMACh(Uint32 uChan);
 };

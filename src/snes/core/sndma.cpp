@@ -132,6 +132,32 @@ static _INLINE Uint8 SnesHDMARead8(SNCpuT *pCPU, Uint32 uAddr)
 	return SnesDMAReadA(pCPU, uAddr);
 }
 
+/* AURORA_HDMA_MODE7_FASTQUEUE_V1
+ *
+ * Snes9x historically optimized Mode 7-heavy games which rewrite the matrix
+ * every scanline through HDMA. Aurora already preserves per-scanline PPU
+ * state with its write queue, so do not change rendering/timing semantics:
+ * only avoid generic CPU trap dispatch for the hot Mode 7 B-bus ports.
+ *
+ * $210D/$210E : Mode 7 H/V offset (shared BG1 ports)
+ * $211A-$2120 : M7SEL, matrix A-D, centre X/Y
+ *
+ * Queue-full deliberately returns FALSE so the caller falls back to the old
+ * SnesDMAWriteB path, whose Write2000 loop performs the required SyncPPU().
+ */
+static _INLINE Bool SnesHDMATryQueueMode7Write(
+    SnesPPU *pPPU, Uint32 uLine, Uint8 uPortB, Uint8 uData)
+{
+    if (uPortB == 0x0D || uPortB == 0x0E ||
+        (uPortB >= 0x1A && uPortB <= 0x20))
+    {
+        return pPPU->EnqueueWrite(
+            uLine, 0x2100u | (Uint32)uPortB, uData);
+    }
+
+    return FALSE;
+}
+
 static _INLINE Bool SnesDMAPathTouches16(Uint16 uStart, Uint32 nBytes,
                                          Int32 iDelta, Uint16 uLo, Uint16 uHi)
 {
@@ -987,7 +1013,7 @@ void SnesDMAC::BeginHDMA()
 	}
 }
 
-void SnesDMAC::ProcessHDMACh(Uint32 uChan)
+void SnesDMAC::ProcessHDMACh(Uint32 uChan, Uint32 uLine)
 {
 	SnesDMAChT *pChan;
 	Uint8 *pTransfer;
@@ -1027,7 +1053,16 @@ void SnesDMAC::ProcessHDMACh(Uint32 uChan)
 		else
 		{
 			uData = SnesDMAReadA(m_pCPU, uAddrA);
-			SnesDMAWriteB(m_pCPU, uAddrA, uPortB, uData);
+
+			/* AURORA_HDMA_MODE7_FASTQUEUE_V1
+			 * Preserve the exact old fallback for every non-Mode-7 port and
+			 * whenever the PPU queue is full. Emulated HDMA cycle charging
+			 * remains below, unchanged. */
+			if (!SnesHDMATryQueueMode7Write(
+			        m_pPPU, uLine, uPortB, uData))
+			{
+				SnesDMAWriteB(m_pCPU, uAddrA, uPortB, uData);
+			}
 #if SNDBG_LOG
 			{
 				Uint32 uPort = uPortB;
@@ -1102,7 +1137,7 @@ void SnesDMAC::ProcessMDMA()
     }
 }
 
-void SnesDMAC::ProcessHDMA()
+void SnesDMAC::ProcessHDMA(Uint32 uLine)
 {
 	Uint8 uActive = m_HDMAEnable & ~m_HDMAEnded;
 
@@ -1136,7 +1171,7 @@ void SnesDMAC::ProcessHDMA()
 #if SNDBG_LOG
 			g_DbgHDMATransferChannels++;
 #endif
-			ProcessHDMACh(uChan);
+			ProcessHDMACh(uChan, uLine);
 		}
 	}
 
