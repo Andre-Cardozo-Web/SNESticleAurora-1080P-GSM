@@ -207,26 +207,66 @@ Uint16 _MainLoopInput(Uint32 pad)
 		return 0;
 
 	/* AURORA_PICODRIVE_STAGE3_INPUT_DISPATCH
-	 * MD: SNES-style R2 turbo. SMS: NES-style Circle/Triangle turbo. */
+	 * MD: SNES-style R2 turbo. SMS/GG: dedicated NES-style turbo buttons. */
 	if (_pSystem == _pSega)
 	{
 		if (PicoDriveBridge_Is8Bit())
 		{
-			/* AURORA_MD_PAD_LAYOUT_V1
-			 * Circle is now a normal logical C button in ABC, so use R2 as
-			 * the unambiguous turbo modifier for SMS/GG too. */
-			if (pad & PAD_R2)
+			/* AURORA_SMS_GG_DEDICATED_TURBO_V1
+			 * NES-style dedicated turbo buttons; R2 is not required.
+			 *
+			 * ABC:
+			 *   Cross    = B
+			 *   Circle   = C
+			 *   Square   = Turbo B
+			 *   Triangle = Turbo C
+			 *
+			 * BCA:
+			 *   Square   = B
+			 *   Cross    = C
+			 *   Triangle = Turbo B
+			 *   Circle   = Turbo C
+			 *
+			 * Strip the four face buttons first and rebuild only the
+			 * logical B/C state, so turbo buttons can never leak through
+			 * as ordinary SMS/GG buttons during the OFF turbo phase. */
+			Uint32 uSms =
+				pad & ~(PAD_SQUARE | PAD_CROSS | PAD_CIRCLE |
+				        PAD_TRIANGLE | PAD_R2);
+
+			const Bool bTurboOn =
+				_MainLoopTurboIsOn((Uint32)_pSystem->GetFrame());
+
+			if (_MainLoop_MdPadLayout == MAINLOOP_MD_PAD_BCA)
 			{
-				const Uint32 uContinuous =
-					pad & (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT | PAD_START);
-				Uint32 uTurboButtons =
-					pad & (PAD_SQUARE | PAD_CROSS | PAD_CIRCLE);
-				if (!_MainLoopTurboIsOn((Uint32)_pSystem->GetFrame()))
-					uTurboButtons = 0;
-				return _MainLoopSegaInput(uContinuous | uTurboButtons);
+				/* Normal buttons. */
+				if (pad & PAD_SQUARE) uSms |= PAD_SQUARE; /* B */
+				if (pad & PAD_CROSS)  uSms |= PAD_CROSS;  /* C */
+
+				/* Dedicated turbo buttons. */
+				if (bTurboOn)
+				{
+					if (pad & PAD_TRIANGLE) uSms |= PAD_SQUARE; /* Turbo B */
+					if (pad & PAD_CIRCLE)   uSms |= PAD_CROSS;  /* Turbo C */
+				}
 			}
-			return _MainLoopSegaInput(pad);
+			else
+			{
+				/* Normal buttons. */
+				if (pad & PAD_CROSS)  uSms |= PAD_CROSS;  /* B */
+				if (pad & PAD_CIRCLE) uSms |= PAD_CIRCLE; /* C */
+
+				/* Dedicated turbo buttons. */
+				if (bTurboOn)
+				{
+					if (pad & PAD_SQUARE)   uSms |= PAD_CROSS;  /* Turbo B */
+					if (pad & PAD_TRIANGLE) uSms |= PAD_CIRCLE; /* Turbo C */
+				}
+			}
+
+			return _MainLoopSegaInput(uSms);
 		}
+
 		if (pad & PAD_R2)
 		{
 			const Uint32 uDirections = pad & (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT);
