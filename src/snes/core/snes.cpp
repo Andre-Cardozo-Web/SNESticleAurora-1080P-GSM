@@ -11,6 +11,23 @@
 #include "sndebug.h"
 #include "sndbglog.h"
 
+/* AURORA_SPLIT_SYSTEM_AUDIO_RATES_20260821
+ * 16 kHz is the low-CPU default selected for Aurora. This changes only the
+ * host PCM synthesis/output rate; emulated SPC700 timing remains unchanged. */
+static Uint32 s_SnesAudioRate = 16000;
+
+void SnesAudioSetRate(Uint32 hz)
+{
+    if (hz < 8000)  hz = 8000;
+    if (hz > 48000) hz = 48000;
+    s_SnesAudioRate = hz;
+}
+
+Uint32 SnesAudioGetRate(void)
+{
+    return s_SnesAudioRate;
+}
+
 #ifndef SNES_HK97_SPC_BOOT
 #define SNES_HK97_SPC_BOOT 1
 #endif

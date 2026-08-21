@@ -137,11 +137,13 @@ extern "C" void DLog(const char *fmt, ...);
    gsKit has already reserved the active mode's FB0/FB1 when this helper
    runs, so the same layout remains valid for 480i and 1080i. */
 #define MAINLOOP_VRAM_FRAME_ALIGN   8192U
-/* AURORA_PD_DIRECT_T8_VRAM
- * Original RGBA _OutTex remains first and unchanged. Reserve native MD T8
- * (384x256 destination pitch) + one aligned CLUT page after it. */
+/* AURORA_PD_CT16_VRAM_FIX_20260821
+ * _OutTex remains first. The direct PicoDrive area must fit the LARGEST
+ * renderer, not only Fast/Good T8. Accurate is CT16; reserving only one byte
+ * per pixel let that upload run into the following font/UI allocation.
+ * 384x256x2 safely covers both CT16 and the smaller T8+CLUT layout. */
 #define MAINLOOP_OUT_TEX_BYTES      ((256U * 256U * 4U) + \
-                                     (384U * 256U) + 8192U)
+                                     (384U * 256U * 2U) + 8192U)
 /* Highest blender address is base + 0x200 TBP (temporary 256px RGBA
    surface). Reserve through +0x280 TBP so the complete GS page span is
    private to the blender. */

@@ -10,8 +10,8 @@
  * e' o unico produtor de audio -- nao briga com o AudMixBuffer do jogo.
  *
  * Descoberta de arquivo: procura todas as faixas .mod/.xm em BGM_PATH
- * (define do Makefile) e em pastas padrao e indexa todas. A faixa selecionada
- * repete continuamente; somente BgmNext() muda de faixa. Ao voltar de uma ROM
+ * (define do Makefile) e em pastas padrao e indexa todas. Track index seleciona a faixa atual/inicial; ao fim natural, a playlist
+ * avanca automaticamente e volta a primeira depois da ultima. Ao voltar de uma ROM
  * o decoder carregado e' retomado sem reler o dispositivo.
  *
  * O player anterior (jar_mod/jar_xm) implementava apenas parte dos efeitos
@@ -59,7 +59,7 @@ extern "C" {
    (meio-termo, padrao), 48000 (nativo, mais pesado).  Sobrescrevivel pelo
    Makefile:  make BGM_RATE=24000 */
 #ifndef BGM_RATE
-#define BGM_RATE        24000
+#define BGM_RATE        16000
 #endif
 
 /* Teto de frames de SAIDA (48 kHz) por chamada.  Em regime normal so
@@ -159,8 +159,8 @@ static int  s_drainWait = 0;           /* frames esperando dreno da cauda */
 static int  s_gapFrames = 0;           /* frames de silencio na troca de faixa */
 
 /* Frequencias de sintese oferecidas no Settings Menu (Hz).  Mais alta =
-   melhor qualidade e mais CPU (48000 pode derrubar o fps).  24000 e' o
-   padrao seguro. A saida e' sempre reamostrada para 48 kHz. */
+   melhor qualidade e mais CPU (48000 pode derrubar o fps).  16000 e' o
+   padrao de desempenho. A saida e' sempre reamostrada para 48 kHz. */
 static const int s_rateList[] = { 16000, 22050, 24000, 32000, 38000, 44100, 48000 };
 #define BGM_RATE_COUNT ((int)(sizeof(s_rateList) / sizeof(s_rateList[0])))
 
@@ -490,7 +490,8 @@ static void _WakeAfterNewSource(int before)
 
     if (before == 0 && s_indexCount > 0)
     {
-        s_trackIdx = s_requestedTrackIdx % s_indexCount;
+        if (s_requestedTrackIdx >= s_indexCount) s_requestedTrackIdx = s_indexCount - 1;
+        s_trackIdx = s_requestedTrackIdx;
         if (s_state == BGM_FAILED)
             s_state = BGM_UNTRIED;
     }
@@ -691,7 +692,8 @@ static void _BuildIndex(void)
 
     /* AURORA_PD_MEGA_FIX_20260820: honour the persistent 1..64 menu selection. */
     if (s_indexCount > 0)
-        s_trackIdx = s_requestedTrackIdx % s_indexCount;
+        if (s_requestedTrackIdx >= s_indexCount) s_requestedTrackIdx = s_indexCount - 1;
+        s_trackIdx = s_requestedTrackIdx;
 
     printf("[BGM] initial indexed tracks: %d\n", s_indexCount);
 }
@@ -907,6 +909,24 @@ static void _BgmFree(void)
     s_gapFrames = 0;
 }
 
+/* AURORA_BGM_PLAYLIST_REVIEW_V1_20260821
+ * Natural end-of-song advances through the discovered playlist. Track index
+ * therefore means "current/starting track", not "repeat this one forever". */
+static void _BgmAdvanceNaturalLocked(void)
+{
+    if (s_indexCount <= 0)
+    {
+        _BgmFreeDecoder();
+        s_state = BGM_FAILED;
+        return;
+    }
+
+    s_trackIdx = (s_trackIdx + 1) % s_indexCount;
+    s_requestedTrackIdx = s_trackIdx;
+    _BgmFreeDecoder();
+    s_gapFrames = BGM_GAP_FRAMES;
+}
+
 void BgmStop(void)
 {
     _BgmLock();
@@ -968,7 +988,9 @@ void BgmSetTrackIndex(int track)
     if (track < 1) track = 1;
     if (track > BGM_INDEX_MAX) track = BGM_INDEX_MAX;
     s_requestedTrackIdx = track - 1;
-    next = s_indexCount > 0 ? (s_requestedTrackIdx % s_indexCount) : s_requestedTrackIdx;
+    if (s_indexCount > 0 && s_requestedTrackIdx >= s_indexCount)
+        s_requestedTrackIdx = s_indexCount - 1;
+    next = s_requestedTrackIdx;
     if (next != s_trackIdx)
     {
         s_trackIdx = next;
@@ -1241,30 +1263,31 @@ static void _BgmUpdateLocked(Bool allowFilesystem)
         {
             int ret;
 
-            /* AURORA_BGM_SELECTED_TRACK_LOOP_V4
-             *
-             * The selected module is the BGM until the user explicitly asks
-             * for Next. libxmp's loop=0 disables loop-boundary checking and
-             * therefore lets the module repeat naturally forever.
-             *
-             * The previous code changed loop from 0 to 1 when asynchronous
-             * discovery made s_indexCount grow above one. That meant playback
-             * semantics could change underneath an already-running song.
-             */
+            /* AURORA_BGM_PLAYLIST_REVIEW_V1_20260821
+             * Track index selects the current/starting song. Ask libxmp to
+             * report the first natural loop boundary so Aurora can advance to
+             * the next indexed song instead of repeating one module forever. */
+            /* Stop at the first natural module loop/end so Aurora can
+             * advance the playlist. libxmp only checks loop_count when this
+             * argument is > 0. */
             ret = xmp_play_buffer(
                 s_xmp,
                 &s_inter[s_sourceFrames * 2],
                 append * 2 * (int)sizeof(short),
-                0);
+                1);
 
             if (ret == -XMP_END)
             {
-                /* Defensive fallback. loop=0 normally prevents XMP_END at a
-                 * normal module loop; if the player was stopped internally,
-                 * restart THIS selected track rather than silently advancing
-                 * or leaving menu music dead. */
-                xmp_restart_module(s_xmp);
-                _ResetResampler();
+                /* loop=1 reports the first natural module loop/end. With multiple
+                 * indexed songs, continue as a playlist; with one song, loop
+                 * that song so menu music never simply dies. */
+                if (s_indexCount > 1)
+                    _BgmAdvanceNaturalLocked();
+                else
+                {
+                    xmp_restart_module(s_xmp);
+                    _ResetResampler();
+                }
                 return;
             }
             if (ret < 0)

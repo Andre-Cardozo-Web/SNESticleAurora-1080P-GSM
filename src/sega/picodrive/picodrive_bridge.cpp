@@ -42,8 +42,8 @@ static bool s_Use6Button = false;
 static int  s_AuroraRegion = SNES_FORCE_REGION_OFF;
 static bool s_VariablesChanged = false;
 static int  s_RenderingMode = 1; /* AURORA_PD_MEGA_FIX_20260820: 0 Fast, 1 Good, 2 Accurate */
-static int  s_AudioRate = 24000; /* AURORA_PD_POLISH_V3_20260820: follows Settings/Audio Frequency */
-static char s_AudioRateText[16] = "24000";
+static int  s_AudioRate = 16000; /* AURORA_PD_POLISH_V3_20260820: follows Settings/Audio Frequency */
+static char s_AudioRateText[16] = "16000";
 
 /* Cache SRAM metadata at load time. PicoDrive's libretro API intentionally
  * reports size 0 after frame 0 while SRAM is still all-zero; Aurora needs a
@@ -894,8 +894,11 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes, const char *pNam
     s_GameLoaded = true;
     /* AURORA_MD_CLUT_GAME_LIFETIME_V1 */
     s_DirectClutValid = false;
-    /* Shared-rate path: 32 kHz uses Aurora's cubic converter; other rates use the continuous converter. */
-    AudMixSetFastResample(0);
+    /* AURORA_PD_REVIEW_PERF_V1_20260821
+     * PicoDrive owns the existing low-cost 32->48 path while a Sega game is
+     * active. SNES/QuickNES return to cubic on unload below. At the default
+     * 16 kHz this flag is irrelevant, so behaviour is unchanged there. */
+    AudMixSetFastResample(1);
     s_LastPortType[0] = s_LastPortType[1] = -1;
     s_MapLeft = s_MapTop = -1;
     s_MapSrcW = s_MapSrcH = s_MapDstW = s_MapDstH = -1;
