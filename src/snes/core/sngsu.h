@@ -213,7 +213,9 @@ private:
     // graficos
     Int32  ScreenBpp() const;                 // 2, 4 ou 8 (de SCMR.MD)
     Uint32 PixelTileNo(Uint8 x, Uint8 y) const;
-    Uint32 PixelRowAddr(Uint8 x, Uint8 y) const;
+    /* AURORA_SAFE_CODE_PERF_V1_GSU: callers already know BPP; do not
+       decode SCMR twice for the same pixel-cache operation. */
+    Uint32 PixelRowAddr(Uint8 x, Uint8 y, Int32 bpp) const;
     void   PixFlush(Int32 nCache);            // descarrega um cache para a RAM
     void   PixFlushAll();                     // RPIX espera os dois caches
     void   PixMovePrimaryToSecondary();

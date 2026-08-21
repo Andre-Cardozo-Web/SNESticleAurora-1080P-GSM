@@ -88,27 +88,33 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 	while (--nObjLine >= 0)
 	{
 		const SnesRenderObj8T *pObj = pObjLine + nObjLine;
-		Uint32 uOpaque = pObj->uData[SNPPU_BGPLANE_OPAQUE];
+		/* AURORA_SAFE_CODE_PERF_V1_OBJ
+		 * Immutable per-tile metadata kept local in the hot renderer. */
+		const Int32 iPosX = pObj->iPosX;
+		const Uint32 uPri = pObj->uPri;
+		const Uint32 uPal = pObj->uPal;
+		const Uint8 *pObjData = pObj->uData;
+		Uint32 uOpaque = pObjData[SNPPU_BGPLANE_OPAQUE];
 
-		if (!uOpaque || pObj->iPosX <= -8 || pObj->iPosX >= 256)
+		if (!uOpaque || iPosX <= -8 || iPosX >= 256)
 			continue;
 
 #if SNDBG_DEEP
 		g_DbgObjCandidatePixels += _ObjCountBits8(uOpaque);
 #endif
 
-		if (pObj->iPosX >= 0 && pObj->iPosX <= 248)
+		if (iPosX >= 0 && iPosX <= 248)
 		{
-			Uint32 uShift = pObj->iPosX & 31;
+			Uint32 uShift = iPosX & 31;
 			Uint32 uInvShift = 32 - uShift;
 			Uint32 uMask0 = uOpaque << uShift;
 			Uint32 uMask1 = uShift ? (uOpaque >> uInvShift) : 0;
 			Uint32 uBlocked0;
 			Uint32 uBlocked1;
 			Uint32 uVisible;
-			Uint8 *pDest8 = pLine8 + pObj->iPosX;
+			Uint8 *pDest8 = pLine8 + iPosX;
 
-			iWord = pObj->iPosX >> 5;
+			iWord = iPosX >> 5;
 			uBlocked0 = ObjMask.uMask32[iWord];
 			uBlocked1 = uMask1 ? ObjMask.uMask32[iWord + 1] : 0;
 
@@ -118,7 +124,7 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 			if (uMask1)
 				ObjMask.uMask32[iWord + 1] |= uMask1;
 
-			switch (pObj->uPri)
+			switch (uPri)
 			{
 			case 0:
 				uBlocked0 |= pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord] |
@@ -148,7 +154,7 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 
 			if (pAddSubMask)
 			{
-				if ((bAddSubMask & 1) && ((pObj->uPal | bAddSubMask) & 0x4))
+				if ((bAddSubMask & 1) && ((uPal | bAddSubMask) & 0x4))
 				{
 					pAddSubMask->uMask32[iWord] |= uMask0;
 					if (uMask1)
@@ -178,18 +184,18 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 				continue;
 			if (uVisible == 0xFF)
 			{
-				memcpy(pDest8, pObj->uData, 8);
+				memcpy(pDest8, pObjData, 8);
 			}
 			else
 			{
-				if (uVisible & 0x01) pDest8[0] = pObj->uData[0];
-				if (uVisible & 0x02) pDest8[1] = pObj->uData[1];
-				if (uVisible & 0x04) pDest8[2] = pObj->uData[2];
-				if (uVisible & 0x08) pDest8[3] = pObj->uData[3];
-				if (uVisible & 0x10) pDest8[4] = pObj->uData[4];
-				if (uVisible & 0x20) pDest8[5] = pObj->uData[5];
-				if (uVisible & 0x40) pDest8[6] = pObj->uData[6];
-				if (uVisible & 0x80) pDest8[7] = pObj->uData[7];
+				if (uVisible & 0x01) pDest8[0] = pObjData[0];
+				if (uVisible & 0x02) pDest8[1] = pObjData[1];
+				if (uVisible & 0x04) pDest8[2] = pObjData[2];
+				if (uVisible & 0x08) pDest8[3] = pObjData[3];
+				if (uVisible & 0x10) pDest8[4] = pObjData[4];
+				if (uVisible & 0x20) pDest8[5] = pObjData[5];
+				if (uVisible & 0x40) pDest8[6] = pObjData[6];
+				if (uVisible & 0x80) pDest8[7] = pObjData[7];
 			}
 		} else
 		{
@@ -206,7 +212,7 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 				if (!(uOpaque & (1u << iPixel)))
 					continue;
 
-				iX = pObj->iPosX + iPixel;
+				iX = iPosX + iPixel;
 				if ((Uint32)iX >= 256u)
 					continue;
 
@@ -215,7 +221,7 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 				uBlocked = ObjMask.uMask32[iWord] & uBit;
 				ObjMask.uMask32[iWord] |= uBit;
 
-				switch (pObj->uPri)
+				switch (uPri)
 				{
 				case 0:
 					uBlocked |= (pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord] |
@@ -237,13 +243,13 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 
 				if (pAddSubMask)
 				{
-					if ((bAddSubMask & 1) && ((pObj->uPal | bAddSubMask) & 0x4))
+					if ((bAddSubMask & 1) && ((uPal | bAddSubMask) & 0x4))
 						pAddSubMask->uMask32[iWord] |= uBit;
 					else
 						pAddSubMask->uMask32[iWord] &= ~uBit;
 				}
 
-				pLine8[iX] = pObj->uData[iPixel];
+				pLine8[iX] = pObjData[iPixel];
 #if SNDBG_DEEP
 				g_DbgObjDrawnPixels++;
 #endif

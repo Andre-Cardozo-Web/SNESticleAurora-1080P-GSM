@@ -14,6 +14,14 @@
 
 #include <string.h>
 
+/* AURORA_SAFE_CODE_PERF_V1_GSU_CPP
+ * $70-$71 is the only GSU Game Pak RAM bank interval. Keep the interval
+ * test in one unsigned subtraction so every ROM/cache path shares it. */
+static inline Bool _SNGSUBankIsRam(Uint8 uBank)
+{
+    return ((Uint32)uBank - 0x70u) < 2u;
+}
+
 extern "C" void DLog(const char *fmt, ...);
 
 SNGSU::SNGSU()
@@ -141,9 +149,10 @@ Uint8 SNGSU::RomReadByte(Uint8 uBank, Uint16 uAddr) const
      * $00-$3F is the 32-KiB ROM view mirrored into both halves of each
      * 64-KiB bank; RomOffset() folds the address to 15 bits. $40-$5F is
      * full-bank ROM. Only $70-$71 is Game Pak RAM. */
-    if (uBank >= 0x70 && uBank <= 0x71)
+    if (_SNGSUBankIsRam(uBank))
         return RamReadByte(((Uint32)(uBank & 1) << 16) | uAddr);
-    if ((uBank >= 0x60 && uBank <= 0x6F) || uBank >= 0x72)
+    // With $70-$71 handled above, every remaining bank >= $60 is unmapped.
+    if (uBank >= 0x60)
         return 0xFF;
 
     if (!m_pRom || !m_uRomSize) return 0xFF;
@@ -166,7 +175,7 @@ void SNGSU::UpdateRomBuffer()
     if (!m_pRom || !m_uRomSize) { m_RomBuffer = 0xFF; m_RomBufValid = FALSE; return; }
     /* Functional completion stays immediate for compatibility, but the
        external bus time is now charged to the instruction that requested it. */
-    if (!(m_ROMBR >= 0x70 && m_ROMBR <= 0x71))
+    if (!_SNGSUBankIsRam(m_ROMBR))
         ChargeClocks(MemoryClockCost());
     m_RomBuffer = RomReadByte(m_ROMBR, m_R[14]);
     m_RomBufValid = TRUE;
@@ -255,14 +264,15 @@ Uint8 SNGSU::CodeRead(Uint16 pc)
 #if SNDBG_DEEP
             m_Diag.CacheMisses++;
 #endif
-            Uint16 base = (Uint16)(m_CBR + (line << 4));
-            Bool bCodeFromRam = (m_PBR >= 0x70 && m_PBR <= 0x71);
+            Uint32 lineBase = line << 4;
+            Uint16 base = (Uint16)(m_CBR + lineBase);
+            Bool bCodeFromRam = _SNGSUBankIsRam(m_PBR);
             Uint32 i;
             for (i = 0; i < 16; i++)
             {
                 // RamReadByte() charges itself; ROM/unmapped bus does not.
                 if (!bCodeFromRam) ChargeClocks(MemoryClockCost());
-                m_Cache[(line << 4) + i] = RawCodeRead((Uint16)(base + i));
+                m_Cache[lineBase + i] = RawCodeRead((Uint16)(base + i));
             }
             m_CacheValid |= (Uint32)1 << line;
         }
@@ -277,7 +287,7 @@ Uint8 SNGSU::CodeRead(Uint16 pc)
     }
     else
     {
-        Bool bCodeFromRam = (m_PBR >= 0x70 && m_PBR <= 0x71);
+        Bool bCodeFromRam = _SNGSUBankIsRam(m_PBR);
         if (!bCodeFromRam) ChargeClocks(MemoryClockCost());
         b = RawCodeRead(pc);       // RAM path charges in RamReadByte()
     }
@@ -497,10 +507,13 @@ Uint32 SNGSU::PixelTileNo(Uint8 x, Uint8 y) const
 }
 
 // Endereco (offset linear na Game Pak RAM) da linha de bitplanes do tile.
-Uint32 SNGSU::PixelRowAddr(Uint8 x, Uint8 y) const
+/* AURORA_SAFE_CODE_PERF_V1_GSU_CPP
+ * PixFlush/RPIX already decoded SCMR.MD to obtain bpp. Reuse it here instead
+ * of calling ScreenBpp() a second time for the same operation. */
+Uint32 SNGSU::PixelRowAddr(Uint8 x, Uint8 y, Int32 bpp) const
 {
     Uint32 tile = PixelTileNo(x, y);
-    Uint32 tileSize = (Uint32)(8 * ScreenBpp());          // 16/32/64
+    Uint32 tileSize = (Uint32)(8 * bpp);                  // 16/32/64
     return tile * tileSize + ((Uint32)m_SCBR << 10) + (Uint32)(y & 7) * 2;
 }
 
@@ -515,7 +528,8 @@ void SNGSU::PixFlush(Int32 nCache)
     Uint8 xbase = (Uint8)(offset << 3);
     Uint8 y = (Uint8)(offset >> 5);
     Int32  bpp = ScreenBpp();
-    Uint32 rowAddr = PixelRowAddr(xbase, y);
+    Uint32 rowAddr = PixelRowAddr(xbase, y, bpp);
+    const Uint8 *pColor = m_PixColor[nCache];
 
     /* AURORA_GSU_FULLPIX_FAST_V1
      *
@@ -528,7 +542,6 @@ void SNGSU::PixFlush(Int32 nCache)
      */
     if (flags == 0xFF)
     {
-        const Uint8 *pColor = m_PixColor[nCache];
         for (Int32 b = 0; b < bpp; b++)
         {
             Uint32 addr = rowAddr + (Uint32)((b >> 1) * 16 + (b & 1));
@@ -556,7 +569,7 @@ void SNGSU::PixFlush(Int32 nCache)
                 if (flags & (1 << i))
                 {
                     Uint8 mask = (Uint8)(1 << (7 - i));
-                    if ((m_PixColor[nCache][i] >> b) & 1) byte |= mask;
+                    if ((pColor[i] >> b) & 1) byte |= mask;
                     else                          byte &= (Uint8)~mask;
                 }
             }
@@ -618,8 +631,9 @@ void SNGSU::Plot()
         PixMovePrimaryToSecondary();
         m_PixOffset[0] = offset;
     }
-    m_PixColor[0][x & 7] = color;
-    m_PixFlags[0] |= (Uint8)(1 << (x & 7));
+    Uint8 pixel = (Uint8)(x & 7);
+    m_PixColor[0][pixel] = color;
+    m_PixFlags[0] |= (Uint8)(1 << pixel);
     m_R[1]++;
 
     if (m_PixFlags[0] == 0xFF)
@@ -635,12 +649,13 @@ Uint16 SNGSU::Rpix()
     Uint8 x = (Uint8)(m_R[1] & 0xFF);
     Uint8 y = (Uint8)(m_R[2] & 0xFF);
     Int32 bpp = ScreenBpp();
-    Uint32 rowAddr = PixelRowAddr(x, y);
+    Uint32 rowAddr = PixelRowAddr(x, y, bpp);
+    Uint32 bitShift = 7u - ((Uint32)x & 7u);
     Uint16 color = 0;
     for (Int32 b = 0; b < bpp; b++) {
         Uint32 addr = rowAddr + (Uint32)((b >> 1) * 16 + (b & 1));
         Uint8  byte = RamReadByte(addr);
-        Uint8  bit  = (Uint8)((byte >> (7 - (x & 7))) & 1);
+        Uint8  bit  = (Uint8)((byte >> bitShift) & 1u);
         color |= (Uint16)(bit << b);
     }
     return color;
@@ -1058,7 +1073,7 @@ Bool SNGSU::CanExecuteNow() const
 
     if (m_PBR <= 0x5F)
         return (m_SCMR & 0x10) != 0;  // RON
-    if (m_PBR >= 0x70 && m_PBR <= 0x71)
+    if (_SNGSUBankIsRam(m_PBR))
         return (m_SCMR & 0x08) != 0;  // RAN
     return FALSE;
 }

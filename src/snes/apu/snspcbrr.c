@@ -32,6 +32,9 @@ static Int32 _SNSpcDsp_FilterParm[4][2]=
 typedef void (*SNSpcBRRDecodeFuncT)(Int16 *pOut, Int16 *pIn, Int32 nSamples, Int32 eFilterType, Int32 iPrev0, Int32 iPrev1);
 
 static void _SNSpcBRRFilter(Int16 *pOut, Int16 *pIn, Int32 nSamples, Int32 eFilterType, Int32 iPrev0, Int32 iPrev1);
+/* AURORA_SAFE_CODE_PERF_V1_BRR
+ * Preserve the exact Int16 output conversion, but reuse that converted value
+ * for filter history instead of storing it and immediately loading it back. */
 static void _SNSpcBRRFilter3(Int16 *pOut, Int16 *pIn, Int32 nSamples, Int32 eFilterType, Int32 iPrev0, Int32 iPrev1);
 static void _SNSpcBRRFilter4(Int16 *pOut, Int16 *pIn, Int32 nSamples, Int32 eFilterType, Int32 iPrev0, Int32 iPrev1);
 static void _SNSpcBRRFilter_9x(Int16 *pOut, Int16 *pIn, Int32 nSamples, Int32 eFilterType, Int32 prev0, Int32 prev1);
@@ -173,8 +176,8 @@ static void _SNSpcBRRFilter2(Int32 *pOut, Int16 *pIn, Int32 nSamples, Int32 eFil
 		iSample += ((iPrev0 * iFilter0)>>9) + ((iPrev1 * iFilter1) >> 9);
 
 		// clamp sample to 16-bit range
-		if (iSample >  iMax) iSample = iMax;
-		if (iSample <  iMin) iSample = iMin;
+		if (iSample > iMax) iSample = iMax;
+		else if (iSample < iMin) iSample = iMin;
 		iSample<<=1;
 
 		iSample<<=16;
@@ -219,11 +222,12 @@ static void _SNSpcBRRFilter3(Int16 *pOut, Int16 *pIn, Int32 nSamples, Int32 eFil
 		iSample<<=1;
 
 		// write sample
-		*pOut = iSample;
+		Int16 iOutput = (Int16)iSample;
+		*pOut = iOutput;
 
-		// rotate sample queue
+		// rotate sample queue without a store->reload dependency
 		iPrev1 = iPrev0;
-		iPrev0 = *pOut;
+		iPrev0 = iOutput;
 
 		pOut++;
 		pIn++;

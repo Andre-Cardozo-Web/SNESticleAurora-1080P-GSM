@@ -48,9 +48,12 @@ static Uint8 _SNPPUBg_Tile16Pos[4][4] =
  * continue to alias nonexistent screens correctly for 32x32/64x32
  * maps, while 32x64/64x64 maps can really cross into their lower half.
  */
+/* AURORA_SAFE_CODE_PERF_V1_BG
+ * Keep the renderer's exact abstract tilemap layout, but operate on its
+ * bitfields directly instead of unpacking and immediately repacking them. */
 static Uint16 _SNPPUOffsetNextRow(Uint16 uAddr)
 {
-	if (((uAddr >> 5) & 0x1F) != 0x1F)
+	if ((uAddr & 0x03E0) != 0x03E0)
 		return (Uint16)(uAddr + 0x20);
 
 	/* wrap tile row 31 -> 0 and toggle the vertical screen */
@@ -244,8 +247,6 @@ static void _FetchBG8x8Offset(Uint32 uScrollX, Uint32 uScrollY, Int32 iLine, Sne
 	//   yyyyy is tile vert row
 	//   xxxxx is tile horiz column
 
-	Uint16 *pScrData;
-	Uint32 uAddr;
 	Uint32 uTileX, uTileY;
 	Uint32 uX = 0;
 
@@ -255,19 +256,21 @@ static void _FetchBG8x8Offset(Uint32 uScrollX, Uint32 uScrollY, Int32 iLine, Sne
 	{
 		Uint16 uScrData;
 		Uint32 uTileScrollX, uTileScrollY;
+		const Uint16 uOffsetX = pOffset[0];
+		const Uint16 uOffsetY = pOffset[1];
 
-		if (pOffset[0] & uOffsetMask)
+		if (uOffsetX & uOffsetMask)
 		{
 			uTileScrollX =
-				(uScrollX & 7) | (pOffset[0] & 0x3F8);
+				(uScrollX & 7) | (uOffsetX & 0x3F8);
 		} else
 		{
 			uTileScrollX = uScrollX;
 		}
 
-		if (pOffset[1] & uOffsetMask)
+		if (uOffsetY & uOffsetMask)
 		{
-			uTileScrollY = pOffset[1] & 0x3FF;
+			uTileScrollY = uOffsetY & 0x3FF;
 		} else
 		{
 			uTileScrollY = uScrollY;
@@ -280,17 +283,10 @@ static void _FetchBG8x8Offset(Uint32 uScrollX, Uint32 uScrollY, Int32 iLine, Sne
 		uTileX = (uTileScrollX >> 3) & 63;
 		uTileY = (uTileScrollY >> 3) & 63;
 
-		// calculate vram tile address (ssyyyyyxxxxx)
-		uAddr = (uTileX & 0x1F) << 0 ;
-		uAddr|= (uTileY & 0x1F) << 5 ;
-		uAddr|= (uTileX >>   5) << 10;
-		uAddr|= (uTileY >>   5) << 11;
-
-		// get pointer to screen data
-		pScrData  =  (Uint16 *)ppScreen[(uAddr >> 10) & 3];
-
-		// fetch screen data
-		uScrData = pScrData[uAddr & 0x03FF];
+		// Direct decomposition of the same ss-yyyyy-xxxxx address.
+		const Uint32 uScreen = (uTileX >> 5) | ((uTileY >> 5) << 1);
+		const Uint32 uMapIndex = (uTileX & 0x1F) | ((uTileY & 0x1F) << 5);
+		uScrData = ((Uint16 *)ppScreen[uScreen])[uMapIndex];
 
 		// screen data is of format: YX?cccNNNNNNNNNN
 		pTile->uFlip = (uScrData >> 14) & 3;
@@ -315,8 +311,6 @@ static void _FetchBG8x8Offset2(Uint32 uScrollX, Uint32 uScrollY, Int32 iLine, Sn
 	//   yyyyy is tile vert row
 	//   xxxxx is tile horiz column
 
-	Uint16 *pScrData;
-	Uint32 uAddr;
 	Uint32 uTileX, uTileY;
 	Uint32 uX = 0;
 
@@ -326,19 +320,20 @@ static void _FetchBG8x8Offset2(Uint32 uScrollX, Uint32 uScrollY, Int32 iLine, Sn
 	{
 		Uint16 uScrData;
 		Uint32 uTileScrollX, uTileScrollY;
+		const Uint16 uOffset = pOffset[0];
 
 		uTileScrollX = uScrollX;
 		uTileScrollY = uScrollY;
 
-		if (pOffset[0] & uOffsetMask)
+		if (uOffset & uOffsetMask)
 		{
-			if (pOffset[0] & 0x8000)
+			if (uOffset & 0x8000)
 			{
-				uTileScrollY = pOffset[0] & 0x3FF;
+				uTileScrollY = uOffset & 0x3FF;
 			} else
 			{
 				uTileScrollX =
-				(uScrollX & 7) | (pOffset[0] & 0x3F8);
+				(uScrollX & 7) | (uOffset & 0x3F8);
 			}
 		} 
 
@@ -349,17 +344,10 @@ static void _FetchBG8x8Offset2(Uint32 uScrollX, Uint32 uScrollY, Int32 iLine, Sn
 		uTileX = (uTileScrollX >> 3) & 63;
 		uTileY = (uTileScrollY >> 3) & 63;
 
-		// calculate vram tile address (ssyyyyyxxxxx)
-		uAddr = (uTileX & 0x1F) << 0 ;
-		uAddr|= (uTileY & 0x1F) << 5 ;
-		uAddr|= (uTileX >>   5) << 10;
-		uAddr|= (uTileY >>   5) << 11;
-
-		// get pointer to screen data
-		pScrData  =  (Uint16 *)ppScreen[(uAddr >> 10) & 3];
-
-		// fetch screen data
-		uScrData = pScrData[uAddr & 0x03FF];
+		// Direct decomposition of the same ss-yyyyy-xxxxx address.
+		const Uint32 uScreen = (uTileX >> 5) | ((uTileY >> 5) << 1);
+		const Uint32 uMapIndex = (uTileX & 0x1F) | ((uTileY & 0x1F) << 5);
+		uScrData = ((Uint16 *)ppScreen[uScreen])[uMapIndex];
 
 		// screen data is of format: YX?cccNNNNNNNNNN
 		pTile->uFlip = (uScrData >> 14) & 3;

@@ -1502,6 +1502,12 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	SnesRenderObj8T ObjLine[SNPPU_MAXOBJCHR];
 	Int32 nObjLine;
 	const SnesPPURegsT *pRegs = m_pPPU->GetRegs();
+	/* AURORA_SAFE_CODE_PERF_V1_PPU
+	 * RenderLine8 is synchronous: these registers cannot change underneath the
+	 * scanline. Snapshot fields repeatedly used across helper calls. */
+	const Uint8 uBGModeReg = pRegs->bgmode;
+	const Uint8 uBGMode = (Uint8)(uBGModeReg & 7);
+	const Uint8 uOBSEL = pRegs->obsel;
 	/* AURORA_V85_SOFTWARE_LAYER_MASK
 	 * Mask before fetch/decode so disabled layers really save EE work. */
 	const Uint8 uSoftwareLayers = SNPPURenderGetSoftwareLayerMask();
@@ -1576,8 +1582,8 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 			for (Int32 i=0;i<count;i++) rotated[i]=list[(i+shift)%count];
 			list=rotated;
 		}
-		nObjLine=_FetchOBJ(m_Objs,list,count,ObjLine,budget,iLine,(pRegs->obsel&7)<<13,
-			_SnesPPUOBJNameSelect(pRegs->obsel),m_pPPU->GetVramPtr(0));
+		nObjLine=_FetchOBJ(m_Objs,list,count,ObjLine,budget,iLine,(uOBSEL&7)<<13,
+			_SnesPPUOBJNameSelect(uOBSEL),m_pPPU->GetVramPtr(0));
 	}
 	else
 		nObjLine = 0;
@@ -1605,7 +1611,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 		#endif
 		if (m_nObjLine[iLine] >= SNPPU_MAXOBJ) g_DbgObjRangeLimitLines++;
 		if (nObjLine >= SNPPU_MAXOBJCHR) g_DbgObjLimitLines++;
-		g_DbgObjOBSEL = pRegs->obsel;
+		g_DbgObjOBSEL = uOBSEL;
 		g_DbgObjTM = pRegs->tm;
 		g_DbgObjTS = pRegs->ts;
 		g_DbgObjPriority = pRegs->oampri.w;
@@ -1613,14 +1619,14 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 #endif
 	PROF_LEAVE("FetchOBJ");
 
-	if ((pRegs->bgmode&7)!=7)
+	if (uBGMode!=7)
 	{
 		Int32 iBG;
 		Uint8 uBGFlags[4];
 		Uint16 *pOffset = NULL;
 		Uint32 uOffsetOR = 0;
 
-		if (((pRegs->bgmode&7)==2 || (pRegs->bgmode&7)==4) &&
+		if ((uBGMode==2 || uBGMode==4) &&
 		    (uFetchLayers & (SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2)))
 		{
 			pOffset = pRenderInfo->BGOffset;
@@ -1629,7 +1635,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 #if SNDBG_LOG
 			Uint32 _tBGOffset = ProfCtrGetCycle();
 #endif
-			uOffsetOR  = FetchOffset(&BGInfo[2], pOffset, iLine, pRenderInfo->uBGVramAddr[2], (pRegs->bgmode&7)==2 ? TRUE : FALSE);
+			uOffsetOR  = FetchOffset(&BGInfo[2], pOffset, iLine, pRenderInfo->uBGVramAddr[2], uBGMode==2 ? TRUE : FALSE);
 #if SNDBG_LOG
 			g_TmgCycBGOffset += ProfCtrGetCycle() - _tBGOffset;
 #endif
@@ -1651,7 +1657,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 			{
 				// fetch BGline with offset
 				PROF_ENTER("FetchBGOffset");
-				uBGFlags[iBG] = FetchBGOffset(&BGInfo[iBG], pRenderInfo->Tiles[iBG], 33, iLine, pOffset, (0x2000 << iBG), ((pRegs->bgmode&7)==4 ? TRUE : FALSE));
+				uBGFlags[iBG] = FetchBGOffset(&BGInfo[iBG], pRenderInfo->Tiles[iBG], 33, iLine, pOffset, (0x2000 << iBG), (uBGMode==4 ? TRUE : FALSE));
 				PROF_LEAVE("FetchBGOffset");
 
 				// invalidate cache
@@ -1744,7 +1750,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 		SNMaskClear(pMainAddSubMask);
 	}
 
-	bBG3Pri = (pRegs->bgmode&8) && (tm & SNESPPU_MASK_BG3) && ((pRegs->bgmode&7)==1);
+	bBG3Pri = (uBGModeReg & 8) && (tm & SNESPPU_MASK_BG3) && (uBGMode==1);
 
 	// clear main screen
 	SNMaskClear(&pMain[SNPPU_BGPLANE_PLANE7]);
@@ -1805,7 +1811,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	}
 
 	// do fancy BG3 priority stuff?
-	bBG3Pri = (pRegs->bgmode&8) && (ts & SNESPPU_MASK_BG3) && ((pRegs->bgmode&7)==1);;
+	bBG3Pri = (uBGModeReg & 8) && (ts & SNESPPU_MASK_BG3) && (uBGMode==1);;
 
 	// clear Sub screen
 	SNMaskClear(&pSub[SNPPU_BGPLANE_PLANE7]);
@@ -1861,6 +1867,10 @@ void RenderLine8Mode7(Int32 iLine,  SnesRender8pInfoT *pRenderInfo)
 
 
 
+/* AURORA_SAFE_CODE_PERF_V1_MODE7
+ * Remove address work whose result is provably discarded/out-of-range while
+ * preserving the exact existing repeat/clamp/black rules. VRAM is plain host
+ * memory here, so skipped discarded reads have no emulated side effects. */
 static void _FetchMode7_Repeat(Uint8 *pLine, Int32 nPixels, Uint8 *pVram, Int32 x, Int32 y, Int32 dx, Int32 dy)
 {
 	Int32 x2,y2;
@@ -1884,7 +1894,6 @@ static void _FetchMode7_Repeat(Uint8 *pLine, Int32 nPixels, Uint8 *pVram, Int32 
 
 		// get tile address
 		uTileAddr = ((y2>>3)<<7) | (x2>>3);
-		uTileAddr &= 0x3FFF;
 
 		// fetch chr address
 		uChrAddr = pVram[uTileAddr * 2 + 0];
@@ -1920,14 +1929,17 @@ static void _FetchMode7_Clamp(Uint8 *pLine, Int32 nPixels, Uint8 *pVram, Int32 x
 		x+=dx;
 		y+=dy;
 
-		// get tile address
-		uTileAddr = ((y2>>3)<<7) | (x2>>3);
-		uTileAddr &= 0x3FFF;
-
-		// fetch chr address
-		uChrAddr = pVram[uTileAddr * 2 + 0];
-
-		if ((x2|y2) >> 10)	uChrAddr = 0;
+		// Outside the map this mode repeats character 0; the tile-map read
+		// would be discarded immediately, so avoid it.
+		if ((x2|y2) >> 10)
+		{
+			uChrAddr = 0;
+		}
+		else
+		{
+			uTileAddr = ((y2>>3)<<7) | (x2>>3);
+			uChrAddr = pVram[uTileAddr * 2];
+		}
 
 		// offset into pixel of tile
 		uChrAddr <<=6;
@@ -1960,22 +1972,23 @@ static void _FetchMode7_Black(Uint8 *pLine, Int32 nPixels, Uint8 *pVram, Int32 x
 		x+=dx;
 		y+=dy;
 
-		// get tile address
-		uTileAddr = ((y2>>3)<<7) | (x2>>3);
-		uTileAddr &= 0x3FFF;
+		if ((x2|y2) >> 10)
+		{
+			uChrData = 0;
+		}
+		else
+		{
+			// In-range coordinates are already 10-bit, hence this is 14-bit.
+			uTileAddr = ((y2>>3)<<7) | (x2>>3);
+			uChrAddr = pVram[uTileAddr * 2];
 
-		// fetch chr address
-		uChrAddr = pVram[uTileAddr * 2 + 0];
+			// offset into pixel of tile
+			uChrAddr <<= 6;
+			uChrAddr += (x2 & 7);
+			uChrAddr += (y2 & 7) << 3;
 
-		// offset into pixel of tile
-		uChrAddr <<=6;
-		uChrAddr += (x2 & 7);
-		uChrAddr += (y2 & 7) << 3;
-
-		// fetch chr data
-		uChrData = pVram[uChrAddr * 2 + 1];
-
-		if ((x2|y2) >> 10)	uChrData = 0;
+			uChrData = pVram[uChrAddr * 2 + 1];
+		}
 
 		nPixels--;
 		pLine[0] = uChrData;
@@ -2039,8 +2052,7 @@ static void _FetchMode7Priority(Uint8 *pPriority, Uint8 *pLine, Int32 nPixels)
 		uPriority|= (uPri64 >> ( 0x38 + 7)) << 7;
 
 		// remove priority bits
-		uData64 |= uMask64;
-		uData64 ^= uMask64;
+		uData64 &= ~uMask64;
 
 		// store priority
 		pPriority[0] = (Uint8)uPriority;
@@ -2172,24 +2184,29 @@ static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPrio
 	cx   = AURORA_M7_SIGN13(pRegs->m7x.w);
 	cy   = AURORA_M7_SIGN13(pRegs->m7y.w);
 
+	/* AURORA_SAFE_CODE_PERF_V1_MODE7_MATRIX: reuse scanline invariants. */
+	const Uint8 m7sel = pRegs->m7sel;
+	const Int32 clippedH = AURORA_M7_CLIP(hofs - cx);
+	const Int32 clippedV = AURORA_M7_CLIP(vofs - cy);
+
 	/* Mode 7 mosaic is deliberately not approximated here. Its vertical phase
 	 * is controlled by an internal PPU counter that can be reloaded mid-frame;
 	 * absolute scanline grouping would create a new inaccuracy. */
 
-	screenY = (pRegs->m7sel & 0x02) ? (255 - iLine) : iLine;
+	screenY = (m7sel & 0x02) ? (255 - iLine) : iLine;
 
-	originX = (m7a * AURORA_M7_CLIP(hofs - cx) & ~63) +
-	          (m7b * AURORA_M7_CLIP(vofs - cy) & ~63) +
+	originX = (m7a * clippedH & ~63) +
+	          (m7b * clippedV & ~63) +
 	          (m7b * screenY & ~63) + (cx << 8);
-	originY = (m7c * AURORA_M7_CLIP(hofs - cx) & ~63) +
-	          (m7d * AURORA_M7_CLIP(vofs - cy) & ~63) +
+	originY = (m7c * clippedH & ~63) +
+	          (m7d * clippedV & ~63) +
 	          (m7d * screenY & ~63) + (cy << 8);
 
-	screenX = (pRegs->m7sel & 0x01) ? 255 : 0;
+	screenX = (m7sel & 0x01) ? 255 : 0;
 	x = originX + m7a * screenX;
 	y = originY + m7c * screenX;
-	dx = (pRegs->m7sel & 0x01) ? -m7a : m7a;
-	dy = (pRegs->m7sel & 0x01) ? -m7c : m7c;
+	dx = (m7sel & 0x01) ? -m7a : m7a;
+	dy = (m7sel & 0x01) ? -m7c : m7c;
 
 	/* AURORA_V85_MODE7_HALF
 	 * Optional performance compromise. Full remains the exact old path. */
@@ -2203,7 +2220,7 @@ static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPrio
 
 	/* M7SEL repeat values 0 and 1 both wrap. Value 2 is transparent/backdrop
 	 * outside the 1024x1024 map, value 3 repeats character 0. */
-	switch ((pRegs->m7sel >> 6) & 3)
+	switch ((m7sel >> 6) & 3)
 	{
 	case 0:
 	case 1:
