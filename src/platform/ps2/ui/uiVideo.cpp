@@ -1208,7 +1208,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		else if (m_iSelect < 30) { lo = 20; hi = 29; }
 		else if (m_iSelect < 40) { lo = 30; hi = 36; }
 		else if (m_iSelect < 50) { lo = 40; hi = 43; }
-		else                     { lo = 50; hi = 54; }
+		else                     { lo = 50; hi = 55; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}

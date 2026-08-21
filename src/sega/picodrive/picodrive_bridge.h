@@ -21,6 +21,8 @@ void PicoDriveBridge_SetRenderingMode(int mode);
 int  PicoDriveBridge_GetRenderingMode(void);
 void PicoDriveBridge_SetAudioRate(int hz);
 int  PicoDriveBridge_GetAudioRate(void);
+/* AURORA_PD_HOST_CADENCE_V1_20260821 */
+int  PicoDriveBridge_GetNominalFrameRate(void);
 /* AURORA_PD_MEGA_FIX_20260820 */
 bool PicoDriveBridge_IsMasterSystem(void);
 bool PicoDriveBridge_Is8Bit(void);
@@ -30,6 +32,8 @@ bool PicoDriveBridge_Is8Bit(void);
 void PicoDriveBridge_SetRegion(int auroraRegion);
 
 void PicoDriveBridge_SetMouseInput(bool active, int dx, int dy, unsigned buttons);
+/* AURORA_PD_SKIP_DISCARDED_VIDEO_V2_H_20260821 */
+void PicoDriveBridge_SetSkipVideo(bool skip);
 
 void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
                               CRenderSurface *pTarget,

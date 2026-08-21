@@ -144,9 +144,13 @@ static short _gameplay_silence[
  * The extra 64 KiB is only shock-absorber headroom for rare host/IOP stalls.
  */
 #define AUD_ASYNC_FIFO_SAMPLES 65536
-static short _async_left[AUD_ASYNC_FIFO_SAMPLES]
+/* AURORA_AUDIO_PACKED_ASYNC_FIFO_V5_20260821 */
+static u32 _async_stereo[AUD_ASYNC_FIFO_SAMPLES]
     __attribute__((aligned(64)));
-static short _async_right[AUD_ASYNC_FIFO_SAMPLES]
+/* Rare Aud_Wait() compatibility scratch; normal drain never uses it. */
+static short _async_wait_left[AUD_MAX_ENQUEUE_SAMPLES]
+    __attribute__((aligned(64)));
+static short _async_wait_right[AUD_MAX_ENQUEUE_SAMPLES]
     __attribute__((aligned(64)));
 static int aud_async_head = 0;
 static int aud_async_count = 0;
@@ -266,38 +270,65 @@ void Aud_AsyncDiscardPending(void)
     Aud_AsyncReset();
 }
 
-static void Aud_AsyncCopyIn(short *left, short *right, int size)
+/* AURORA_AUDIO_ASYNC_GAIN_COPY_V4_IMPL_20260821: V5 supersedes the planar V4 implementation. */
+static inline u32 Aud_PackStereo(short left, short right)
 {
-    int tail;
-    int first;
-    int second;
+    return (u32)(u16)left | ((u32)(u16)right << 16);
+}
 
-    if (size <= 0)
-        return;
+static void Aud_AsyncPackSegment(
+    int dst, const short *left, const short *right, int size, int gainPct)
+{
+    int i;
+    if (size <= 0) return;
+    if (gainPct < 0) gainPct = 0;
+    if (gainPct > 400) gainPct = 400;
 
-    tail = aud_async_head + aud_async_count;
-    if (tail >= AUD_ASYNC_FIFO_SAMPLES)
-        tail -= AUD_ASYNC_FIFO_SAMPLES;
-
-    first = AUD_ASYNC_FIFO_SAMPLES - tail;
-    if (first > size)
-        first = size;
-    second = size - first;
-
-    memcpy(&_async_left[tail], left, (size_t)first * sizeof(short));
-    memcpy(&_async_right[tail], right, (size_t)first * sizeof(short));
-
-    if (second > 0)
+    if (gainPct == 0)
     {
-        memcpy(&_async_left[0], left + first,
-               (size_t)second * sizeof(short));
-        memcpy(&_async_right[0], right + first,
-               (size_t)second * sizeof(short));
+        memset(&_async_stereo[dst], 0, (size_t)size * sizeof(u32));
+        return;
     }
 
+    for (i = 0; i < size; ++i)
+    {
+        int l = left[i];
+        int r = right[i];
+        if (gainPct != 100)
+        {
+            if (gainPct == 200) { l *= 2; r *= 2; }
+            else { l = (l * gainPct) / 100; r = (r * gainPct) / 100; }
+            if (l > 32767) l = 32767;
+            if (l < -32768) l = -32768;
+            if (r > 32767) r = 32767;
+            if (r < -32768) r = -32768;
+        }
+        _async_stereo[dst + i] = Aud_PackStereo((short)l, (short)r);
+    }
+}
+
+static void Aud_AsyncCopyInGain(
+    short *left, short *right, int size, int gainPct)
+{
+    int tail, first, second;
+    if (size <= 0) return;
+    tail = aud_async_head + aud_async_count;
+    if (tail >= AUD_ASYNC_FIFO_SAMPLES) tail -= AUD_ASYNC_FIFO_SAMPLES;
+    first = AUD_ASYNC_FIFO_SAMPLES - tail;
+    if (first > size) first = size;
+    second = size - first;
+    Aud_AsyncPackSegment(tail, left, right, first, gainPct);
+    if (second > 0)
+        Aud_AsyncPackSegment(0, left + first, right + first, second, gainPct);
     aud_async_count += size;
 }
 
+static void Aud_AsyncCopyIn(short *left, short *right, int size)
+{
+    Aud_AsyncCopyInGain(left, right, size, 100);
+}
+
+/* Drain at most one contiguous FIFO span.
 /* Drain at most one contiguous FIFO span.
  * wait=0 is the normal gameplay path and NEVER calls audsrv_wait_audio().
  * Keep two sample-frames free because the existing servo may add at most 2.
@@ -320,9 +351,17 @@ static int Aud_AsyncDrainOne(int wait)
     {
         /* Rare overflow / explicit Aud_Wait fallback. Keep V2's lossless
            blocking behavior away from the normal gameplay path. */
-        Aud_Enqueue(&_async_left[aud_async_head],
-                    &_async_right[aud_async_head],
-                    n, 1);
+        /* AURORA_AUDIO_PACKED_ASYNC_WAIT_V5_20260821: unpack only for rare blocking wait. */
+        {
+            int i;
+            for (i = 0; i < n; ++i)
+            {
+                u32 frame = _async_stereo[aud_async_head + i];
+                _async_wait_left[i] = (short)(u16)(frame & 0xffffU);
+                _async_wait_right[i] = (short)(u16)(frame >> 16);
+            }
+            Aud_Enqueue(_async_wait_left, _async_wait_right, n, 1);
+        }
 
         aud_async_head += n;
         if (aud_async_head >= AUD_ASYNC_FIFO_SAMPLES)
@@ -334,7 +373,6 @@ static int Aud_AsyncDrainOne(int wait)
 
     {
         int usable;
-        int i;
         int bytes;
         int sent_bytes;
         int sent_frames;
@@ -365,25 +403,15 @@ static int Aud_AsyncDrainOne(int wait)
         if (n <= 0)
             return 0;
 
-        /* Direct interleave for the exact contiguous FIFO prefix.
-           This bypasses Aud_Enqueue's periodic audsrv_queued() servo RPC
-           on the hot async path. The rational frame scheduler remains the
-           emulated-audio clock authority. */
-        for (i = 0; i < n; i++)
-        {
-            Aud_StoreStereoFrame(
-                i,
-                _async_left[aud_async_head + i],
-                _async_right[aud_async_head + i]
-            );
-        }
-
+        /* V5: FIFO is already the exact little-endian stereo byte stream
+           audsrv expects; no post-frame interleave pass is needed. */
         bytes = n * AUD_BYTES_PER_SAMPLE;
 
         /* <= 16380 bytes in Standard mode: exactly one maximum-sized
            PLAY_AUDIO copy in PS2SDK's EE staging buffer. audsrv may accept
            only a prefix; consume exactly the complete stereo frames reported. */
-        sent_bytes = audsrv_play_audio((const char *)_interleave_buf, bytes);
+        sent_bytes = audsrv_play_audio(
+            (const char *)&_async_stereo[aud_async_head], bytes);
         if (sent_bytes <= 0)
         {
             aud_async_cached_avail = -1;
@@ -822,6 +850,25 @@ void Aud_EnqueueAsync(short *left, short *right, int size)
         return;
 
     Aud_AsyncCopyIn(left, right, size);
+}
+
+/* AURORA_AUDIO_ASYNC_GAIN_COPY_V4_API_20260821
+ * Producer-side semantics are identical to Aud_EnqueueAsync(): same clamp,
+ * same nonblocking overflow policy, same FIFO order. Only the gain is fused
+ * with the copy instead of modifying AudMixBuffer's source planes first. */
+void Aud_EnqueueAsyncGain(
+    short *left, short *right, int size, int gainPct)
+{
+    if (!sjpcm_inited || !left || !right || size <= 0)
+        return;
+
+    if (size > AUD_MAX_ENQUEUE_SAMPLES)
+        size = AUD_MAX_ENQUEUE_SAMPLES;
+
+    if (aud_async_count + size > AUD_ASYNC_FIFO_SAMPLES)
+        return;
+
+    Aud_AsyncCopyInGain(left, right, size, gainPct);
 }
 
 

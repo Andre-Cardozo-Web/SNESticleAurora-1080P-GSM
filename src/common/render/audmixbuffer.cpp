@@ -327,6 +327,221 @@ Int32 AudMixBuffer::ConvertSamplesStereo_Linear48(
     return out;
 }
 
+/* AURORA_PD_AUDIO_INTERLEAVED_FAST_V2_CPP_20260821
+ * AURORA_PD_AUDIO_INTERLEAVED_ALL_RATES_V3_20260821
+ * PicoDrive supplies interleaved stereo. Consume it directly for every
+ * selectable rate except 32 kHz, fusing the existing +50% pre-gain with
+ * deinterleave/resampling so the input is read once and the 2x1024 temporary
+ * channel planes are not touched.
+ *
+ * 16/24 kHz preserve the integer-ratio Linear48 path sample-for-sample.
+ * 22.05/38/44.1 kHz preserve its continuous Q15 rational phase exactly.
+ * 48 kHz preserves the old pre-gain + memcpy path sample-for-sample.
+ * 32 kHz deliberately stays on the old multiple-of-four fast 2:3 path; its
+ * chunk-tail semantics are different and are not changed by this patch. */
+static inline Int16 _AudMixPicoGain150(Int16 sample)
+{
+    Int32 v = ((Int32)sample * 3) / 2;
+    if (v > 32767)  v = 32767;
+    if (v < -32768) v = -32768;
+    return (Int16)v;
+}
+
+Bool AudMixBuffer::OutputPicoDriveInterleaved150(
+    const Int16 *pStereo, Int32 nFrames)
+{
+    Int32 i;
+
+    switch (m_uSampleRate)
+    {
+        case 16000:
+        case 22050:
+        case 24000:
+        case 38000:
+        case 44100:
+        case 48000:
+            break;
+        default:
+            return FALSE;
+    }
+
+    if (!pStereo || nFrames <= 0)
+        return TRUE;
+
+    if (m_uSampleRate == 48000)
+    {
+        if (m_nOutSamples + nFrames > AUDMIXBUFFER_MAXENQUEUE)
+            return TRUE;
+
+        for (i = 0; i < nFrames; ++i)
+        {
+            m_OutData[0][m_nOutSamples + i] =
+                _AudMixPicoGain150(pStereo[i * 2 + 0]);
+            m_OutData[1][m_nOutSamples + i] =
+                _AudMixPicoGain150(pStereo[i * 2 + 1]);
+        }
+        m_nOutSamples += nFrames;
+        return TRUE;
+    }
+
+    i = 0;
+    if (!m_bLinearHavePrev)
+    {
+        m_iLinearPrev[0] = _AudMixPicoGain150(pStereo[0]);
+        m_iLinearPrev[1] = _AudMixPicoGain150(pStereo[1]);
+        m_uLinearResamplePhase = 0;
+        m_bLinearHavePrev = TRUE;
+        i = 1;
+    }
+
+    if (m_uSampleRate == 16000)
+    {
+        for (; i < nFrames; ++i)
+        {
+            Int32 l0, r0, l1, r1;
+            Int16 *pOutLeft, *pOutRight;
+
+            if (m_nOutSamples + 3 > AUDMIXBUFFER_MAXENQUEUE)
+                break;
+
+            l0 = m_iLinearPrev[0];
+            r0 = m_iLinearPrev[1];
+            l1 = _AudMixPicoGain150(pStereo[i * 2 + 0]);
+            r1 = _AudMixPicoGain150(pStereo[i * 2 + 1]);
+
+            pOutLeft = m_OutData[0] + m_nOutSamples;
+            pOutRight = m_OutData[1] + m_nOutSamples;
+
+            pOutLeft[0] = (Int16)l0;
+            pOutRight[0] = (Int16)r0;
+            pOutLeft[1] = (Int16)((2 * l0 + l1) / 3);
+            pOutRight[1] = (Int16)((2 * r0 + r1) / 3);
+            pOutLeft[2] = (Int16)((l0 + 2 * l1) / 3);
+            pOutRight[2] = (Int16)((r0 + 2 * r1) / 3);
+
+            m_iLinearPrev[0] = l1;
+            m_iLinearPrev[1] = r1;
+            m_nOutSamples += 3;
+        }
+    }
+    else if (m_uSampleRate == 24000)
+    {
+        for (; i < nFrames; ++i)
+        {
+            Int32 l0, r0, l1, r1;
+            Int16 *pOutLeft, *pOutRight;
+
+            if (m_nOutSamples + 2 > AUDMIXBUFFER_MAXENQUEUE)
+                break;
+
+            l0 = m_iLinearPrev[0];
+            r0 = m_iLinearPrev[1];
+            l1 = _AudMixPicoGain150(pStereo[i * 2 + 0]);
+            r1 = _AudMixPicoGain150(pStereo[i * 2 + 1]);
+
+            pOutLeft = m_OutData[0] + m_nOutSamples;
+            pOutRight = m_OutData[1] + m_nOutSamples;
+
+            pOutLeft[0] = (Int16)l0;
+            pOutRight[0] = (Int16)r0;
+            pOutLeft[1] = (Int16)((l0 + l1) / 2);
+            pOutRight[1] = (Int16)((r0 + r1) / 2);
+
+            m_iLinearPrev[0] = l1;
+            m_iLinearPrev[1] = r1;
+            m_nOutSamples += 2;
+        }
+    }
+    else
+    {
+        /* Same Q15 phase/order as ConvertSamplesStereo_Linear48(), but read
+         * PicoDrive's interleaved input directly after the existing +50%. */
+        for (; i < nFrames && m_nOutSamples < AUDMIXBUFFER_MAXENQUEUE; ++i)
+        {
+            Int32 l0 = m_iLinearPrev[0];
+            Int32 r0 = m_iLinearPrev[1];
+            Int32 l1 = _AudMixPicoGain150(pStereo[i * 2 + 0]);
+            Int32 r1 = _AudMixPicoGain150(pStereo[i * 2 + 1]);
+
+            while (m_uLinearResamplePhase < 48000U &&
+                   m_nOutSamples < AUDMIXBUFFER_MAXENQUEUE)
+            {
+                Int32 frac =
+                    (Int32)((m_uLinearResamplePhase * 32768U) / 48000U);
+                m_OutData[0][m_nOutSamples] =
+                    (Int16)(l0 + (((l1 - l0) * frac) >> 15));
+                m_OutData[1][m_nOutSamples] =
+                    (Int16)(r0 + (((r1 - r0) * frac) >> 15));
+                ++m_nOutSamples;
+                m_uLinearResamplePhase += m_uSampleRate;
+            }
+
+            if (m_uLinearResamplePhase >= 48000U)
+                m_uLinearResamplePhase -= 48000U;
+
+            m_iLinearPrev[0] = l1;
+            m_iLinearPrev[1] = r1;
+        }
+    }
+
+    return TRUE;
+}
+
+/* AURORA_PD_AUDIO_32K_DIRECT_V5_CPP_20260821
+ * Exact fast 32 -> 48 kHz PicoDrive path without the 2x1024 bridge planes.
+ * Prefix contains the bridge's 0..3 already-gained pending frames. Current
+ * callback frames are gained +50% only as each sample is consumed. */
+Bool AudMixBuffer::OutputPicoDriveInterleaved32000(
+    const Int16 *pPrefixLeft, const Int16 *pPrefixRight,
+    Int32 nPrefixFrames, const Int16 *pStereo, Int32 nStereoFrames)
+{
+    Int32 total = nPrefixFrames + nStereoFrames;
+    Int32 i;
+    Int32 outNeeded;
+
+    if (m_uSampleRate != 32000)
+        return FALSE;
+    if (total <= 0)
+        return TRUE;
+    if (nPrefixFrames < 0 || nPrefixFrames > 3 || nStereoFrames < 0 ||
+        (nPrefixFrames > 0 && (!pPrefixLeft || !pPrefixRight)) ||
+        (nStereoFrames > 0 && !pStereo))
+        return FALSE;
+    if ((total & 3) != 0)
+        return FALSE;
+
+    outNeeded = (total / 2) * 3;
+    if (m_nOutSamples + outNeeded > AUDMIXBUFFER_MAXENQUEUE)
+        return TRUE;
+
+#define AURORA_PD32_FETCH(CH, IDX) \
+    ((IDX) < nPrefixFrames ? \
+        ((CH) == 0 ? pPrefixLeft[(IDX)] : pPrefixRight[(IDX)]) : \
+        _AudMixPicoGain150(pStereo[((IDX) - nPrefixFrames) * 2 + (CH)]))
+
+    for (i = 0; i + 1 < total; i += 2)
+    {
+        Int32 l0 = AURORA_PD32_FETCH(0, i);
+        Int32 r0 = AURORA_PD32_FETCH(1, i);
+        Int32 l1 = AURORA_PD32_FETCH(0, i + 1);
+        Int32 r1 = AURORA_PD32_FETCH(1, i + 1);
+        Int32 l2 = (i + 2 < total) ? AURORA_PD32_FETCH(0, i + 2) : l1;
+        Int32 r2 = (i + 2 < total) ? AURORA_PD32_FETCH(1, i + 2) : r1;
+
+        m_OutData[0][m_nOutSamples] = (Int16)l0;
+        m_OutData[1][m_nOutSamples++] = (Int16)r0;
+        m_OutData[0][m_nOutSamples] = (Int16)((l0 + 2 * l1) / 3);
+        m_OutData[1][m_nOutSamples++] = (Int16)((r0 + 2 * r1) / 3);
+        m_OutData[0][m_nOutSamples] = (Int16)((2 * l1 + l2) / 3);
+        m_OutData[1][m_nOutSamples++] = (Int16)((2 * r1 + r2) / 3);
+    }
+
+    m_iPrevSample[0] = AURORA_PD32_FETCH(0, total - 1);
+    m_iPrevSample[1] = AURORA_PD32_FETCH(1, total - 1);
+#undef AURORA_PD32_FETCH
+    return TRUE;
+}
+
 void AudMixBuffer::OutputSamplesStereo(Int16 *pLeftSamples, Int16 *pRightSamples, Int32 nSamples)
 {
     /* AURORA_PD_POLISH_V3_20260820_RATE_DISPATCH */
@@ -415,9 +630,11 @@ void AudMixBuffer::Flush()
             nOutSamples = AUDMIXBUFFER_MAXENQUEUE;
         }
 
-        /* Apply the Game Volume gain with saturation, just before enqueue,
-           so it covers every sample-rate path (32k resampled and 48k
-           passthrough).  gainPct==100 (Game Volume 50) is unity -> skip. */
+        /* AURORA_AUDIO_ASYNC_GAIN_COPY_V4_FLUSH_20260821
+         * Async gameplay fuses this exact gain with the FIFO copy below.
+         * Keep the historical in-place transform only for synchronous
+         * output, preserving that path byte-for-byte. */
+        if (!m_bAsync)
         {
             Int32 gainPct = s_gameVolume;
             /* AURORA_MEGA_V4_AUDIO_GAIN_FASTPATH
@@ -465,7 +682,8 @@ void AudMixBuffer::Flush()
 
         if (m_bAsync)
         {
-            Aud_EnqueueAsync(m_OutData[0], m_OutData[1], nOutSamples);
+            Aud_EnqueueAsyncGain(
+                m_OutData[0], m_OutData[1], nOutSamples, s_gameVolume);
         } else
         {
             Aud_Enqueue(m_OutData[0], m_OutData[1], nOutSamples,1);

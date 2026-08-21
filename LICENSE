@@ -1,8 +1,37 @@
-SNESticle Revived - a Super Nintendo (and NES) emulator for the PlayStation 2.
+SNESticle Aurora - a PlayStation 2 emulator project based on SNESticle Revive.
 
   Copyright (c) 2022 Icer Addis (iaddis)   - original SNESticle source
   Copyright (c) 2026 ReyFxck               - SNESticleRevive fork
   Copyright (c) 2026 Vinícius Nunes (@itsveenee) - SNESticle Aurora project integration and original contributions
+
+----------------------------------------------------------------------------
+AURORA_BRANDING_LICENSE_V9_20260821
+PROJECT NAME AND BRANDING NOTICE — SEPARATE FROM THE SOFTWARE LICENSE
+
+The software licenses in this file apply to source code and software
+components. They do not grant any license to use the "SNESticle Aurora"
+name, the "Aurora" name as used to identify this emulator/project, or
+Aurora-specific logos, release branding, artwork, visual identity or other
+source-identifying project branding.
+
+SNESticle Aurora, and Aurora when used as this project's identity, are
+project-specific names and branding reserved by Vinícius Nunes
+(@itsveenee). Exercising GPL or other software-license rights in the code
+does not itself authorize a fork, modified build, redistributed binary or
+derivative project to be presented as an official SNESticle Aurora/Aurora
+release. Unless separately authorized by @itsveenee, use a distinct name
+and distinct branding for such works.
+
+Factual attribution such as "based on SNESticle Aurora" is welcome and is
+not intended to be prohibited; it does not imply endorsement. This notice
+does not modify, replace or add conditions to the GNU GPL or any third-
+party software license, and it does not reduce any code right those
+licenses grant. It does not claim ownership of "SNESticle" standing alone
+or of third-party names/marks, and it does not claim exclusive rights in
+the word "Aurora" outside its use as this project's identity.
+
+See BRANDING.md for the project branding policy.
+----------------------------------------------------------------------------
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License version 2, as published by the

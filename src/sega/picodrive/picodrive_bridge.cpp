@@ -34,6 +34,10 @@ extern "C" {
 /* AURORA_PD_BORROW_AURORA_ROM_V1 */
 void PicoCartSetExternalRomBuffer(const unsigned char *rom,
                                   unsigned int capacity);
+/* AURORA_PD_SKIP_DISCARDED_VIDEO_V2_NATIVE_DECL_20260821 */
+void PicoDriveLibretro_SetSkipNextVideoFrame(int skip);
+/* AURORA_PD_PALETTE_SERIAL_V7_BRIDGE_20260821 */
+unsigned int PicoDriveLibretro_GetPaletteSerial(void);
 }
 
 static bool s_Initialized = false;
@@ -143,6 +147,21 @@ static bool s_Color555RGBAReady = false;
 /* AURORA_MD_DIRECT_CLUT_CACHE_V1 */
 static Uint16 s_DirectLastClut[256];
 static bool s_DirectClutValid = false;
+static Uint32 s_DirectPaletteSerial = 0;
+/* AURORA_PD_DIRECT_FRAME_REUSE_V2_FIELDS_20260821 */
+static Uint32 s_DirectVideoSerial = 0;
+static Uint32 s_DirectUploadedSerial = 0;
+static bool s_DirectPixelsValid = false;
+static bool s_SkipVideoNext = false;
+/* AURORA_PD_DIRECT_INFO_CACHE_V4_20260821 */
+static bool s_DirectInfoValid = false;
+static bool s_DirectInfoCanGs = false;
+static bool s_DirectInfoIsMd = false;
+static int s_DirectInfoTexW = 0;
+static int s_DirectInfoLeft = 0;
+static int s_DirectInfoTop = 0;
+static int s_DirectInfoSrcW = 0;
+static int s_DirectInfoSrcH = 0;
 static Uint16 s_H40SharpMap[256];
 static bool s_H40SharpMapReady = false;
 static int s_MapLeft = -1, s_MapTop = -1;
@@ -341,19 +360,91 @@ static void pdAudioOutputInterleaved(const int16_t *data, size_t frames)
 
     if (!data || frames == 0)
         return;
-
     if (!s_pMix)
     {
         pdAudioTailReset();
         return;
     }
 
-    /* AURORA_PD_POLISH_V3_20260820_AUDIO_CALLBACK
-     * PicoDrive gets +50% before the shared Game-volume stage. At 32 kHz,
-     * retain 0..3 input frames so every call into Aurora's proven cubic 2:3
-     * converter is a multiple of four: its output is then always even and
-     * Flush() never has to discard a sample. Other rates are accepted as-is
-     * by the continuous rate -> 48 kHz path. */
+    /* AURORA_PD_AUDIO_INTERLEAVED_FAST_V2_BRIDGE_20260821: preserved so the consolidated V3 stage
+     * remains idempotent after V5 replaces this function body. */
+    if (_AudMix && s_pMix == _AudMix && frames <= 0x7fffffffU &&
+        _AudMix->OutputPicoDriveInterleaved150(
+            (const Int16 *)data, (Int32)frames))
+        return;
+
+    /* AURORA_PD_AUDIO_32K_DIRECT_V5_BRIDGE_20260821
+     * Preserve the old 1024-frame partition and 0..3-frame tail exactly, but
+     * consume every complete 32 kHz block straight from PicoDrive's stereo
+     * interleaved callback. Only the tiny tail is copied for the next call. */
+    /* AURORA_PD_AUDIO_32K_GUARD_V6_20260821 */
+    if (s_AudioRate == 32000 && _AudMix && s_pMix == _AudMix &&
+        _AudMix->GetSampleRate() == 32000)
+    {
+        while (pos < frames)
+        {
+            size_t room = PD_AUDIO_CHUNK - (size_t)s_AudioPendingCount;
+            size_t take = frames - pos;
+            int total, flush, remain, currentFlush;
+
+            if (take > room) take = room;
+            total = s_AudioPendingCount + (int)take;
+            flush = total & ~3;
+            remain = total - flush;
+            currentFlush = flush - s_AudioPendingCount;
+
+            if (flush > 0)
+            {
+                size_t tailStart;
+                int i;
+
+                if (currentFlush < 0) currentFlush = 0;
+                _AudMix->OutputPicoDriveInterleaved32000(
+                    s_AudioPendingL, s_AudioPendingR, s_AudioPendingCount,
+                    (const Int16 *)(data + pos * 2), currentFlush);
+
+                /* Any remainder is now entirely after the consumed prefix. */
+                tailStart = pos + (size_t)currentFlush;
+                for (i = 0; i < remain; ++i)
+                {
+                    s_AudioPendingL[i] =
+                        pdGain50(data[(tailStart + (size_t)i) * 2 + 0]);
+                    s_AudioPendingR[i] =
+                        pdGain50(data[(tailStart + (size_t)i) * 2 + 1]);
+                }
+                s_AudioPendingCount = remain;
+            }
+            else
+            {
+                /* total < 4: preserve the previous pending prefix and append
+                 * the new gained frames exactly like the old staging path. */
+                int i;
+                for (i = 0; i < (int)take; ++i)
+                {
+                    s_AudioPendingL[s_AudioPendingCount + i] =
+                        pdGain50(data[(pos + (size_t)i) * 2 + 0]);
+                    s_AudioPendingR[s_AudioPendingCount + i] =
+                        pdGain50(data[(pos + (size_t)i) * 2 + 1]);
+                }
+                s_AudioPendingCount = total;
+            }
+            pos += take;
+        }
+        return;
+    }
+
+    /* AURORA_PD_AUDIO_PENDING_FALLBACK_V6_20260821
+     * Compatibility path is normally entered with no pending prefix. Keep it
+     * fully lossless if a transient 32 kHz mixer mismatch occurs after 1..3
+     * frames were retained by the direct path. */
+    if (s_AudioPendingCount > 0)
+    {
+        memcpy(s_AudioL, s_AudioPendingL,
+               (size_t)s_AudioPendingCount * sizeof(s_AudioL[0]));
+        memcpy(s_AudioR, s_AudioPendingR,
+               (size_t)s_AudioPendingCount * sizeof(s_AudioR[0]));
+    }
+
     while (pos < frames)
     {
         size_t room = PD_AUDIO_CHUNK - (size_t)s_AudioPendingCount;
@@ -420,6 +511,13 @@ static bool pdPadHas(Uint16 p, Uint16 bit)
 
 static bool pdIs8Bit();
 static bool pdIsMasterSystem();
+static void pdRefreshDirectVideoInfo();
+/* AURORA_PD_DIRECT_INFO_INVALIDATE_V5_20260821 */
+static inline void pdInvalidateDirectVideoInfo()
+{
+    s_DirectInfoValid = false;
+    s_DirectInfoCanGs = false;
+}
 
 static int16_t pdJoyMask(unsigned port)
 {
@@ -759,7 +857,9 @@ static void pdRenderToAurora(CRenderSurface *pTarget)
  * Reinitialising gsKit destroys that residency even if PicoDrive stays alive. */
 void PicoDriveBridge_InvalidateGsResources(void)
 {
+    /* AURORA_PD_DIRECT_FRAME_REUSE_V2_INVALIDATE_20260821 */
     s_DirectClutValid = false;
+    s_DirectPixelsValid = false;
 }
 
 bool PicoDriveBridge_Init(void)
@@ -892,6 +992,9 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes, const char *pNam
 
     pdAudioTailReset();
     s_GameLoaded = true;
+    /* AURORA_PD_DIRECT_INFO_LIFETIME_V4_20260821 */
+    s_DirectInfoValid = false;
+    s_DirectInfoCanGs = false;
     /* AURORA_MD_CLUT_GAME_LIFETIME_V1 */
     s_DirectClutValid = false;
     /* AURORA_PD_REVIEW_PERF_V1_20260821
@@ -951,6 +1054,8 @@ void PicoDriveBridge_UnloadGame(void)
 
     s_GameLoaded = false;
     s_DirectClutValid = false;
+    s_DirectInfoValid = false;
+    s_DirectInfoCanGs = false;
     pdAudioTailReset();
     AudMixSetFastResample(0);
     s_LastPortType[0] = s_LastPortType[1] = -1;
@@ -973,6 +1078,7 @@ void PicoDriveBridge_Reset(void)
     if (s_GameLoaded)
         retro_reset();
     pdAudioTailReset();
+    pdInvalidateDirectVideoInfo();
 }
 
 void PicoDriveBridge_SoftReset(void)
@@ -980,6 +1086,7 @@ void PicoDriveBridge_SoftReset(void)
     if (s_GameLoaded)
         retro_reset();
     pdAudioTailReset();
+    pdInvalidateDirectVideoInfo();
 }
 
 void PicoDriveBridge_Set6Button(bool enabled)
@@ -1002,6 +1109,7 @@ void PicoDriveBridge_SetRenderingMode(int mode)
     s_RenderingMode = mode;
     s_VariablesChanged = true;
     s_DirectClutValid = false;
+    pdInvalidateDirectVideoInfo();
 }
 
 int PicoDriveBridge_GetRenderingMode(void)
@@ -1031,6 +1139,15 @@ int PicoDriveBridge_GetAudioRate(void)
     return s_AudioRate;
 }
 
+/* AURORA_PD_HOST_CADENCE_IMPL_V1_20260821
+ * A fonte de verdade é a região já ativa dentro do core. O frontend
+ * usa isto somente para converter 50<->60 quando a família de VBlank
+ * do PS2 não coincide com a do jogo. */
+int PicoDriveBridge_GetNominalFrameRate(void)
+{
+    return (s_GameLoaded && Pico.m.pal) ? 50 : 60;
+}
+
 bool PicoDriveBridge_IsMasterSystem(void)
 {
     return s_GameLoaded && pdIsMasterSystem();
@@ -1047,6 +1164,7 @@ void PicoDriveBridge_SetRegion(int auroraRegion)
         return;
     s_AuroraRegion = auroraRegion;
     s_VariablesChanged = true;
+    pdInvalidateDirectVideoInfo();
 
     /* A region change may switch the 50/60 Hz audio cadence. */
     pdAudioTailReset();
@@ -1071,10 +1189,19 @@ void PicoDriveBridge_SetMouseInput(bool active, int dx, int dy, unsigned buttons
     PicoIn.mouse[1] = (short)s_MouseY;
 }
 
+/* AURORA_PD_SKIP_DISCARDED_VIDEO_V2_CPP_20260821 */
+void PicoDriveBridge_SetSkipVideo(bool skip)
+{
+    s_SkipVideoNext = skip;
+}
+
 void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
                               CRenderSurface *pTarget,
                               CMixBuffer *pMixBuf)
 {
+    bool skipVideo = s_SkipVideoNext;
+    s_SkipVideoNext = false;
+
     if (!s_GameLoaded)
         return;
 
@@ -1091,14 +1218,31 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
     /* AURORA_PD_FORCE_HW_SPRITE_LIMIT */
     PicoIn.opt &= ~POPT_DIS_SPRITE_LIM;
 
+    PicoDriveLibretro_SetSkipNextVideoFrame(skipVideo ? 1 : 0);
     retro_run();
-    /* Aurora copies the core framebuffer itself: never request blur. */
-    s_CoreTexture.Filter = GS_FILTER_NEAREST;
 
-    /* AURORA_PD_MEGA_FIX_20260820: all plain-MD renderer modes are GS-native
-     * (T8 Fast, CT16 Good/Accurate). Build RGBA only for non-direct systems. */
-    if (!PicoDriveBridge_CanDirectGsVideo())
-        pdRenderToAurora(pTarget);
+    /* A skipped scheduler frame has advanced CPU/audio only. Its old GS
+     * texture remains the image until the immediately-following drawn frame. */
+    if (!skipVideo)
+    {
+        /* AURORA_PD_DIRECT_FRAME_REUSE_V2_RUN_20260821 */
+        ++s_DirectVideoSerial;
+        if (s_DirectVideoSerial == 0)
+        {
+            s_DirectVideoSerial = 1;
+            s_DirectPixelsValid = false;
+        }
+
+        s_CoreTexture.Filter = GS_FILTER_NEAREST;
+        /* AURORA_PD_DIRECT_INFO_RUN_V4_20260821: cache once after the real video frame. */
+        pdRefreshDirectVideoInfo();
+
+        if (!PicoDriveBridge_CanDirectGsVideo())
+        {
+            s_DirectPixelsValid = false;
+            pdRenderToAurora(pTarget);
+        }
+    }
 
     if (s_pMix)
         s_pMix->Flush();
@@ -1123,16 +1267,77 @@ bool PicoDriveBridge_IsMegaDrive(void)
     if (!s_GameLoaded)
         return false;
 
+    /* AURORA_PD_MD_CLASSIFY_8BIT_V2_20260821 */
     return (PicoIn.AHW &
-            (PAHW_SMS | PAHW_PICO | PAHW_MCD | PAHW_32X)) == 0;
+            (PAHW_8BIT | PAHW_PICO | PAHW_MCD | PAHW_32X)) == 0;
 }
 
+static void pdRefreshDirectVideoInfo()
+{
+    int texW, texH;
+    int left, right, top, bottom;
+    int srcW, srcH;
+    bool isMd;
+    bool is8bit;
+
+    s_DirectInfoValid = true;
+    s_DirectInfoCanGs = false;
+    s_DirectInfoIsMd = false;
+
+    if (!s_GameLoaded ||
+        (PicoIn.AHW & (PAHW_PICO | PAHW_MCD | PAHW_32X)) != 0)
+        return;
+
+    isMd = PicoDriveBridge_IsMegaDrive();
+    is8bit = pdIs8Bit();
+    if (!isMd && !is8bit)
+        return;
+
+    if (!s_CoreTexture.Mem ||
+        (s_CoreTexture.PSM != GS_PSM_T8 &&
+         s_CoreTexture.PSM != GS_PSM_CT16))
+        return;
+
+    if (s_CoreTexture.PSM == GS_PSM_T8 && !s_CoreTexture.Clut)
+        return;
+
+    texW = (int)s_CoreTexture.Width;
+    texH = (int)s_CoreTexture.Height;
+    if (texW <= 0 || texH <= 0)
+        return;
+
+    left   = (int)(s_Hw.padding.left   + 0.5f);
+    right  = (int)(s_Hw.padding.right  + 0.5f);
+    top    = (int)(s_Hw.padding.top    + 0.5f);
+    bottom = (int)(s_Hw.padding.bottom + 0.5f);
+
+    if (left < 0) left = 0;
+    if (right < 0) right = 0;
+    if (top < 0) top = 0;
+    if (bottom < 0) bottom = 0;
+
+    srcW = texW - left - right;
+    srcH = texH - top - bottom;
+
+    if (srcW <= 0 || srcH <= 0 || srcH > 240 ||
+        left + srcW > texW || top + srcH > texH)
+        return;
+
+    s_DirectInfoIsMd = isMd;
+    s_DirectInfoTexW = texW;
+    s_DirectInfoLeft = left;
+    s_DirectInfoTop = top;
+    s_DirectInfoSrcW = srcW;
+    s_DirectInfoSrcH = srcH;
+
+    s_DirectInfoCanGs =
+        isMd ? (srcW == 320 || srcW == 256) : (srcW <= 256);
+}
+
+/* AURORA_PD_DIRECT_INFO_CACHE_V4_20260821_QUERY */
 bool PicoDriveBridge_CanDirectGsVideo(void)
 {
-    /* AURORA_PD_MEGA_FIX_20260820: Fast is T8; Good/Accurate are CT16. Both are
-     * already GS-native and should bypass the RGBA staging surface. */
-    return PicoDriveBridge_IsMegaDrive() && s_CoreTexture.Mem &&
-           (s_CoreTexture.PSM == GS_PSM_T8 || s_CoreTexture.PSM == GS_PSM_CT16);
+    return s_DirectInfoValid && s_DirectInfoCanGs;
 }
 
 static Uint32 pdPs2ClutBackdropRGBA(unsigned logicalIndex)
@@ -1176,66 +1381,69 @@ static Uint32 pdScaleDirectColor(Uint32 c, Float32 intensity)
 
 bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
 {
-    int texW, texH;
-    int left, right, top, bottom;
+    int texW;
+    int left, top;
     int srcW, srcH;
     int fbW, fbH, dstW, dstH, dstX, dstY;
+    int logicalX, logicalY;
+    int presentTopLogical, presentTopPx, presentH;
+    bool isMd;
+    bool uploadPixels;
     Uint32 texTBP, clutTBP;
     Uint32 backdrop, modColor;
     unsigned mod;
 
-    if (!PicoDriveBridge_IsMegaDrive())
+    /* AURORA_PD_DIRECT_8BIT_GS_DRAW_V2_20260821
+     * AURORA_PD_DIRECT_INFO_CACHE_V4_20260821_DRAW */
+    if (!PicoDriveBridge_CanDirectGsVideo())
         return false;
 
-    if (!s_CoreTexture.Mem ||
-        (s_CoreTexture.PSM != GS_PSM_T8 && s_CoreTexture.PSM != GS_PSM_CT16))
-        return false;
-    if (s_CoreTexture.PSM == GS_PSM_T8 && !s_CoreTexture.Clut)
-        return false;
-
-    texW = (int)s_CoreTexture.Width;
-    texH = (int)s_CoreTexture.Height;
-    left   = (int)(s_Hw.padding.left   + 0.5f);
-    right  = (int)(s_Hw.padding.right  + 0.5f);
-    top    = (int)(s_Hw.padding.top    + 0.5f);
-    bottom = (int)(s_Hw.padding.bottom + 0.5f);
-
-    if (left < 0) left = 0;
-    if (right < 0) right = 0;
-    if (top < 0) top = 0;
-    if (bottom < 0) bottom = 0;
-
-    srcW = texW - left - right;
-    srcH = texH - top - bottom;
-    if (srcW <= 0 || srcH <= 0 ||
-        left + srcW > texW || top + srcH > texH)
-        return false;
-
-    if (srcW != 320 && srcW != 256)
-        return false;
+    isMd = s_DirectInfoIsMd;
+    texW = s_DirectInfoTexW;
+    left = s_DirectInfoLeft;
+    top = s_DirectInfoTop;
+    srcW = s_DirectInfoSrcW;
+    srcH = s_DirectInfoSrcH;
 
     texTBP  = auroraOutBaseTBP + PD_GS_T8_TBP_OFFSET;
     clutTBP = auroraOutBaseTBP + PD_GS_CLUT_TBP_OFFSET;
 
-    /* AURORA_PD_MEGA_FIX_20260820: upload PicoDrive's native framebuffer directly.
-     * Fast is T8+CLUT; Good/Accurate are CT16. This removes the expensive
-     * CT16 -> RGBA32 -> GS round-trip while preserving the exact MD geometry. */
+    /* AURORA_PD_DIRECT_FRAME_REUSE_V2_DRAW_20260821
+     * On a PAL50 -> NTSC59.94 duplicate host tick no core video frame was
+     * produced, so the previous texels are already resident at this TBP. */
+    uploadPixels =
+        !s_DirectPixelsValid ||
+        s_DirectUploadedSerial != s_DirectVideoSerial;
+
+    /* Envia o framebuffer nativo. Fast/Good normalmente são T8+CLUT;
+     * Accurate usa CT16 quando o core assim o fornece. */
     if (s_CoreTexture.PSM == GS_PSM_T8)
     {
-        GPPrimUploadTexture(
-            (int)texTBP, PD_GS_T8_TBW, 0, 0, GS_PSM_T8,
-            ((Uint8 *)s_CoreTexture.Mem) + top * texW,
-            texW, srcH);
+        if (uploadPixels)
+            GPPrimUploadTexture(
+                (int)texTBP, PD_GS_T8_TBW, 0, 0, GS_PSM_T8,
+                ((Uint8 *)s_CoreTexture.Mem) + top * texW,
+                texW, srcH);
 
-        if (!s_DirectClutValid ||
-            memcmp(s_DirectLastClut, s_CoreTexture.Clut,
-                   sizeof(s_DirectLastClut)) != 0)
+        /* AURORA_PD_DUPLICATE_CLUT_SKIP_V6_20260821
+         * AURORA_PD_PALETTE_SERIAL_V7_DRAW_20260821
+         * libretro increments this only after rebuilding the rotated PS2
+         * palette. No per-frame 512-byte comparison is necessary. */
         {
-            GPPrimUploadTexture((int)clutTBP, 64, 0, 0,
-                                GS_PSM_CT16, s_CoreTexture.Clut, 16, 16);
-            memcpy(s_DirectLastClut, s_CoreTexture.Clut,
-                   sizeof(s_DirectLastClut));
-            s_DirectClutValid = true;
+            Uint32 paletteSerial =
+                (Uint32)PicoDriveLibretro_GetPaletteSerial();
+            if (!s_DirectClutValid ||
+                s_DirectPaletteSerial != paletteSerial)
+            {
+                GPPrimUploadTexture((int)clutTBP, 64, 0, 0,
+                                    GS_PSM_CT16, s_CoreTexture.Clut, 16, 16);
+                /* Keep the shadow copy for diagnostics/lifetime parity, but
+                 * touch it only when the palette actually changes. */
+                memcpy(s_DirectLastClut, s_CoreTexture.Clut,
+                       sizeof(s_DirectLastClut));
+                s_DirectPaletteSerial = paletteSerial;
+                s_DirectClutValid = true;
+            }
         }
 
         GPPrimSetTex(texTBP, PD_GS_T8_TBW, 9, 8, GS_PSM_T8,
@@ -1244,12 +1452,19 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     else
     {
         const int ct16TBW = (texW + 63) & ~63;
-        GPPrimUploadTexture(
-            (int)texTBP, ct16TBW, 0, 0, GS_PSM_CT16,
-            ((Uint16 *)s_CoreTexture.Mem) + top * texW,
-            texW, srcH);
+        if (uploadPixels)
+            GPPrimUploadTexture(
+                (int)texTBP, ct16TBW, 0, 0, GS_PSM_CT16,
+                ((Uint16 *)s_CoreTexture.Mem) + top * texW,
+                texW, srcH);
         GPPrimSetTex(texTBP, ct16TBW, 9, 8, GS_PSM_CT16,
                      0, 0, GS_PSM_CT16, 0);
+    }
+
+    if (uploadPixels)
+    {
+        s_DirectUploadedSerial = s_DirectVideoSerial;
+        s_DirectPixelsValid = true;
     }
 
     fbW = (int)(256.0f * GPPrimGetScaleX() + 0.5f);
@@ -1257,40 +1472,64 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     if (fbW <= 0 || fbH <= 0)
         return false;
 
-    /* AURORA_MD_H32_FULL_SCANLINE_V2
-     * H40 and H32 both represent a full-width Mega Drive scanline.
-     * H32 has 256 active samples because the VDP uses a lower dot clock;
-     * those pixels must therefore occupy the same physical display width
-     * as H40's 320 samples. Keep NEAREST sampling: this changes geometry,
-     * not filtering, and introduces no blur. */
-    if (fbW == 320 && fbH == 240 && (srcW == 320 || srcW == 256))
+    if (isMd)
     {
-        /* AURORA_PD_POLISH_V3_20260820_240P_1TO1: exact same geometry, cheaper hot path. */
-        dstW = 320;
-        dstH = srcH;
-        dstX = 0;
-        dstY = (240 - srcH) / 2;
+        /* H40 e H32 representam a largura inteira da linha do MD.
+         * Em 320x240 nativo, os 320 samples H40 ficam 1:1. */
+        if (fbW == 320 && fbH == 240)
+        {
+            dstW = 320;
+            dstH = srcH;
+            dstX = 0;
+            dstY = (240 - srcH) / 2;
+        }
+        else
+        {
+            dstW = fbW;
+            dstH = (fbH * srcH + 120) / 240;
+            dstX = 0;
+            dstY = (fbH - dstH) / 2;
+        }
+
+        backdrop = pdScaleDirectColor(
+            pdPs2ClutBackdropRGBA((unsigned)Pico.video.reg[7] & 0x3fU),
+            intensity);
+
+        /* Mantém exatamente a cobertura já usada pelo direct-MD. */
+        GPPrimRect(0, 0, backdrop,
+                   256U << 4, 240U << 4, backdrop,
+                   0, 0);
     }
     else
     {
-        if (srcW == 320 || srcW == 256)
-            dstW = fbW;
-        else
-            dstW = (fbW * srcW + 160) / 320;
-        dstH = (fbH * srcH + 120) / 240;
-        dstX = (fbW - dstW) / 2;
-        dstY = (fbH - dstH) / 2;
+        /* Replica a geometria do antigo pdRenderToAurora()+PolyRect:
+         * - SMS 256: centralizado, 1:1 em 240p;
+         * - SMS 248 (1ª coluna mascarada): 8 px vazios à esquerda;
+         * - GG 160x144: centralizado em 256x240;
+         * - 480i/1080i preservam o antigo topo lógico Y=4. */
+        logicalX = (pdIsMasterSystem() && srcW == 248)
+                 ? 8 : (256 - srcW) / 2;
+        logicalY = (240 - srcH) / 2;
+
+        presentTopLogical = (fbH == 240) ? 0 : 4;
+        presentTopPx =
+            (fbH * presentTopLogical + 120) / 240;
+        presentH = fbH - presentTopPx;
+
+        dstX = (fbW * logicalX + 128) / 256;
+        dstW = (fbW * srcW     + 128) / 256;
+        dstY = presentTopPx +
+               (presentH * logicalY + 120) / 240;
+        dstH = (presentH * srcH + 120) / 240;
+
+        backdrop = pdScaleDirectColor(
+            pdIsMasterSystem() ? pdSmsBorderRGBA() : 0xff000000u,
+            intensity);
+
+        GPPrimRect(0, (Uint32)(presentTopLogical << 4), backdrop,
+                   256U << 4, 240U << 4, backdrop,
+                   0, 0);
     }
-
-    /* VDP backdrop/border = CRAM index R7[5:0], using the exact CLUT
-     * that PicoDrive prepared for the PS2 GS. */
-    backdrop = pdScaleDirectColor(
-        pdPs2ClutBackdropRGBA((unsigned)Pico.video.reg[7] & 0x3fU),
-        intensity);
-
-    GPPrimRect(0, 0, backdrop,
-               256U << 4, 240U << 4, backdrop,
-               0, 0);
 
     if (intensity < 0.0f) intensity = 0.0f;
     if (intensity > 1.0f) intensity = 1.0f;
@@ -1337,6 +1576,7 @@ bool PicoDriveBridge_LoadState(const void *pData, int nBytes)
     {
         /* AURORA_MD_STATE_CLUT_INVALIDATE_V1 */
         s_DirectClutValid = false;
+        pdInvalidateDirectVideoInfo();
 
         /* Pending PCM belongs to the pre-load timeline. */
         pdAudioTailReset();

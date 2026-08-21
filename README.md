@@ -15,7 +15,10 @@ SNESticle Aurora focuses on 240p CRT output, NES/QuickNES integration and experi
 
 **Changes made in SNESticle Aurora may be reused, cherry-picked, pulled or incorporated into other projects subject to the applicable licenses.** Aurora code covered by the GPL remains under GNU GPLv2; separately licensed third-party components remain under their own terms.
 
-Project lineage and attribution are documented in [CREDITS.md](CREDITS.md). See LICENSE and the third-party license files for licensing details.
+<!-- AURORA_BRANDING_README_V9_20260821 -->
+**Code license and project branding are separate.** The applicable software licenses grant rights in the code; they do **not** grant permission to use the **SNESticle Aurora** name or the project-specific **Aurora** identity/branding for an unofficial fork, modified build, redistributed binary, or derivative project. Unless separately authorized by **@itsveenee**, use a distinct project/product name and distinct branding. Factual attribution such as **“based on SNESticle Aurora”** remains welcome. See [BRANDING.md](BRANDING.md).
+
+Project lineage and attribution are documented in [CREDITS.md](CREDITS.md). See LICENSE, [BRANDING.md](BRANDING.md), and the third-party license files for licensing details.
 
 Keep in mind: this project uses **AI-generated code**, but the changes are tested by me, and I'm a Human according to reCAPTCHA.
 

@@ -8,6 +8,13 @@ Aurora begins its own release series at **1.0.0**.
 
 The Aurora project has its own name, releases, experiments and development direction while preserving the history and attribution of the projects on which it is based.
 
+<!-- AURORA_BRANDING_CREDITS_V9_20260821 -->
+## Name and branding
+
+The **SNESticle Aurora** name, and **Aurora** when used as the identity of this emulator/project, are project-specific names and branding reserved by **Vinícius Nunes (`@itsveenee`)**. Rights granted under the applicable software licenses concern the code and do **not** grant a license to reuse that project identity for an unofficial fork, modified build, redistributed binary or derivative project. Unless separately authorized by @itsveenee, use a distinct name and branding. Factual provenance references such as **“based on SNESticle Aurora”** remain welcome. See [BRANDING.md](BRANDING.md).
+
+This claim is limited to the **SNESticle Aurora / project-specific Aurora identity**. It does not claim ownership of **SNESticle** standing alone or of third-party names and marks.
+
 ## SNESticle Revive
 
 SNESticle Aurora is based on **SNESticle Revive**, maintained by **ReyFxck (Thomas R.)**.

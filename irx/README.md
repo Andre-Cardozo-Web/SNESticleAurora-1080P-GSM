@@ -1,6 +1,7 @@
 # Pinned SIO2 and storage IRX modules
 
-These binaries are embedded in every SNESticle Revive build. The complete
+<!-- AURORA_BRANDING_IRX_V9_20260821 -->
+These binaries are embedded in every SNESticle Aurora build. The complete
 SIO2 transport, memory-card and input group is kept together so an SDK update
 cannot silently combine incompatible driver revisions. This also covers MMCE
 and MX4SIO, which are not exported by every historical PS2SDK installation.

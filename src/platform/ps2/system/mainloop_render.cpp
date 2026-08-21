@@ -148,6 +148,17 @@ void MainLoopRender()
      * Only enable the reduced clear when this frame is guaranteed to draw the
      * normal game output texture. Menu, boot and black-screen frames retain
      * the complete physical clear. */
+    /* AURORA_PD_DIRECT_MD_SKIP_CLEAR_V3_RENDER_20260821
+     * DrawDirectGs() for plain MD always emits an opaque backdrop over
+     * the entire transformed 256x240 canvas, which is the entire active
+     * framebuffer in 240p/480i/1080i. Avoid clearing pixels that are
+     * guaranteed to be replaced later in this same frame. */
+    /* AURORA_PD_DIRECT_8BIT_SKIP_CLEAR_V4_20260821 */
+    GSK_SetGameplaySkipClear(
+        (!_bMenu && _pSystem == _pSega && !_MainLoop_BlackScreen &&
+         PicoDriveBridge_CanDirectGsVideo() &&
+         (PicoDriveBridge_IsMegaDrive() ||
+          g_GskVideoMode == GSK_VIDMODE_240P)) ? TRUE : FALSE);
     GSK_SetGameplayFastClear(
         (!_bMenu && _pSystem && !_MainLoop_BlackScreen) ? TRUE : FALSE);
     GSK_ResetFrame();
@@ -208,10 +219,9 @@ void MainLoopRender()
 		}
 
 
+        /* AURORA_PD_DIRECT_8BIT_GS_V1_20260821 */
         if (_pSystem == _pSega &&
-            PicoDriveBridge_CanDirectGsVideo() &&
-            (g_GskVideoMode != GSK_VIDMODE_240P ||
-             GSK_Get240pFramebufferWidth() == 320))
+            PicoDriveBridge_CanDirectGsVideo())
         {
             /* AURORA_PD_DIRECT_T8_RENDER */
             PicoDriveBridge_DrawDirectGs(

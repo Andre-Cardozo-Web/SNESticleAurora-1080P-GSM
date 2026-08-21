@@ -28,6 +28,8 @@ void Aud_Quit();
 void Aud_BufferedAsyncStart();
 int  Aud_BufferedAsyncGet();
 void Aud_EnqueueAsync(short *left, short *right, int size);
+/* AURORA_AUDIO_ASYNC_GAIN_COPY_V4_API_20260821 */
+void Aud_EnqueueAsyncGain(short *left, short *right, int size, int gainPct);
 void Aud_Wait();
 
 int  Aud_IsInitialized();

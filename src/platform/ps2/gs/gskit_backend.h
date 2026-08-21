@@ -104,6 +104,8 @@ void GSK_DrainForRawGif(void);
  * its black clear to a conservative top strip and restores full scissor before
  * subsequent primitives. Default/off keeps the historical full clear. */
 void GSK_SetGameplayFastClear(Bool enabled);
+/* AURORA_PD_DIRECT_MD_SKIP_CLEAR_V3_H_20260821 */
+void GSK_SetGameplaySkipClear(Bool enabled);
 
 /* Drain gsKit's draw queue and wait. Equivalent to GSK_DrainAndWait
    but kept as a separate name for clarity in the per-frame flush. */

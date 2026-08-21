@@ -45,6 +45,8 @@ static int       _gsk_invalidate_pending = 0;
  * Off by default: every caller that does not explicitly opt into the gameplay
  * fast-clear path retains the exact historical full-frame clear. */
 static Bool      _gsk_gameplay_fast_clear = FALSE;
+/* AURORA_PD_DIRECT_MD_SKIP_CLEAR_V3_C_20260821 */
+static Bool      _gsk_gameplay_skip_clear = FALSE;
 
 /* Video mode + display offset (selectable in the Settings screen).
    480i is the safe default and 1080i is the only alternate output. */
@@ -564,6 +566,11 @@ void GSK_SetGameplayFastClear(Bool enabled)
     _gsk_gameplay_fast_clear = enabled ? TRUE : FALSE;
 }
 
+void GSK_SetGameplaySkipClear(Bool enabled)
+{
+    _gsk_gameplay_skip_clear = enabled ? TRUE : FALSE;
+}
+
 void GSK_FlushFrame(void)
 {
     if (!_gsk_initialised) {
@@ -684,7 +691,13 @@ void GSK_ResetFrame(void)
         u8 previous_alpha = gs->PrimAlphaEnable;
         gs->PrimAlphaEnable = GS_SETTING_OFF;
 
-        if (_gsk_gameplay_fast_clear && gs->Width > 0 && gs->Height > 0)
+        if (_gsk_gameplay_skip_clear)
+        {
+            /* Plain MD direct-GS paints an opaque full-frame backdrop
+             * immediately after reset, so even the top-strip clear would
+             * be overwritten before presentation. */
+        }
+        else if (_gsk_gameplay_fast_clear && gs->Width > 0 && gs->Height > 0)
         {
             int wanted_rows =
                 (_gsk_active_mode == GSK_VIDMODE_240P) ? 8 : 16;

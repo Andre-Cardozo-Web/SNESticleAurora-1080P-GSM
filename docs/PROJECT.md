@@ -12,6 +12,15 @@ SNESticle Aurora is based on SNESticle Revive by ReyFxck (Thomas R.), which is b
 
 The Aurora name identifies this project's own releases and development direction. References to SNESticle Revive are intentionally retained where they describe project history, upstream lineage or ReyFxck's work.
 
+<!-- AURORA_BRANDING_PROJECT_V9_20260821 -->
+## Name and branding
+
+**SNESticle Aurora**, and **Aurora** when used as this emulator/project's identity, are the project-specific name and branding reserved by **Vinícius Nunes (`@itsveenee`)**. The software licenses permit the code uses they expressly grant, but they do **not** license this project identity for an unofficial fork, modified build, redistribution or derivative project. Unless separately authorized by @itsveenee, use a distinct project name and distinct branding.
+
+Factual attribution such as **“based on SNESticle Aurora”** is welcome and does not imply endorsement. See [`../BRANDING.md`](../BRANDING.md).
+
+This does not claim ownership of **SNESticle** standing alone or of the word **Aurora** in unrelated contexts.
+
 ## Compatibility
 
 The historical SNESticle data-directory name used on PlayStation 2 storage devices is intentionally retained for compatibility.

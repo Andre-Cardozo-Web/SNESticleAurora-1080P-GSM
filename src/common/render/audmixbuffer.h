@@ -53,11 +53,19 @@ public:
             m_uFrameSamplePhase = 0;
         }
     }
+    /* AURORA_PD_AUDIO_RATE_QUERY_V6_20260821 */
+    Uint32 GetSampleRate() const { return m_uSampleRate; }
 	Uint32 GetLastOutput() {return m_uLastOutput;}
     void Reset();
 
     virtual void GetFormat(Uint32 *puSampleRate, Uint32 *pnSampleBits, Uint32 *pnChannels);
     virtual Int32 GetOutputSamples();
+    /* AURORA_PD_AUDIO_INTERLEAVED_FAST_V2_H_20260821 */
+    Bool OutputPicoDriveInterleaved150(const Int16 *pStereo, Int32 nFrames);
+    /* AURORA_PD_AUDIO_32K_DIRECT_V5_H_20260821 */
+    Bool OutputPicoDriveInterleaved32000(
+        const Int16 *pPrefixLeft, const Int16 *pPrefixRight,
+        Int32 nPrefixFrames, const Int16 *pStereo, Int32 nStereoFrames);
     virtual void OutputSamplesStereo(Int16 *pLeftSamples, Int16 *pRightSamples, Int32 nSamples);
     virtual void OutputSamplesMono(Int16 *pSamples, Int32 nSamples);
     virtual void Flush();

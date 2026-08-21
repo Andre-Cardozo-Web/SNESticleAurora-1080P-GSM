@@ -57,6 +57,8 @@ static Bool _UsbMouseGameplayWasActive = FALSE;
 Bool MainLoopProcess()
 {
     NetPlayRPCInputT NetInput;
+    /* AURORA_PD_CADENCE_RESUME_FIRST_FRAME_V7_20260821 */
+    Bool bGameplayJustStarted = FALSE;
 
     PROF_ENTER("Frame");
 
@@ -94,8 +96,12 @@ Bool MainLoopProcess()
         const Bool bGameplayNow =
             (!_bMenu && _pSystem && !_MainLoop_BlackScreen) ? TRUE : FALSE;
 
-        if (bGameplayNow &&
-            (!_AudioGameplayWasActive || _AudioGameplaySystem != _pSystem))
+        bGameplayJustStarted =
+            (bGameplayNow &&
+             (!_AudioGameplayWasActive ||
+              _AudioGameplaySystem != _pSystem)) ? TRUE : FALSE;
+
+        if (bGameplayJustStarted)
         {
             /* Fill host-audio safety headroom BEFORE the first cold frame. */
             Aud_PrepareGameplayHeadroom();
@@ -268,12 +274,30 @@ Bool MainLoopProcess()
             }
             else if (_pSystem == _pSega)
             {
-                /* AURORA_PICODRIVE_STAGE2_EXECUTE */
-                Bool bDirectMd =
-                    (PicoDriveBridge_CanDirectGsVideo() &&
-                     (g_GskVideoMode != GSK_VIDMODE_240P ||
-                      GSK_Get240pFramebufferWidth() == 320))
-                    ? TRUE : FALSE;
+                /* AURORA_PD_HOST_CADENCE_EXEC_V1_20260821
+                 *
+                 * O core produz 50 fps em PAL e 60 fps em NTSC, enquanto o
+                 * Aurora apresenta uma vez por VBlank do GS. Quando as famílias
+                 * diferem, converta a cadência no frontend:
+                 *
+                 *   PAL 50 -> NTSC ~59.94: repete periodicamente um frame;
+                 *   NTSC 60 -> PAL 50: executa periodicamente dois frames e
+                 *                       apresenta apenas o mais novo.
+                 *
+                 * AURORA_PD_HOST_CADENCE_ALL_SEGA_V6_20260821
+                 * O one-shot skip do V2 faz o primeiro frame de um burst 60->50
+                 * avançar CPU+áudio sem reescrever vídeo. Assim o caminho RGBA
+                 * também pode usar 0/2 ExecuteFrame(): num tick sem core frame,
+                 * _OutTex simplesmente reapresenta a última imagem residente.
+                 * Netplay e movies permanecem 1:1 para preservar determinismo.
+                 */
+                static Uint32 sPdHostNum = 0;
+                static Uint32 sPdHostDen = 0;
+                static Int32 sPdGameHz = 0;
+                static Uint32 sPdPhase = 0;
+
+                Bool bDirectSega;
+                Int32 executeFrames = 1;
 
                 PicoDriveBridge_SetRegion((int)g_SnesForceRegion);
                 PicoDriveBridge_SetMouseInput(
@@ -282,15 +306,102 @@ Bool MainLoopProcess()
                     (int)nSnesMouseY,
                     (unsigned)uSnesMouseButtons);
 
+                bDirectSega =
+                    PicoDriveBridge_CanDirectGsVideo() ? TRUE : FALSE;
+
+                if (NetInput.eGameState == NETPLAY_GAMESTATE_IDLE &&
+                    /* AURORA_PD_HOST_CADENCE_ALL_SEGA_V6_GATE_20260821 */
+                    !s_pMovieClip->IsPlaying() &&
+                    !s_pMovieClip->IsRecording())
+                {
+                    Uint32 hostNum = 60, hostDen = 1;
+                    Int32 hostFamily;
+                    Int32 gameHz;
+
+                    GSK_GetRefreshRate(&hostNum, &hostDen);
+                    if (hostNum == 0 || hostDen == 0)
+                    {
+                        hostNum = 60;
+                        hostDen = 1;
+                    }
+
+                    hostFamily =
+                        (hostNum == 50 && hostDen == 1) ? 50 : 60;
+                    gameHz = PicoDriveBridge_GetNominalFrameRate();
+
+                    if (gameHz != hostFamily)
+                    {
+                        Uint32 add = (Uint32)gameHz * hostDen;
+
+                        /* AURORA_PD_CADENCE_RESUME_FIRST_FRAME_V7_RESET_20260821 */
+                        if (bGameplayJustStarted ||
+                            _pSega->GetFrame() == 0 ||
+                            hostNum != sPdHostNum ||
+                            hostDen != sPdHostDen ||
+                            gameHz != sPdGameHz)
+                        {
+                            sPdHostNum = hostNum;
+                            sPdHostDen = hostDen;
+                            sPdGameHz = gameHz;
+                            sPdPhase =
+                                (add < hostNum && hostNum > 0)
+                                ? hostNum - 1 : 0;
+                        }
+
+                        executeFrames = 0;
+                        sPdPhase += add;
+
+                        while (sPdPhase >= hostNum &&
+                               executeFrames < 2)
+                        {
+                            sPdPhase -= hostNum;
+                            ++executeFrames;
+                        }
+                    }
+                    else
+                    {
+                        sPdHostNum = hostNum;
+                        sPdHostDen = hostDen;
+                        sPdGameHz = gameHz;
+                        sPdPhase = 0;
+                    }
+                }
+                else
+                {
+                    sPdHostNum = 0;
+                    sPdHostDen = 0;
+                    sPdGameHz = 0;
+                    sPdPhase = 0;
+                }
+
                 PROF_ENTER("SegaExecuteFrame");
-                /* AURORA_PD_DIRECT_T8_EXECUTE */
-                _pSega->ExecuteFrame(
-                    &Input, bDirectMd ? NULL : pSurface, pMixBuffer, eMode);
+                for (Int32 iPdFrame = 0;
+                     iPdFrame < executeFrames;
+                     ++iPdFrame)
+                {
+                    /* AURORA_PD_SKIP_DISCARDED_VIDEO_V2_EXEC_20260821
+                     * In 60->50 conversion, the first of a two-frame burst is
+                     * never displayed. CPU + audio still advance; only video
+                     * rendering is skipped for that discarded frame. */
+                    PicoDriveBridge_SetSkipVideo(
+                        (executeFrames > 1 &&
+                         iPdFrame + 1 < executeFrames) ? true : false);
+
+                    /* Sempre passe pSurface como fallback. No caminho direto
+                     * ela não é tocada; se a geometria mudar durante retro_run,
+                     * o bridge ainda consegue produzir o RGBA de segurança. */
+                    _pSega->ExecuteFrame(
+                        &Input, pSurface, pMixBuffer, eMode);
+                }
                 PROF_LEAVE("SegaExecuteFrame");
 
-                if (!bDirectMd)
+                /* Releia depois de retro_run(): a geometria/PSM do core pode
+                 * ter mudado durante o frame. */
+                bDirectSega =
+                    PicoDriveBridge_CanDirectGsVideo() ? TRUE : FALSE;
+
+                if (!bDirectSega && executeFrames > 0)
                 {
-                    /* SMS/GG/32X retain the proven RGBA path. */
                     PROF_ENTER("SegaTexUpload");
                     TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
                     PROF_LEAVE("SegaTexUpload");

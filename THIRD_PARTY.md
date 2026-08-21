@@ -2,6 +2,9 @@
 
 SNESticle Aurora contains or integrates code from third-party projects. Their original license files and source-file notices remain authoritative.
 
+<!-- AURORA_BRANDING_THIRD_PARTY_V9_20260821 -->
+Third-party licenses govern their respective code and assets; they do **not** grant rights to use the **SNESticle Aurora** name or the project-specific **Aurora** branding for unofficial forks or redistributed builds. Conversely, Aurora's branding policy does not alter any third-party license. See [BRANDING.md](BRANDING.md).
+
 ## QuickNES
 
 Aurora integrates QuickNES as the pinned Git submodule:
