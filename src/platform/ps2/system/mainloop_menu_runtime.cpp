@@ -234,7 +234,7 @@ void _MenuDraw()
     /* Status bar (green): compiler version on the left and app version
        right-aligned. Network details already live on the Host settings
        screen, so the redundant IP field no longer consumes this row. */
-    FontPrintf(8, vy, " GCC%d.%d", __GNUC__, __GNUC_MINOR__);
+    FontPrintf(8, vy, "  GCC%d.%d", __GNUC__, __GNUC_MINOR__);
 
 #ifdef APP_VERSION
     static const char *_AppVersionStr =
