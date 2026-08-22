@@ -2490,7 +2490,9 @@ Bool _MainLoopSaveState()
     nStateBytes = _MainLoopStateGetPayloadBytes();
     if (!pStateData || !nStateBytes)
     {
-        _MainLoopStateSetMessage("Could not allocate core state buffer.");
+        _MainLoopStateSetMessage(
+            "Could not allocate core state buffer (%u bytes).",
+            (unsigned)nStateBytes);
         return FALSE;
     }
     if (_pSystem == _pNes)
