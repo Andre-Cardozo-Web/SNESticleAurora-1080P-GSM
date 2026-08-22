@@ -25,8 +25,8 @@ extern "C" {
  *
  * Higher modes use a non-integer logical transform (notably 2.5x in X).
  * Sampling the glyph atlas through it makes glyph shapes vary with screen
- * position. Draw glyphs directly in framebuffer space at an exact 2x scale
- * in both supported outputs.
+ * position. Draw glyphs directly in framebuffer space at an exact integer
+ * scale: 1x in native 240p and 2x in the 480-line framebuffer modes.
  *
  * Layout still lives in the 256x240 logical space, so advances and
  * FontGetStrWidth convert the physical glyph size back to logical with
@@ -77,25 +77,59 @@ static Int32 _FontDrawChar(FontCharT *pFontChar, float fX, float fY, float z1, U
     width  = pFontChar->u1 - pFontChar->u0;
     height = pFontChar->v1 - pFontChar->v0;
 
-	/* No half-texel bias here.  The old +8 (0.5 texel) offset was for the
-	   fractional NEAREST scale; with the exact integer 2x draw it shifts
-	   sampling half a texel right and clips the LEFT edge of every glyph.
-	   Sampling from the texel edge (offset 0) pixel-doubles cleanly and
-	   never reads the 1px transparent gap around each glyph. */
-	u0 = (pFontChar->u0 << 4);
-	v0 = (pFontChar->v0 << 4);
-	u1 = (pFontChar->u1 << 4);
-	v1 = (pFontChar->v1 << 4);
-
+    /* AURORA_FONT_GS_DDA_240P_V1
+     *
+     * Pixel-perfect 1:1 glyph rasterisation on the real PS2 GS.
+     *
+     * The GS sprite DDA does not treat the bottom/right edge like a
+     * conventional 2D blitter. Pixel centres are at integer coordinates,
+     * while texel centres are at n + 0.5. With the naive UV [u0,u1] /
+     * XY [x0,x0+w] mapping a tiny 1x glyph can miss its rightmost texel.
+     *
+     * In native 240p use the documented GS pixel-perfect convention:
+     *   source start : first texel centre             (+0.5000)
+     *   source end   : just past last texel centre    (-0.3750 from u1/v1)
+     *   dest end     : 1/16 past the last pixel centre
+     *
+     * This is a sampling/rasterisation fix, NOT a font-content hack:
+     * every source column is sampled exactly from the original atlas.
+     *
+     * Higher framebuffer modes retain Aurora's existing exact integer
+     * glyph scaling path, which is already clean there.
+     */
     sx = GPPrimGetScaleX(); if (sx <= 0.0f) sx = 1.0f;
     sy = GPPrimGetScaleY(); if (sy <= 0.0f) sy = 1.0f;
 
-    /* Position via the logical->physical scale, but size the glyph at an
-       EXACT integer 2x of the atlas texels (clean pixel-double). */
     px0 = fX * sx + GPPrimGetOffsetX();
     py0 = fY * sy + GPPrimGetOffsetY();
-    px1 = px0 + (float)(width  * FONT_DRAW_SCALE);
-    py1 = py0 + (float)(height * FONT_DRAW_SCALE);
+
+    if (FONT_DRAW_SCALE == 1 && sx == 1.0f && sy == 1.0f)
+    {
+        /* UV is 10.4 fixed point: +8 = +0.5, -6 = -0.375. */
+        u0 = (pFontChar->u0 << 4) + 8;
+        v0 = (pFontChar->v0 << 4) + 8;
+        u1 = (pFontChar->u1 << 4) - 6;
+        v1 = (pFontChar->v1 << 4) - 6;
+
+        /*
+         * Last physical pixel centre is (origin + size - 1).
+         * Add the smallest GS subpixel step (1/16) so the right/bottom
+         * pixel survives the sprite edge rule without creating a new pixel.
+         */
+        px1 = px0 + (float)width  - 0.9375f;
+        py1 = py0 + (float)height - 0.9375f;
+    }
+    else
+    {
+        /* Existing higher-mode integer pixel scaling. */
+        u0 = (pFontChar->u0 << 4);
+        v0 = (pFontChar->v0 << 4);
+        u1 = (pFontChar->u1 << 4);
+        v1 = (pFontChar->v1 << 4);
+
+        px1 = px0 + (float)(width  * FONT_DRAW_SCALE);
+        py1 = py0 + (float)(height * FONT_DRAW_SCALE);
+    }
 
     x0 = ((Uint32)FIXED4(px0)) & 0xFFFF;
     y0 = ((Uint32)FIXED4(py0)) & 0xFFFF;
@@ -103,29 +137,6 @@ static Int32 _FontDrawChar(FontCharT *pFontChar, float fX, float fY, float z1, U
     y1 = ((Uint32)FIXED4(py1)) & 0xFFFF;
 
 	GPPrimTexRectAbs(x0, y0, u0, v0, x1, y1, u1, v1, 10, uColor, 1);
-
-    /*
-     * Temporary 240p font hack:
-     * the rightmost glyph column is lost by the current rasterisation.
-     * Draw that source column over the penultimate physical column
-     * instead of extending the glyph to the right.
-     */
-    if (GPPrimGetScaleX() == 1.0f && GPPrimGetScaleY() == 1.0f)
-    {
-        Uint32 lastU0 = ((pFontChar->u1 - 1) << 4);
-        Uint32 lastU1 = (pFontChar->u1 << 4);
-
-        Uint32 lastX0 = ((Uint32)FIXED4(px1 - 1.0f)) & 0xFFFF;
-        Uint32 lastX1 = ((Uint32)FIXED4(px1)) & 0xFFFF;
-
-        GPPrimTexRectAbs(
-            lastX0, y0,
-            lastU0, v0,
-            lastX1, y1,
-            lastU1, v1,
-            10, uColor, 1
-        );
-    }
 
 
     /* advance in LOGICAL units: physical glyph width + 2px gap */

@@ -13,7 +13,7 @@ Mega Drive and Master System emulation through **PicoDrive** is based on the Pic
 
 SNESticle Aurora focuses on 240p CRT output, NES/QuickNES integration and experiments, real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
 
-**Changes made in SNESticle Aurora may be reused, cherry-picked, pulled or incorporated into other projects subject to the applicable licenses.** Aurora code covered by the GPL remains under GNU GPLv2; separately licensed third-party components remain under their own terms.
+**Changes made in SNESticle Aurora may be reused, cherry-picked, pulled or incorporated into other projects subject to the applicable licenses.** SNESticle Aurora code covered by the GPL remains under GNU GPLv2; separately licensed third-party components remain under their own terms.
 
 <!-- AURORA_BRANDING_README_V9_20260821 -->
 **Code license and project branding are separate.** The applicable software licenses grant rights in the code; they do **not** grant permission to use the **SNESticle Aurora** name or the project-specific **Aurora** identity/branding for an unofficial fork, modified build, redistributed binary, or derivative project. Unless separately authorized by **@itsveenee**, use a distinct project/product name and distinct branding. Factual attribution such as **“based on SNESticle Aurora”** remains welcome. See [BRANDING.md](BRANDING.md).
@@ -53,6 +53,7 @@ Emulation:
 * Turbo toggle (hold R2+ANY BUTTON) for SNES and MD games
 * In-game soft reset (L2+SELECT)
 * SNES and MD mouse emulation
+* Region selector
 
 User interface:
 
@@ -62,21 +63,19 @@ User interface:
 * Faster UI navigation
 * Many options to enable emulation hacks and compatibility modes (exchange accuracy for performance or vice-versa)
 * Option to reload the emulator's .elf (very useful for upgrading and testing new builds)
-* ~Changed font from 80 characters to 40 characters, more readable in 240p.~ *(I'll enable this very soon)*
 
 *(**NOTE**: to find the options above, go to the Video Settings and change the pages with the circle button.)*
 
 Just for fun:
 
 * Famiclone audio option for NES games (swap duty cycles, a known hardware bug in some Famiclones you can intentionally turn on)
-* Region selector (to intentionally trigger region-lock screens) for SNES games
 * Select SRAM size (to intentionally trigger anti-piracy screens and measures) for SNES games
 
 
 **FIXED:**
 
-* Many graphical glitches and inaccuracies on many NES and SNES games
 * Pilotwings (SNES) mode 7 rendering, also fixes other games that rely on it
+* Many other graphical glitches and inaccuracies on many NES, SNES and SEGA games
 
 
 **TO BE FIXED:**
