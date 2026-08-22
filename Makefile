@@ -155,19 +155,19 @@ SNES_HVIRQ_RESCHEDULE ?= 1
 # AURORA_ROM_COMPAT_DB_V6
 # CRC-gated in-memory ROM workarounds. No file on disk is modified.
 # REGIONAL=0 keeps only payloads documented directly for the source region.
-SNES_ROM_COMPAT_PATCHES ?= 1
-SNES_ROM_COMPAT_REGIONAL ?= 1
+SNES_ROM_COMPAT_PATCHES ?= 0
+SNES_ROM_COMPAT_REGIONAL ?= 0
 
 # AURORA_SONIC_COLOR_V7
 # CRC-gated Sonic Blast Man color-math workaround; set 0 for A/B testing.
-SNES_SONIC_COLOR_WORKAROUND ?= 1
+SNES_SONIC_COLOR_WORKAROUND ?= 0
 
 # AURORA_CRC_ZERO_INIT_V8
 # Exact-CRC cold-boot compatibility. Selected SNES titles reproduce the
 # ReyFxck/SNESticleRevive cold boot: WRAM=0x00 and SRAM backing=0x00.
 # Existing .srm files are still loaded later and overwrite this initial state.
 # Set to 0 for an A/B build using Aurora's random WRAM + 0xFF fresh SRAM.
-SNES_CRC_ZERO_INIT ?= 1
+SNES_CRC_ZERO_INIT ?= 0
 
 # AURORA_HK97_SPC_BOOT_V9
 # Hong Kong '97 only: let the SPC700 IPL naturally reach its AA/BB boot
