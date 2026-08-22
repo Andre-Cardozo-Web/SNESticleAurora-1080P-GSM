@@ -63,6 +63,12 @@ PICODRIVE_DIR ?= $(CURDIR)/src/third_party/picodrive
 PICODRIVE_LIB ?= $(PICODRIVE_DIR)/picodrive_libretro_ps2.a
 PICODRIVE_INC := $(PICODRIVE_DIR)/platform/libretro/libretro-common/include
 
+# AURORA_PD_TRYAGAIN_V1_PS2_BUILD_PARITY
+# PicoDrive's standalone PS2 configure path explicitly uses -G0. Keep
+# the embedded libretro core on the same EE small-data ABI assumption;
+# optimization level/LTO remain owned by PicoDrive's own Makefiles.
+PICODRIVE_PS2_SAFE_FLAGS := -G0
+
 # PicoDrive is intentionally built with STATIC_LINKING=0 so its libretro-common
 # helpers are self-contained in the archive. PicoDrive's root Makefile enables
 # -flto in that mode, therefore the archive must be indexed by GCC's plugin-
@@ -968,7 +974,7 @@ FORCE_PICODRIVE:
 $(PICODRIVE_LIB): FORCE_PICODRIVE
 	@printf '[ PicoDrive ] building PS2 static core\n'
 	@$(MAKE) -C "$(PICODRIVE_DIR)" -f Makefile.libretro \
-		platform=ps2 CC="$(EE_CC) $(PICODRIVE_OPLL_NS_FLAGS)" AR="$(PICODRIVE_AR)" PS2DEV="$(PS2DEV)" PS2SDK="$(PS2SDK)" use_libchdr=0 STATIC_LINKING=0 STATIC_LINKING_LINK=1 all
+		platform=ps2 CC="$(EE_CC) $(PICODRIVE_PS2_SAFE_FLAGS) $(PICODRIVE_OPLL_NS_FLAGS)" AR="$(PICODRIVE_AR)" PS2DEV="$(PS2DEV)" PS2SDK="$(PS2SDK)" use_libchdr=0 STATIC_LINKING=0 STATIC_LINKING_LINK=1 all
 
 $(TARGET): $(OBJS) $(PICODRIVE_LIB) $(QUICKNES_LIB) | $(OBJ_DIR)
 	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) "$(PICODRIVE_LIB)" "$(QUICKNES_LIB)" $(LIBDIRS) $(LIBS))

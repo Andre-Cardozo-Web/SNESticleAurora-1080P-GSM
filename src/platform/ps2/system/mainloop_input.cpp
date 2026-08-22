@@ -39,6 +39,12 @@ extern "C" {
 /* AURORA_CONTROLLER_OPTIONS_V2 */
 static MainLoopTurboSpeedE _MainLoop_TurboSpeed = MAINLOOP_TURBO_SPEED_NORMAL;
 static Uint32 _MainLoop_TurboPhaseBase = 0;
+/* AURORA_SMS_GG_TURBO_HOST_CLOCK_V2
+ * SMS/GG can execute 0/1/2 PicoDrive frames per GS VBlank when host and
+ * game cadence differ. Keep their autofire on the frontend input tick
+ * instead of the emulated-core frame counter. */
+static Uint32 _MainLoop_TurboHostFrame = 0;
+static Uint32 _MainLoop_TurboHostPhaseBase = 0;
 
 void MainLoopTurboSetSpeed(MainLoopTurboSpeedE eSpeed)
 {
@@ -46,6 +52,7 @@ void MainLoopTurboSetSpeed(MainLoopTurboSpeedE eSpeed)
         eSpeed = MAINLOOP_TURBO_SPEED_NORMAL;
     _MainLoop_TurboSpeed = eSpeed;
     _MainLoop_TurboPhaseBase = _pSystem ? (Uint32)_pSystem->GetFrame() : 0;
+    _MainLoop_TurboHostPhaseBase = _MainLoop_TurboHostFrame;
     QuicknesBridge_SetTurboSpeed((unsigned)eSpeed);
 }
 
@@ -70,6 +77,16 @@ const char *MainLoopTurboGetSpeedName(void)
         case MAINLOOP_TURBO_SPEED_NORMAL:
         default:                           return "Max";
     }
+}
+
+void MainLoopTurboAdvanceHostFrame(void)
+{
+    ++_MainLoop_TurboHostFrame;
+}
+
+void MainLoopTurboRearmHostPhase(void)
+{
+    _MainLoop_TurboHostPhaseBase = _MainLoop_TurboHostFrame;
 }
 
 /* AURORA_MD_PAD_LAYOUT_V1 */
@@ -107,6 +124,13 @@ static Bool _MainLoopTurboIsOn(Uint32 uFrame)
     Uint32 shift = (Uint32)_MainLoop_TurboSpeed;
     Uint32 elapsed = uFrame - _MainLoop_TurboPhaseBase;
     /* Every speed selection begins in the ON half of its cadence. */
+    return (((elapsed >> shift) & 1U) == 0U) ? TRUE : FALSE;
+}
+
+static Bool _MainLoopTurboHostIsOn(void)
+{
+    Uint32 shift = (Uint32)_MainLoop_TurboSpeed;
+    Uint32 elapsed = _MainLoop_TurboHostFrame - _MainLoop_TurboHostPhaseBase;
     return (((elapsed >> shift) & 1U) == 0U) ? TRUE : FALSE;
 }
 
@@ -200,7 +224,7 @@ Uint16 _MainLoopInput(Uint32 pad)
 			/* AURORA_SMS_GG_FIXED_TURBO12_V1
 			 * Square=1, Cross=2, Triangle=Turbo1, Circle=Turbo2. */
 			Uint32 uSms = pad & ~(PAD_SQUARE | PAD_CROSS | PAD_CIRCLE | PAD_TRIANGLE | PAD_R2);
-			const Bool bTurboOn = _MainLoopTurboIsOn((Uint32)_pSystem->GetFrame());
+			const Bool bTurboOn = _MainLoopTurboHostIsOn();
 			if (pad & PAD_SQUARE) uSms |= PAD_SQUARE;
 			if (pad & PAD_CROSS)  uSms |= PAD_CROSS;
 			if (bTurboOn)

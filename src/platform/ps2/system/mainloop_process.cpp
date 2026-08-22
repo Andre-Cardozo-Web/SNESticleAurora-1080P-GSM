@@ -103,6 +103,8 @@ Bool MainLoopProcess()
 
         if (bGameplayJustStarted)
         {
+            /* Start SMS/GG autofire in its ON half whenever gameplay resumes. */
+            MainLoopTurboRearmHostPhase();
             /* Fill host-audio safety headroom BEFORE the first cold frame. */
             Aud_PrepareGameplayHeadroom();
             _AudioGameplaySystem = _pSystem;
@@ -476,6 +478,11 @@ Bool MainLoopProcess()
 			InputMouseClearSnapshot();
 		_UsbMouseGameplayWasActive = bUsbGameplay;
 	}
+
+    /* AURORA_SMS_GG_TURBO_HOST_CLOCK_V2
+     * Exactly one tick per completed frontend frame; never one tick per
+     * controller and never one tick per PicoDrive core frame. */
+    MainLoopTurboAdvanceHostFrame();
 
     PROF_LEAVE("Frame");
 

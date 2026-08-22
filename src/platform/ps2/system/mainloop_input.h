@@ -16,6 +16,8 @@ void MainLoopTurboSetSpeed(MainLoopTurboSpeedE eSpeed);
 MainLoopTurboSpeedE MainLoopTurboGetSpeed(void);
 void MainLoopTurboCycleSpeedDir(Int32 dir);
 const char *MainLoopTurboGetSpeedName(void);
+void MainLoopTurboAdvanceHostFrame(void);
+void MainLoopTurboRearmHostPhase(void);
 
 /* AURORA_MD_PAD_LAYOUT_V1
  * Ordem dos três botões frontais do DualShock: Square / Cross / Circle.

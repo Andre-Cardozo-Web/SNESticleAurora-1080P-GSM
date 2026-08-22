@@ -1380,10 +1380,15 @@ static void pdRefreshDirectVideoInfo()
     s_DirectInfoIsMd = false;
 
     if (!s_GameLoaded ||
-        (PicoIn.AHW & (PAHW_PICO | PAHW_MCD | PAHW_32X)) != 0)
+        (PicoIn.AHW & (PAHW_PICO | PAHW_MCD)) != 0)
         return;
 
-    isMd = PicoDriveBridge_IsMegaDrive();
+    /* AURORA_PD_TRYAGAIN_V1_32X_DIRECT_CT16
+     * 32X is not reclassified globally as plain MD. Only presentation
+     * treats its mandatory RGB555 framebuffer as MD-style geometry so
+     * the existing CT16 EE->GS path can bypass RGBA32 conversion. */
+    isMd = PicoDriveBridge_IsMegaDrive() ||
+           ((PicoIn.AHW & PAHW_32X) != 0);
     is8bit = pdIs8Bit();
     if (!isMd && !is8bit)
         return;
