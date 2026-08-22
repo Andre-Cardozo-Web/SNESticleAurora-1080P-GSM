@@ -11,21 +11,28 @@
 #include "sndebug.h"
 #include "sndbglog.h"
 
-/* AURORA_SPLIT_SYSTEM_AUDIO_RATES_20260821
- * 16 kHz is the low-CPU default selected for Aurora. This changes only the
- * host PCM synthesis/output rate; emulated SPC700 timing remains unchanged. */
-static Uint32 s_SnesAudioRate = 16000;
-
+/* AURORA_SNES_NATIVE_32K_V1_20260822
+ *
+ * The SNESticle S-DSP mixer is fundamentally clocked around the SNES native
+ * 32 kHz sample domain. In particular, DSP-register write timestamps, envelope
+ * progression and echo/FIR behaviour were designed around that clock.
+ *
+ * Aurora briefly exposed lower synthesis rates directly to this mixer. That
+ * made the host buffer cheaper, but it also changed DSP timing semantics:
+ * the register-write queue still advanced in native 32 kHz units while the
+ * mixer produced fewer samples per frame.
+ *
+ * Keep SNES synthesis at its native rate and let AudMixBuffer perform the
+ * existing 32 -> 48 kHz host conversion. The setter remains as a compatibility
+ * API for video.cfg v35/older callers, but all requests normalize to native. */
 void SnesAudioSetRate(Uint32 hz)
 {
-    if (hz < 8000)  hz = 8000;
-    if (hz > 48000) hz = 48000;
-    s_SnesAudioRate = hz;
+    (void)hz;
 }
 
 Uint32 SnesAudioGetRate(void)
 {
-    return s_SnesAudioRate;
+    return SNSPCDSP_SAMPLERATE;
 }
 
 #ifndef SNES_HK97_SPC_BOOT

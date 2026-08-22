@@ -34,10 +34,9 @@ extern "C" {
 
 #define SNES_DSP1 1
 
-/* AURORA_SPLIT_SYSTEM_AUDIO_RATES_20260821
- * Host synthesis rate for SNES audio. The SPC/DSP mixer already asks the
- * CMixBuffer for its current format every frame, so this is independent from
- * the menu-music tracker rate and from PicoDrive. */
+/* AURORA_SNES_NATIVE_32K_V1_20260822
+ * SNES S-DSP synthesis is fixed to its native 32 kHz domain. The setter is
+ * retained only so existing config/call sites remain source-compatible. */
 void SnesAudioSetRate(Uint32 hz);
 Uint32 SnesAudioGetRate(void);
 
@@ -81,7 +80,7 @@ public:
     Uint8   *GetSRAMData();
 
 	virtual const char *GetString(StringE eString);
-    virtual Uint32 GetSampleRate() {return SnesAudioGetRate();}
+    virtual Uint32 GetSampleRate() {return SNSPCDSP_SAMPLERATE;}
 
     static const Char *GetRegName(Uint32 uAddr);
 

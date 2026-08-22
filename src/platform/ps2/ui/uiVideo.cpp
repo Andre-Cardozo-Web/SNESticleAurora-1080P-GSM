@@ -102,7 +102,7 @@ typedef struct
 	Int32  md6button;   /* bit0=6-button, bit1=BCA */
 	Int32  bgmtrack;    /* 1..64 */
 	Int32  mdrendering; /* 0=Fast, 1=Good, 2=Accurate */
-	Int32  snesaudiorate; /* independent SNES host PCM rate */
+	Int32  snesaudiorate; /* legacy/reserved: SNES native 32000 Hz */
 	Int32  segaaudiorate; /* independent PicoDrive PCM rate */
 	Int32  smscolorborder; /* 0=black, 1=SMS VDP backdrop */
 	Int32  smsfm;          /* 0=off, 1=Master System YM2413/OPLL */
@@ -659,13 +659,14 @@ void VideoSettingsLoad(void)
 		cfg.mdrendering = 1;
 	}
 
-	/* v34 splits the old shared menu/PicoDrive rate into real per-system
-	 * settings. Keep both low-CPU defaults independent from BGM synthesis. */
+	/* AURORA_SNES_NATIVE_32K_V1_20260822
+	 * v34 introduced independent SNES/SEGA rate fields. The SNES field stays
+	 * in v35 for byte compatibility, but native S-DSP synthesis is always
+	 * 32 kHz. PicoDrive keeps its independent low-CPU default. */
+	if (loaded)
+		cfg.snesaudiorate = SNSPCDSP_SAMPLERATE;
 	if (loaded && header.version <= 33)
-	{
-		cfg.snesaudiorate = 16000;
 		cfg.segaaudiorate = 16000;
-	}
 
 	/* Preserve the pre-v35 behaviour when importing any old config. */
 	if (loaded && header.version <= 34)
@@ -1093,8 +1094,7 @@ void CVideoScreen::Draw()
 		_VideoRow(vy, 51, m_iSelect, "Game volume", buf); vy += 12;
 		_VideoRow(vy, 52, m_iSelect, "Menu music",
 		          BgmIsEnabled() ? "ON" : "OFF"); vy += 12;
-		snprintf(buf, sizeof(buf), "%d kHz", ((int)SnesAudioGetRate() + 500) / 1000);
-		_VideoRow(vy, 53, m_iSelect, "SNES audio", buf); vy += 12;
+		_VideoRow(vy, 53, m_iSelect, "SNES audio", "32 kHz native"); vy += 12;
 		snprintf(buf, sizeof(buf), "%d kHz", (PicoDriveBridge_GetAudioRate() + 500) / 1000);
 		_VideoRow(vy, 54, m_iSelect, "SEGA audio", buf); vy += 12;
 		_VideoRow(vy, 55, m_iSelect, "SMS FM audio",
@@ -1302,12 +1302,12 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 			BgmSetEnabled(!BgmIsEnabled());
 			break;
 		case 53:
-			{
-				Int32 v = _VideoCycleSystemAudioRate((Int32)SnesAudioGetRate(), dir);
-				SnesAudioSetRate((Uint32)v);
-				if (_pSystem == _pSnes && _AudMix)
-					_AudMix->SetSampleRate((Uint32)v);
-			}
+			/* AURORA_SNES_NATIVE_32K_V1_20260822
+			 * Keep the historical row/index but do not allow the frontend to
+			 * push a non-native rate into the shared AudMixBuffer. */
+			SnesAudioSetRate(SNSPCDSP_SAMPLERATE);
+			if (_pSystem == _pSnes && _AudMix)
+				_AudMix->SetSampleRate(SNSPCDSP_SAMPLERATE);
 			break;
 		case 54:
 			PicoDriveBridge_SetAudioRate(
