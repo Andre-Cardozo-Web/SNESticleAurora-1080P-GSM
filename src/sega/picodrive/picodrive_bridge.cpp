@@ -1544,6 +1544,35 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
         (Uint32)((left + srcW) << 4), (Uint32)(srcH << 4),
         0, modColor, 0);
 
+    /* AURORA_SMS_EDGE_SCANLINES_V2
+     *
+     * The normal SMS blit already preserves the penultimate active line.
+     * The GS edge rule can fail to cover the final destination scanline,
+     * though.  Do not redraw/replace either of the existing bottom rows:
+     * append only the final source scanline into the first border row below
+     * the nominal sprite.  This turns ... A B | border into ... A B C |
+     * border instead of V1's ... A C | border.
+     *
+     * Only SMS is affected. GG/MD are excluded, and 240-line SMS is left
+     * untouched because there is no free framebuffer row below it.
+     */
+    if (pdIsMasterSystem() &&
+        dstH == srcH &&
+        srcH > 0 &&
+        dstY + dstH < fbH)
+    {
+        const Uint32 lastV =
+            (Uint32)(((srcH - 1) << 4) + 8); /* centre of last texel */
+
+        GPPrimTexRectAbs(
+            (Uint32)(dstX << 4), (Uint32)((dstY + dstH) << 4),
+            (Uint32)(left << 4), lastV,
+            (Uint32)((dstX + dstW) << 4),
+            (Uint32)((dstY + dstH + 1) << 4),
+            (Uint32)((left + srcW) << 4), lastV,
+            0, modColor, 0);
+    }
+
     return true;
 }
 

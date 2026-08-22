@@ -467,7 +467,7 @@ int QuicknesBridge_GetSRAMBytes(void)
 {
     if (!s_GameLoaded || !s_pEmu->cart() || !s_pEmu->has_battery_ram())
         return 0;
-    return (int)Nes_Emu::high_mem_size;
+    return (int)s_pEmu->battery_ram_size();
 }
 
 uint8_t *QuicknesBridge_GetSRAMData(void)
