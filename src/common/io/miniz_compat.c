@@ -17,6 +17,143 @@
    use direct fileXio calls: one large EE->IOP read avoids the repeated small
    stdio RPCs that made ZIP/GZ launch noticeably slower on cdfs/mass/SMB. */
 
+/* AURORA_ZIP_FILEXIO_STREAM_V1_20260822
+ *
+ * fileXioRead(), like read(), is allowed to complete a request partially.
+ * Keep the existing fast direct-IOP path, but finish the request instead of
+ * treating the first short transfer as a corrupt archive.
+ */
+static int filexio_read_fully(int fd, void *buf, int size)
+{
+        unsigned char *dst = (unsigned char *)buf;
+        int total = 0;
+
+        if (fd < 0 || !buf || size < 0)
+                return -1;
+
+        while (total < size)
+        {
+                int n = fileXioRead(fd, dst + total, size - total);
+                if (n <= 0)
+                        return (total > 0) ? total : n;
+                total += n;
+        }
+
+        return total;
+}
+
+/* Use miniz's user-supplied random-access reader for ZIP archives.
+ *
+ * The previous implementation malloc()'d a second buffer as large as the
+ * complete .zip before decompression. Aurora now keeps the SNES, QuickNES
+ * and PicoDrive frontends in the same 32 MiB PS2 process, so that temporary
+ * whole-archive copy can fail even when the extracted ROM itself fits in
+ * the permanent _RomData buffer.
+ */
+typedef struct MinizFileXioReader
+{
+        int fd;
+        int size;
+        int pos;
+} MinizFileXioReader;
+
+static int miniz_filexio_reader_open(
+        const char *path, MinizFileXioReader *reader)
+{
+        int size;
+
+        if (!reader)
+                return -1;
+
+        reader->fd = -1;
+        reader->size = 0;
+        reader->pos = 0;
+
+        if (!path || !path[0])
+                return -1;
+
+        reader->fd = fileXioOpen(path, FIO_O_RDONLY, 0);
+        if (reader->fd < 0)
+                return -1;
+
+        size = fileXioLseek(reader->fd, 0, FIO_SEEK_END);
+        if (size <= 0)
+        {
+                fileXioClose(reader->fd);
+                reader->fd = -1;
+                return -1;
+        }
+
+        if (fileXioLseek(reader->fd, 0, FIO_SEEK_SET) < 0)
+        {
+                fileXioClose(reader->fd);
+                reader->fd = -1;
+                return -1;
+        }
+
+        reader->size = size;
+        reader->pos = 0;
+        return size;
+}
+
+static void miniz_filexio_reader_close(MinizFileXioReader *reader)
+{
+        if (!reader)
+                return;
+
+        if (reader->fd >= 0)
+                fileXioClose(reader->fd);
+
+        reader->fd = -1;
+        reader->size = 0;
+        reader->pos = 0;
+}
+
+static size_t miniz_filexio_read_func(
+        void *opaque, mz_uint64 file_ofs, void *buf, size_t n)
+{
+        MinizFileXioReader *reader = (MinizFileXioReader *)opaque;
+        unsigned char *dst = (unsigned char *)buf;
+        size_t total = 0;
+        size_t avail;
+
+        if (!reader || reader->fd < 0 || !buf || n == 0)
+                return 0;
+
+        if (file_ofs > 0x7FFFFFFFULL ||
+            file_ofs >= (mz_uint64)reader->size)
+                return 0;
+
+        avail = (size_t)((mz_uint64)reader->size - file_ofs);
+        if (n > avail)
+                n = avail;
+
+        if (reader->pos != (int)file_ofs)
+        {
+                int pos = fileXioLseek(
+                        reader->fd, (int)file_ofs, FIO_SEEK_SET);
+                if (pos < 0)
+                        return 0;
+                reader->pos = pos;
+        }
+
+        while (total < n)
+        {
+                size_t remain = n - total;
+                int want = (remain > 0x7FFFFFFFUL)
+                        ? 0x7FFFFFFF : (int)remain;
+                int got = fileXioRead(reader->fd, dst + total, want);
+
+                if (got <= 0)
+                        break;
+
+                total += (size_t)got;
+                reader->pos += got;
+        }
+
+        return total;
+}
+
 static int read_file_to_alloc(const char *path, void **out_buf, int *out_size)
 {
         int fd;
@@ -52,7 +189,7 @@ static int read_file_to_alloc(const char *path, void **out_buf, int *out_size)
                 return -1;
         }
 
-        n = fileXioRead(fd, buf, size);
+        n = filexio_read_fully(fd, buf, size);
         fileXioClose(fd);
 
         if (n != size)
@@ -156,8 +293,7 @@ int MinizReadZipFirstMatch(const char *path,
                            int filename_max,
                            int (*name_filter)(const char *name))
 {
-        void *zip_data = NULL;
-        int zip_size = 0;
+        MinizFileXioReader reader;
         mz_zip_archive zip;
         mz_uint num_files;
         mz_uint i;
@@ -166,13 +302,16 @@ int MinizReadZipFirstMatch(const char *path,
         if (!out_buf || out_max <= 0)
                 return -1;
 
-        if (read_file_to_alloc(path, &zip_data, &zip_size) <= 0)
+        if (miniz_filexio_reader_open(path, &reader) <= 0)
                 return -1;
 
         memset(&zip, 0, sizeof(zip));
-        if (!mz_zip_reader_init_mem(&zip, zip_data, (size_t)zip_size, 0))
+        zip.m_pRead = miniz_filexio_read_func;
+        zip.m_pIO_opaque = &reader;
+
+        if (!mz_zip_reader_init(&zip, (mz_uint64)reader.size, 0))
         {
-                free(zip_data);
+                miniz_filexio_reader_close(&reader);
                 return -1;
         }
 
@@ -198,7 +337,8 @@ int MinizReadZipFirstMatch(const char *path,
                         result = (int)st.m_uncomp_size;
                         if (out_filename && filename_max > 0)
                         {
-                                strncpy(out_filename, st.m_filename, (size_t)(filename_max - 1));
+                                strncpy(out_filename, st.m_filename,
+                                        (size_t)(filename_max - 1));
                                 out_filename[filename_max - 1] = '\0';
                         }
                         break;
@@ -206,6 +346,6 @@ int MinizReadZipFirstMatch(const char *path,
         }
 
         mz_zip_reader_end(&zip);
-        free(zip_data);
+        miniz_filexio_reader_close(&reader);
         return result;
 }

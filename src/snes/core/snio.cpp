@@ -324,6 +324,10 @@ void SnesIO::Reset()
 {
 	memset(this, 0, sizeof(*this));
 	m_Regs.rdnmi  =  SNIO_VERSION_5A22;
+	/* AURORA_SNES_WRIO_POWERON_V4_20260822
+	 * WRIO ($4201) powers on at $FF. Bit 7 enables the PPU /EXTLATCH
+	 * sampled by reads of $2137. */
+	m_Regs.wrio = 0xFF;
 }
 
 void SnesIO::LatchInput(Emu::SysInputT  *pInput)

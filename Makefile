@@ -172,7 +172,8 @@ SNES_CRC_ZERO_INIT ?= 1
 # AURORA_HK97_SPC_BOOT_V9
 # Hong Kong '97 only: let the SPC700 IPL naturally reach its AA/BB boot
 # handshake before the S-CPU starts. Exact CRC32 gate, disabled with =0.
-SNES_HK97_SPC_BOOT ?= 1
+# AURORA_HK97_SPC_PREWARM_DEFAULT_OFF_V4_20260822
+SNES_HK97_SPC_BOOT ?= 0
 
 # Conservative flags to bridge the GCC 3.2 (2003) -> GCC 15.1 (2025)
 # gap in default optimization behavior. The original iaddis source was
