@@ -44,7 +44,8 @@ Bool MainLoopReinitVideoMode(Int32 mode);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 34
+#define VIDEOCFG_VERSION 35
+/* v35 appends SMS color-border + SMS FM preferences. */
 /* AURORA_AUDIO_SPLIT_REVIEW_V1_20260821 */
 /* AURORA_PD_MEGA_FIX_20260820 */
 /* AURORA_PICODRIVE_CURRENT_UI_V4: v32 appends md6button only. */
@@ -103,6 +104,8 @@ typedef struct
 	Int32  mdrendering; /* 0=Fast, 1=Good, 2=Accurate */
 	Int32  snesaudiorate; /* independent SNES host PCM rate */
 	Int32  segaaudiorate; /* independent PicoDrive PCM rate */
+	Int32  smscolorborder; /* 0=black, 1=SMS VDP backdrop */
+	Int32  smsfm;          /* 0=off, 1=Master System YM2413/OPLL */
 } VideoCfgT;
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -403,6 +406,8 @@ void VideoSettingsSave(void)
 	cfg.mdrendering = PicoDriveBridge_GetRenderingMode();
 	cfg.snesaudiorate = (Int32)SnesAudioGetRate();
 	cfg.segaaudiorate = (Int32)PicoDriveBridge_GetAudioRate();
+	cfg.smscolorborder = PicoDriveBridge_GetSmsColorBorder() ? 1 : 0;
+	cfg.smsfm = PicoDriveBridge_GetSmsFm() ? 1 : 0;
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -439,37 +444,43 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
+		else if (header.version == 34)
+		{
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
+			        sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm));
+			if (loaded) cfg.version = VIDEOCFG_VERSION;
+		}
 		else if (header.version == 33)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        sizeof(cfg) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate));
+			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 32)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        sizeof(cfg) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 31)
 		{
 			/* AURORA_PICODRIVE_CURRENT_CFG_V32 */
-			memset(&cfg, 0, sizeof(cfg));
+			memset(&cfg, 0, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)));
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        sizeof(cfg) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 30)
 		{
 			/* v30 has the same byte layout as v31. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 29)
 		{
 			/* v29 was a temporary test config with broken menu-audio defaults.
 			 * Import its layout, then reset only those two settings once. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded)
 			{
 				cfg.version = VIDEOCFG_VERSION;
@@ -480,19 +491,19 @@ void VideoSettingsLoad(void)
 		else if (header.version == 28)
 		{
 			/* v28 has the same byte layout; only Menu Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 27)
 		{
 			/* v27 is the v28/v29 prefix without bgmenable. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 26)
 		{
 			/* v26 has the same byte layout; only Game Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 25)
@@ -656,6 +667,13 @@ void VideoSettingsLoad(void)
 		cfg.segaaudiorate = 16000;
 	}
 
+	/* Preserve the pre-v35 behaviour when importing any old config. */
+	if (loaded && header.version <= 34)
+	{
+		cfg.smscolorborder = 1;
+		cfg.smsfm = 0;
+	}
+
 	/* New policy applies exactly once to every pre-v22 config. Once the
 	 * user saves v22, a manual Full selection remains persistent. */
 	if (loaded && header.version < 22)
@@ -681,6 +699,10 @@ void VideoSettingsLoad(void)
 		if (cfg.overscan >= 0 && cfg.overscan <= 100) g_GskOverscan = cfg.overscan;
 		if (cfg.widescreen == 0 || cfg.widescreen == 1) g_GskWidescreen = cfg.widescreen;
 		if (cfg.covers == 0 || cfg.covers == 1) CoverSetEnabled(cfg.covers ? TRUE : FALSE);
+		if (cfg.smscolorborder == 0 || cfg.smscolorborder == 1)
+			PicoDriveBridge_SetSmsColorBorder(cfg.smscolorborder != 0);
+		if (cfg.smsfm == 0 || cfg.smsfm == 1)
+			PicoDriveBridge_SetSmsFm(cfg.smsfm != 0);
 		if (cfg.bgmvol >= 0 && cfg.bgmvol <= 400) BgmSetVolume(cfg.bgmvol);
 		if (cfg.bgmenable == 0 || cfg.bgmenable == 1) BgmSetEnabled(cfg.bgmenable);
 		if (cfg.bgmrate >= 8000 && cfg.bgmrate <= 48000)
@@ -1057,6 +1079,8 @@ void CVideoScreen::Draw()
 	_VideoRow(vy, 5, m_iSelect, "Offset Y", buf);      vy += 12;
 
 	_VideoRow(vy, 6, m_iSelect, "Cover Art", CoverIsEnabled() ? "On" : "Off"); vy += 12;
+	_VideoRow(vy, 7, m_iSelect, "SMS VDP border",
+	          PicoDriveBridge_GetSmsColorBorder() ? "On" : "Off"); vy += 12;
 
 	}
 	else if (iPage == 1)
@@ -1072,6 +1096,8 @@ void CVideoScreen::Draw()
 		_VideoRow(vy, 53, m_iSelect, "SNES audio", buf); vy += 12;
 		snprintf(buf, sizeof(buf), "%d kHz", (PicoDriveBridge_GetAudioRate() + 500) / 1000);
 		_VideoRow(vy, 54, m_iSelect, "SEGA audio", buf); vy += 12;
+		_VideoRow(vy, 55, m_iSelect, "SMS FM audio",
+		          PicoDriveBridge_GetSmsFm() ? "Enable" : "Disable"); vy += 12;
 	}
 	else if (iPage == 5)
 	{
@@ -1195,12 +1221,12 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 
 	{
 		int lo, hi;
-		if (m_iSelect < 10)      { lo = 0;  hi = 6;  }
+		if (m_iSelect < 10)      { lo = 0;  hi = 7;  }
 		else if (m_iSelect < 20) { lo = 10; hi = 19; }
 		else if (m_iSelect < 30) { lo = 20; hi = 29; }
 		else if (m_iSelect < 40) { lo = 30; hi = 36; }
 		else if (m_iSelect < 50) { lo = 40; hi = 43; }
-		else                     { lo = 50; hi = 54; }
+		else                     { lo = 50; hi = 55; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1259,26 +1285,10 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 			CoverToggle();
 			break;
 
-		case 7: /* UI 0..200; internal gain 0..400, step 2 => UI step 1 */
-			{
-				int v = AudMixGameGetVolume() + dir * 2;
-				if (v < 0)   v = 0;
-				if (v > 400) v = 400;
-				AudMixGameSetVolume(v);
-			}
-			break;
 
-		case 8: /* UI 0..200; internal gain 0..400, step 2 => UI step 1 */
-			{
-				int v = BgmGetVolume() + dir * 2;
-				if (v < 0)   v = 0;
-				if (v > 400) v = 400;
-				BgmSetVolume(v);
-			}
-			break;
-
-		case 9: /* Menu Music on/off; Menu Volume remains independent. */
-			BgmSetEnabled(!BgmIsEnabled());
+		case 7: /* SMS VDP border color / black, live */
+			PicoDriveBridge_SetSmsColorBorder(
+				!PicoDriveBridge_GetSmsColorBorder());
 			break;
 
 		case 50: /* Music volume: UI 0..200, internal 0..400. */
@@ -1301,6 +1311,9 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		case 54:
 			PicoDriveBridge_SetAudioRate(
 				_VideoCycleSystemAudioRate(PicoDriveBridge_GetAudioRate(), dir));
+			break;
+		case 55: /* Master System YM2413/OPLL */
+			PicoDriveBridge_SetSmsFm(!PicoDriveBridge_GetSmsFm());
 			break;
 
 		case 10: /* Mass / USB on/off -- lista mass0:/mass1: (USB).  O USB core

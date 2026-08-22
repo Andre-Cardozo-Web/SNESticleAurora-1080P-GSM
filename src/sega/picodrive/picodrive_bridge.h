@@ -19,6 +19,10 @@ void PicoDriveBridge_Set6Button(bool enabled);
 bool PicoDriveBridge_Get6Button(void);
 void PicoDriveBridge_SetRenderingMode(int mode);
 int  PicoDriveBridge_GetRenderingMode(void);
+void PicoDriveBridge_SetSmsColorBorder(bool enabled);
+bool PicoDriveBridge_GetSmsColorBorder(void);
+void PicoDriveBridge_SetSmsFm(bool enabled);
+bool PicoDriveBridge_GetSmsFm(void);
 void PicoDriveBridge_SetAudioRate(int hz);
 int  PicoDriveBridge_GetAudioRate(void);
 /* AURORA_PD_HOST_CADENCE_V1_20260821 */

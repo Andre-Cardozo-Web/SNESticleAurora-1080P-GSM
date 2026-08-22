@@ -45,7 +45,9 @@ static bool s_GameLoaded = false;
 static bool s_Use6Button = false;
 static int  s_AuroraRegion = SNES_FORCE_REGION_OFF;
 static bool s_VariablesChanged = false;
-static int  s_RenderingMode = 1; /* AURORA_PD_MEGA_FIX_20260820: 0 Fast, 1 Good, 2 Accurate */
+static int  s_RenderingMode = 1; /* preferencia MD/32X: 0 Fast, 1 Good, 2 Accurate */
+static bool s_SmsColorBorder = true; /* VDP backdrop nas bordas do SMS */
+static bool s_SmsFm = false; /* Master System YM2413/OPLL */
 static int  s_AudioRate = 16000; /* AURORA_PD_POLISH_V3_20260820: follows Settings/Audio Frequency */
 static char s_AudioRateText[16] = "16000";
 
@@ -199,6 +201,28 @@ static void pdEnsureColor555Lut()
     s_Color555RGBAReady = true;
 }
 
+/* AURORA_PD_NON_MD_FORCE_ACCURATE_V1
+ * Fast/Good remain user-selectable for plain MD and 32X, where renderer cost
+ * matters. SMS/GG/SG/SC/Pico/MCD-class hardware uses the RGB555 renderer:
+ * on PS2 this avoids the legacy 8-bit overlap/padding path without a measured
+ * performance penalty. The saved menu preference is NOT overwritten. */
+static bool pdForceAccurateRendererForCurrentHw()
+{
+    bool plainMd;
+
+    if (!s_GameLoaded)
+        return false;
+
+    if (PicoIn.AHW & PAHW_32X)
+        return false;
+
+    plainMd =
+        (PicoIn.AHW &
+         (PAHW_8BIT | PAHW_PICO | PAHW_MCD | PAHW_32X)) == 0;
+
+    return !plainMd;
+}
+
 static const char *pdRendererName()
 {
     return s_RenderingMode == 0 ? "fast" :
@@ -243,6 +267,8 @@ static bool pdEnvironment(unsigned cmd, void *data)
                 var->value = s_AudioRateText;
             else if (!strcmp(var->key, "picodrive_renderer"))
                 var->value = pdRendererName();
+            else if (!strcmp(var->key, "picodrive_smsfm"))
+                var->value = s_SmsFm ? "on" : "off";
             else if (!strcmp(var->key, "picodrive_fm_filter"))
                 var->value = "off";
             else if (!strcmp(var->key, "picodrive_audio_filter"))
@@ -687,7 +713,7 @@ static bool pdIsMasterSystem()
 /* AURORA_MD_UNIFORM_SCALE_V1 */
 static Uint32 pdSmsBorderRGBA()
 {
-    if (!pdIsMasterSystem())
+    if (!pdIsMasterSystem() || !s_SmsColorBorder)
         return 0xff000000u;
 
     /* Mode 4 backdrop is VDP R7 low nibble in palette 1 (0x10..0x1f).
@@ -992,6 +1018,11 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes, const char *pNam
 
     pdAudioTailReset();
     s_GameLoaded = true;
+
+    /* Hardware is known only after retro_load_game(). Re-query core options
+     * on the first real frame so non-MD/32X starts directly in Accurate. */
+    s_VariablesChanged = true;
+
     /* AURORA_PD_DIRECT_INFO_LIFETIME_V4_20260821 */
     s_DirectInfoValid = false;
     s_DirectInfoCanGs = false;
@@ -1115,6 +1146,30 @@ void PicoDriveBridge_SetRenderingMode(int mode)
 int PicoDriveBridge_GetRenderingMode(void)
 {
     return s_RenderingMode;
+}
+
+void PicoDriveBridge_SetSmsColorBorder(bool enabled)
+{
+    s_SmsColorBorder = enabled;
+}
+
+bool PicoDriveBridge_GetSmsColorBorder(void)
+{
+    return s_SmsColorBorder;
+}
+
+void PicoDriveBridge_SetSmsFm(bool enabled)
+{
+    if (s_SmsFm == enabled)
+        return;
+
+    s_SmsFm = enabled;
+    s_VariablesChanged = true;
+}
+
+bool PicoDriveBridge_GetSmsFm(void)
+{
+    return s_SmsFm;
 }
 
 
