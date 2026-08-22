@@ -1241,18 +1241,22 @@ void PicoDriveBridge_SetRegion(int auroraRegion)
 
     s_AuroraRegion = auroraRegion;
 
-    /* SMS/GG need the territory bit at RESET time. If an 8-bit game is
-     * currently loaded, update regionOverride now so Reset Emulator invokes
-     * PicoResetMS() with the correct PMS_HW_JAP state.
-     *
-     * For a running MD/32X game, leave the old core value in place until
-     * libretro consumes picodrive_region on the next frame; that preserves
-     * PicoDrive's existing live PicoDetectRegion() behaviour there. */
-    if (!s_GameLoaded || (PicoIn.AHW & PAHW_8BIT))
-        PicoIn.regionOverride = coreRegion;
-
+    /* AURORA_SMS_GG_LIVE_REGION_V2
+     * SMS/GG latch territory and PAL/NTSC cadence during PicoResetMS().
+     * Apply the requested override and reset immediately.
+     * MD/32X keep the existing live libretro region-update path. */
     if (!menuChanged && !coreChanged)
         return;
+
+    if (!s_GameLoaded)
+    {
+        PicoIn.regionOverride = coreRegion;
+    }
+    else if (PicoIn.AHW & PAHW_8BIT)
+    {
+        PicoIn.regionOverride = coreRegion;
+        retro_reset();
+    }
 
     s_VariablesChanged = true;
     pdInvalidateDirectVideoInfo();
