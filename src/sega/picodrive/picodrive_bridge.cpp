@@ -240,6 +240,24 @@ static const char *pdRegionName()
     }
 }
 
+/* AURORA_SMS_REGION_SYNC_V1
+ * SMS/GG consume PicoIn.regionOverride inside PicoResetMS(), before the
+ * normal Mega Drive PicoDetectRegion() path. Keep the Aurora menu value
+ * convertible to the exact PicoDrive territory bits at all times.
+ *
+ * Aurora exposes Off/NTSC-U/NTSC-J/PAL. Its PAL entry means European PAL,
+ * hence 8 rather than the uncommon Japan-PAL value 2. */
+static unsigned short pdCoreRegionOverride(int auroraRegion)
+{
+    switch (auroraRegion)
+    {
+        case SNES_FORCE_REGION_NTSC_J: return 1; /* Japan NTSC */
+        case SNES_FORCE_REGION_NTSC_U: return 4; /* Export/US NTSC */
+        case SNES_FORCE_REGION_PAL:    return 8; /* Export/Europe PAL */
+        default:                       return 0; /* Auto */
+    }
+}
+
 static bool pdEnvironment(unsigned cmd, void *data)
 {
     switch (cmd)
@@ -995,6 +1013,8 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes, const char *pNam
         (const unsigned char *)pData,
         (unsigned int)PD_AURORA_ROM_BUFFER_CAPACITY);
 
+    /* Region must already be visible to PicoResetMS() during load. */
+    PicoIn.regionOverride = pdCoreRegionOverride(s_AuroraRegion);
     s_VariablesChanged = true;
     bool loadOk = retro_load_game(&info);
 
@@ -1215,9 +1235,25 @@ bool PicoDriveBridge_Is8Bit(void)
 
 void PicoDriveBridge_SetRegion(int auroraRegion)
 {
-    if (s_AuroraRegion == auroraRegion)
-        return;
+    const unsigned short coreRegion = pdCoreRegionOverride(auroraRegion);
+    const bool menuChanged = s_AuroraRegion != auroraRegion;
+    const bool coreChanged = PicoIn.regionOverride != coreRegion;
+
     s_AuroraRegion = auroraRegion;
+
+    /* SMS/GG need the territory bit at RESET time. If an 8-bit game is
+     * currently loaded, update regionOverride now so Reset Emulator invokes
+     * PicoResetMS() with the correct PMS_HW_JAP state.
+     *
+     * For a running MD/32X game, leave the old core value in place until
+     * libretro consumes picodrive_region on the next frame; that preserves
+     * PicoDrive's existing live PicoDetectRegion() behaviour there. */
+    if (!s_GameLoaded || (PicoIn.AHW & PAHW_8BIT))
+        PicoIn.regionOverride = coreRegion;
+
+    if (!menuChanged && !coreChanged)
+        return;
+
     s_VariablesChanged = true;
     pdInvalidateDirectVideoInfo();
 

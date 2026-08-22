@@ -746,6 +746,7 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 		    cfg.forceregion == SNES_FORCE_REGION_PAL)
 		{
 			g_SnesForceRegion = cfg.forceregion;
+			PicoDriveBridge_SetRegion(g_SnesForceRegion);
 		}
 
 		const Int32 uLayerBits =
@@ -1453,6 +1454,7 @@ case 16: /* Force Region */
                 break;
         }
     }
+    PicoDriveBridge_SetRegion(g_SnesForceRegion);
     break;
 case 17: /* Famiclone Audio */
     g_FamicloneAudio = !g_FamicloneAudio;
