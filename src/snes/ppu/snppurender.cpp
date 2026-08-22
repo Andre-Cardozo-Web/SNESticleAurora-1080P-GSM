@@ -83,6 +83,8 @@ static void _SNPPURenderRefreshObjLimitCache()
 		case SNPPU_OBJ_LIMIT_MEDIUM: nBudget=24; break;
 		case SNPPU_OBJ_LIMIT_STRONG: nBudget=20; break;
 		case SNPPU_OBJ_LIMIT_EXTREME: nBudget=16; break;
+		case SNPPU_OBJ_LIMIT_HEAVY: nBudget=12; break;
+		case SNPPU_OBJ_LIMIT_INSANE: nBudget=8; break;
 		default: nBudget=SNPPU_MAXOBJCHR; break;
 	}
 	g_SnesObjLimitTileBudget =

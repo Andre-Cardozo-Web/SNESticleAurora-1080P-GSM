@@ -914,6 +914,8 @@ static const char *_VideoHackSpriteLimiterStatus()
 		case SNPPU_OBJ_LIMIT_MEDIUM:  return "Medium (24)";
 		case SNPPU_OBJ_LIMIT_STRONG:  return "Strong (20)";
 		case SNPPU_OBJ_LIMIT_EXTREME: return "Extreme (16)";
+		case SNPPU_OBJ_LIMIT_HEAVY:   return "Heavy (12)";
+		case SNPPU_OBJ_LIMIT_INSANE:  return "Insane (8)";
 		default:                      return "Off (34)";
 	}
 }
