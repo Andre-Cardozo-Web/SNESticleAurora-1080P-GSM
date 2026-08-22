@@ -294,6 +294,8 @@ Bool MainLoopProcess()
                 static Uint32 sPdHostNum = 0;
                 static Uint32 sPdHostDen = 0;
                 static Int32 sPdGameHz = 0;
+                /* AURORA_PD_NTSC_5994_CLOCK_V1_20260822
+                 * Phase is rational; all products stay below ~61 million. */
                 static Uint32 sPdPhase = 0;
 
                 Bool bDirectSega;
@@ -314,25 +316,39 @@ Bool MainLoopProcess()
                     !s_pMovieClip->IsPlaying() &&
                     !s_pMovieClip->IsRecording())
                 {
-                    Uint32 hostNum = 60, hostDen = 1;
-                    Int32 hostFamily;
+                    Uint32 hostNum = 60000, hostDen = 1001;
+                    Uint32 gameNum, gameDen;
+                    Uint32 add, threshold;
                     Int32 gameHz;
 
                     GSK_GetRefreshRate(&hostNum, &hostDen);
                     if (hostNum == 0 || hostDen == 0)
                     {
-                        hostNum = 60;
-                        hostDen = 1;
+                        hostNum = 60000;
+                        hostDen = 1001;
                     }
 
-                    hostFamily =
-                        (hostNum == 50 && hostDen == 1) ? 50 : 60;
                     gameHz = PicoDriveBridge_GetNominalFrameRate();
 
-                    if (gameHz != hostFamily)
+                    /* Match the PS2/core sound timebase above: PAL is 50/1;
+                     * Aurora's NTSC PicoDrive presentation is 60000/1001.
+                     * Do not collapse NTSC to integer 60 here. */
+                    if (gameHz == 50)
                     {
-                        Uint32 add = (Uint32)gameHz * hostDen;
+                        gameNum = 50;
+                        gameDen = 1;
+                    }
+                    else
+                    {
+                        gameNum = 60000;
+                        gameDen = 1001;
+                    }
 
+                    add = gameNum * hostDen;
+                    threshold = hostNum * gameDen;
+
+                    if (add != threshold)
+                    {
                         /* AURORA_PD_CADENCE_RESUME_FIRST_FRAME_V7_RESET_20260821 */
                         if (bGameplayJustStarted ||
                             _pSega->GetFrame() == 0 ||
@@ -344,17 +360,17 @@ Bool MainLoopProcess()
                             sPdHostDen = hostDen;
                             sPdGameHz = gameHz;
                             sPdPhase =
-                                (add < hostNum && hostNum > 0)
-                                ? hostNum - 1 : 0;
+                                (add < threshold && threshold > 0)
+                                ? threshold - 1 : 0;
                         }
 
                         executeFrames = 0;
                         sPdPhase += add;
 
-                        while (sPdPhase >= hostNum &&
+                        while (sPdPhase >= threshold &&
                                executeFrames < 2)
                         {
-                            sPdPhase -= hostNum;
+                            sPdPhase -= threshold;
                             ++executeFrames;
                         }
                     }
