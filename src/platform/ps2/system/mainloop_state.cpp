@@ -1497,19 +1497,40 @@ static void _MainLoopStateDeleteSettings()
 
 static const Char *_MainLoopStateGetUnsupportedChip(Uint32 uFlags)
 {
-    if (uFlags & SNROM_FLAG_SUPERFX) return "SuperFX";
+    /* AURORA_SPECIAL_CHIP_STATE_V1
+     * DSP-1/2/4, OBC1, SuperFX, S-DD1 and S-RTC have a tagged snapshot in
+     * the unused SRAM-state tail. Keep refusing them only if the current
+     * cartridge cannot fit that envelope safely. */
     if (uFlags & SNROM_FLAG_GAMEBOY) return "Super Game Boy";
-    if (uFlags & SNROM_FLAG_DSP1)    return "DSP-1";
-    if (uFlags & SNROM_FLAG_DSP2)    return "DSP-2";
     if (uFlags & SNROM_FLAG_DSP3)    return "DSP-3";
-    if (uFlags & SNROM_FLAG_DSP4)    return "DSP-4";
-    if (uFlags & SNROM_FLAG_OBC1)    return "OBC1";
-    /* AURORA_CX4_STATE_V7 */
+
+    if ((uFlags & SNROM_FLAG_SUPERFX) &&
+        (!_pSnes || !_pSnes->CanSerializeSpecialChipState()))
+        return "SuperFX";
+    if ((uFlags & SNROM_FLAG_DSP1) &&
+        (!_pSnes || !_pSnes->CanSerializeSpecialChipState()))
+        return "DSP-1";
+    if ((uFlags & SNROM_FLAG_DSP2) &&
+        (!_pSnes || !_pSnes->CanSerializeSpecialChipState()))
+        return "DSP-2";
+    if ((uFlags & SNROM_FLAG_DSP4) &&
+        (!_pSnes || !_pSnes->CanSerializeSpecialChipState()))
+        return "DSP-4";
+    if ((uFlags & SNROM_FLAG_OBC1) &&
+        (!_pSnes || !_pSnes->CanSerializeSpecialChipState()))
+        return "OBC1";
+    if ((uFlags & SNROM_FLAG_SDD1) &&
+        (!_pSnes || !_pSnes->CanSerializeSpecialChipState()))
+        return "S-DD1";
+    if ((uFlags & SNROM_FLAG_SRTC) &&
+        (!_pSnes || !_pSnes->CanSerializeSpecialChipState()))
+        return "S-RTC";
+
+    /* Existing CX4 format/offset is intentionally unchanged. */
     if ((uFlags & SNROM_FLAG_CX4) &&
         (!_pSnes || !_pSnes->CanSerializeCX4State()))
         return "CX4";
-    if (uFlags & SNROM_FLAG_SDD1)    return "S-DD1";
-    if (uFlags & SNROM_FLAG_SRTC)    return "S-RTC";
+
     return NULL;
 }
 

@@ -41,6 +41,9 @@ public:
 
     static SNDSP1 *GetInstance();
 
+    /* AURORA_SPECIAL_CHIP_STATE_V1: SnesSystem owns the packed special-chip snapshot. */
+    friend class SnesSystem;
+
 private:
     // ------------------------------------------------------------------
     // Bits do Status Register (todos referidos ao byte alto, ja que so

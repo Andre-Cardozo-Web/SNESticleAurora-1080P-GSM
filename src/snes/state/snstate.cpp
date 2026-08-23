@@ -5,6 +5,7 @@
 #include "console.h"
 #include "snes.h"
 #include "snstate.h"
+#include "dsp4emu.h"
 
 /* AURORA_SPEEDY_MDR_STATE_LAYOUT_V1
    SNStateCPUT was 44 bytes before MDR support. New fields only consume
@@ -51,6 +52,147 @@ Bool SnesSystem::CanSerializeCX4State()
 
     return nSramBytes <=
         (Uint32)(SNES_SRAMSIZE - sizeof(SNCX4StateEnvelopeT))
+        ? TRUE : FALSE;
+}
+
+/* AURORA_SPECIAL_CHIP_STATE_V1
+ *
+ * Keep sizeof(SnesStateT) byte-for-byte compatible.  Like the existing CX4
+ * support, implemented coprocessor snapshots live in the unused tail of the
+ * fixed 256 KiB SRAM image.  The CX4 envelope stays at the exact old offset;
+ * this envelope is placed immediately before it.
+ *
+ * The payload stores only runtime bytes with no vtable or live host pointers.
+ * A byte-count guard makes a layout-changing future build reject an old
+ * special-chip state instead of restoring a mismatched object layout.
+ */
+#define SNSPECIAL_STATE_PAYLOAD_BYTES (12 * 1024)
+#define SNSPECIAL_STATE_SUPPORTED_FLAGS \
+    (SNROM_FLAG_DSP1 | SNROM_FLAG_DSP2 | SNROM_FLAG_DSP4 | \
+     SNROM_FLAG_OBC1 | SNROM_FLAG_SUPERFX | SNROM_FLAG_SDD1 | \
+     SNROM_FLAG_SRTC)
+
+struct SNSpecialStateEnvelopeT
+{
+    Uint8  Tag[8];
+    Uint32 Version;
+    Uint32 ChipFlag;
+    Uint32 DataBytes;
+    Uint8  Data[SNSPECIAL_STATE_PAYLOAD_BYTES];
+};
+
+static const Uint8 _SNSpecialStateTag[8] =
+    { 'A', 'U', 'S', 'P', 'S', 'T', '1', 0 };
+
+static Uint32 _SNSpecialStateFlag(Uint32 uFlags)
+{
+    Uint32 uSpecial = uFlags & SNSPECIAL_STATE_SUPPORTED_FLAGS;
+
+    /* Commercial carts represented here use one of these coprocessors at a
+       time.  Refuse an unexpected combination rather than guess an order. */
+    if (!uSpecial || (uSpecial & (uSpecial - 1)))
+        return 0;
+    return uSpecial;
+}
+
+static SNSpecialStateEnvelopeT *_SNSpecialStateEnvelope(SnesStateT *pState)
+{
+    return (SNSpecialStateEnvelopeT *)
+        (pState->SRam + sizeof(pState->SRam)
+         - sizeof(SNCX4StateEnvelopeT)
+         - sizeof(SNSpecialStateEnvelopeT));
+}
+
+static const SNSpecialStateEnvelopeT *_SNSpecialStateEnvelope(
+    const SnesStateT *pState)
+{
+    return (const SNSpecialStateEnvelopeT *)
+        (pState->SRam + sizeof(pState->SRam)
+         - sizeof(SNCX4StateEnvelopeT)
+         - sizeof(SNSpecialStateEnvelopeT));
+}
+
+typedef char SNSpecialStateEnvelopeMustFit[
+    (sizeof(SNSpecialStateEnvelopeT) + sizeof(SNCX4StateEnvelopeT)
+        < SNES_SRAMSIZE) ? 1 : -1];
+
+Bool SnesSystem::CanSerializeSpecialChipState()
+{
+    Uint32 uChip;
+    Uint32 nStateBytes = 0;
+    Uint32 nSramBytes;
+
+    if (!m_pRom)
+        return FALSE;
+
+    uChip = _SNSpecialStateFlag(m_pRom->m_Flags);
+    if (!uChip)
+        return FALSE;
+
+    switch (uChip)
+    {
+#if SNES_DSP1
+        case SNROM_FLAG_DSP1:
+            nStateBytes = (Uint32)
+                (((const Uint8 *)&m_DSP1.m_Vz + sizeof(m_DSP1.m_Vz))
+                 - (const Uint8 *)&m_DSP1.m_uSR);
+            break;
+
+        case SNROM_FLAG_DSP2:
+            nStateBytes = (Uint32)
+                (((const Uint8 *)&m_DSP2.m_Op0DOutLen + sizeof(m_DSP2.m_Op0DOutLen))
+                 - (const Uint8 *)&m_DSP2.m_uCommand);
+            break;
+
+        case SNROM_FLAG_DSP4:
+            nStateBytes = (Uint32)(sizeof(DSP4) + sizeof(DSP4_vars)
+                + sizeof(dsp4_byte) + sizeof(dsp4_address));
+            break;
+#endif
+
+        case SNROM_FLAG_OBC1:
+            nStateBytes = (Uint32)
+                (((const Uint8 *)&m_OBC1.m_Shift + sizeof(m_OBC1.m_Shift))
+                 - (const Uint8 *)&m_OBC1.m_Ram[0]);
+            break;
+
+        case SNROM_FLAG_SUPERFX:
+            /* All live GSU execution/cache/pixel state precedes m_pRom.
+               m_pRom/m_pRam and their sizes belong to the currently loaded
+               cartridge and must remain live pointers, never state bytes. */
+            nStateBytes = (Uint32)
+                ((const Uint8 *)&m_GSU.m_pRom
+                 - (const Uint8 *)&m_GSU.m_R[0]);
+            break;
+
+        case SNROM_FLAG_SDD1:
+            /* Decompression runs synchronously.  Between calls only the
+               register/map prefix is persistent; the input pointer and
+               arithmetic decoder scratch state are transient. */
+            nStateBytes = (Uint32)
+                (((const Uint8 *)&m_SDD1.m_bMapDirty + sizeof(m_SDD1.m_bMapDirty))
+                 - (const Uint8 *)&m_SDD1.m_Reg[0]);
+            break;
+
+        case SNROM_FLAG_SRTC:
+            /* Exclude the optional SNSRTC_TESTHOOK host function pointer. */
+            nStateBytes = (Uint32)
+                (((const Uint8 *)&m_SRTC.m_Index + sizeof(m_SRTC.m_Index))
+                 - (const Uint8 *)&m_SRTC.m_Reg[0]);
+            break;
+
+        default:
+            return FALSE;
+    }
+
+    if (!nStateBytes || nStateBytes > SNSPECIAL_STATE_PAYLOAD_BYTES)
+        return FALSE;
+
+    nSramBytes = m_pRom->GetSRAMBytes();
+    return nSramBytes <=
+        (Uint32)(SNES_SRAMSIZE
+                 - sizeof(SNCX4StateEnvelopeT)
+                 - sizeof(SNSpecialStateEnvelopeT))
         ? TRUE : FALSE;
 }
 
@@ -135,6 +277,103 @@ void SnesSystem::SaveState(SnesStateT *pState)
         m_CX4.SaveState(&pCX4->CX4);
     }
 
+    /* AURORA_SPECIAL_CHIP_STATE_V1 */
+    if (m_pRom && CanSerializeSpecialChipState())
+    {
+        SNSpecialStateEnvelopeT *pSpecial = _SNSpecialStateEnvelope(pState);
+        Uint32 uChip = _SNSpecialStateFlag(m_pRom->m_Flags);
+        Uint32 nStateBytes = 0;
+
+        memset(pSpecial, 0, sizeof(*pSpecial));
+        memcpy(pSpecial->Tag, _SNSpecialStateTag, sizeof(pSpecial->Tag));
+        pSpecial->Version = 1;
+        pSpecial->ChipFlag = uChip;
+
+        switch (uChip)
+        {
+#if SNES_DSP1
+            case SNROM_FLAG_DSP1:
+            {
+                const Uint8 *pBegin = (const Uint8 *)&m_DSP1.m_uSR;
+                const Uint8 *pEnd =
+                    (const Uint8 *)&m_DSP1.m_Vz + sizeof(m_DSP1.m_Vz);
+                nStateBytes = (Uint32)(pEnd - pBegin);
+                memcpy(pSpecial->Data, pBegin, nStateBytes);
+                break;
+            }
+
+            case SNROM_FLAG_DSP2:
+            {
+                const Uint8 *pBegin = (const Uint8 *)&m_DSP2.m_uCommand;
+                const Uint8 *pEnd = (const Uint8 *)&m_DSP2.m_Op0DOutLen
+                    + sizeof(m_DSP2.m_Op0DOutLen);
+                nStateBytes = (Uint32)(pEnd - pBegin);
+                memcpy(pSpecial->Data, pBegin, nStateBytes);
+                break;
+            }
+
+            case SNROM_FLAG_DSP4:
+            {
+                Uint32 uOffset = 0;
+                memcpy(pSpecial->Data + uOffset, &DSP4, sizeof(DSP4));
+                uOffset += sizeof(DSP4);
+                memcpy(pSpecial->Data + uOffset, &DSP4_vars, sizeof(DSP4_vars));
+                uOffset += sizeof(DSP4_vars);
+                memcpy(pSpecial->Data + uOffset, &dsp4_byte, sizeof(dsp4_byte));
+                uOffset += sizeof(dsp4_byte);
+                memcpy(pSpecial->Data + uOffset, &dsp4_address, sizeof(dsp4_address));
+                uOffset += sizeof(dsp4_address);
+                nStateBytes = uOffset;
+                break;
+            }
+#endif
+
+            case SNROM_FLAG_OBC1:
+            {
+                const Uint8 *pBegin = (const Uint8 *)&m_OBC1.m_Ram[0];
+                const Uint8 *pEnd =
+                    (const Uint8 *)&m_OBC1.m_Shift + sizeof(m_OBC1.m_Shift);
+                nStateBytes = (Uint32)(pEnd - pBegin);
+                memcpy(pSpecial->Data, pBegin, nStateBytes);
+                break;
+            }
+
+            case SNROM_FLAG_SUPERFX:
+            {
+                const Uint8 *pBegin = (const Uint8 *)&m_GSU.m_R[0];
+                const Uint8 *pEnd = (const Uint8 *)&m_GSU.m_pRom;
+                nStateBytes = (Uint32)(pEnd - pBegin);
+                memcpy(pSpecial->Data, pBegin, nStateBytes);
+                break;
+            }
+
+            case SNROM_FLAG_SDD1:
+            {
+                const Uint8 *pBegin = (const Uint8 *)&m_SDD1.m_Reg[0];
+                const Uint8 *pEnd = (const Uint8 *)&m_SDD1.m_bMapDirty
+                    + sizeof(m_SDD1.m_bMapDirty);
+                nStateBytes = (Uint32)(pEnd - pBegin);
+                memcpy(pSpecial->Data, pBegin, nStateBytes);
+                break;
+            }
+
+            case SNROM_FLAG_SRTC:
+            {
+                const Uint8 *pBegin = (const Uint8 *)&m_SRTC.m_Reg[0];
+                const Uint8 *pEnd =
+                    (const Uint8 *)&m_SRTC.m_Index + sizeof(m_SRTC.m_Index);
+                nStateBytes = (Uint32)(pEnd - pBegin);
+                memcpy(pSpecial->Data, pBegin, nStateBytes);
+                break;
+            }
+
+            default:
+                break;
+        }
+
+        pSpecial->DataBytes = nStateBytes;
+    }
+
     // copy spc ram
     pState->SPC.bRomEnable = m_Spc.bRomEnable;
 
@@ -156,6 +395,76 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
         if (!CanSerializeCX4State() ||
             memcmp(pCX4->Tag, _SNCX4StateTag, sizeof(pCX4->Tag)) != 0 ||
             pCX4->Version != 1)
+        {
+            return FALSE;
+        }
+    }
+
+    /* AURORA_SPECIAL_CHIP_STATE_V1
+     * Validate the coprocessor envelope before mutating any live machine
+     * state. Old special-chip states were blocked by the frontend, so there
+     * is no legacy special-chip payload to accept here. */
+    if (m_pRom && _SNSpecialStateFlag(m_pRom->m_Flags))
+    {
+        const SNSpecialStateEnvelopeT *pSpecial =
+            _SNSpecialStateEnvelope(pState);
+        Uint32 uChip = _SNSpecialStateFlag(m_pRom->m_Flags);
+        Uint32 nExpectedBytes = 0;
+
+        if (!CanSerializeSpecialChipState() ||
+            memcmp(pSpecial->Tag, _SNSpecialStateTag,
+                   sizeof(pSpecial->Tag)) != 0 ||
+            pSpecial->Version != 1 ||
+            pSpecial->ChipFlag != uChip)
+        {
+            return FALSE;
+        }
+
+        switch (uChip)
+        {
+#if SNES_DSP1
+            case SNROM_FLAG_DSP1:
+                nExpectedBytes = (Uint32)
+                    (((const Uint8 *)&m_DSP1.m_Vz + sizeof(m_DSP1.m_Vz))
+                     - (const Uint8 *)&m_DSP1.m_uSR);
+                break;
+            case SNROM_FLAG_DSP2:
+                nExpectedBytes = (Uint32)
+                    (((const Uint8 *)&m_DSP2.m_Op0DOutLen + sizeof(m_DSP2.m_Op0DOutLen))
+                     - (const Uint8 *)&m_DSP2.m_uCommand);
+                break;
+            case SNROM_FLAG_DSP4:
+                nExpectedBytes = (Uint32)(sizeof(DSP4) + sizeof(DSP4_vars)
+                    + sizeof(dsp4_byte) + sizeof(dsp4_address));
+                break;
+#endif
+            case SNROM_FLAG_OBC1:
+                nExpectedBytes = (Uint32)
+                    (((const Uint8 *)&m_OBC1.m_Shift + sizeof(m_OBC1.m_Shift))
+                     - (const Uint8 *)&m_OBC1.m_Ram[0]);
+                break;
+            case SNROM_FLAG_SUPERFX:
+                nExpectedBytes = (Uint32)
+                    ((const Uint8 *)&m_GSU.m_pRom
+                     - (const Uint8 *)&m_GSU.m_R[0]);
+                break;
+            case SNROM_FLAG_SDD1:
+                nExpectedBytes = (Uint32)
+                    (((const Uint8 *)&m_SDD1.m_bMapDirty + sizeof(m_SDD1.m_bMapDirty))
+                     - (const Uint8 *)&m_SDD1.m_Reg[0]);
+                break;
+            case SNROM_FLAG_SRTC:
+                nExpectedBytes = (Uint32)
+                    (((const Uint8 *)&m_SRTC.m_Index + sizeof(m_SRTC.m_Index))
+                     - (const Uint8 *)&m_SRTC.m_Reg[0]);
+                break;
+            default:
+                return FALSE;
+        }
+
+        if (!nExpectedBytes ||
+            nExpectedBytes > SNSPECIAL_STATE_PAYLOAD_BYTES ||
+            pSpecial->DataBytes != nExpectedBytes)
         {
             return FALSE;
         }
@@ -214,6 +523,71 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
             return FALSE;
     }
 
+    /* AURORA_SPECIAL_CHIP_STATE_V1 */
+    if (m_pRom && _SNSpecialStateFlag(m_pRom->m_Flags))
+    {
+        const SNSpecialStateEnvelopeT *pSpecial =
+            _SNSpecialStateEnvelope(pState);
+        Uint32 uChip = _SNSpecialStateFlag(m_pRom->m_Flags);
+
+        switch (uChip)
+        {
+#if SNES_DSP1
+            case SNROM_FLAG_DSP1:
+                memcpy(&m_DSP1.m_uSR, pSpecial->Data,
+                       pSpecial->DataBytes);
+                break;
+
+            case SNROM_FLAG_DSP2:
+                memcpy(&m_DSP2.m_uCommand, pSpecial->Data,
+                       pSpecial->DataBytes);
+                break;
+
+            case SNROM_FLAG_DSP4:
+            {
+                Uint32 uOffset = 0;
+                memcpy(&DSP4, pSpecial->Data + uOffset, sizeof(DSP4));
+                uOffset += sizeof(DSP4);
+                memcpy(&DSP4_vars, pSpecial->Data + uOffset, sizeof(DSP4_vars));
+                uOffset += sizeof(DSP4_vars);
+                memcpy(&dsp4_byte, pSpecial->Data + uOffset, sizeof(dsp4_byte));
+                uOffset += sizeof(dsp4_byte);
+                memcpy(&dsp4_address, pSpecial->Data + uOffset,
+                       sizeof(dsp4_address));
+                break;
+            }
+#endif
+
+            case SNROM_FLAG_OBC1:
+                memcpy(&m_OBC1.m_Ram[0], pSpecial->Data,
+                       pSpecial->DataBytes);
+                break;
+
+            case SNROM_FLAG_SUPERFX:
+                /* Preserve the current cartridge pointers/sizes; only the
+                   pointer-free runtime prefix is restored. */
+                memcpy(&m_GSU.m_R[0], pSpecial->Data,
+                       pSpecial->DataBytes);
+                break;
+
+            case SNROM_FLAG_SDD1:
+                /* Drop stale decoder scratch/pointer state, then restore the
+                   persistent register/map prefix. */
+                m_SDD1.Reset();
+                memcpy(&m_SDD1.m_Reg[0], pSpecial->Data,
+                       pSpecial->DataBytes);
+                break;
+
+            case SNROM_FLAG_SRTC:
+                memcpy(&m_SRTC.m_Reg[0], pSpecial->Data,
+                       pSpecial->DataBytes);
+                break;
+
+            default:
+                return FALSE;
+        }
+    }
+
     // copy spc ram
     SNSPCSetRomEnable(&m_Spc, FALSE);
 	memcpy(m_Spc.Mem, pState->SpcRam, SNSPC_MEM_SIZE);
@@ -228,6 +602,15 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
 	{
 		SetSlowRom();
 	}
+
+    /* AURORA_SPECIAL_CHIP_STATE_V1
+     * SetFastRom/SetSlowRom may touch CPU bank descriptors, so make the
+     * restored S-DD1 $C0-$FF mapping the final word. */
+    if (m_pRom && (m_pRom->m_Flags & SNROM_FLAG_SDD1))
+    {
+        RemapSDD1();
+        m_SDD1.ClearMapDirty();
+    }
 
 	return TRUE;
 }

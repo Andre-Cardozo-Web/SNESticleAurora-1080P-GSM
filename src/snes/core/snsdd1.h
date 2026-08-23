@@ -60,6 +60,9 @@ public:
     // descomprime 'len' bytes (0 = 0x10000) de 'pIn' para 'pOut'
     void  Decompress(Uint8 *pOut, const Uint8 *pIn, Int32 len);
 
+    /* AURORA_SPECIAL_CHIP_STATE_V1: SnesSystem owns the packed special-chip snapshot. */
+    friend class SnesSystem;
+
 private:
     Uint8 m_Reg[8];        // $4800-$4807
     Bool  m_bMapDirty;

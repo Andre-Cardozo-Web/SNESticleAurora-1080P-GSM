@@ -47,6 +47,9 @@ public:
     void   SetModeIndex(Int32 mode, Int32 idx) { m_Mode = mode; m_Index = idx; }
 #endif
 
+    /* AURORA_SPECIAL_CHIP_STATE_V1: SnesSystem owns the packed special-chip snapshot. */
+    friend class SnesSystem;
+
 private:
     enum { RTCM_Ready = 0, RTCM_Command, RTCM_Read, RTCM_Write };
 

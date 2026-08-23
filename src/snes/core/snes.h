@@ -76,6 +76,9 @@ public:
      * field, preserving sizeof(SnesStateT) and normal SNES state files. */
     Bool    CanSerializeCX4State();
 
+    /* AURORA_SPECIAL_CHIP_STATE_V1 */
+    Bool    CanSerializeSpecialChipState();
+
     Int32   GetSRAMBytes();
     Uint8   *GetSRAMData();
 

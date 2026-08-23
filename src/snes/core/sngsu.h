@@ -105,6 +105,9 @@ public:
     void ClearDiagWindow();
 #endif
 
+    /* AURORA_SPECIAL_CHIP_STATE_V1: SnesSystem owns the packed special-chip snapshot. */
+    friend class SnesSystem;
+
 private:
     // ---- estado de CPU ----
     Uint16 m_R[16];          // R0-R15 (R15 = PC)

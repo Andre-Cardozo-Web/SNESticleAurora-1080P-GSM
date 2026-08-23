@@ -24,6 +24,9 @@ public:
     Uint8 Read (Uint32 uAddr);             // uAddr = endereco baixo ($6000-$7FFF)
     void  Write(Uint32 uAddr, Uint8 uData);
 
+    /* AURORA_SPECIAL_CHIP_STATE_V1: SnesSystem owns the packed special-chip snapshot. */
+    friend class SnesSystem;
+
 private:
     Uint8 m_Ram[0x2000];   // 8KB de RAM interna ($6000-$7FFF)
     Int32 m_Address;       // indice do sprite atual (0..0x7F)

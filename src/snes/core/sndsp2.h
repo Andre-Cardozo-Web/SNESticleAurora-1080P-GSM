@@ -35,6 +35,9 @@ public:
     Uint8 ReadData (Uint32 uAddr);
     Uint8 ReadStatus(Uint32 uAddr);
 
+    /* AURORA_SPECIAL_CHIP_STATE_V1: SnesSystem owns the packed special-chip snapshot. */
+    friend class SnesSystem;
+
 private:
     // ---- estado do protocolo (byte-oriented) ----
     Uint8 m_uCommand;       // opcode atual
