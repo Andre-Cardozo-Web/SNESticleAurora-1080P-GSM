@@ -450,11 +450,16 @@ Bool MainLoopProcess()
 		    _iframetex^=1;
         }
 
-        /* AURORA_AUDIO_POSTVBLANK_ONLY_V10_20260823
-         * Gameplay PCM is staged in the EE FIFO here, but the IOP RPC
-         * drain is intentionally deferred to MainLoopRender(), after
-         * GSK_SyncFlip(). This keeps synchronous audsrv latency out of
-         * the emulation/render deadline. */
+        /* AURORA_AUDIO_STUTTER_EARLY_DRAIN_V9_20260823
+         *
+         * Refill audsrv as soon as this emulated frame has produced its PCM,
+         * before the remaining host render/VBlank latency can consume the IOP
+         * safety cushion. Aud_BufferedAsyncStart() uses wait=0 drains.
+         *
+         * MainLoopRender keeps its existing post-VBlank call as a retry.
+         * If this early call emptied the EE FIFO, the late call sees
+         * aud_async_count==0 and performs no audio RPC. */
+        Aud_BufferedAsyncStart();
     }
 
     _MainLoopCheckSRAM();

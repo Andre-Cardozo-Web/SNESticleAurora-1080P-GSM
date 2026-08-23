@@ -114,13 +114,6 @@ void DLog(const char *fmt, ...)
 #define AUD_AUDSRV_CHANNELS  2
 #define AUD_BYTES_PER_SAMPLE (AUD_AUDSRV_CHANNELS * (AUD_AUDSRV_BITS / 8)) /* 4 */
 
-/* AURORA_AUDIO_POSTVBLANK_CACHE_V10_20260823
- * PS2SDK audsrv at fixed 48 kHz / 16-bit / stereo uses a
- * 20480-byte ring: 5120 stereo sample-frames. Keep this explicit
- * so transition priming can derive a conservative free-space
- * lower bound from the audsrv_queued() RPC it already performs. */
-#define AUD_AUDSRV_RING_SAMPLES 5120
-
 
 /*
     Static interleave scratch sized for the worst case the engine will
@@ -476,7 +469,6 @@ void Aud_PrepareGameplayHeadroom(void)
 {
     int queued_bytes;
     int queued_samples;
-    int cached_avail;
     int need_samples;
     int remaining_bytes;
     const int target_samples = aud_compat_deep_queue
@@ -485,35 +477,14 @@ void Aud_PrepareGameplayHeadroom(void)
     if (!sjpcm_inited)
         return;
 
-    /*
-     * AURORA_AUDIO_POSTVBLANK_CACHE_V10_20260823
-     *
-     * This RPC already existed for transition priming. Reuse its result to
-     * seed aud_async_cached_avail before the first gameplay frame instead of
-     * forcing a separate audsrv_available() RPC on the first async drain.
-     *
-     * queued + available == 5120 while the pointer-only ring is kept away
-     * from the writepos==readpos collision. IOP playback may consume samples
-     * while this function runs, which only makes the real available space
-     * larger; therefore this value remains a conservative LOWER bound.
-     */
     queued_bytes = audsrv_queued();
     if (queued_bytes < 0)
         return;
 
     queued_samples = queued_bytes / AUD_BYTES_PER_SAMPLE;
-    cached_avail = AUD_AUDSRV_RING_SAMPLES - queued_samples;
-    if (cached_avail < 0)
-        cached_avail = 0;
-    if (cached_avail > AUD_AUDSRV_RING_SAMPLES)
-        cached_avail = AUD_AUDSRV_RING_SAMPLES;
-
     need_samples = target_samples - queued_samples;
     if (need_samples <= 0)
-    {
-        aud_async_cached_avail = cached_avail;
         return;
-    }
 
     remaining_bytes = need_samples * AUD_BYTES_PER_SAMPLE;
 
@@ -521,14 +492,14 @@ void Aud_PrepareGameplayHeadroom(void)
     {
         int chunk = remaining_bytes;
         int sent;
-        int sent_samples;
 
-        /* Transition priming is best-effort. Never call wait_audio():
+        /* AURORA_AUDIO_FAILSOFT_POSTVBLANK_V1
+         * Transition priming is best-effort too. Never call wait_audio():
          * if the IOP ring cannot accept the requested silence immediately,
          * keep whatever headroom already exists and let gameplay continue.
          *
-         * _gameplay_silence is 3072 stereo frames = 12288 bytes, below
-         * PS2SDK audsrv's single-copy 16380-byte EE staging limit. */
+         * _gameplay_silence is 3072 stereo frames = 12288 bytes, still below
+         * PS2SDK audsrv's single-copy 16380-byte staging limit. */
         if (chunk > (int)sizeof(_gameplay_silence))
             chunk = (int)sizeof(_gameplay_silence);
 
@@ -539,23 +510,11 @@ void Aud_PrepareGameplayHeadroom(void)
         remaining_bytes -= sent;
         sjpcm_playing = 1;
 
-        /*
-         * Subtract only what the IOP really accepted. Consumption happening
-         * concurrently is deliberately NOT added back: cached_avail must stay
-         * pessimistic so the existing 32-frame collision margin stays valid.
-         */
-        sent_samples = sent / AUD_BYTES_PER_SAMPLE;
-        cached_avail -= sent_samples;
-        if (cached_avail < 0)
-            cached_avail = 0;
-
         /* Short write means the IOP ring reached its current safe capacity.
            Do not spin or wait for more room. */
         if (sent < chunk)
             break;
     }
-
-    aud_async_cached_avail = cached_avail;
 }
 
 

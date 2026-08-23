@@ -104,15 +104,10 @@ Uint32 _MainLoop_uBlenderTBP = 0;
 CWavFile _WavFile;
 #endif
 
-/* AURORA_ROM_BUFFER_16M_V1_20260823
- * 16 MiB + 1 KiB shared frontend staging buffer.
- *
- * SNES keeps its existing mapper limits (normal ExLoROM remains <= 8 MiB);
- * the extra capacity is primarily for PicoDrive content such as 10 MiB
- * Mega Drive hacks. PicoDrive receives the REAL ROM byte count and rounds
- * only its backing/banking allocation to the next power of two (16 MiB).
- * The final 1 KiB remains guard space for legacy aligned look-ahead reads. */
-Uint8 _RomData[16 * 1024 * 1024 + 1024] __attribute__((aligned(64))) __attribute__ ((section (".bss")));
+/* 8MB+1KB: cobre LoROM/HiROM ate 4MB E ExLoROM (Jumbo) ate 8MB/64Mbit,
+   usado por hacks grandes de SMW expandidas pelo Lunar Magic. Cabe folgado
+   nos 32MB da PS2. */
+Uint8 _RomData[8 * 1024 * 1024 + 1024] __attribute__((aligned(64))) __attribute__ ((section (".bss")));
 
 SnesStateT		_SnesState;
 NesStateT		_NesState;

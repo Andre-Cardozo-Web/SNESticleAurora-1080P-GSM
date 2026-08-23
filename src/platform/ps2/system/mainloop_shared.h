@@ -116,7 +116,7 @@ extern SegaRom        *_pSegaRom;
 
 /* ---- ROM / framebuffer / audio buffers ---------------------------- */
 
-extern Uint8           _RomData[16 * 1024 * 1024 + 1024];
+extern Uint8           _RomData[8 * 1024 * 1024 + 1024];
 extern CRenderSurface *_fbTexture[2];
 extern TextureT        _OutTex;
 extern AudMixBuffer *_AudMix;

@@ -113,7 +113,7 @@ static struct retro_game_info_ext s_ContentInfoExt;
 static const char s_DotPath[] = ".";
 
 /* Keep in sync with _RomData in mainloop_globals.cpp. */
-enum { PD_AURORA_ROM_BUFFER_CAPACITY = 16 * 1024 * 1024 + 1024 };
+enum { PD_AURORA_ROM_BUFFER_CAPACITY = 8 * 1024 * 1024 + 1024 };
 
 enum { PD_AUDIO_CHUNK = 1024 };
 static Int16 s_AudioL[PD_AUDIO_CHUNK];
