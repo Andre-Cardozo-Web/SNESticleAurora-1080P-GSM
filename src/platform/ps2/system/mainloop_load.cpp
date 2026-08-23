@@ -522,7 +522,7 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 	uRomCRC = (Uint32)mz_crc32(MZ_CRC32_INIT, pBuffer, (size_t)nRomBytes);
 #endif
 
-    /* Parsers receive the exact byte count, so clearing all 8 MiB before
+    /* Parsers receive the exact byte count, so clearing the whole ROM buffer before
        every launch was redundant. Keep only a small zero guard for old
        cartridge code that may legally perform aligned look-ahead reads. */
     {
