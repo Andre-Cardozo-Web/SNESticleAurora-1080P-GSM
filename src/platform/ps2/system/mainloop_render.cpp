@@ -15,6 +15,7 @@
 #include "mainloop_ui.h"
 #include "mainloop_bgm.h"
 #include "sega/picodrive/picodrive_bridge.h"
+#include "nes/quicknes/quicknes_bridge.h"
 
 #include "types.h"
 #include "console.h"
@@ -80,8 +81,10 @@ void MainLoopRender()
 
             if (!_bMenu &&
                 _pSystem == _pSega &&
-                PicoDriveBridge_IsMegaDrive())
+                (PicoDriveBridge_IsMegaDrive() ||
+                 PicoDriveBridge_IsMegaCd()))
             {
+                /* AURORA_PD_MCD_DIRECT_CT16_V4_RASTER */
                 wantedRaster = 320;
             }
 
@@ -113,6 +116,7 @@ void MainLoopRender()
               _pSystem == _pSnes ||
               (_pSystem == _pSega &&
                (PicoDriveBridge_IsMegaDrive() ||
+                PicoDriveBridge_IsMegaCd() ||
                 PicoDriveBridge_IsMasterSystem()))) &&
              !_bMenu) ? 1 : 0;
 
@@ -219,9 +223,15 @@ void MainLoopRender()
 		}
 
 
+        /* AURORA_QN_DIRECT_T8_GS_V4_RENDER */
+        if (_pSystem == _pNes && QuicknesBridge_CanDirectGsVideo())
+        {
+            Float32 qnY = (g_GskVideoMode == GSK_VIDMODE_240P) ? 2.0f : 4.0f;
+            QuicknesBridge_DrawDirectGs(_MainLoop_uOutTexTBP, fColor, qnY);
+        }
         /* AURORA_PD_DIRECT_8BIT_GS_V1_20260821 */
-        if (_pSystem == _pSega &&
-            PicoDriveBridge_CanDirectGsVideo())
+        else if (_pSystem == _pSega &&
+                 PicoDriveBridge_CanDirectGsVideo())
         {
             /* AURORA_PD_DIRECT_T8_RENDER */
             PicoDriveBridge_DrawDirectGs(

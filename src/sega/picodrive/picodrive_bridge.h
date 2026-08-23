@@ -57,6 +57,8 @@ void PicoDriveBridge_InvalidateGsResources(void);
 
 /* AURORA_PD_NATIVE320_DIRECT_T8_V1 */
 bool PicoDriveBridge_IsMegaDrive(void);
+/* AURORA_PD_MCD_DIRECT_CT16_V4 */
+bool PicoDriveBridge_IsMegaCd(void);
 bool PicoDriveBridge_CanDirectGsVideo(void);
 bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity);
 

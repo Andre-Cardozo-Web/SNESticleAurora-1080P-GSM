@@ -22,6 +22,14 @@
 #include "mixbuffer.h"
 #include "snio.h"
 
+/* AURORA_QN_DIRECT_T8_GS_V4
+ * QuickNES already renders native palette indices. Keep them indexed all the
+ * way to GS instead of expanding 256x240 pixels to RGBA32 on the EE. */
+extern "C" {
+#include "gs.h"
+#include "gpprim.h"
+}
+
 /* SNESTICLE_QUICKNES_PS2_ALIGNMENT_V1
  * Keep the bridge under the same unaligned-access contract used by
  * QuickNES's PS2 objects. */
@@ -70,6 +78,29 @@ static Uint32 s_RgbaPalette[256];
 static short  s_LastFramePalette[Nes_Emu::max_palette_size];
 static bool   s_PaletteValid = false;
 
+/* AURORA_QN_DIRECT_T8_GS_V4_STATE
+ * Share Aurora's existing direct-video scratch slab with PicoDrive. Only one
+ * system is active at once. QuickNES' native pitch is 272 bytes, so a 320-px
+ * GS TBW is the smallest 64-pixel-aligned row that contains it.
+ * The palette remains CT32; V3's final CT16 target is the only quantisation. */
+enum
+{
+    QN_GS_T8_TBP_OFFSET   = 0x400,
+    QN_GS_CLUT_TBP_OFFSET = 0x580,
+    QN_GS_T8_TBW          = 320
+};
+static Uint32 s_DirectClut[256] __attribute__((aligned(64)));
+static short  s_DirectLastPalette[Nes_Emu::max_palette_size];
+static bool   s_DirectPaletteValid = false;
+static bool   s_DirectFrameValid = false;
+static const Uint8 *s_DirectPixels = NULL;
+static int    s_DirectPitch = 0;
+static Uint32 s_DirectVideoSerial = 0;
+static Uint32 s_DirectUploadedSerial = 0;
+static Uint32 s_DirectPaletteSerial = 0;
+static Uint32 s_DirectUploadedPaletteSerial = 0;
+static bool   s_DirectPixelsResident = false;
+
 /* Audio scratch is BSS/static, never EE thread stack. QuickNES's default
  * non-linear Nes_Buffer emits mono; SNESticle's AudMixBuffer duplicates it
  * to stereo and performs the existing 32 -> 48 kHz conversion. */
@@ -78,6 +109,21 @@ static Int16 s_AudioOut[QN_AUDIO_MAX + 4];
 static Int16 s_Pending[4];
 static int   s_PendingCount = 0;
 
+
+static void qResetDirectVideo(void)
+{
+    memset(s_DirectClut, 0, sizeof(s_DirectClut));
+    memset(s_DirectLastPalette, 0, sizeof(s_DirectLastPalette));
+    s_DirectPaletteValid = false;
+    s_DirectFrameValid = false;
+    s_DirectPixels = NULL;
+    s_DirectPitch = 0;
+    s_DirectVideoSerial = 0;
+    s_DirectUploadedSerial = 0;
+    s_DirectPaletteSerial = 0;
+    s_DirectUploadedPaletteSerial = 0;
+    s_DirectPixelsResident = false;
+}
 
 static void qResetTransient(void)
 {
@@ -88,6 +134,7 @@ static void qResetTransient(void)
     s_PaletteValid = false;
     s_TurboPhase = false;
     s_TurboFrame = 0;
+    qResetDirectVideo();
 }
 
 static Uint8 qMapPad(Uint16 pad)
@@ -121,6 +168,61 @@ static Uint8 qMapPad(Uint16 pad)
         nes &= (Uint8)~(0x40 | 0x80);
 
     return nes;
+}
+
+/* AURORA_QN_DIRECT_T8_GS_V4_PREP */
+static unsigned qPs2ClutSlot(unsigned logical)
+{
+    unsigned slot = logical & 0xffu;
+    if ((slot & 0x18u) == 0x08u) slot += 8u;
+    else if ((slot & 0x18u) == 0x10u) slot -= 8u;
+    return slot;
+}
+
+static bool qPrepareDirectFrame(void)
+{
+    if (!s_pEmu) return false;
+    const Nes_Emu::frame_t &frame = s_pEmu->frame();
+
+    /* GPPrimUploadTexture expects packed rows. If QuickNES ever changes the
+     * 272-byte pitch contract, fail closed into the old RGBA path. */
+    if (!frame.pixels || frame.pitch != QN_VIDEO_W)
+    {
+        s_DirectFrameValid = false;
+        s_DirectPixels = NULL;
+        s_DirectPitch = 0;
+        return false;
+    }
+
+    if (!s_DirectPaletteValid ||
+        memcmp(s_DirectLastPalette, frame.palette,
+               sizeof(s_DirectLastPalette)) != 0)
+    {
+        for (unsigned i = 0; i < 256; ++i)
+        {
+            unsigned ci = (unsigned)(unsigned short)frame.palette[i];
+            if (ci >= (unsigned)Nes_Emu::color_table_size) ci = 0;
+            const Nes_Emu::rgb_t &rgb = Nes_Emu::nes_colors[ci];
+            Uint32 c = 0x80000000u |
+                       ((Uint32)rgb.blue << 16) |
+                       ((Uint32)rgb.green << 8) |
+                       (Uint32)rgb.red;
+            s_DirectClut[qPs2ClutSlot(i)] = c;
+        }
+        memcpy(s_DirectLastPalette, frame.palette, sizeof(s_DirectLastPalette));
+        s_DirectPaletteValid = true;
+        if (++s_DirectPaletteSerial == 0) s_DirectPaletteSerial = 1;
+    }
+
+    s_DirectPixels = frame.pixels;
+    s_DirectPitch = (int)frame.pitch;
+    s_DirectFrameValid = true;
+    if (++s_DirectVideoSerial == 0)
+    {
+        s_DirectVideoSerial = 1;
+        s_DirectPixelsResident = false;
+    }
+    return true;
 }
 
 static void qRenderFrame(CRenderSurface *pTarget)
@@ -339,6 +441,7 @@ void QuicknesBridge_Reset(void)
     s_PaletteValid = false;
     s_TurboPhase = false;
     s_TurboFrame = 0;
+    qResetDirectVideo();
 }
 
 void QuicknesBridge_SoftReset(void)
@@ -349,6 +452,7 @@ void QuicknesBridge_SoftReset(void)
     s_PaletteValid = false;
     s_TurboPhase = false;
     s_TurboFrame = 0;
+    qResetDirectVideo();
 }
 
 void QuicknesBridge_SetDutySwap(bool enabled)
@@ -367,6 +471,63 @@ void QuicknesBridge_SetTurboSpeed(unsigned speedShift)
         s_TurboFrame = 0;
         s_TurboPhase = true;
     }
+}
+
+/* AURORA_QN_DIRECT_T8_GS_V4_API */
+void QuicknesBridge_InvalidateGsResources(void)
+{
+    s_DirectPixelsResident = false;
+    s_DirectUploadedSerial = 0;
+    s_DirectUploadedPaletteSerial = 0;
+}
+
+bool QuicknesBridge_CanDirectGsVideo(void)
+{
+    return s_GameLoaded && s_DirectFrameValid && s_DirectPaletteValid &&
+           s_DirectPixels != NULL && s_DirectPitch == QN_VIDEO_W;
+}
+
+bool QuicknesBridge_DrawDirectGs(unsigned int auroraOutBaseTBP,
+                                 float intensity,
+                                 float logicalY)
+{
+    if (!QuicknesBridge_CanDirectGsVideo()) return false;
+
+    Uint32 texTBP  = auroraOutBaseTBP + QN_GS_T8_TBP_OFFSET;
+    Uint32 clutTBP = auroraOutBaseTBP + QN_GS_CLUT_TBP_OFFSET;
+
+    if (!s_DirectPixelsResident || s_DirectUploadedSerial != s_DirectVideoSerial)
+    {
+        GPPrimUploadTexture((int)texTBP, QN_GS_T8_TBW, 0, 0, GS_PSMT8,
+                            (void *)s_DirectPixels, s_DirectPitch,
+                            Nes_Emu::image_height);
+        s_DirectUploadedSerial = s_DirectVideoSerial;
+        s_DirectPixelsResident = true;
+    }
+
+    if (s_DirectUploadedPaletteSerial != s_DirectPaletteSerial)
+    {
+        GPPrimUploadTexture((int)clutTBP, 64, 0, 0, GS_PSMCT32,
+                            s_DirectClut, 16, 16);
+        s_DirectUploadedPaletteSerial = s_DirectPaletteSerial;
+    }
+
+    GPPrimSetTex(texTBP, QN_GS_T8_TBW, 9, 8, GS_PSMT8,
+                 clutTBP, 64, GS_PSMCT32, 0);
+
+    if (intensity < 0.0f) intensity = 0.0f;
+    if (intensity > 1.0f) intensity = 1.0f;
+    unsigned mod = (unsigned)(128.0f * intensity + 0.5f);
+    if (mod > 128U) mod = 128U;
+    Uint32 modColor = 0x80000000U | (mod << 16) | (mod << 8) | mod;
+
+    Uint32 y0 = (Uint32)(logicalY * 16.0f + 0.5f);
+    Uint32 y1 = y0 + (240U << 4);
+    GPPrimTexRect(0, y0, 8, 8,
+                  256U << 4, y1,
+                  (256U << 4) + 8, (240U << 4) + 8,
+                  10U << 4, modColor, 0);
+    return true;
 }
 
 void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
@@ -395,7 +556,9 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
         return;
     }
 
-    qRenderFrame(pTarget);
+    /* AURORA_QN_DIRECT_T8_GS_V4_RUN */
+    if (!qPrepareDirectFrame())
+        qRenderFrame(pTarget); /* exact old RGBA32 fallback */
     qDrainAudio(pMixBuf);
 }
 
