@@ -450,9 +450,16 @@ Bool MainLoopProcess()
 		    _iframetex^=1;
         }
 
-        /* AURORA_AUDIO_FAILSOFT_POSTVBLANK_V1
-         * Host-audio RPC drain moved to MainLoopRender(), AFTER GSK_SyncFlip.
-         * Do not spend synchronous SIF time before this frame is presented. */
+        /* AURORA_AUDIO_STUTTER_EARLY_DRAIN_V9_20260823
+         *
+         * Refill audsrv as soon as this emulated frame has produced its PCM,
+         * before the remaining host render/VBlank latency can consume the IOP
+         * safety cushion. Aud_BufferedAsyncStart() uses wait=0 drains.
+         *
+         * MainLoopRender keeps its existing post-VBlank call as a retry.
+         * If this early call emptied the EE FIFO, the late call sees
+         * aud_async_count==0 and performs no audio RPC. */
+        Aud_BufferedAsyncStart();
     }
 
     _MainLoopCheckSRAM();

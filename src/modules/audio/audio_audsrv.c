@@ -126,9 +126,12 @@ static short _interleave_buf[AUD_MAX_ENQUEUE_SAMPLES * AUD_AUDSRV_CHANNELS]
     __attribute__((aligned(64)));
 
 /* AURORA_GAMEPLAY_HEADROOM_V1
- * Dedicated BSS-zero buffer: never clobber the real interleave scratch.
- * 2048 frames = 8192 bytes ~= 42.7 ms at 48 kHz stereo. */
-#define AUD_GAMEPLAY_HEADROOM_SAMPLES 2048
+ * AURORA_AUDIO_STUTTER_HEADROOM_V9_20260823
+ *
+ * Keep transition headroom inside the backend's existing 2560..3840 guard
+ * band. 3072 frames = 12288 bytes ~= 64 ms at 48 kHz stereo.
+ * audsrv's 48 kHz stereo ring is 5120 frames, leaving 2048 frames free. */
+#define AUD_GAMEPLAY_HEADROOM_SAMPLES 3072
 static short _gameplay_silence[
     AUD_GAMEPLAY_HEADROOM_SAMPLES * AUD_AUDSRV_CHANNELS]
     __attribute__((aligned(64)));
@@ -469,7 +472,7 @@ void Aud_PrepareGameplayHeadroom(void)
     int need_samples;
     int remaining_bytes;
     const int target_samples = aud_compat_deep_queue
-        ? 2560 : AUD_GAMEPLAY_HEADROOM_SAMPLES;
+        ? 3840 : AUD_GAMEPLAY_HEADROOM_SAMPLES;
 
     if (!sjpcm_inited)
         return;
@@ -495,7 +498,7 @@ void Aud_PrepareGameplayHeadroom(void)
          * if the IOP ring cannot accept the requested silence immediately,
          * keep whatever headroom already exists and let gameplay continue.
          *
-         * _gameplay_silence is 2048 stereo frames = 8192 bytes, still below
+         * _gameplay_silence is 3072 stereo frames = 12288 bytes, still below
          * PS2SDK audsrv's single-copy 16380-byte staging limit. */
         if (chunk > (int)sizeof(_gameplay_silence))
             chunk = (int)sizeof(_gameplay_silence);
