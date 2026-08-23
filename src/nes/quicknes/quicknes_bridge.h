@@ -28,11 +28,6 @@ void QuicknesBridge_SetTurboSpeed(unsigned speedShift);
 void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
                              CRenderSurface *pTarget,
                              CMixBuffer *pMixBuf);
-/* AURORA_QN_DIRECT_T8_GS_V4_API */
-void QuicknesBridge_InvalidateGsResources(void);
-bool QuicknesBridge_CanDirectGsVideo(void);
-bool QuicknesBridge_DrawDirectGs(unsigned int auroraOutBaseTBP,
-                                 float intensity, float logicalY);
 int QuicknesBridge_GetStateSize(void);
 int QuicknesBridge_SaveState(void *pData, int nBytes);
 bool QuicknesBridge_LoadState(const void *pData, int nBytes);

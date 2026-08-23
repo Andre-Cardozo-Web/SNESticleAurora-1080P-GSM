@@ -1367,15 +1367,6 @@ bool PicoDriveBridge_IsMegaDrive(void)
             (PAHW_8BIT | PAHW_PICO | PAHW_MCD | PAHW_32X)) == 0;
 }
 
-/* AURORA_PD_MCD_DIRECT_CT16_V4
- * Presentation query only: never reclassify MCD as plain Mega Drive. */
-bool PicoDriveBridge_IsMegaCd(void)
-{
-    return s_GameLoaded &&
-           (PicoIn.AHW & PAHW_MCD) != 0 &&
-           (PicoIn.AHW & PAHW_PICO) == 0;
-}
-
 static void pdRefreshDirectVideoInfo()
 {
     int texW, texH;
@@ -1389,21 +1380,15 @@ static void pdRefreshDirectVideoInfo()
     s_DirectInfoIsMd = false;
 
     if (!s_GameLoaded ||
-        (PicoIn.AHW & PAHW_PICO) != 0)
+        (PicoIn.AHW & (PAHW_PICO | PAHW_MCD)) != 0)
         return;
 
     /* AURORA_PD_TRYAGAIN_V1_32X_DIRECT_CT16
      * 32X is not reclassified globally as plain MD. Only presentation
      * treats its mandatory RGB555 framebuffer as MD-style geometry so
-     * the existing CT16 EE->GS path can bypass RGBA32 conversion.
-     *
-     * AURORA_PD_MCD_DIRECT_CT16_V4
-     * MCD is already forced to RGB555/CT16 by Aurora. The old PAHW_MCD
-     * exclusion converted it to RGBA32 on EE and uploaded _OutTex anyway.
-     * Treat MCD as MD-style geometry ONLY in this presentation function. */
+     * the existing CT16 EE->GS path can bypass RGBA32 conversion. */
     isMd = PicoDriveBridge_IsMegaDrive() ||
-           ((PicoIn.AHW & PAHW_32X) != 0) ||
-           ((PicoIn.AHW & PAHW_MCD) != 0);
+           ((PicoIn.AHW & PAHW_32X) != 0);
     is8bit = pdIs8Bit();
     if (!isMd && !is8bit)
         return;

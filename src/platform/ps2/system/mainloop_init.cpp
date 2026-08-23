@@ -40,7 +40,6 @@
 #include "snppucolor.h"
 #include "snppurender.h"
 #include "sega/picodrive/picodrive_bridge.h"
-#include "nes/quicknes/quicknes_bridge.h"
 #include "emumovie.h"
 
 #include <sifrpc.h>
@@ -172,8 +171,6 @@ static Bool _MainLoopAllocVideoVram(void)
      * Cold boot is harmless: both invalidators are no-ops before first use. */
     SNPPURenderInvalidateGsResources();
     PicoDriveBridge_InvalidateGsResources();
-    /* AURORA_QN_DIRECT_T8_GS_V4_VRAM_EPOCH */
-    QuicknesBridge_InvalidateGsResources();
 
 	outTBP = GSK_VramAllocTBP(
 		_MainLoopAlignVramBytes(MAINLOOP_OUT_TEX_BYTES));
@@ -234,18 +231,8 @@ Bool MainLoopEnsureGameplayRasterWidth(Int32 width)
     CoverInit(s_CoverTexTBP);
 
     TextureSetAddr(&_OutTex, _MainLoop_uOutTexTBP);
-    /* AURORA_DIRECT_SKIP_DEAD_OUTTEX_SEED_V4
-     * A direct renderer will immediately refill its own GS texture in the new
-     * VRAM epoch. Uploading the unrelated 256x256 CT32 _OutTex first is a dead
-     * 256 KiB transfer. Keep it for every fallback path. */
-    {
-        const Bool directVideo =
-            ((_pSystem == _pNes && QuicknesBridge_CanDirectGsVideo()) ||
-             (_pSystem == _pSega && PicoDriveBridge_CanDirectGsVideo()))
-            ? TRUE : FALSE;
-        if (_fbTexture[0] && !directVideo)
-            TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
-    }
+    if (_fbTexture[0])
+        TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 
     return TRUE;
 }
@@ -351,17 +338,8 @@ Bool MainLoopInit()
 	// BOOTLOG("[boot] GS_SetDispMode()\n");
 	GS_SetDispMode(dispx,dispy, MAINLOOP_SCREENWIDTH, MAINLOOP_SCREENHEIGHT);
 	// BOOTLOG("[boot] GS_SetEnv()\n");
-	/* AURORA_GLOBAL_CT16_FRAMEBUFFER_V3
-	 * Final DISPLAY target only.
-	 *
-	 * _OutTex, QuickNES RGBA output, SNES color-math/intermediates,
-	 * PicoDrive source textures, fonts and CLUTs keep their existing
-	 * formats. GSK_Init passes only the FINAL display PSM to gsKit.
-	 * gsKit allocates ScreenBuffer[0/1] and programs FRAME/DISPFB with
-	 * that same PSM. Dithering remains unchanged/off for a clean A/B.
-	 */
 	GS_SetEnv(MAINLOOP_SCREENWIDTH, MAINLOOP_SCREENHEIGHT,
-	          FB0, FB1, GS_PSMCT16, Z0, GS_PSMZ16S);
+	          FB0, FB1, GS_PSMCT32, Z0, GS_PSMZ16S);
 
 	if (!_MainLoopAllocVideoVram())
 		return FALSE;

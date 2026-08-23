@@ -20,7 +20,6 @@
 #include "mainloop_exec.h"
 #include "mainloop_iop.h"
 #include "sega/picodrive/picodrive_bridge.h"
-#include "nes/quicknes/quicknes_bridge.h"
 #include "gskit_backend.h"
 
 #include "types.h"
@@ -271,13 +270,9 @@ Bool MainLoopProcess()
                 PROF_ENTER("NesExecuteFrame");
                 _pNes->ExecuteFrame(&Input, pSurface, pMixBuffer, eMode);
                 PROF_LEAVE("NesExecuteFrame");
-                /* AURORA_QN_DIRECT_T8_GS_V4_UPLOAD */
-                if (!QuicknesBridge_CanDirectGsVideo())
-                {
-                    PROF_ENTER("NesTexUpload");
-                    TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
-                    PROF_LEAVE("NesTexUpload");
-                }
+                PROF_ENTER("NesTexUpload");
+                TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
+                PROF_LEAVE("NesTexUpload");
             }
             else if (_pSystem == _pSega)
             {
@@ -432,67 +427,14 @@ Bool MainLoopProcess()
             }
             else
             {
-                /* AURORA_V8_SNES_HOST_CADENCE_20260822
-                 * The SNES core latches PAL in STAT78 bit 4 and executes
-                 * 312 lines for PAL or 262 for NTSC. Emulated time, not the
-                 * physical GS clock, is therefore the normal-gameplay PCM
-                 * authority. A rational accumulator converts core frames to
-                 * GS VBlanks. Netplay/movie preserve the old 1:1 policy. */
-                const Bool bSnesPAL =
-                    (_pSnes->GetPPU()->GetRegs()->stat78 & 0x10) ? TRUE : FALSE;
-                const Uint32 uSnesGameNum = bSnesPAL ? 50U : 60U;
-                const Uint32 uSnesGameDen = 1U;
-                Uint32 uSnesHostNum = 60000U, uSnesHostDen = 1001U;
-                const Bool bSnesCadenceConvert =
-                    (NetInput.eGameState == NETPLAY_GAMESTATE_IDLE &&
-                     !s_pMovieClip->IsPlaying() &&
-                     !s_pMovieClip->IsRecording()) ? TRUE : FALSE;
-                Int32 nSnesExecuteFrames = 1;
-
-                GSK_GetRefreshRate(&uSnesHostNum, &uSnesHostDen);
-
+                /* AURORA_MEGA_V2_SNES_AUDIO_CLOCK
+                   Match produced PCM to the GS VBlank clock. Keep this
+                   SNES-only so the QuickNES path is unchanged. */
                 if (_AudMix)
                 {
-                    if (bSnesCadenceConvert)
-                        _AudMix->SetFrameRateRational(uSnesGameNum, uSnesGameDen);
-                    else
-                        _AudMix->SetFrameRateRational(uSnesHostNum, uSnesHostDen);
-                }
-
-                if (bSnesCadenceConvert)
-                {
-                    static Uint32 s_uSnesPhase = 0;
-                    static Uint32 s_uSnesHostNum = 0;
-                    static Uint32 s_uSnesHostDen = 0;
-                    static Uint32 s_uSnesGameNum = 0;
-                    static Uint32 s_uSnesGameDen = 0;
-                    const Uint32 uAdd = uSnesGameNum * uSnesHostDen;
-                    const Uint32 uThreshold = uSnesHostNum * uSnesGameDen;
-
-                    if (uSnesHostNum != s_uSnesHostNum ||
-                        uSnesHostDen != s_uSnesHostDen ||
-                        uSnesGameNum != s_uSnesGameNum ||
-                        uSnesGameDen != s_uSnesGameDen)
-                    {
-                        s_uSnesHostNum = uSnesHostNum;
-                        s_uSnesHostDen = uSnesHostDen;
-                        s_uSnesGameNum = uSnesGameNum;
-                        s_uSnesGameDen = uSnesGameDen;
-                        /* First tick must always execute a core frame. */
-                        s_uSnesPhase =
-                            (uAdd < uThreshold && uThreshold > 0)
-                            ? uThreshold - 1 : 0;
-                    }
-
-                    nSnesExecuteFrames = 0;
-                    s_uSnesPhase += uAdd;
-                    while (uThreshold > 0 &&
-                           s_uSnesPhase >= uThreshold &&
-                           nSnesExecuteFrames < 2)
-                    {
-                        s_uSnesPhase -= uThreshold;
-                        ++nSnesExecuteFrames;
-                    }
+                    Uint32 uRateNum = 60, uRateDen = 1;
+                    GSK_GetRefreshRate(&uRateNum, &uRateDen);
+                    _AudMix->SetFrameRateRational(uRateNum, uRateDen);
                 }
 				if (bSnesMouse)
 					Input.uPad[0] = EMUSYS_DEVICE_DISCONNECTED;
@@ -503,18 +445,7 @@ Bool MainLoopProcess()
 						nSnesMouseY,
 						uSnesMouseButtons);
 				_SnesMouseWasActive = bSnesMouse;
-                /* AURORA_V8_SNES_HOST_CADENCE_20260822
-                 * In a 2-frame burst only the final core frame is displayed.
-                 * NULL suppresses host rendering; CPU/SPC/DSP/audio still run. */
-                for (Int32 iSnesFrame = 0;
-                     iSnesFrame < nSnesExecuteFrames;
-                     ++iSnesFrame)
-                {
-                    CRenderSurface *pSnesSurface =
-                        (iSnesFrame + 1 == nSnesExecuteFrames)
-                        ? pSurface : NULL;
-                    _ExecuteSnes(pSnesSurface, pMixBuffer, &Input, eMode);
-                }
+				_ExecuteSnes(pSurface, pMixBuffer, &Input, eMode);
             }
 		    _iframetex^=1;
         }
