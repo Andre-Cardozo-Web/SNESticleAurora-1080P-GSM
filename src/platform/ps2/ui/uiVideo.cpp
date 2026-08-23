@@ -44,7 +44,10 @@ Bool MainLoopReinitVideoMode(Int32 mode);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 35
+#define VIDEOCFG_VERSION 36
+/* AURORA_AUDIO_SPLIT_VOLUMES_V36_20260823
+ * v36 changes NO struct size or field offsets. The former legacy/reserved
+ * snesaudiorate slot is now segavol; native SNES synthesis stays fixed 32k. */
 /* v35 appends SMS color-border + SMS FM preferences. */
 /* AURORA_AUDIO_SPLIT_REVIEW_V1_20260821 */
 /* AURORA_PD_MEGA_FIX_20260820 */
@@ -79,7 +82,7 @@ typedef struct
 	Int32  covers;
 	Int32  bgmvol;     /* ganho interno da trilha: 0..400; UI /2 */
 	Int32  bgmrate;    /* frequencia de sintese da trilha (Hz)     */
-	Int32  gamevol;    /* ganho interno do jogo (SNES/NES): 0..400; UI /2 */
+	Int32  gamevol;    /* SNES/QuickNES gain: 0..400; UI /2 */
 	Int32  hddenable;  /* suporte ao HD interno (hdd0:): 0=off, 1=on  */
 	Int32  mmceenable; /* suporte a MMCE (mmce0/1): 0=off, 1=on       */
 	Int32  massenable; /* mass/USB (mass0/1): 0=off, 1=on             */
@@ -102,7 +105,7 @@ typedef struct
 	Int32  md6button;   /* bit0=6-button, bit1=BCA */
 	Int32  bgmtrack;    /* 1..64 */
 	Int32  mdrendering; /* 0=Fast, 1=Good, 2=Accurate */
-	Int32  snesaudiorate; /* legacy/reserved: SNES native 32000 Hz */
+	Int32  segavol;       /* v36: PicoDrive final gain 0..400; UI /2 */
 	Int32  segaaudiorate; /* independent PicoDrive PCM rate */
 	Int32  smscolorborder; /* 0=black, 1=SMS VDP backdrop */
 	Int32  smsfm;          /* 0=off, 1=Master System YM2413/OPLL */
@@ -404,7 +407,7 @@ void VideoSettingsSave(void)
 		(MainLoopMdPadGetLayout() == MAINLOOP_MD_PAD_BCA ? 2 : 0);
 	cfg.bgmtrack = BgmGetTrackIndex();
 	cfg.mdrendering = PicoDriveBridge_GetRenderingMode();
-	cfg.snesaudiorate = (Int32)SnesAudioGetRate();
+	cfg.segavol = AudMixSegaGetVolume();
 	cfg.segaaudiorate = (Int32)PicoDriveBridge_GetAudioRate();
 	cfg.smscolorborder = PicoDriveBridge_GetSmsColorBorder() ? 1 : 0;
 	cfg.smsfm = PicoDriveBridge_GetSmsFm() ? 1 : 0;
@@ -444,6 +447,13 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
+		else if (header.version == 35)
+		{
+			/* v35 is byte-identical in size; this slot used to be the
+			 * legacy SNES rate value and is migrated below. */
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+			if (loaded) cfg.version = VIDEOCFG_VERSION;
+		}
 		else if (header.version == 34)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
@@ -453,13 +463,13 @@ void VideoSettingsLoad(void)
 		else if (header.version == 33)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate));
+			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 32)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 31)
@@ -467,20 +477,20 @@ void VideoSettingsLoad(void)
 			/* AURORA_PICODRIVE_CURRENT_CFG_V32 */
 			memset(&cfg, 0, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)));
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 30)
 		{
 			/* v30 has the same byte layout as v31. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 29)
 		{
 			/* v29 was a temporary test config with broken menu-audio defaults.
 			 * Import its layout, then reset only those two settings once. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded)
 			{
 				cfg.version = VIDEOCFG_VERSION;
@@ -491,19 +501,19 @@ void VideoSettingsLoad(void)
 		else if (header.version == 28)
 		{
 			/* v28 has the same byte layout; only Menu Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 27)
 		{
 			/* v27 is the v28/v29 prefix without bgmenable. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 26)
 		{
 			/* v26 has the same byte layout; only Game Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.snesaudiorate) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 25)
@@ -659,12 +669,12 @@ void VideoSettingsLoad(void)
 		cfg.mdrendering = 1;
 	}
 
-	/* AURORA_SNES_NATIVE_32K_V1_20260822
-	 * v34 introduced independent SNES/SEGA rate fields. The SNES field stays
-	 * in v35 for byte compatibility, but native S-DSP synthesis is always
-	 * 32 kHz. PicoDrive keeps its independent low-CPU default. */
-	if (loaded)
-		cfg.snesaudiorate = SNSPCDSP_SAMPLERATE;
+	/* AURORA_AUDIO_SPLIT_VOLUMES_V36_20260823
+	 * v35 and older had one final Game Volume shared by every core.
+	 * Copy the already-migrated gamevol into SEGA volume so old configs keep
+	 * exactly the same audible balance after upgrading. */
+	if (loaded && header.version <= 35)
+		cfg.segavol = cfg.gamevol;
 	if (loaded && header.version <= 33)
 		cfg.segaaudiorate = 16000;
 
@@ -708,11 +718,13 @@ void VideoSettingsLoad(void)
 		if (cfg.bgmenable == 0 || cfg.bgmenable == 1) BgmSetEnabled(cfg.bgmenable);
 		if (cfg.bgmrate >= 8000 && cfg.bgmrate <= 48000)
 			BgmSetRate(cfg.bgmrate);
-		if (cfg.snesaudiorate >= 8000 && cfg.snesaudiorate <= 48000)
-			SnesAudioSetRate((Uint32)cfg.snesaudiorate);
+		/* SNES is always native 32 kHz; v36 reuses the old persisted rate
+		 * slot for SEGA volume without changing VideoCfgT size. */
+		SnesAudioSetRate(SNSPCDSP_SAMPLERATE);
 		if (cfg.segaaudiorate >= 8000 && cfg.segaaudiorate <= 48000)
 			PicoDriveBridge_SetAudioRate(cfg.segaaudiorate);
 		if (cfg.gamevol >= 0 && cfg.gamevol <= 400) AudMixGameSetVolume(cfg.gamevol);
+		if (cfg.segavol >= 0 && cfg.segavol <= 400) AudMixSegaSetVolume(cfg.segavol);
 		if (cfg.bgmtrack >= 1 && cfg.bgmtrack <= 64) BgmSetTrackIndex(cfg.bgmtrack);
 		if (cfg.mdrendering >= 0 && cfg.mdrendering <= 2)
 			PicoDriveBridge_SetRenderingMode(cfg.mdrendering);
@@ -1090,16 +1102,18 @@ void CVideoScreen::Draw()
 	else if (iPage == 1)
 	{
 		_VideoHeader(vy, "Audio"); vy += 14;
-		snprintf(buf, sizeof(buf), "%d", BgmGetVolume() / 2);
-		_VideoRow(vy, 50, m_iSelect, "Music volume", buf); vy += 12;
-		snprintf(buf, sizeof(buf), "%d", AudMixGameGetVolume() / 2);
-		_VideoRow(vy, 51, m_iSelect, "Game volume", buf); vy += 12;
-		_VideoRow(vy, 52, m_iSelect, "Menu music",
+		_VideoRow(vy, 50, m_iSelect, "Menu Music",
 		          BgmIsEnabled() ? "ON" : "OFF"); vy += 12;
-		_VideoRow(vy, 53, m_iSelect, "SNES audio", "32 kHz native"); vy += 12;
+		snprintf(buf, sizeof(buf), "%d", BgmGetVolume() / 2);
+		_VideoRow(vy, 51, m_iSelect, "Menu volume", buf); vy += 12;
+		snprintf(buf, sizeof(buf), "%d", AudMixGameGetVolume() / 2);
+		_VideoRow(vy, 52, m_iSelect, "SNES volume", buf); vy += 12;
+		snprintf(buf, sizeof(buf), "%d", AudMixSegaGetVolume() / 2);
+		_VideoRow(vy, 53, m_iSelect, "SEGA volume", buf); vy += 12;
+		_VideoRow(vy, 54, m_iSelect, "SNES audio", "32 kHz native"); vy += 12;
 		snprintf(buf, sizeof(buf), "%d kHz", (PicoDriveBridge_GetAudioRate() + 500) / 1000);
-		_VideoRow(vy, 54, m_iSelect, "SEGA audio", buf); vy += 12;
-		_VideoRow(vy, 55, m_iSelect, "SMS FM audio",
+		_VideoRow(vy, 55, m_iSelect, "SEGA audio", buf); vy += 12;
+		_VideoRow(vy, 56, m_iSelect, "SMS FM audio",
 		          PicoDriveBridge_GetSmsFm() ? "Enable" : "Disable"); vy += 12;
 	}
 	else if (iPage == 5)
@@ -1229,7 +1243,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		else if (m_iSelect < 30) { lo = 20; hi = 29; }
 		else if (m_iSelect < 40) { lo = 30; hi = 36; }
 		else if (m_iSelect < 50) { lo = 40; hi = 43; }
-		else                     { lo = 50; hi = 55; }
+		else                     { lo = 50; hi = 56; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1294,28 +1308,29 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 				!PicoDriveBridge_GetSmsColorBorder());
 			break;
 
-		case 50: /* Music volume: UI 0..200, internal 0..400. */
-			{ int v = BgmGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; BgmSetVolume(v); }
-			break;
-		case 51: /* Game volume: UI 0..200, internal 0..400. */
-			{ int v = AudMixGameGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; AudMixGameSetVolume(v); }
-			break;
-		case 52:
+		case 50: /* Menu Music ON/OFF. */
 			BgmSetEnabled(!BgmIsEnabled());
 			break;
-		case 53:
-			/* AURORA_SNES_NATIVE_32K_V1_20260822
-			 * Keep the historical row/index but do not allow the frontend to
-			 * push a non-native rate into the shared AudMixBuffer. */
+		case 51: /* Menu volume: UI 0..200, internal 0..400. */
+			{ int v = BgmGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; BgmSetVolume(v); }
+			break;
+		case 52: /* SNES volume: SNESticle + QuickNES, UI 0..200. */
+			{ int v = AudMixGameGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; AudMixGameSetVolume(v); }
+			break;
+		case 53: /* SEGA volume: PicoDrive only, UI 0..200. */
+			{ int v = AudMixSegaGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; AudMixSegaSetVolume(v); }
+			break;
+		case 54:
+			/* SNES stays native 32 kHz; row retained as informational. */
 			SnesAudioSetRate(SNSPCDSP_SAMPLERATE);
 			if (_pSystem == _pSnes && _AudMix)
 				_AudMix->SetSampleRate(SNSPCDSP_SAMPLERATE);
 			break;
-		case 54:
+		case 55:
 			PicoDriveBridge_SetAudioRate(
 				_VideoCycleSystemAudioRate(PicoDriveBridge_GetAudioRate(), dir));
 			break;
-		case 55: /* Master System YM2413/OPLL */
+		case 56: /* Master System YM2413/OPLL */
 			PicoDriveBridge_SetSmsFm(!PicoDriveBridge_GetSmsFm());
 			break;
 

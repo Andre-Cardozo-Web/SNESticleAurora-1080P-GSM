@@ -77,17 +77,21 @@ void MainLoopRender()
          */
         {
             Int32 wantedRaster = 256;
+            const Bool bPlainMd =
+                (_pSystem == _pSega &&
+                 PicoDriveBridge_IsMegaDrive()) ? TRUE : FALSE;
 
-            if (!_bMenu &&
-                _pSystem == _pSega &&
-                PicoDriveBridge_IsMegaDrive())
-            {
+            /* AURORA_MD_UI256_320FB_V1_20260823
+             * Keep 320 for the whole active MD cartridge lifetime to avoid
+             * rebuilding gsKit under large-ROM memory pressure. */
+            if (bPlainMd)
                 wantedRaster = 320;
-            }
 
-            /* The menu must never inherit the Sega gameplay PCRTC PAR.
-             * Do this before a possible 320->256 240p reinit so the newly
-             * created UI raster starts with Aurora's normal presentation. */
+            /* Menu/prompts use exact 256-source integer presentation on the
+             * still-alive 320 framebuffer, not 256->320 resampling. */
+            GSK_SetUi256On320Framebuffer(
+                (_bMenu && bPlainMd) ? 1 : 0);
+
             if (_bMenu)
                 GSK_SetNative240pPar(0);
 

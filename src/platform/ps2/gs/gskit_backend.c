@@ -61,6 +61,10 @@ static int _gsk_fb_height   = 480; /* active FB height                    */
 static int _gsk_active_mode = GSK_VIDMODE_480I; /* mode the GS is in now   */
 static int _gsk_native240p_par = 0;
 static int _gsk_240p_fb_width = 256;
+/* AURORA_MD_UI256_320FB_V1_20260823
+ * Keep MD's physical 320-wide framebuffer while its cartridge is alive,
+ * but draw/scan Aurora's UI as exactly 256 uniform source pixels. */
+static int _gsk_ui256_on_320fb = 0;
 static int _gsk_game_y_bias = 0;
 
 /* gsKit's computed DISPLAY params, captured after gsKit_init_screen so
@@ -319,6 +323,15 @@ static void _GskApplyRenderTransform(void)
     float sx = (float)_gsk_fb_width / (float)GSK_LOGICAL_W;
     float sy = (float)_gsk_fb_height / (float)GSK_LOGICAL_H;
 
+    /* AURORA_MD_UI256_320FB_V1_20260823
+     * No 256->320 fractional UI scaling. Draw logical UI columns 1:1. */
+    if (_gsk_ui256_on_320fb &&
+        _gsk_active_mode == GSK_VIDMODE_240P &&
+        _gsk_fb_width == 320)
+    {
+        sx = 1.0f;
+    }
+
     GPPrimSetTransform(sx, sy, 0.0f, 0.0f);
 }
 
@@ -395,6 +408,27 @@ static void _GskApplyDisplay(void)
         starty += 1;
     }
 
+    /* AURORA_MD_UI256_320FB_V1_20260823
+     * DISPLAY.DW/MAGH define how many framebuffer samples PCRTC scans.
+     * Choose one integer magnification for exactly 256 source pixels, keeping
+     * physical width as close as possible to the active 320 presentation.
+     * No source columns are duplicated unevenly. */
+    if (_gsk_ui256_on_320fb &&
+        _gsk_active_mode == GSK_VIDMODE_240P &&
+        _gsk_fb_width == 320)
+    {
+        int new_magh1 = (dw + (GSK_LOGICAL_W / 2)) / GSK_LOGICAL_W;
+        int new_dw;
+
+        if (new_magh1 < 1)  new_magh1 = 1;
+        if (new_magh1 > 16) new_magh1 = 16;
+
+        new_dw = GSK_LOGICAL_W * new_magh1;
+        startx += (dw - new_dw) / 2;
+        dw      = new_dw;
+        magh    = new_magh1 - 1;
+    }
+
     /* Widescreen: stretch the picture horizontally to ~16:9 by raising
        the horizontal magnification (MAGH) and the display width (DW)
        together, while still reading the SAME framebuffer pixels.  This
@@ -442,6 +476,16 @@ void GSK_SetGameplayYOffsetBias(int y)
         return;
 
     _gsk_game_y_bias = y;
+    _GskApplyDisplay();
+}
+
+void GSK_SetUi256On320Framebuffer(int on)
+{
+    on = on ? 1 : 0;
+    if (_gsk_ui256_on_320fb == on)
+        return;
+
+    _gsk_ui256_on_320fb = on;
     _GskApplyDisplay();
 }
 

@@ -21,7 +21,9 @@ extern "C" {
    Video Config deliberately shows half of this value, so 200 internal is
    displayed as 100 and 400 internal as 200.  The single AudMixBuffer
    instance (_AudMix) is shared by SNES and NES. */
-static int s_gameVolume = 200;   /* internal gain percent: 0..400 */
+static int s_gameVolume = 200;   /* SNES/QuickNES: internal 0..400 */
+static int s_segaVolume = 200;   /* PicoDrive: internal 0..400 */
+static int s_useSegaVolume = 0;  /* selected by frontend at gameplay entry */
 /* PicoDrive-only speed mode. SNES/NES retain cubic resampling. */
 static int s_fastResample = 0;
 
@@ -35,6 +37,23 @@ extern "C" void AudMixGameSetVolume(int vol)
 extern "C" int AudMixGameGetVolume(void)
 {
     return s_gameVolume;
+}
+
+extern "C" void AudMixSegaSetVolume(int vol)
+{
+    if (vol < 0)   vol = 0;
+    if (vol > 400) vol = 400;
+    s_segaVolume = vol;
+}
+
+extern "C" int AudMixSegaGetVolume(void)
+{
+    return s_segaVolume;
+}
+
+extern "C" void AudMixSetSegaVolumeMode(int enabled)
+{
+    s_useSegaVolume = enabled ? 1 : 0;
 }
 
 extern "C" void AudMixSetFastResample(int enabled)
@@ -612,6 +631,11 @@ void AudMixBuffer::Flush()
 
     if (nOutSamples > 0)
     {
+        /* AURORA_AUDIO_SPLIT_VOLUMES_V36_20260823
+         * Shared mixer, separate final gain by active core family. */
+        const Int32 gainPct =
+            s_useSegaVolume ? s_segaVolume : s_gameVolume;
+
         if ((nOutSamples & 1) && m_uSampleRate == 32000)
         {
             // uh oh
@@ -636,7 +660,6 @@ void AudMixBuffer::Flush()
          * output, preserving that path byte-for-byte. */
         if (!m_bAsync)
         {
-            Int32 gainPct = s_gameVolume;
             /* AURORA_MEGA_V4_AUDIO_GAIN_FASTPATH
              * Internal Game Volume 200 (shown as 100) is the shipped 200% gain. For every int16
              * input, (sample * 200) / 100 is exactly sample * 2; retain the
@@ -683,7 +706,7 @@ void AudMixBuffer::Flush()
         if (m_bAsync)
         {
             Aud_EnqueueAsyncGain(
-                m_OutData[0], m_OutData[1], nOutSamples, s_gameVolume);
+                m_OutData[0], m_OutData[1], nOutSamples, gainPct);
         } else
         {
             Aud_Enqueue(m_OutData[0], m_OutData[1], nOutSamples,1);

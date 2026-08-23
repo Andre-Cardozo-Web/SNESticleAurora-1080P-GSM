@@ -21,6 +21,7 @@ SegaRom::SegaRom()
     m_pRomMem = NULL;
     m_pRomData = NULL;
     m_uRomBytes = 0;
+    m_uRomCapacity = 0;
     m_szSourceName[0] = 0;
 }
 
@@ -36,6 +37,7 @@ void SegaRom::Unload()
     m_pRomMem = NULL;
     m_pRomData = NULL;
     m_uRomBytes = 0;
+    m_uRomCapacity = 0;
     m_szSourceName[0] = 0;
     m_bLoaded = FALSE;
 }
@@ -87,23 +89,27 @@ Emu::Rom::LoadErrorE SegaRom::LoadRom(
 
     m_pRomData = pBuf;
     m_uRomBytes = uTotal;
+    m_uRomCapacity =
+        (pBuffer && pBuf == pBuffer) ? nBufferBytes : uTotal;
     m_bLoaded = TRUE;
 
     printf("[SegaRom] loaded %u bytes\n", (unsigned)m_uRomBytes);
     return LOADERROR_NONE;
 }
 
-Emu::Rom::LoadErrorE SegaRom::AttachBuffer(Uint8 *pData, Uint32 nBytes)
+Emu::Rom::LoadErrorE SegaRom::AttachBuffer(
+    Uint8 *pData, Uint32 nBytes, Uint32 nCapacity)
 {
     Unload();
-    if (!pData || !nBytes)
+    if (!pData || !nBytes || nCapacity < nBytes)
         return LOADERROR_BADROMSIZE;
     m_pRomMem = NULL;
     m_pRomData = pData;
     m_uRomBytes = nBytes;
+    m_uRomCapacity = nCapacity;
     m_bLoaded = TRUE;
-    printf("[SegaRom] attached Aurora ROM buffer: %u bytes\n",
-           (unsigned)m_uRomBytes);
+    printf("[SegaRom] attached Aurora ROM buffer: %u/%u bytes\n",
+           (unsigned)m_uRomBytes, (unsigned)m_uRomCapacity);
     return LOADERROR_NONE;
 }
 

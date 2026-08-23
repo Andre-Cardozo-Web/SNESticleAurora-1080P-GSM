@@ -72,13 +72,18 @@ public:
 };
 
 
-/* Game (emulator) audio gain: internal 0..400 percent, default 200.
-   Video Config displays internal/2 (0..200). Shared by SNES and NES. */
+/* Emulator audio gains: internal 0..400 percent, default 200.
+   Video Config displays internal/2 (0..200).
+   "SNES volume" is shared by SNESticle + QuickNES.
+   "SEGA volume" is used only while PicoDrive is active. */
 #ifdef __cplusplus
 extern "C" {
 #endif
 void AudMixGameSetVolume(int vol);
 int  AudMixGameGetVolume(void);
+void AudMixSegaSetVolume(int vol);
+int  AudMixSegaGetVolume(void);
+void AudMixSetSegaVolumeMode(int enabled);
 /* Experimental fast 32->48 kHz path used only by PicoDrive. */
 void AudMixSetFastResample(int enabled);
 #ifdef __cplusplus

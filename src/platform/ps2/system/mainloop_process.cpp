@@ -105,6 +105,16 @@ Bool MainLoopProcess()
         {
             /* Start SMS/GG autofire in its ON half whenever gameplay resumes. */
             MainLoopTurboRearmHostPhase();
+            /* AURORA_SNES_AUDIO_BURST_CAP_V1_20260823
+             * SNES normally emits ~800 stereo frames at 48 kHz per VBlank.
+             * 1024 still drains faster than production while capping a single
+             * post-VBlank SIF RPC at 4096 bytes. Other systems are unchanged. */
+            Aud_SetAsyncBurstLimit(_pSystem == _pSnes ? 1024 : 4095);
+
+            /* AURORA_AUDIO_SPLIT_VOLUMES_V36_20260823
+             * Select which saved final gain the shared mixer will use. */
+            AudMixSetSegaVolumeMode(_pSystem == _pSega ? 1 : 0);
+
             /* Fill host-audio safety headroom BEFORE the first cold frame. */
             Aud_PrepareGameplayHeadroom();
             _AudioGameplaySystem = _pSystem;

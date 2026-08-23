@@ -52,6 +52,10 @@ extern int g_GskWidescreen;   /* 0 = 4:3, 1 = safe mode-specific 16:9           
 void GSK_SetDisplayOffset(int x, int y);
 /* Runtime-only game bias; does not change/save g_GskDispOffY. */
 void GSK_SetGameplayYOffsetBias(int y);
+/* AURORA_MD_UI256_320FB_V1_20260823
+ * Present logical 256-wide UI without fractional scaling while MD keeps
+ * its physical 320-wide 240p framebuffer alive. */
+void GSK_SetUi256On320Framebuffer(int on);
 /* 240p physical sample raster: 256 (SNES/NES) or 320 (plain MD). */
 void GSK_Set240pFramebufferWidth(int width);
 int GSK_Get240pFramebufferWidth(void);

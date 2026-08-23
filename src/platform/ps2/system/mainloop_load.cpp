@@ -1,5 +1,7 @@
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <malloc.h>
 #define NEWLIB_PORT_AWARE
 #include <io_common.h>
 #include <fileXio.h>
@@ -133,16 +135,21 @@ static Bool _MainLoopSegaWantsNative320(
         0x7ff0U, 0x3ff0U, 0x1ff0U
     };
 
-    if (!pData || nBytes <= 0)
-        return FALSE;
-
-    /* Explicit non-MD extensions always keep Aurora's 256 raster. */
+    /* Explicit extensions can choose the raster before ROM allocation. */
     if (_MainLoopSegaExtEquals(pName, "sms") ||
         _MainLoopSegaExtEquals(pName, "gg")  ||
         _MainLoopSegaExtEquals(pName, "sg")  ||
         _MainLoopSegaExtEquals(pName, "sc")  ||
         _MainLoopSegaExtEquals(pName, "32x") ||
         _MainLoopSegaExtEquals(pName, "pco"))
+        return FALSE;
+
+    if (_MainLoopSegaExtEquals(pName, "md")  ||
+        _MainLoopSegaExtEquals(pName, "gen") ||
+        _MainLoopSegaExtEquals(pName, "smd"))
+        return TRUE;
+
+    if (!pData || nBytes <= 0)
         return FALSE;
 
     /* A .bin may actually be SMS/GG. Mirror PicoDrive's TMR SEGA test
@@ -177,11 +184,6 @@ static Bool _MainLoopSegaWantsNative320(
         (nBytes >= 0x309 &&
          memcmp(pData + 0x300, "SEGA PICO", 9) == 0))
         return FALSE;
-
-    if (_MainLoopSegaExtEquals(pName, "md")  ||
-        _MainLoopSegaExtEquals(pName, "gen") ||
-        _MainLoopSegaExtEquals(pName, "smd"))
-        return TRUE;
 
     /* Normal commercial .bin MD dumps identify themselves here. */
     if (_MainLoopSegaExtEquals(pName, "bin") &&
@@ -223,25 +225,32 @@ static Bool _MainLoopSegaWantsNative320(
 int _MainLoopReadBinaryData(Uint8 *pBuffer, Int32 nBufferBytes, const char *pRomFile)
 {
         int fd;
-        int nBytes;
+        int total = 0;
 
-        /* One fileXio read becomes one EE->IOP RPC; the IOP-side fileXio
-           server chunks and DMA-copies the request internally until EOF.
-           newlib fread() uses its own small buffering and is substantially
-           slower for multi-megabyte ROMs, especially on cdfs/mass/SMB. */
-        /* fileXioOpen() is an IOP API, so it must receive the IOP/FIO flag.
-           newlib's O_RDONLY is zero; passing it directly makes drivers such
-           as cdfs reject every ROM before the first byte is read. */
+        if (!pBuffer || nBufferBytes <= 0)
+                return -1;
+
         fd = fileXioOpen(pRomFile, FIO_O_RDONLY, 0);
         if (fd < 0)
-        {
                 return -1;
+
+        /* AURORA_DYNAMIC_ROM_BUFFER_V1_20260823
+         * fileXioRead may legally return short; finish the payload. */
+        while (total < nBufferBytes)
+        {
+                int n = fileXioRead(fd, pBuffer + total, nBufferBytes - total);
+                if (n < 0)
+                {
+                        fileXioClose(fd);
+                        return -1;
+                }
+                if (n == 0)
+                        break;
+                total += n;
         }
 
-        nBytes = fileXioRead(fd, pBuffer, nBufferBytes);
         fileXioClose(fd);
-
-        return nBytes;
+        return total;
 }
 
 int _MainLoopReadGZData(Uint8 *pBuffer, Int32 nBufferBytes, const char *pRomFile)
@@ -272,6 +281,104 @@ static int _MainLoopZipNameIsRom(const char *pName)
                         return 0;
         }
 }
+
+
+/* AURORA_DYNAMIC_ROM_BUFFER_V1_20260823 */
+#define MAINLOOP_LEGACY_ROM_MAX_BYTES (8U * 1024U * 1024U + 1024U)
+#define MAINLOOP_SEGA_ROM_MAX_BYTES   (16U * 1024U * 1024U)
+#define MAINLOOP_SEGA_PROBE_BYTES     0x8200U
+
+static void _MainLoopFreeRomBuffer(void)
+{
+    if (_RomData)
+        free(_RomData);
+    _RomData = NULL;
+    _RomDataCapacity = 0;
+}
+
+static Bool _MainLoopAllocRomBuffer(Uint32 capacity)
+{
+    Uint8 *p;
+    if (capacity == 0 || _RomData || _RomDataCapacity)
+        return FALSE;
+
+    p = (Uint8 *)memalign(64, (size_t)capacity);
+    if (!p)
+        return FALSE;
+
+    _RomData = p;
+    _RomDataCapacity = capacity;
+    return TRUE;
+}
+
+static Int32 _MainLoopGetBinarySize(const char *pRomFile)
+{
+    int fd = fileXioOpen(pRomFile, FIO_O_RDONLY, 0);
+    int size;
+    if (fd < 0)
+        return -1;
+    size = fileXioLseek(fd, 0, FIO_SEEK_END);
+    fileXioClose(fd);
+    return (size > 0) ? (Int32)size : -1;
+}
+
+static Int32 _MainLoopReadBinaryPrefix(
+    Uint8 *pBuffer, Int32 nBufferBytes, const char *pRomFile)
+{
+    int fd, total = 0;
+    if (!pBuffer || nBufferBytes <= 0)
+        return -1;
+
+    fd = fileXioOpen(pRomFile, FIO_O_RDONLY, 0);
+    if (fd < 0)
+        return -1;
+
+    while (total < nBufferBytes)
+    {
+        int n = fileXioRead(fd, pBuffer + total, nBufferBytes - total);
+        if (n <= 0)
+            break;
+        total += n;
+    }
+    fileXioClose(fd);
+    return total;
+}
+
+static Uint32 _MainLoopRomPayloadLimit(PathExtTypeE eType)
+{
+    return (eType == MAINLOOP_ENTRYTYPE_SEGAROM)
+        ? MAINLOOP_SEGA_ROM_MAX_BYTES
+        : MAINLOOP_LEGACY_ROM_MAX_BYTES;
+}
+
+static int _MainLoopZipDynamicEntryFilter(
+    const char *pName, unsigned int nBytes)
+{
+    PathExtTypeE eType;
+    if (!pName || !PathExtResolve((char *)pName, &eType, FALSE))
+        return 0;
+
+    switch (eType)
+    {
+        case MAINLOOP_ENTRYTYPE_SNESROM:
+        case MAINLOOP_ENTRYTYPE_NESROM:
+        case MAINLOOP_ENTRYTYPE_NESFDSDISK:
+        case MAINLOOP_ENTRYTYPE_NESFDSBIOS:
+            return nBytes <= MAINLOOP_LEGACY_ROM_MAX_BYTES;
+        case MAINLOOP_ENTRYTYPE_SEGAROM:
+            return nBytes <= MAINLOOP_SEGA_ROM_MAX_BYTES;
+        default:
+            return 0;
+    }
+}
+
+static void _MainLoopAbortPreCoreLoad(void)
+{
+    _MainLoopFreeRomBuffer();
+    if (!MainLoopEnsureGameplayRasterWidth(256))
+        printf("[video] warning: could not restore 256 raster after load failure\n");
+}
+
 
 int _MainLoopReadZipData(Uint8 *pBuffer, Int32 nBufferBytes, const char *pZipFile, char *pFileName)
 {
@@ -309,7 +416,8 @@ Bool _MainLoopLoadRomData(Emu::Rom *pRom, Uint8 *pRomData, Int32 nRomBytes)
            already-loaded _RomData directly. No duplicate buffer and no
            in-place CMemFileIO memcpy. SNES/NES retain the old path. */
         if (pRom == _pSegaRom)
-            eError = _pSegaRom->AttachBuffer(pRomData, (Uint32)nRomBytes);
+            eError = _pSegaRom->AttachBuffer(
+                pRomData, (Uint32)nRomBytes, _RomDataCapacity);
         else
             eError = pRom->LoadRom(&romfile);
         romfile.Close();
@@ -388,9 +496,25 @@ void _MainLoopUnloadRom()
 	if (_pSega) _pSega->SetRom(NULL);
 	if (_pSegaRom) _pSegaRom->Unload();
 
+    /* The cores are detached now; release ROM RAM before gsKit reallocates. */
+    _MainLoopFreeRomBuffer();
+
     /* AURORA_MD_STABLE_RASTER_V2
      * Only rebuild the 240p GS after PicoDrive has been shut down.
      * Browser/SNES/NES/SMS/GG use Aurora's normal physical raster. */
+    /* AURORA_GAME_SWITCH_CLEAR_V1_20260823
+     * System-agnostic: every ROM switch starts from black presentation state.
+     *
+     * The raster helper re-uploads _fbTexture[0] after a gsKit rebuild.
+     * Therefore clear BEFORE the rebuild, otherwise the previous game's last
+     * frame gets copied into the new _OutTex and flashes during next boot. */
+    if (_fbTexture[0]) _fbTexture[0]->Clear();
+    if (_fbTexture[1]) _fbTexture[1]->Clear();
+
+    /* Also cover same-raster switches where no GS rebuild occurs. */
+    if (_fbTexture[0])
+        TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
+
     if (!MainLoopEnsureGameplayRasterWidth(256))
         printf("[video] warning: could not restore 256 raster after unload\n");
 
@@ -399,301 +523,321 @@ void _MainLoopUnloadRom()
     _RomPath[0] = 0;
     MainLoopStateOnRomChanged();
 
-	_fbTexture[0]->Clear();
-	_fbTexture[1]->Clear();
 }
 
 
 Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 {
-	PathExtTypeE eType;
-	Emu::Rom *pRom = NULL;
-	Emu::System *pSystem = NULL;
-	Emu::Rom *pBios = NULL;
-	/* CBrowserScreen now builds paths into a 1024-byte buffer (m_Dir up
-	   to 512 + a per-entry name up to 255), so the bespoke copy that
-	   _MainLoopExecuteFile keeps for PathExtResolve()'s in-place
-	   truncation has to match that size. Otherwise a long ROM path
-	   silently overflows the old FileName[256] in strcpy() below. */
-	char FileName[1024];
-	char OriginalPath[1024];
-	/* AURORA_PICODRIVE_STAGE2_CONTENT_NAME */
-	char SegaContentName[1024];
+    PathExtTypeE eType, eSourceType;
+    Emu::Rom *pRom = NULL;
+    Emu::System *pSystem = NULL;
+    Emu::Rom *pBios = NULL;
+    char FileName[1024], OriginalPath[1024], SegaContentName[1024];
+    char hddPath[1024], ZipMemberName[512];
+    unsigned int uZipIndex = 0;
+    Bool bZipIndexValid = FALSE;
+    Int32 nExpectedRomBytes = 0, nRomBytes = 0;
+    Uint32 uRomIdentityCRC = 0;
+#if SNDBG_LOG
+    Uint32 uRomCRC = 0;
+#endif
 
-	if (pFileName==NULL)
-	{
-		return FALSE;
-	}
+    if (!pFileName)
+        return FALSE;
 
-	/* Keep the browser-facing path as well as the mapped I/O path.  For an
-	   internal-HDD ROM this preserves hdd0:/PARTITION/... so save states
-	   can remount that exact APA partition later; pFileName itself becomes
-	   pfs0:/... below and no longer contains the partition identity. */
-	snprintf(OriginalPath, sizeof(OriginalPath), "%s", pFileName);
+    snprintf(OriginalPath, sizeof(OriginalPath), "%s", pFileName);
+    if (HddMapPath(pFileName, hddPath, sizeof(hddPath)) == 1)
+        pFileName = hddPath;
 
-	/* HD interno (APA): traduz "hdd0:/PARTICAO/.../rom" -> "pfs0:/.../rom"
-	   (monta a particao em pfs0:).  Para os demais dispositivos e' no-op,
-	   entao pFileName segue inalterado. */
-	char hddPath[1024];
-	if (HddMapPath(pFileName, hddPath, sizeof(hddPath)) == 1)
-		pFileName = hddPath;
+    snprintf(FileName, sizeof(FileName), "%s", pFileName);
+    snprintf(SegaContentName, sizeof(SegaContentName), "%s", pFileName);
+    ZipMemberName[0] = 0;
 
-	// make copy of filename
-	snprintf(FileName, sizeof(FileName), "%s", pFileName);
-	snprintf(SegaContentName, sizeof(SegaContentName), "%s", pFileName);
+    if (!PathExtResolve(FileName, &eType, TRUE))
+        return FALSE;
 
-	// resolve file extension of filename
-	if (!PathExtResolve(FileName, &eType, TRUE))
-	{
-		return FALSE;
-  	}
+    if (eType == MAINLOOP_ENTRYTYPE_SNESPALETTE)
+        return _MainLoopLoadSnesPalette(pFileName);
 
-	if (eType == MAINLOOP_ENTRYTYPE_SNESPALETTE)
-	{
-		return _MainLoopLoadSnesPalette(pFileName);
-	}
-
-	// unload existing game
     _MainLoopUnloadRom();
 
-    #if MAINLOOP_HISTORY
+#if MAINLOOP_HISTORY
     _MainLoopResetHistory();
-    #endif
-	_MainLoopResetInputChecksums();
-
-	int nRomBytes = 0;
-	Uint8 *pBuffer = _RomData;
-	Int32 nBufferBytes = sizeof(_RomData);
-	Uint32 uRomIdentityCRC = 0;
-#if SNDBG_LOG
-	Uint32 uRomCRC = 0;
 #endif
+    _MainLoopResetInputChecksums();
 
-	// load rom data from disk into our buffer
-	if (eType == MAINLOOP_ENTRYTYPE_GZ)
-	{
-		// if its a GZ file, then the next extension is the one we use
-		/* AURORA_PICODRIVE_STAGE2_GZ_NAME: FileName still has .md/.sms/etc here. */
-		snprintf(SegaContentName, sizeof(SegaContentName), "%s", FileName);
-		if (!PathExtResolve(FileName, &eType, TRUE))
-		{
-			return FALSE;
-		}
+    eSourceType = eType;
 
-		// load GZ-ipped data
-		nRomBytes = _MainLoopReadGZData(pBuffer, nBufferBytes, pFileName);
-
-	} else
-	if (eType == MAINLOOP_ENTRYTYPE_ZIP)
-	{
-		// if it is a ZIP file then we have to look in the file to find the right file to load
-		nRomBytes = _MainLoopReadZipData(pBuffer, nBufferBytes, pFileName, FileName);
-		if (nRomBytes > 0)
-		{
-			/* AURORA_PICODRIVE_STAGE2_ZIP_NAME */
-			snprintf(SegaContentName, sizeof(SegaContentName), "%s", FileName);
-			// resolve extension of unzipped file
-			if (!PathExtResolve(FileName, &eType, TRUE))
-			{
-				return FALSE;
-			}
-		}
-
-	} else
-	{
-		// read as binary data
-		nRomBytes = _MainLoopReadBinaryData(pBuffer, nBufferBytes, pFileName);
-	}
-
-	// was load successful?
-	if (nRomBytes <= 0)
-	{
-		return FALSE;
-	}
-
-	/* Save-state identity is the pristine file/archive payload. PicoDrive is
-	 * allowed to byte-swap or patch its borrowed buffer after this point. */
-	uRomIdentityCRC = (Uint32)mz_crc32(
-		MZ_CRC32_INIT, pBuffer, (size_t)nRomBytes);
-
-#if SNDBG_LOG
-	/* Hash the bytes exactly as they came from disk/archive, before a ROM
-	   parser removes a copier header or deinterleaves the image. */
-	uRomCRC = (Uint32)mz_crc32(MZ_CRC32_INIT, pBuffer, (size_t)nRomBytes);
-#endif
-
-    /* Parsers receive the exact byte count, so clearing all 8 MiB before
-       every launch was redundant. Keep only a small zero guard for old
-       cartridge code that may legally perform aligned look-ahead reads. */
+    /* Preflight size/name with no large frontend ROM allocation. */
+    if (eSourceType == MAINLOOP_ENTRYTYPE_GZ)
     {
-        Int32 nGuardBytes = nBufferBytes - nRomBytes;
-        if (nGuardBytes > 1024)
-            nGuardBytes = 1024;
-        if (nGuardBytes > 0)
-            memset(pBuffer + nRomBytes, 0, nGuardBytes);
+        snprintf(SegaContentName, sizeof(SegaContentName), "%s", FileName);
+        if (!PathExtResolve(FileName, &eType, TRUE))
+            return FALSE;
+        nExpectedRomBytes = MinizGetGZUncompressedSize(pFileName);
+    }
+    else if (eSourceType == MAINLOOP_ENTRYTYPE_ZIP)
+    {
+        nExpectedRomBytes = MinizProbeZipFirstMatchInfo(
+            pFileName, &uZipIndex,
+            ZipMemberName, (int)sizeof(ZipMemberName),
+            _MainLoopZipDynamicEntryFilter);
+
+        if (nExpectedRomBytes > 0)
+        {
+            bZipIndexValid = TRUE;
+            snprintf(SegaContentName, sizeof(SegaContentName),
+                     "%s", ZipMemberName);
+            snprintf(FileName, sizeof(FileName), "%s", ZipMemberName);
+            if (!PathExtResolve(FileName, &eType, TRUE))
+                return FALSE;
+        }
+    }
+    else
+    {
+        nExpectedRomBytes = _MainLoopGetBinarySize(pFileName);
     }
 
-    printf("ROM data read: %s (%d bytes)\n", pFileName, nRomBytes);
+    if (nExpectedRomBytes <= 0 ||
+        (Uint32)nExpectedRomBytes > _MainLoopRomPayloadLimit(eType))
+    {
+        MainLoopModalPrintf(60 * 3, "ERROR: ROM is too large or unreadable");
+        return FALSE;
+    }
 
-	_MainLoopGetName(_RomName, FileName);
-	printf("ROMName: '%s'\n", _RomName);
+    switch (eType)
+    {
+        case MAINLOOP_ENTRYTYPE_NESROM:
+            pSystem = _pNes; pRom = _pNesRom; pBios = NULL;
+            _MainLoop_fOutputIntensity = 0.8f;
+            break;
+        case MAINLOOP_ENTRYTYPE_NESFDSDISK:
+            pSystem = _pNes; pRom = _pNesFDSDisk; pBios = _pNesFDSBios;
+            _MainLoop_fOutputIntensity = 0.8f;
+            break;
+        case MAINLOOP_ENTRYTYPE_NESFDSBIOS:
+            pSystem = _pNes; pRom = NULL; pBios = _pNesFDSBios;
+            _MainLoop_fOutputIntensity = 0.8f;
+            break;
+        case MAINLOOP_ENTRYTYPE_SEGAROM:
+            pSystem = _pSega; pRom = _pSegaRom; pBios = NULL;
+            _MainLoop_fOutputIntensity = 1.0f;
+            break;
+        case MAINLOOP_ENTRYTYPE_SNESROM:
+            pSystem = _pSnes; pRom = _pSnesRom; pBios = NULL;
+            _MainLoop_fOutputIntensity = 1.0f;
+            break;
+        default:
+            return FALSE;
+    }
 
-	// determine what kind of system to use for this rom
-	switch (eType)
-	{
-		/* Phase 2 of the NES integration: route .nes/.fds/disksys.rom
-		   to _pNes (the NesSystem). FDS support is enabled here so
-		   the loader accepts the file, but ExecuteFrame is a stub
-		   today and disk-swap input is still gated until Phase 5. */
-		case MAINLOOP_ENTRYTYPE_NESROM:
-			pSystem = _pNes;
-			pRom    = _pNesRom;
-			pBios   = NULL;
-			_MainLoop_fOutputIntensity = 0.8f;
-			break;
-
-		case MAINLOOP_ENTRYTYPE_NESFDSDISK:
-			pSystem = _pNes;
-			pRom    = _pNesFDSDisk;
-			pBios   = _pNesFDSBios;
-			_MainLoop_fOutputIntensity = 0.8f;
-			break;
-
-		case MAINLOOP_ENTRYTYPE_NESFDSBIOS:
-			pSystem = _pNes;
-			pRom    = NULL;
-			pBios   = _pNesFDSBios;
-			_MainLoop_fOutputIntensity = 0.8f;
-			break;
-		case MAINLOOP_ENTRYTYPE_SEGAROM:
-			pSystem = _pSega;
-			pRom    = _pSegaRom;
-			pBios   = NULL;
-			_MainLoop_fOutputIntensity = 1.0f;
-			break;
-		case MAINLOOP_ENTRYTYPE_SNESROM:
-			pSystem = _pSnes;
-			pRom    = _pSnesRom;
-			pBios   = NULL;
-			_MainLoop_fOutputIntensity = 1.0f;
-			break;
-		default:
-			return FALSE;
-	}
-
-	if (pBios)
-	{
-		if (pRom==NULL)
-		{
-			// try to load disksys.rom directly
-			if (!_MainLoopLoadBios(pBios, pFileName))
-			{
-				MainLoopModalPrintf(60*5, "ERROR: Cannot load disksys.rom");
-				return FALSE;
-			}
-		} else
-		{
-			// can't run disks unless we have the FDS Bios loaded
-			if (!pBios->IsLoaded())
-			{
-				char diskrompath[1024];
-                            Char *pFileName;
-				snprintf(diskrompath, sizeof(diskrompath), "%s", FileName);
-				pFileName = strrchr(diskrompath, '/');
-				if (!pFileName) 
-					pFileName = strrchr(diskrompath, ':');
-				if (!pFileName)
-					return FALSE;
-
-				// 
-				strcpy(pFileName + 1, "disksys.rom");
-
-				printf("FDSRom: '%s'\n", diskrompath);
-
-				// try to load disksys.rom
-				if (!_MainLoopLoadBios(pBios, diskrompath))
-				{
-					MainLoopModalPrintf(60*5, "ERROR: Cannot load disksys.rom");
-					return FALSE;
-				}
-			}
-		}
-	}
-
-    /* AURORA_MD_PRELOAD_RASTER_V2
-     * Select the final physical 240p raster BEFORE the ROM wrapper/core
-     * gets initialised. GSK_ReinitVideo must not run while PicoDrive owns
-     * live EE allocations. */
+    /* Resolve 240p physical raster before final ROM RAM is committed. */
     {
         Int32 rasterWidth = 256;
 
-        if (eType == MAINLOOP_ENTRYTYPE_SEGAROM &&
-            _MainLoopSegaWantsNative320(
-                pBuffer, nRomBytes, SegaContentName))
+        if (eType == MAINLOOP_ENTRYTYPE_SEGAROM)
         {
-            rasterWidth = 320;
+            Bool native320 = FALSE;
+
+            if (_MainLoopSegaExtEquals(SegaContentName, "bin"))
+            {
+                Uint32 nProbe = (Uint32)nExpectedRomBytes;
+                Uint8 *pProbe;
+                Int32 got;
+
+                if (nProbe > MAINLOOP_SEGA_PROBE_BYTES)
+                    nProbe = MAINLOOP_SEGA_PROBE_BYTES;
+
+                pProbe = (Uint8 *)malloc((size_t)nProbe);
+                if (!pProbe)
+                {
+                    MainLoopModalPrintf(60 * 3,
+                        "ERROR: not enough memory for ROM probe");
+                    return FALSE;
+                }
+
+                if (eSourceType == MAINLOOP_ENTRYTYPE_GZ)
+                    got = MinizReadGZPrefix(
+                        pFileName, pProbe, (Int32)nProbe);
+                else if (eSourceType == MAINLOOP_ENTRYTYPE_ZIP)
+                    got = bZipIndexValid
+                        ? MinizReadZipEntryPrefix(
+                            pFileName, uZipIndex, pProbe, (Int32)nProbe)
+                        : -1;
+                else
+                    got = _MainLoopReadBinaryPrefix(
+                        pProbe, (Int32)nProbe, pFileName);
+
+                if (got != (Int32)nProbe)
+                {
+                    free(pProbe);
+                    MainLoopModalPrintf(60 * 3,
+                        "ERROR: cannot probe Sega ROM");
+                    return FALSE;
+                }
+
+                native320 = _MainLoopSegaWantsNative320(
+                    pProbe, nExpectedRomBytes, SegaContentName);
+                free(pProbe);
+            }
+            else
+            {
+                native320 = _MainLoopSegaWantsNative320(
+                    NULL, nExpectedRomBytes, SegaContentName);
+            }
+
+            if (native320)
+                rasterWidth = 320;
         }
 
         if (!MainLoopEnsureGameplayRasterWidth(rasterWidth))
         {
-            printf("[video] failed to prepare %d raster before ROM init\n",
-                   (int)rasterWidth);
-
-            /* Best-effort recovery so the error/UI remains usable. */
             if (rasterWidth != 256)
                 MainLoopEnsureGameplayRasterWidth(256);
-
             MainLoopModalPrintf(60 * 3,
                 "ERROR: cannot configure video raster");
             return FALSE;
         }
     }
 
-	if (pRom)
-	{
-		// attempt to load rom for that system
-		if (!_MainLoopLoadRomData(pRom, _RomData, nRomBytes))
-		{
-			return FALSE;
-		}
-	}
+    /* Allocate exact frontend backing policy for this cartridge. */
+    {
+        size_t required;
+        if (eType == MAINLOOP_ENTRYTYPE_SEGAROM)
+            required = PicoDriveBridge_RequiredRomCapacity(
+                (size_t)nExpectedRomBytes);
+        else
+            required = (size_t)nExpectedRomBytes + 1024U;
 
-	if (pBios)
-	{
-		// setup disk system
-		pSystem->SetRom(pBios);
-		/* Phase 2: NesSystem accepts the FDS disk pointer but the
-		   real swap mux (NesMMU) is still a Phase 5 task, so this
-		   stores the pointer without actually selecting a disk. The
-		   SNES SetSnesRom path is kept as a safety net in case the
-		   ROM that triggered pBios was somehow a SNES image. */
-		if (pSystem == _pNes)
-		{
-			_pNes->SetNesDisk(_pNesFDSDisk);
-		}
-		else
-		{
-			_pSnes->SetSnesRom(_pSnesRom);
-		}
-	} 
-	else
-	{
-		/* AURORA_PICODRIVE_STAGE2_SETROM */
-		if (pSystem == _pSega && _pSegaRom)
-		{
-			_pSegaRom->SetSourceName(SegaContentName);
-			PicoDriveBridge_SetRegion((int)g_SnesForceRegion);
-		}
-		pSystem->SetRom(pRom);
-	}
+        if (required < (size_t)nExpectedRomBytes ||
+            required > 0xFFFFFFFFU ||
+            !_MainLoopAllocRomBuffer((Uint32)required))
+        {
+            _MainLoopAbortPreCoreLoad();
+            MainLoopModalPrintf(60 * 3,
+                "ERROR: not enough memory for ROM");
+            return FALSE;
+        }
+    }
 
-	pSystem->Reset();
+    if (eSourceType == MAINLOOP_ENTRYTYPE_GZ)
+    {
+        nRomBytes = _MainLoopReadGZData(
+            _RomData, (Int32)_RomDataCapacity, pFileName);
+    }
+    else if (eSourceType == MAINLOOP_ENTRYTYPE_ZIP)
+    {
+        char loadedName[512];
+        loadedName[0] = 0;
+        nRomBytes = bZipIndexValid
+            ? MinizReadZipEntryToBuffer(
+                pFileName, uZipIndex,
+                _RomData, (Int32)_RomDataCapacity,
+                loadedName, (int)sizeof(loadedName))
+            : -1;
+        if (nRomBytes > 0 &&
+            strcmp(loadedName, ZipMemberName) != 0)
+            nRomBytes = -1;
+    }
+    else
+    {
+        nRomBytes = _MainLoopReadBinaryData(
+            _RomData, (Int32)_RomDataCapacity, pFileName);
+    }
 
-    /* SNESTICLE_QUICKNES_REQUIRE_ROM_READY
-     * QuickNES only runs a successfully opened .nes cartridge. SetRom()
-     * deliberately rejects FDS/non-cartridge images and can also reject an
-     * unsupported mapper. Do not publish that half-loaded NesSystem to the
-     * frame loop. */
+    if (nRomBytes != nExpectedRomBytes)
+    {
+        _MainLoopAbortPreCoreLoad();
+        MainLoopModalPrintf(60 * 3, "ERROR: Cannot read complete ROM");
+        return FALSE;
+    }
+
+    /* Save-state identity: same pristine payload boundary as before. */
+    uRomIdentityCRC = (Uint32)mz_crc32(
+        MZ_CRC32_INIT, _RomData, (size_t)nRomBytes);
+#if SNDBG_LOG
+    uRomCRC = (Uint32)mz_crc32(
+        MZ_CRC32_INIT, _RomData, (size_t)nRomBytes);
+#endif
+
+    {
+        Int32 guard = (Int32)(_RomDataCapacity - (Uint32)nRomBytes);
+        if (guard > 1024) guard = 1024;
+        if (guard > 0)
+            memset(_RomData + nRomBytes, 0, (size_t)guard);
+    }
+
+    printf("ROM data read: %s (%d/%u bytes backing)\n",
+           pFileName, nRomBytes, (unsigned)_RomDataCapacity);
+    _MainLoopGetName(_RomName, FileName);
+    printf("ROMName: '%s'\n", _RomName);
+
+    if (pBios)
+    {
+        if (pRom == NULL)
+        {
+            if (!_MainLoopLoadBios(pBios, pFileName))
+            {
+                _MainLoopUnloadRom();
+                MainLoopModalPrintf(60 * 5,
+                    "ERROR: Cannot load disksys.rom");
+                return FALSE;
+            }
+        }
+        else if (!pBios->IsLoaded())
+        {
+            char diskrompath[1024];
+            Char *pDiskFileName;
+
+            snprintf(diskrompath, sizeof(diskrompath), "%s", FileName);
+            pDiskFileName = strrchr(diskrompath, '/');
+            if (!pDiskFileName)
+                pDiskFileName = strrchr(diskrompath, ':');
+            if (!pDiskFileName)
+            {
+                _MainLoopUnloadRom();
+                return FALSE;
+            }
+
+            strcpy(pDiskFileName + 1, "disksys.rom");
+            printf("FDSRom: '%s'\n", diskrompath);
+
+            if (!_MainLoopLoadBios(pBios, diskrompath))
+            {
+                _MainLoopUnloadRom();
+                MainLoopModalPrintf(60 * 5,
+                    "ERROR: Cannot load disksys.rom");
+                return FALSE;
+            }
+        }
+    }
+
+    if (pRom && !_MainLoopLoadRomData(pRom, _RomData, nRomBytes))
+    {
+        _MainLoopUnloadRom();
+        return FALSE;
+    }
+
+    if (pBios)
+    {
+        pSystem->SetRom(pBios);
+        if (pSystem == _pNes)
+            _pNes->SetNesDisk(_pNesFDSDisk);
+        else
+            _pSnes->SetSnesRom(_pSnesRom);
+    }
+    else
+    {
+        if (pSystem == _pSega && _pSegaRom)
+        {
+            _pSegaRom->SetSourceName(SegaContentName);
+            PicoDriveBridge_SetRegion((int)g_SnesForceRegion);
+        }
+        pSystem->SetRom(pRom);
+    }
+
+    pSystem->Reset();
+
     if (pSystem == _pNes && !_pNes->IsRomReady())
     {
         printf("[QuickNES] ROM rejected; aborting launch before mainloop\n");
@@ -703,7 +847,6 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         return FALSE;
     }
 
-    /* AURORA_PICODRIVE_STAGE2_REQUIRE_READY */
     if (pSystem == _pSega && !_pSega->IsRomReady())
     {
         printf("[PicoDrive] ROM rejected; aborting launch before mainloop\n");
@@ -713,71 +856,51 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         return FALSE;
     }
 
-    /* AURORA_MD_PRELOAD_RASTER_V2
-     * Physical raster was selected before SetRom(). Do not rebuild the
-     * GS here: PicoDrive is now live and must keep a stable host video
-     * environment until the ROM is unloaded. */
-
     _pSystem = pSystem;
     snprintf(_RomPath, sizeof(_RomPath), "%s", OriginalPath);
     MainLoopStateOnRomChanged();
     MainLoopStatePrimeRomIdentityCRC(uRomIdentityCRC);
 
-	ConPrint("ROM Loaded: %s\n", pFileName);
+    ConPrint("ROM Loaded: %s\n", pFileName);
 
-	if (pRom)
-	{
-		int nRegions, iRegion;
-		Char *pRomTitle;
-		Char *pRomMapper;
+    if (pRom)
+    {
+        int nRegions, iRegion;
+        Char *pRomTitle = pRom->GetRomTitle();
+        Char *pRomMapper = pRom->GetMapperName();
 
-		// print mapper info
-		pRomMapper = pRom->GetMapperName();
-		if (pRomMapper && !strcmp(pRomMapper, "<unknown>"))
-		{
-			MainLoopModalPrintf(60*1, "WARNING: Unsupported NES Mapper");
-		}
-
-		// print rom title
-		pRomTitle = pRom->GetRomTitle();
-		if (pRomTitle)
-		{
-		    printf("Rom Title: %s\n", pRomTitle);
-		}
+        if (pRomMapper && !strcmp(pRomMapper, "<unknown>"))
+            MainLoopModalPrintf(60, "WARNING: Unsupported NES Mapper");
+        if (pRomTitle)
+            printf("Rom Title: %s\n", pRomTitle);
 
 #if SNDBG_LOG
-		DLog("[rom] file='%s' bytes=%d crc32=%08X title='%s' mapper='%s'",
-			_RomName, (int)nRomBytes, (unsigned)uRomCRC,
-			pRomTitle ? pRomTitle : "<none>",
-			pRomMapper ? pRomMapper : "<none>");
+        DLog("[rom] file='%s' bytes=%d crc32=%08X title='%s' mapper='%s'",
+             _RomName, (int)nRomBytes, (unsigned)uRomCRC,
+             pRomTitle ? pRomTitle : "<none>",
+             pRomMapper ? pRomMapper : "<none>");
 #endif
 
-		// print info about rom regions
-		nRegions = pRom->GetNumRomRegions();
-		for (iRegion=0; iRegion < nRegions; iRegion++)
-		{
-			printf("%s: %d bytes\n", pRom->GetRomRegionName(iRegion), pRom->GetRomRegionSize(iRegion));
-		}
-	}
+        nRegions = pRom->GetNumRomRegions();
+        for (iRegion = 0; iRegion < nRegions; ++iRegion)
+            printf("%s: %d bytes\n",
+                   pRom->GetRomRegionName(iRegion),
+                   pRom->GetRomRegionSize(iRegion));
+    }
 
     _MainLoopSetSampleRate(pSystem->GetSampleRate());
+    if (bLoadSRAM)
+        _MainLoopLoadSRAM();
 
-	if (bLoadSRAM)
-		_MainLoopLoadSRAM();
-
-	// clear screen
     _fbTexture[0]->Clear();
     TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
-	if (eType == MAINLOOP_ENTRYTYPE_NESFDSDISK)
-	{
-		/* Phase 2: track disk-inserted state so the SRAM/state path
-		   builder picks up the right name, but the real disk swap
-		   (NesMMU::InsertDisk) is a Phase 5 task. _pNes->GetMMU()
-		   currently returns NULL so we deliberately skip that call. */
-		_MainLoop_iDisk         = 0;
-		_MainLoop_bDiskInserted = TRUE;
-	}
-	return TRUE;
+
+    if (eType == MAINLOOP_ENTRYTYPE_NESFDSDISK)
+    {
+        _MainLoop_iDisk = 0;
+        _MainLoop_bDiskInserted = TRUE;
+    }
+    return TRUE;
 }
 
 void _MainLoopSetSampleRate(Uint32 uSampleRate)

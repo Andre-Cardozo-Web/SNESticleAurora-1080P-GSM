@@ -10,7 +10,10 @@ class CMixBuffer;
 
 bool PicoDriveBridge_Init(void);
 void PicoDriveBridge_Shutdown(void);
-bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes, const char *pName);
+/* AURORA_DYNAMIC_ROM_BUFFER_V1_20260823 */
+size_t PicoDriveBridge_RequiredRomCapacity(size_t nBytes);
+bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes,
+                              size_t nCapacity, const char *pName);
 void PicoDriveBridge_UnloadGame(void);
 void PicoDriveBridge_Reset(void);
 void PicoDriveBridge_SoftReset(void);

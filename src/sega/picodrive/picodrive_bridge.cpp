@@ -112,9 +112,6 @@ static char s_ContentExt[16] = "md";
 static struct retro_game_info_ext s_ContentInfoExt;
 static const char s_DotPath[] = ".";
 
-/* Keep in sync with _RomData in mainloop_globals.cpp. */
-enum { PD_AURORA_ROM_BUFFER_CAPACITY = 8 * 1024 * 1024 + 1024 };
-
 enum { PD_AUDIO_CHUNK = 1024 };
 static Int16 s_AudioL[PD_AUDIO_CHUNK];
 static Int16 s_AudioR[PD_AUDIO_CHUNK];
@@ -946,9 +943,49 @@ void PicoDriveBridge_Shutdown(void)
     s_Initialized = false;
 }
 
-bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes, const char *pName)
+
+/* AURORA_DYNAMIC_ROM_BUFFER_V1_20260823
+ * Mirror PicoCartCalcAllocSize()'s worst-case non-SMS backing rule:
+ * round logical bytes to 4, power-of-two banking, 512 KiB alignment, then
+ * add four bytes when execution protection would otherwise cross the end.
+ * This result is never smaller than the SMS rule for the same byte count. */
+size_t PicoDriveBridge_RequiredRomCapacity(size_t nBytes)
 {
-    if (!pData || !nBytes || !PicoDriveBridge_Init())
+    size_t size, alloc;
+
+    if (nBytes == 0 || nBytes > 0x7FFFFFFCU)
+        return 0;
+
+    size = (nBytes + 3U) & ~(size_t)3U;
+    alloc = 1U;
+    while (alloc < size)
+    {
+        if (alloc > ((size_t)-1) / 2U)
+            return 0;
+        alloc <<= 1;
+    }
+
+    alloc = (alloc + 0x7FFFFU) & ~(size_t)0x7FFFFU;
+    if (alloc < size)
+        return 0;
+    if (alloc - size < 4U)
+    {
+        if (alloc > ((size_t)-1) - 4U)
+            return 0;
+        alloc += 4U;
+    }
+    return alloc;
+}
+
+bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes,
+                              size_t nCapacity, const char *pName)
+{
+    const size_t requiredCapacity =
+        PicoDriveBridge_RequiredRomCapacity(nBytes);
+
+    if (!pData || !nBytes || !requiredCapacity ||
+        nCapacity < requiredCapacity || nCapacity > 0xFFFFFFFFU ||
+        !PicoDriveBridge_Init())
         return false;
 
     if (s_GameLoaded)
@@ -1007,11 +1044,10 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes, const char *pNam
     }
 
     /* AURORA_PD_BORROW_AURORA_ROM_V1
-     * SegaRom already points at Aurora's _RomData. Lend that storage
-     * to PicoDrive instead of allocating/copying a second cartridge. */
+     * Lend PicoDrive the exact frontend allocation capacity. */
     PicoCartSetExternalRomBuffer(
         (const unsigned char *)pData,
-        (unsigned int)PD_AURORA_ROM_BUFFER_CAPACITY);
+        (unsigned int)nCapacity);
 
     /* Region must already be visible to PicoResetMS() during load. */
     PicoIn.regionOverride = pdCoreRegionOverride(s_AuroraRegion);

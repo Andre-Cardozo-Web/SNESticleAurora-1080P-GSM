@@ -187,7 +187,18 @@ static int aud_async_count = 0;
  * exhausted; periodic refreshes while the lower bound is already sufficient
  * add synchronous SIF jitter without adding safety. */
 #define AUD_ASYNC_MAX_BURST_SAMPLES  4095
+/* AURORA_SNES_AUDIO_BURST_CAP_V1_20260823
+ * Default remains historical 4095. SNES selects 1024 stereo frames so a
+ * rare backlog is repaid gradually instead of one exceptional ~16 KB RPC. */
+static int aud_async_max_burst_samples = AUD_ASYNC_MAX_BURST_SAMPLES;
 static int aud_async_cached_avail = -1;
+
+void Aud_SetAsyncBurstLimit(int samples)
+{
+    if (samples <= 0 || samples > AUD_ASYNC_MAX_BURST_SAMPLES)
+        samples = AUD_ASYNC_MAX_BURST_SAMPLES;
+    aud_async_max_burst_samples = samples;
+}
 
 
 /* AURORA_V83_AUDIO_PACKED_STEREO
@@ -405,8 +416,8 @@ static int Aud_AsyncDrainOne(int wait)
         usable = aud_async_cached_avail - AUD_ASYNC_RING_MARGIN_SAMPLES;
         if (n > usable)
             n = usable;
-        if (n > AUD_ASYNC_MAX_BURST_SAMPLES)
-            n = AUD_ASYNC_MAX_BURST_SAMPLES;
+        if (n > aud_async_max_burst_samples)
+            n = aud_async_max_burst_samples;
         if (aud_compat_small_chunks && n > 256)
             n = 256;
 

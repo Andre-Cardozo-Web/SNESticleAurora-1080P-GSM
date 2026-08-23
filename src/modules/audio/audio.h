@@ -26,6 +26,8 @@ int  Aud_Buffered();
 void Aud_Quit();
 
 void Aud_BufferedAsyncStart();
+/* <=0 restores the historical default catch-up limit. */
+void Aud_SetAsyncBurstLimit(int samples);
 int  Aud_BufferedAsyncGet();
 void Aud_EnqueueAsync(short *left, short *right, int size);
 /* AURORA_AUDIO_ASYNC_GAIN_COPY_V4_API_20260821 */

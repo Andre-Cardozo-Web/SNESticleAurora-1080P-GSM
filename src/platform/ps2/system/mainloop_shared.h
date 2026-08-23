@@ -116,7 +116,9 @@ extern SegaRom        *_pSegaRom;
 
 /* ---- ROM / framebuffer / audio buffers ---------------------------- */
 
-extern Uint8           _RomData[8 * 1024 * 1024 + 1024];
+/* AURORA_DYNAMIC_ROM_BUFFER_V1_20260823 */
+extern Uint8          *_RomData;
+extern Uint32          _RomDataCapacity;
 extern CRenderSurface *_fbTexture[2];
 extern TextureT        _OutTex;
 extern AudMixBuffer *_AudMix;

@@ -21,10 +21,11 @@ public:
     virtual Char *GetMapperName();
     virtual Char *GetRomTitle();
 
-    LoadErrorE AttachBuffer(Uint8 *pData, Uint32 nBytes);
+    LoadErrorE AttachBuffer(Uint8 *pData, Uint32 nBytes, Uint32 nCapacity);
 
     Uint8 *GetData() const { return m_pRomData; }
     Uint32 GetBytes() const { return m_uRomBytes; }
+    Uint32 GetCapacity() const { return m_uRomCapacity; }
 
     void SetSourceName(const Char *pName);
     const Char *GetSourceName() const { return m_szSourceName; }
@@ -33,6 +34,7 @@ private:
     Uint8  *m_pRomMem;
     Uint8  *m_pRomData;
     Uint32  m_uRomBytes;
+    Uint32  m_uRomCapacity;
     Char    m_szSourceName[1024];
 };
 

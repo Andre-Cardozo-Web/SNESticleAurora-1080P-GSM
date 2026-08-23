@@ -56,7 +56,8 @@ void SegaSystem::SetRom(Emu::Rom *pRom)
         name = "game.md";
 
     if (!PicoDriveBridge_LoadGame(
-            rom->GetData(), (size_t)rom->GetBytes(), name))
+            rom->GetData(), (size_t)rom->GetBytes(),
+            (size_t)rom->GetCapacity(), name))
     {
         printf("[SegaSystem/PicoDrive] LOAD FAILED\n");
         return;

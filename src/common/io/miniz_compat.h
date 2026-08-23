@@ -33,6 +33,31 @@ int MinizReadZipFirstMatch(const char *path,
                            int filename_max,
                            int (*name_filter)(const char *name));
 
+/* AURORA_DYNAMIC_ROM_BUFFER_V1_20260823 */
+int MinizGetGZUncompressedSize(const char *path);
+int MinizReadGZPrefix(const char *path, void *out_buf, int out_max);
+
+typedef int (*MinizZipEntryFilter)(
+    const char *name, unsigned int uncompressed_size);
+
+int MinizProbeZipFirstMatchInfo(const char *path,
+                                unsigned int *out_file_index,
+                                char *out_filename,
+                                int filename_max,
+                                MinizZipEntryFilter entry_filter);
+
+int MinizReadZipEntryToBuffer(const char *path,
+                              unsigned int file_index,
+                              void *out_buf,
+                              int out_max,
+                              char *out_filename,
+                              int filename_max);
+
+int MinizReadZipEntryPrefix(const char *path,
+                            unsigned int file_index,
+                            void *out_buf,
+                            int out_max);
+
 #ifdef __cplusplus
 }
 #endif
