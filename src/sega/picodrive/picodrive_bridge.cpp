@@ -7,6 +7,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <strings.h> /* strncasecmp; AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
 #include <stdint.h>
 #include <stdarg.h>
 
@@ -31,6 +32,7 @@ extern "C" {
 #include <pico/pico.h>
 #include <pico/pico_int.h>
 
+#include <pico/cd/cd_parse.h> /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
 /* AURORA_PD_BORROW_AURORA_ROM_V1 */
 void PicoCartSetExternalRomBuffer(const unsigned char *rom,
                                   unsigned int capacity);
@@ -112,6 +114,9 @@ static char s_ContentExt[16] = "md";
 static struct retro_game_info_ext s_ContentInfoExt;
 static const char s_DotPath[] = ".";
 
+/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: firmware directory is selected by Aurora's SRAM policy. */
+static char s_SystemPath[1024] = ".";
+static char s_ContentDir[1024] = ".";
 enum { PD_AUDIO_CHUNK = 1024 };
 static Int16 s_AudioL[PD_AUDIO_CHUNK];
 static Int16 s_AudioR[PD_AUDIO_CHUNK];
@@ -327,6 +332,13 @@ static bool pdEnvironment(unsigned cmd, void *data)
             return false;
 
         case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+            if (data)
+            {
+                *(const char **)data = s_SystemPath;
+                return true;
+            }
+            return false;
+
         case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
         case RETRO_ENVIRONMENT_GET_CORE_ASSETS_DIRECTORY:
             if (data)
@@ -366,7 +378,7 @@ static bool pdEnvironment(unsigned cmd, void *data)
          * PicoDrive already supports persistent in-memory content through
          * this standard libretro query. Keep the submodule source pristine. */
         case RETRO_ENVIRONMENT_GET_GAME_INFO_EXT:
-            if (!data || !s_ContentData || !s_ContentBytes)
+            if (!data || !s_ContentInfoExt.full_path)
                 return false;
             *(const struct retro_game_info_ext **)data = &s_ContentInfoExt;
             return true;
@@ -1123,6 +1135,174 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes,
     return true;
 }
 
+/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824
+ * Both Sega CD and PC Engine CD use .cue. Parse the CUE with PicoDrive's
+ * own resolver and classify only the canonical Sega boot signature. */
+int PicoDriveBridge_ProbeSegaCd(const char *pPath)
+{
+    cd_data_t *pCue;
+    pm_file *pTrack;
+    unsigned char Header[32];
+    int Result = -1;
+
+    if (!pPath || !*pPath)
+        return -1;
+
+    pCue = cue_parse(pPath);
+    if (!pCue || pCue->track_count < 1 || !pCue->tracks[1].fname)
+    {
+        cdparse_destroy(pCue);
+        return -1;
+    }
+
+    pTrack = pm_open(pCue->tracks[1].fname);
+    cdparse_destroy(pCue);
+    if (!pTrack)
+        return -1;
+
+    if (pm_read(Header, sizeof(Header), pTrack) == sizeof(Header))
+    {
+        Result = (!strncasecmp((const char *)Header, "SEGADISCSYSTEM", 14) ||
+                  !strncasecmp((const char *)Header + 0x10,
+                               "SEGADISCSYSTEM", 14)) ? 1 : 0;
+    }
+    pm_close(pTrack);
+    return Result;
+}
+
+static bool pdBuildDiscInfo(const char *pPath)
+{
+    const char *pSlash;
+    const char *pBackslash;
+    const char *pBase;
+    const char *pDot;
+    size_t nDir;
+    size_t nBase;
+
+    if (!pPath || !*pPath || strlen(pPath) >= sizeof(s_ContentName))
+        return false;
+
+    strcpy(s_ContentName, pPath);
+    pSlash = strrchr(s_ContentName, '/');
+    pBackslash = strrchr(s_ContentName, '\\');
+    if (!pSlash || (pBackslash && pBackslash > pSlash))
+        pSlash = pBackslash;
+    pBase = pSlash ? pSlash + 1 : s_ContentName;
+
+    if (pSlash)
+    {
+        nDir = (size_t)(pBase - s_ContentName);
+        if (nDir >= sizeof(s_ContentDir))
+            return false;
+        memcpy(s_ContentDir, s_ContentName, nDir);
+        s_ContentDir[nDir] = '\0';
+    }
+    else
+        strcpy(s_ContentDir, ".");
+
+    pDot = strrchr(pBase, '.');
+    nBase = pDot && pDot > pBase
+        ? (size_t)(pDot - pBase) : strlen(pBase);
+    if (nBase >= sizeof(s_ContentBaseName))
+        return false;
+    memcpy(s_ContentBaseName, pBase, nBase);
+    s_ContentBaseName[nBase] = '\0';
+
+    if (!pDot || !pDot[1] || strlen(pDot + 1) >= sizeof(s_ContentExt))
+        return false;
+    strcpy(s_ContentExt, pDot + 1);
+
+    s_ContentData = NULL;
+    s_ContentBytes = 0;
+    memset(&s_ContentInfoExt, 0, sizeof(s_ContentInfoExt));
+    s_ContentInfoExt.full_path = s_ContentName;
+    s_ContentInfoExt.dir = s_ContentDir;
+    s_ContentInfoExt.name = s_ContentBaseName;
+    s_ContentInfoExt.ext = s_ContentExt;
+    s_ContentInfoExt.file_in_archive = false;
+    s_ContentInfoExt.persistent_data = false;
+    return true;
+}
+
+bool PicoDriveBridge_LoadDisc(const char *pPath, const char *pSystemPath)
+{
+    struct retro_game_info Info;
+    bool bLoaded;
+
+    if (!pPath || !*pPath || !pSystemPath || !*pSystemPath ||
+        strlen(pSystemPath) >= sizeof(s_SystemPath))
+        return false;
+
+    if (s_GameLoaded)
+        PicoDriveBridge_UnloadGame();
+
+    strcpy(s_SystemPath, pSystemPath);
+    if (!PicoDriveBridge_Init() || !pdBuildDiscInfo(pPath))
+        return false;
+
+    memset(&Info, 0, sizeof(Info));
+    Info.path = s_ContentName;
+    Info.data = NULL;
+    Info.size = 0;
+
+    PicoIn.regionOverride = pdCoreRegionOverride(s_AuroraRegion);
+    s_VariablesChanged = true;
+    bLoaded = retro_load_game(&Info);
+    if (!bLoaded || !(PicoIn.AHW & PAHW_MCD))
+    {
+        printf("[PicoDrive/CD] load failed: %s (SYSTEM=%s)\n",
+               s_ContentName, s_SystemPath);
+        if ((PicoIn.AHW & PAHW_MCD) || Pico_mcd)
+            PicoExitMCD();
+        PicoCartUnload();
+        PicoIn.AHW = 0;
+        PicoIn.quirks = 0;
+        s_pSramData = NULL;
+        s_SramBytes = 0;
+        return false;
+    }
+
+    pdAudioTailReset();
+    s_GameLoaded = true;
+    s_VariablesChanged = true;
+    s_DirectInfoValid = false;
+    s_DirectInfoCanGs = false;
+    s_DirectClutValid = false;
+    AudMixSetFastResample(1);
+    s_LastPortType[0] = s_LastPortType[1] = -1;
+    s_MapLeft = s_MapTop = -1;
+    s_MapSrcW = s_MapSrcH = s_MapDstW = s_MapDstH = -1;
+
+    {
+        size_t nSram = retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
+        void *pSram = retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
+        if (pSram && nSram > 0 && nSram <= 0x7fffffffU)
+        {
+            s_pSramData = (Uint8 *)pSram;
+            s_SramBytes = (Int32)nSram;
+        }
+        else
+        {
+            s_pSramData = NULL;
+            s_SramBytes = 0;
+        }
+    }
+
+    s_MouseX = 160;
+    s_MouseY = 120;
+    s_MouseActive = false;
+    s_MouseButtons = 0;
+    PicoSetInputDevice(0, s_Use6Button ? PICO_INPUT_PAD_6BTN
+                                      : PICO_INPUT_PAD_3BTN);
+    PicoSetInputDevice(1, s_Use6Button ? PICO_INPUT_PAD_6BTN
+                                      : PICO_INPUT_PAD_3BTN);
+
+    printf("[PicoDrive/CD] loaded %s; SRAM=%d; SYSTEM=%s\n",
+           s_ContentName, PicoDriveBridge_GetSRAMBytes(), s_SystemPath);
+    return true;
+}
+
+
 void PicoDriveBridge_UnloadGame(void)
 {
     if (s_Initialized)
@@ -1134,6 +1314,9 @@ void PicoDriveBridge_UnloadGame(void)
          * Our routed systems are cartridge based (MD/SMS/GG/32X), so this
          * native cleanup is the missing ownership boundary. It frees the
          * copied cartridge before Aurora can start SNES. */
+        /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: libretro's unload is empty; release CD tracks and MCD RAM. */
+        if ((PicoIn.AHW & PAHW_MCD) || Pico_mcd)
+            PicoExitMCD();
         PicoCartUnload();
         PicoIn.AHW = 0;
         PicoIn.quirks = 0;

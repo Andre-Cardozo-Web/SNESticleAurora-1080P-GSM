@@ -19,6 +19,8 @@
 #include "sega/picodrive/picodrive_bridge.h"
 /* AURORA_PCE_EXPERIMENTAL_V1 */
 #include "pce/beetle/pce_bridge.h"
+/* AURORA_SNES9X2010_V1 */
+#include "snes/snes9x2010/snes9x2010_bridge.h"
 #include "mainloop_state.h"
 #include "mainloop_ui.h"
 #include "snes.h"
@@ -35,6 +37,72 @@ extern "C" {
 #include "miniz.h"
 #include "miniz_compat.h"
 }
+
+/* AURORA_SNES9X2010_V1
+ * V1 intentionally does not alter video.cfg v37. This selector is runtime
+ * only and defaults to the original SNESticle every boot. V2 will persist it. */
+static MainLoopSnesCoreE s_MainLoopSnesCore = MAINLOOP_SNESCORE_SNESTICLE;
+
+MainLoopSnesCoreE MainLoopSnesCoreGet()
+{
+#if AURORA_SNES9X2010 /* AURORA_SNES9X2010_BUILD_OPTION_V1_20260824 */
+    return s_MainLoopSnesCore;
+#else
+    return MAINLOOP_SNESCORE_SNESTICLE;
+#endif
+}
+
+void MainLoopSnesCoreSet(MainLoopSnesCoreE eCore)
+{
+#if AURORA_SNES9X2010 /* AURORA_SNES9X2010_BUILD_OPTION_V1_20260824 */
+    if (eCore < MAINLOOP_SNESCORE_SNESTICLE || eCore >= MAINLOOP_SNESCORE_NUM)
+        eCore = MAINLOOP_SNESCORE_SNESTICLE;
+    s_MainLoopSnesCore = eCore;
+#else
+    (void)eCore;
+    s_MainLoopSnesCore = MAINLOOP_SNESCORE_SNESTICLE;
+#endif
+}
+
+void MainLoopSnesCoreCycleDir(Int32 dir)
+{
+#if AURORA_SNES9X2010 /* AURORA_SNES9X2010_BUILD_OPTION_V1_20260824 */
+    if (dir == 0) return;
+    MainLoopSnesCoreSet(
+        s_MainLoopSnesCore == MAINLOOP_SNESCORE_SNESTICLE
+            ? MAINLOOP_SNESCORE_SNES9X2010
+            : MAINLOOP_SNESCORE_SNESTICLE);
+#else
+    (void)dir;
+    s_MainLoopSnesCore = MAINLOOP_SNESCORE_SNESTICLE;
+#endif
+}
+
+const Char *MainLoopSnesCoreGetName()
+{
+#if AURORA_SNES9X2010 /* AURORA_SNES9X2010_BUILD_OPTION_V1_20260824 */
+    return s_MainLoopSnesCore == MAINLOOP_SNESCORE_SNES9X2010
+        ? "SNES9x" : "SNESticle";
+#else
+    return "SNESticle";
+#endif
+}
+
+/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824
+ * Stable integer wrappers keep uiVideo.cpp independent of the enum type. */
+Int32 MainLoopSnesCoreGetPersisted()
+{
+    return (Int32)MainLoopSnesCoreGet();
+}
+
+void MainLoopSnesCoreSetPersisted(Int32 value)
+{
+    if (value < (Int32)MAINLOOP_SNESCORE_SNESTICLE ||
+        value >= (Int32)MAINLOOP_SNESCORE_NUM)
+        value = (Int32)MAINLOOP_SNESCORE_SNESTICLE;
+    MainLoopSnesCoreSet((MainLoopSnesCoreE)value);
+}
+
 
 void _MainLoopGetName(Char *pName, const Char *pPath)
 {
@@ -427,6 +495,9 @@ Bool _MainLoopLoadRomData(Emu::Rom *pRom, Uint8 *pRomData, Int32 nRomBytes)
         else if (pRom == _pPceRom)
             eError = _pPceRom->AttachBuffer(
                 pRomData, (Uint32)nRomBytes, _RomDataCapacity);
+        else if (pRom == _pSnes9x2010Rom)
+            eError = _pSnes9x2010Rom->AttachBuffer(
+                pRomData, (Uint32)nRomBytes, _RomDataCapacity);
         else
             eError = pRom->LoadRom(&romfile);
         romfile.Close();
@@ -490,10 +561,16 @@ void _MainLoopUnloadRom()
         printf("Movie: Play End\n");
         s_pMovieClip->PlayEnd();
     } 
+    /* V6.2: recordings belong to the departing ROM. Releasing their lazy
+     * buffers here also guarantees maximum EE heap before the next core. */
+    s_pMovieClip->Discard();
 
 	// unload old rom
 	_pSnes->SetRom(NULL);
 	_pSnesRom->Unload();
+	/* AURORA_SNES9X2010_V1 */
+	if (_pSnes9x2010) _pSnes9x2010->SetRom(NULL);
+	if (_pSnes9x2010Rom) _pSnes9x2010Rom->Unload();
 
 	/* Phase 2: NES unload mirrors the SNES path. NesDisk is unloaded
 	   even though disk-swap input is still gated for Phase 5 - the
@@ -536,6 +613,99 @@ void _MainLoopUnloadRom()
 
 }
 
+/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824
+ * A CUE and its BIN/audio tracks stay on storage. This path allocates no
+ * frontend ROM buffer, which is essential inside the EE's 32 MiB budget. */
+static Bool _MainLoopExecuteDisc(const char *pMappedPath,
+                                 const char *pOriginalPath,
+                                 const char *pBasePath,
+                                 Bool bLoadSRAM)
+{
+    Char SystemDirectory[512];
+    Emu::System *pSystem = NULL;
+    const char *pName;
+    int eDisc;
+    Bool bLoaded;
+
+    if (!pMappedPath || !*pMappedPath ||
+        !pOriginalPath || !pBasePath)
+        return FALSE;
+
+    if (!MainLoopEnsureGameplayRasterWidth(256))
+    {
+        MainLoopModalPrintf(60 * 3,
+            "ERROR: cannot configure CD video raster");
+        return FALSE;
+    }
+
+    if (!MainLoopEnsureSystemDirectory(
+            SystemDirectory, (Int32)sizeof(SystemDirectory)))
+    {
+        MainLoopModalPrintf(60 * 4,
+            "ERROR: cannot create SNESticle/SYSTEM");
+        return FALSE;
+    }
+
+    eDisc = PicoDriveBridge_ProbeSegaCd(pMappedPath);
+    if (eDisc < 0)
+    {
+        MainLoopModalPrintf(60 * 4,
+            "ERROR: CUE or its first track is unreadable");
+        return FALSE;
+    }
+
+    _MainLoop_fOutputIntensity = 1.0f;
+    if (eDisc > 0)
+    {
+        pSystem = _pSega;
+        PicoDriveBridge_SetRegion((int)g_SnesForceRegion);
+        bLoaded = _pSega && _pSega->LoadDisc(
+            pMappedPath, SystemDirectory);
+    }
+    else
+    {
+        pSystem = _pPce;
+        bLoaded = _pPce && _pPce->LoadDisc(
+            pMappedPath, SystemDirectory);
+    }
+
+    if (!bLoaded || !pSystem ||
+        (pSystem == _pSega && !_pSega->IsRomReady()) ||
+        (pSystem == _pPce && !_pPce->IsRomReady()))
+    {
+        _MainLoopUnloadRom();
+        if (eDisc > 0)
+            MainLoopModalPrintf(60 * 5,
+                "ERROR: Sega CD failed; put its region BIOS .bin in SYSTEM");
+        else
+            MainLoopModalPrintf(60 * 5,
+                "ERROR: PCE CD failed; put syscard3.pce in SYSTEM");
+        return FALSE;
+    }
+
+    _pSystem = pSystem;
+    pSystem->Reset();
+
+    pName = strrchr(pBasePath, '/');
+    if (!pName)
+        pName = strrchr(pBasePath, '\\');
+    pName = pName ? pName + 1 : pBasePath;
+    snprintf(_RomName, sizeof(_RomName), "%s", pName);
+    snprintf(_RomPath, sizeof(_RomPath), "%s", pOriginalPath);
+    MainLoopStateOnRomChanged();
+
+    ConPrint("CD Loaded: %s (%s)\n", pMappedPath,
+             pSystem == _pSega ? "Sega CD" : "PC Engine CD");
+    _MainLoopSetSampleRate(pSystem->GetSampleRate());
+    if (bLoadSRAM)
+        _MainLoopLoadSRAM();
+
+    _fbTexture[0]->Clear();
+    TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
+    return TRUE;
+}
+
+
 
 Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 {
@@ -576,6 +746,12 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     _MainLoopResetHistory();
 #endif
     _MainLoopResetInputChecksums();
+
+
+    /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: never size/read a CUE or its tracks as a cartridge. */
+    if (eType == MAINLOOP_ENTRYTYPE_CDIMAGE)
+        return _MainLoopExecuteDisc(
+            pFileName, OriginalPath, FileName, bLoadSRAM);
 
     eSourceType = eType;
 
@@ -635,7 +811,15 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
             _MainLoop_fOutputIntensity = 1.0f;
             break;
         case MAINLOOP_ENTRYTYPE_SNESROM:
-            pSystem = _pSnes; pRom = _pSnesRom; pBios = NULL;
+            /* AURORA_SNES9X2010_V1 */
+            if (MainLoopSnesCoreGet() == MAINLOOP_SNESCORE_SNES9X2010)
+            {
+                pSystem = _pSnes9x2010; pRom = _pSnes9x2010Rom; pBios = NULL;
+            }
+            else
+            {
+                pSystem = _pSnes; pRom = _pSnesRom; pBios = NULL;
+            }
             _MainLoop_fOutputIntensity = 1.0f;
             break;
         case MAINLOOP_ENTRYTYPE_PCEROM:
@@ -850,6 +1034,8 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         }
         else if (pSystem == _pPce && _pPceRom)
             _pPceRom->SetSourceName(SegaContentName);
+        else if (pSystem == _pSnes9x2010 && _pSnes9x2010Rom)
+            _pSnes9x2010Rom->SetSourceName(SegaContentName);
         pSystem->SetRom(pRom);
     }
 
@@ -881,10 +1067,31 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         return FALSE;
     }
 
+    if (pSystem == _pSnes9x2010 && !_pSnes9x2010->IsRomReady())
+    {
+        printf("[Snes9x2010] ROM rejected; aborting launch before mainloop\n");
+        _MainLoopUnloadRom();
+        MainLoopModalPrintf(60 * 3, "ERROR: Snes9x 2010 cannot run this SNES image");
+        return FALSE;
+    }
+
     _pSystem = pSystem;
     snprintf(_RomPath, sizeof(_RomPath), "%s", OriginalPath);
     MainLoopStateOnRomChanged();
     MainLoopStatePrimeRomIdentityCRC(uRomIdentityCRC);
+
+    /* AURORA_SNES9X2010_V2_PS2LEAN_20260824
+     * Snes9x LoadROM owns a complete native Memory.ROM copy now. Release the
+     * pristine Aurora buffer immediately; save-state identity already has its
+     * CRC and the wrapper keeps byte count/name without retaining the bytes. */
+    if (pSystem == _pSnes9x2010 && _pSnes9x2010Rom && _RomData)
+    {
+        Uint32 released = _RomDataCapacity;
+        _pSnes9x2010Rom->DetachFrontendBacking();
+        _MainLoopFreeRomBuffer();
+        printf("[Snes9x2010] released frontend ROM backing: %u KiB\n",
+               (unsigned)(released >> 10));
+    }
 
     ConPrint("ROM Loaded: %s\n", pFileName);
 

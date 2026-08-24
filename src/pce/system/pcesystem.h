@@ -10,7 +10,7 @@ struct PceStateHeaderT{Uint32 uMagic,uVersion,nPayloadBytes,uFrame,Reserved[4];}
 class PceSystem:public Emu::System
 {
 public:
-    PceSystem();virtual ~PceSystem();virtual void SetRom(Emu::Rom*);virtual void Reset();virtual void SoftReset();
+    PceSystem();virtual ~PceSystem();virtual void SetRom(Emu::Rom*);Bool LoadDisc(const Char*,const Char*);/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */virtual void Reset();virtual void SoftReset();
     virtual void ExecuteFrame(Emu::SysInputT*,class CRenderSurface*,class CMixBuffer*,ModeE);
     virtual Int32 GetStateSize();virtual void SaveState(void*,Int32);virtual void RestoreState(void*,Int32);
     virtual Int32 GetSRAMBytes();virtual Uint8 *GetSRAMData();virtual const char *GetString(StringE);virtual Uint32 GetSampleRate();

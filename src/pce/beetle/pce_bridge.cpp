@@ -12,6 +12,9 @@
 #include "rendersurface.h"
 #include "pixelformat.h"
 #include "mixbuffer.h"
+/* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
+#include "audmixbuffer.h"
+extern AudMixBuffer *_AudMix;
 #include "snio.h"
 extern "C" {
 #include "gs.h"
@@ -63,6 +66,9 @@ static char s_ContentBaseName[1024] = "game";
 static char s_ContentExt[16] = "pce";
 static struct retro_game_info_ext s_ContentInfoExt;
 static const char s_DotPath[] = ".";
+/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 -- user firmware under SNESticle/SYSTEM. */
+static char s_SystemPath[1024] = ".";
+static char s_ContentDir[1024] = ".";
 enum { PCE_AUDIO_CHUNK = 1024 };
 static Int16 s_AudioL[PCE_AUDIO_CHUNK], s_AudioR[PCE_AUDIO_CHUNK];
 
@@ -145,6 +151,7 @@ static bool pceEnvironment(unsigned cmd, void *data)
         case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
             if (!data) return false; *(bool *)data = false; return true;
         case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+            if (!data) return false; *(const char **)data = s_SystemPath; return true;
         case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
         case RETRO_ENVIRONMENT_GET_CORE_ASSETS_DIRECTORY:
             if (!data) return false; *(const char **)data = s_DotPath; return true;
@@ -155,7 +162,7 @@ static bool pceEnvironment(unsigned cmd, void *data)
         case RETRO_ENVIRONMENT_GET_INPUT_BITMASKS:
             return true;
         case RETRO_ENVIRONMENT_GET_GAME_INFO_EXT:
-            if (!data || !s_ContentData || !s_ContentBytes) return false;
+            if (!data || !s_ContentInfoExt.full_path) return false;
             *(const struct retro_game_info_ext **)data = &s_ContentInfoExt; return true;
         case RETRO_ENVIRONMENT_GET_CURRENT_SOFTWARE_FRAMEBUFFER:
         case RETRO_ENVIRONMENT_GET_VFS_INTERFACE:
@@ -194,6 +201,19 @@ static void pceAudioSample(int16_t l, int16_t r)
 static size_t pceAudioBatch(const int16_t *data, size_t frames)
 {
     if (!data || !frames || !s_pMix) return frames;
+    if (_AudMix && s_pMix == _AudMix && frames <= 0x7fffffffU)
+    {
+        size_t directPos = 0;
+        while (directPos < frames)
+        {
+            size_t n = frames - directPos;
+            if (n > PCE_AUDIO_CHUNK) n = PCE_AUDIO_CHUNK;
+            _AudMix->OutputLibretroInterleaved(
+                (const Int16 *)(data + directPos * 2), (Int32)n);
+            directPos += n;
+        }
+        return frames;
+    }
     size_t pos = 0;
     while (pos < frames)
     {
@@ -349,16 +369,66 @@ static void pceRender(CRenderSurface *target)
 
 static void pceBuildInfo(const char *name, const void *data, size_t bytes)
 {
-    if (name && *name) { strncpy(s_ContentName,name,sizeof(s_ContentName)-1); s_ContentName[sizeof(s_ContentName)-1]=0; }
-    else strcpy(s_ContentName,"game.pce");
-    const char *base=strrchr(s_ContentName,'/'), *base2=strrchr(s_ContentName,'\\');
-    if (!base || (base2 && base2>base)) base=base2; base=base?base+1:s_ContentName;
-    const char *dot=strrchr(base,'.'); size_t n=(dot&&dot>base)?(size_t)(dot-base):strlen(base);
-    if (n>=sizeof(s_ContentBaseName)) n=sizeof(s_ContentBaseName)-1; memcpy(s_ContentBaseName,base,n); s_ContentBaseName[n]=0;
-    if (dot&&dot[1]) { strncpy(s_ContentExt,dot+1,sizeof(s_ContentExt)-1); s_ContentExt[sizeof(s_ContentExt)-1]=0; } else strcpy(s_ContentExt,"pce");
-    s_ContentData=data; s_ContentBytes=bytes; memset(&s_ContentInfoExt,0,sizeof(s_ContentInfoExt));
-    s_ContentInfoExt.full_path=s_ContentName; s_ContentInfoExt.dir=s_DotPath; s_ContentInfoExt.name=s_ContentBaseName; s_ContentInfoExt.ext=s_ContentExt;
-    s_ContentInfoExt.data=data; s_ContentInfoExt.size=bytes; s_ContentInfoExt.file_in_archive=false; s_ContentInfoExt.persistent_data=true;
+    const char *base;
+    const char *base2;
+    const char *dot;
+    size_t n;
+    size_t dirBytes;
+
+    if (name && *name)
+    {
+        strncpy(s_ContentName, name, sizeof(s_ContentName) - 1);
+        s_ContentName[sizeof(s_ContentName) - 1] = 0;
+    }
+    else
+        strcpy(s_ContentName, "game.pce");
+
+    base = strrchr(s_ContentName, '/');
+    base2 = strrchr(s_ContentName, '\\');
+    if (!base || (base2 && base2 > base))
+        base = base2;
+
+    if (base)
+    {
+        dirBytes = (size_t)((base + 1) - s_ContentName);
+        if (dirBytes >= sizeof(s_ContentDir))
+            dirBytes = sizeof(s_ContentDir) - 1;
+        memcpy(s_ContentDir, s_ContentName, dirBytes);
+        s_ContentDir[dirBytes] = 0;
+        base++;
+    }
+    else
+    {
+        strcpy(s_ContentDir, ".");
+        base = s_ContentName;
+    }
+
+    dot = strrchr(base, '.');
+    n = (dot && dot > base) ? (size_t)(dot - base) : strlen(base);
+    if (n >= sizeof(s_ContentBaseName))
+        n = sizeof(s_ContentBaseName) - 1;
+    memcpy(s_ContentBaseName, base, n);
+    s_ContentBaseName[n] = 0;
+
+    if (dot && dot[1])
+    {
+        strncpy(s_ContentExt, dot + 1, sizeof(s_ContentExt) - 1);
+        s_ContentExt[sizeof(s_ContentExt) - 1] = 0;
+    }
+    else
+        strcpy(s_ContentExt, "pce");
+
+    s_ContentData = data;
+    s_ContentBytes = bytes;
+    memset(&s_ContentInfoExt, 0, sizeof(s_ContentInfoExt));
+    s_ContentInfoExt.full_path = s_ContentName;
+    s_ContentInfoExt.dir = s_ContentDir;
+    s_ContentInfoExt.name = s_ContentBaseName;
+    s_ContentInfoExt.ext = s_ContentExt;
+    s_ContentInfoExt.data = data;
+    s_ContentInfoExt.size = bytes;
+    s_ContentInfoExt.file_in_archive = false;
+    s_ContentInfoExt.persistent_data = data && bytes;
 }
 
 bool PceBridge_Init(void)
@@ -391,6 +461,63 @@ bool PceBridge_LoadGame(const void *data, size_t bytes, size_t capacity, const c
     if (av.timing.sample_rate>=8000.0 && av.timing.sample_rate<=96000.0) s_SampleRate=(unsigned)(av.timing.sample_rate+0.5);
     printf("[PCE] loaded %s; SRAM=%d; audio=%u Hz\n",s_ContentName,(int)s_SramBytes,s_SampleRate); return true;
 }
+
+/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
+bool PceBridge_LoadDisc(const char *path, const char *systemPath)
+{
+    struct retro_game_info info;
+    struct retro_system_av_info av;
+    size_t sb;
+    void *sp;
+
+    if (!path || !*path || !systemPath || !*systemPath ||
+        strlen(path) >= sizeof(s_ContentName) ||
+        strlen(systemPath) >= sizeof(s_SystemPath))
+        return false;
+
+    if (s_GameLoaded)
+        PceBridge_UnloadGame();
+
+    /* Beetle caches RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY in retro_init. */
+    if (s_Initialized)
+    {
+        PCE_retro_deinit();
+        s_Initialized = false;
+    }
+    strcpy(s_SystemPath, systemPath);
+    if (!PceBridge_Init())
+        return false;
+
+    pceBuildInfo(path, NULL, 0);
+    memset(&info, 0, sizeof(info));
+    info.path = s_ContentName;
+    info.data = NULL;
+    info.size = 0;
+    if (!PCE_retro_load_game(&info))
+    {
+        printf("[PCE/CD] load failed: %s (SYSTEM=%s)\n",
+               s_ContentName, s_SystemPath);
+        s_ContentData = NULL;
+        s_ContentBytes = 0;
+        return false;
+    }
+
+    s_GameLoaded = true;
+    sb = PCE_retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
+    sp = PCE_retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
+    s_pSramData = (sp && sb && sb <= 0x7fffffffU) ? (Uint8 *)sp : NULL;
+    s_SramBytes = s_pSramData ? (Int32)sb : 0;
+
+    memset(&av, 0, sizeof(av));
+    PCE_retro_get_system_av_info(&av);
+    if (av.timing.sample_rate >= 8000.0 && av.timing.sample_rate <= 96000.0)
+        s_SampleRate = (unsigned)(av.timing.sample_rate + 0.5);
+
+    printf("[PCE/CD] loaded %s; SRAM=%d; audio=%u Hz; SYSTEM=%s\n",
+           s_ContentName, (int)s_SramBytes, s_SampleRate, s_SystemPath);
+    return true;
+}
+
 
 void PceBridge_UnloadGame(void)
 {
@@ -455,7 +582,9 @@ bool PceBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     int dstX, dstY, dstW, dstH;
     Uint32 black, modColor, mod;
 
-    (void)auroraOutBaseTBP;
+    /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 -- PCE reuses Aurora's reserved base slab. */
+    if (!auroraOutBaseTBP)
+        return false;
 
     if (!PceBridge_CanDirectGsVideo())
         return false;
@@ -468,14 +597,7 @@ bool PceBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     if (srcH > 240u)
         srcH = 240u;
 
-    if (!s_PceDirectTexTBP)
-    {
-        s_PceDirectTexTBP =
-            GSK_VramAllocTBP((Uint32)PCE_GS_DIRECT_BYTES);
-
-        if (!s_PceDirectTexTBP)
-            return false;
-    }
+    s_PceDirectTexTBP = auroraOutBaseTBP;
 
     /* libretro's PCE surface is pitchPixels wide in memory.  Uploading the
      * native stride avoids any EE repack/copy even when the active image is

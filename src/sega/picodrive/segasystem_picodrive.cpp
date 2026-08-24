@@ -69,6 +69,28 @@ void SegaSystem::SetRom(Emu::Rom *pRom)
            PicoDriveBridge_GetSRAMBytes());
 }
 
+/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
+Bool SegaSystem::LoadDisc(const Char *pPath, const Char *pSystemPath)
+{
+    m_pSegaRom = NULL;
+    m_bRomReady = FALSE;
+    m_nCachedStateBytes = 0;
+    m_uFrame = m_uLine = 0;
+
+    PicoDriveBridge_UnloadGame();
+    if (!PicoDriveBridge_LoadDisc(pPath, pSystemPath))
+    {
+        printf("[SegaSystem/PicoDrive] SEGA CD LOAD FAILED\n");
+        return FALSE;
+    }
+
+    m_bRomReady = TRUE;
+    printf("[SegaSystem/PicoDrive] SEGA CD LOAD OK; SRAM=%d\n",
+           PicoDriveBridge_GetSRAMBytes());
+    return TRUE;
+}
+
+
 void SegaSystem::Reset()
 {
     m_uFrame = m_uLine = 0;

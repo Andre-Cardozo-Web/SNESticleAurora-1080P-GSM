@@ -5,60 +5,47 @@ SNESticle Aurora contains or integrates code from third-party projects. Their or
 <!-- AURORA_BRANDING_THIRD_PARTY_V9_20260821 -->
 Third-party licenses govern their respective code and assets; they do **not** grant rights to use the **SNESticle Aurora** name or the project-specific **Aurora** branding for unofficial forks or redistributed builds. Conversely, Aurora's branding policy does not alter any third-party license. See [BRANDING.md](BRANDING.md).
 
-## QuickNES
+## Emulator cores
 
-Aurora integrates QuickNES as the pinned Git submodule:
+<!-- AURORA_ALL_CORES_LICENSES_V6_20260824 -->
+### QuickNES
 
-`src/third_party/quicknes`
+Aurora integrates the pinned `itsveenee/QuickNES_Core` Git submodule at `src/third_party/quicknes`, based on QuickNES / Nes_Emu by Shay Green and the libretro core maintained by libretro contributors. Preserve all notices in the submodule. Its GNU GPLv2 text is mirrored at `LICENSES/QuickNES-GPL-2.0.txt`.
 
-Attribution:
+### PicoDrive
 
-- Original QuickNES / Nes_Emu: **Shay Green**
-- Libretro QuickNES core: **libretro contributors**
-- Aurora PS2 integration fork: **itsveenee/QuickNES_Core**
+Aurora builds the pinned `itsveenee/picodrive` submodule at `src/third_party/picodrive`, from the PicoDrive lineage by notaz, irixxxx and contributors. Aurora-owned PS2 bridge code is maintained in the parent repository; all upstream source headers and notices remain authoritative.
 
-The QuickNES source tree contains its own license and source-file notices.
-These files must be preserved when redistributing the QuickNES code.
+The component's `COPYING` is mirrored at `LICENSES/PicoDrive-COPYING.txt`. It contains non-commercial/additional redistribution conditions and a complete-source requirement. Aurora links PicoDrive statically into the same ELF; because those restrictions may be incompatible with GPLv2-only combination/redistribution, do not redistribute a PicoDrive-enabled combined binary unless you have confirmed separate permission or another lawful basis.
 
-<!-- AURORA_BEETLE_PCE_FAST_THIRD_PARTY_V14 -->
-## Beetle PC Engine Fast
+Aurora V6 exposes Sega CD only as path-based `.cue`. BIOS files are not distributed. PicoDrive searches `SNESticle/SYSTEM` for these base names with `.bin` (preferred) or `.zip`:
 
-Aurora integrates Beetle PC Engine Fast as the pinned Git submodule:
+- USA: `us_scd2_9306`, `SegaCDBIOS9303`, `us_scd1_9210`, `bios_CD_U`
+- Europe: `eu_mcd2_9306`, `eu_mcd2_9303`, `eu_mcd1_9210`, `bios_CD_E`
+- Japan: `jp_mcd2_921222`, `jp_mcd1_9112`, `jp_mcd1_9111`, `bios_CD_J`
 
-`src/third_party/beetle-pce-fast`
+### Beetle PC Engine Fast
 
-Repository relationships:
+Aurora integrates the pinned `itsveenee/beetle-pce-fast-libretro` submodule at `src/third_party/beetle-pce-fast`, based on `libretro/beetle-pce-fast-libretro` and Mednafen PCE Fast. Aurora's fork contains PS2-specific integration and optimization; publish its modified source before updating the parent repository's gitlink.
 
-- Aurora integration fork: **`itsveenee/beetle-pce-fast-libretro`**
-- Upstream libretro project: **`libretro/beetle-pce-fast-libretro`**
-- Core lineage: **Beetle PC Engine Fast / Mednafen PCE Fast**
-- Aurora PS2 integration and PS2-specific optimization work: **Vinícius Nunes (`@itsveenee`)**
+The component's GNU GPLv2 `COPYING` is mirrored verbatim at `LICENSES/Beetle-PCE-Fast-GPL-2.0.txt`. Preserve all original source-file notices.
 
-The PCE fork is a real GitHub fork of the libretro repository. Aurora keeps `origin` pointed at `itsveenee/beetle-pce-fast-libretro` and an `upstream` remote pointing at `libretro/beetle-pce-fast-libretro`. The parent SNESticleAurora repository pins a specific PCE commit via the Git submodule gitlink.
+Aurora V6 exposes HuCard and path-based PC Engine CD `.cue` loading. PC Engine CD requires the user-provided `syscard3.pce` in `SNESticle/SYSTEM`. No firmware is included.
 
-The component's `COPYING` file is GNU GPL version 2 and is mirrored verbatim at `LICENSES/Beetle-PCE-Fast-GPL-2.0.txt`. The submodule's original source-file notices remain authoritative and must be preserved. Aurora's modified PCE source must be published before the parent repository is updated to point at that modified submodule commit.
+### Snes9x 2010
 
-Aurora currently exposes a HuCard-focused frontend path. The upstream core contains additional functionality, including CD-ROM² support; that does not imply that every upstream loading path is exposed by Aurora on PS2.
+Aurora optionally embeds the pinned `itsveenee/snes9x2010` submodule at `src/third_party/snes9x2010`, based on Snes9x 2010 and its libretro core. It does not require RetroArch at runtime.
+
+Snes9x carries separate license/copyright terms, including non-commercial and personal-use restrictions. They are not the same as Aurora's GPL-covered code. Preserve the submodule notices and review the verbatim mirror at `LICENSES/Snes9x2010-LICENSE.txt` before redistributing source or binaries containing this core. Publish modified submodule source before updating the parent gitlink.
+
+### CD image scope and firmware
+
+The PS2 frontend exposes `.cue` only. CHD is deliberately not registered: enabling libchdr would also link compression libraries that have not been measured safely inside the EE's 32 MiB memory budget. CUE-referenced BIN/audio files remain on storage and are streamed by the cores. Sega CD and PC Engine CD BIOS files are copyrighted firmware supplied by the user and are not part of this repository.
 
 ## Other components
 
-Aurora also contains or integrates third-party components inherited from SNESticle/SNESticle Revive, including InfoNES, miniz, libxmp-lite and PS2SDK-related libraries. Refer to each component's bundled license and source-file notices.
+Aurora also contains or integrates InfoNES, miniz, libxmp-lite, PS2SDK-related libraries and other components inherited from SNESticle/SNESticle Revive. Refer to each component's bundled license and source-file notices.
 
-<!-- AURORA_PICODRIVE_CURRENT_LICENSES -->
-## PicoDrive
-
-The experimental Sega integration builds against the pinned Git submodule
-`itsveenee/picodrive`. PicoDrive remains a separate third-party component and
-its source tree is not patched by Aurora; ROM bytes are supplied through the
-standard libretro `RETRO_ENVIRONMENT_GET_GAME_INFO_EXT` path.
-
-The pinned component's own `COPYING` text is mirrored verbatim at
-`LICENSES/PicoDrive-COPYING.txt`. Keep all upstream copyright/license headers
-intact. Review the pinned PicoDrive terms before redistributing a linked
-PicoDrive-enabled binary.
-
-**GPLv2 compatibility note:** The PicoDrive COPYING file prohibits sale or commercial activity and requires complete source code for modified redistributions. Aurora currently links PicoDrive statically into the same ELF. Because those are additional restrictions beyond GPLv2, do not redistribute a PicoDrive-enabled combined Aurora binary unless you have confirmed separate permission or another lawful licensing basis for the combination. Source-only components remain subject to their respective licenses.
-
-## m5x7 font
+### m5x7 font
 
 `assets/font/m5x7.ttf` is the **m5x7** font by **Daniel Linssen**, released under **CC0 1.0 Universal**. Attribution is not required by CC0, but is appreciated by the author.

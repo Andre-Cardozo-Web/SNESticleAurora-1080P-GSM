@@ -1,0 +1,81 @@
+# AURORA_SNES9X2010_V1
+# Self-contained PS2 static build for itsveenee/snes9x2010.
+# Kept outside the submodule so the upstream/fork worktree stays pristine.
+
+CORE_DIR := .
+platform := aurora_ps2
+STATIC_LINKING := 0
+TARGET := snes9x2010_libretro_ps2_raw.a
+BUILD_DIR := build/aurora-ps2
+
+CC ?= mips64r5900el-ps2-elf-gcc
+AR ?= mips64r5900el-ps2-elf-ar
+
+include build/Makefile.common
+
+# AURORA_SNES9X2010_V1_PS2LEAN_20260824
+# V1 on PS2 does not expose Blargg or HD texture packs. hdpack.c itself is a
+# tiny ABI stub under PS2; the image decoders therefore have no live callers.
+# Keep file_stream/DEFLATE pieces for MSU-1, which remains supported.
+SOURCES_C := $(filter-out \
+	$(CORE_DIR)/filter/snes_ntsc.c \
+	$(LIBRETRO_COMM_DIR)/formats/png/% \
+	$(LIBRETRO_COMM_DIR)/formats/image_transfer.c \
+	$(LIBRETRO_COMM_DIR)/formats/webp/% \
+	$(LIBRETRO_COMM_DIR)/formats/vp8/% \
+	$(LIBRETRO_COMM_DIR)/formats/dds/% \
+	$(LIBRETRO_COMM_DIR)/vfs/vfs_hybrid.c \
+	,$(SOURCES_C))
+
+# AURORA_SNES9X2010_V2_PS2LEAN_20260824
+# MSU/HD/frontend VFS are gone on PS2. Keep only the two tiny libretro-common
+# helpers the native core still needs: in-memory STREAM and aligned tile cache.
+SOURCES_C := $(filter-out $(LIBRETRO_COMM_DIR)/% $(CORE_DIR)/src/msu1_pack.c $(CORE_DIR)/src/hdpack.c,$(SOURCES_C))
+SOURCES_C += $(LIBRETRO_COMM_DIR)/streams/memory_stream.c
+SOURCES_C += $(LIBRETRO_COMM_DIR)/memmap/memalign.c
+
+WARNINGS := \
+	-Wall \
+	-Wno-sign-compare \
+	-Wno-unused-variable \
+	-Wno-unused-function \
+	-Wno-unused-but-set-variable \
+	-Wno-missing-field-initializers \
+	-Wno-strict-aliasing
+
+FLAGS := \
+	-G0 -O2 -DNDEBUG -pipe -fomit-frame-pointer \
+	-fno-strict-aliasing -fwrapv -fsigned-char \
+	-ffunction-sections -fdata-sections \
+	-DPS2 -D_EE -DLSB_FIRST -DHAVE_UNISTD_H \
+	$(COREDEFINES) $(INCFLAGS) $(WARNINGS)
+
+CFLAGS := $(FLAGS) -std=gnu99
+OBJECTS := $(patsubst $(CORE_DIR)/%.c,$(BUILD_DIR)/%.o,$(SOURCES_C))
+
+
+# AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824
+# Selected integer-heavy core objects keep the global -O2 contract and gain
+# only the same safe local inlining profile used by Aurora host hot paths.
+SNES9X2010_V5_HOT_FLAGS := -finline-functions -finline-small-functions -findirect-inlining
+SNES9X2010_V5_HOT_OBJECTS := \
+	$(BUILD_DIR)/src/cpuexec.o \
+	$(BUILD_DIR)/src/ppu.o \
+	$(BUILD_DIR)/src/apu.o \
+	$(BUILD_DIR)/src/dsp.o \
+	$(BUILD_DIR)/src/sa1.o \
+	$(BUILD_DIR)/src/fxemu.o
+$(SNES9X2010_V5_HOT_OBJECTS): CFLAGS += $(SNES9X2010_V5_HOT_FLAGS)
+.PHONY: all clean
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	@rm -f "$@"
+	$(AR) rcs $@ $(OBJECTS)
+
+$(BUILD_DIR)/%.o: $(CORE_DIR)/%.c
+	@mkdir -p "$(dir $@)"
+	$(CC) -c -o "$@" "$<" $(CPPFLAGS) $(CFLAGS)
+
+clean:
+	rm -rf "$(BUILD_DIR)" "$(TARGET)"

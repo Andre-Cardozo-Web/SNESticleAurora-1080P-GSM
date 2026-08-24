@@ -9,3 +9,7 @@
 	path = src/third_party/beetle-pce-fast
 	url = https://github.com/itsveenee/beetle-pce-fast-libretro.git
 	branch = master
+[submodule "src/third_party/snes9x2010"]
+	path = src/third_party/snes9x2010
+	url = https://github.com/itsveenee/snes9x2010.git
+	branch = master

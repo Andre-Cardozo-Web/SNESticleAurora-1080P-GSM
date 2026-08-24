@@ -60,6 +60,8 @@ public:
 
     virtual void GetFormat(Uint32 *puSampleRate, Uint32 *pnSampleBits, Uint32 *pnChannels);
     virtual Int32 GetOutputSamples();
+    /* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
+    Bool OutputLibretroInterleaved(const Int16 *pStereo, Int32 nFrames);
     /* AURORA_PD_AUDIO_INTERLEAVED_FAST_V2_H_20260821 */
     Bool OutputPicoDriveInterleaved150(const Int16 *pStereo, Int32 nFrames);
     /* AURORA_PD_AUDIO_32K_DIRECT_V5_H_20260821 */

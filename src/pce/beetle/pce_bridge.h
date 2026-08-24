@@ -9,6 +9,8 @@ class CMixBuffer;
 bool PceBridge_Init(void);
 void PceBridge_Shutdown(void);
 bool PceBridge_LoadGame(const void *pData, size_t nBytes, size_t nCapacity, const char *pName);
+/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 -- path-only PC Engine CD CUE. */
+bool PceBridge_LoadDisc(const char *pPath, const char *pSystemPath);
 void PceBridge_UnloadGame(void);
 void PceBridge_Reset(void);
 void PceBridge_SoftReset(void);

@@ -18,10 +18,16 @@
 #include "mainloop_input.h"
 #include "mainloop_state.h"
 #include "mainloop_exec.h"
+/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
+#include "snppurender.h"
 #include "mainloop_iop.h"
 #include "sega/picodrive/picodrive_bridge.h"
+/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
+#include "nes/quicknes/quicknes_bridge.h"
 /* AURORA_PCE_EXPERIMENTAL_V1 */
 #include "pce/beetle/pce_bridge.h"
+/* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
+#include "snes/snes9x2010/snes9x2010_bridge.h"
 #include "gskit_backend.h"
 
 #include "types.h"
@@ -111,7 +117,8 @@ Bool MainLoopProcess()
              * SNES normally emits ~800 stereo frames at 48 kHz per VBlank.
              * 1024 still drains faster than production while capping a single
              * post-VBlank SIF RPC at 4096 bytes. Other systems are unchanged. */
-            Aud_SetAsyncBurstLimit(_pSystem == _pSnes ? 1024 : 4095);
+            Aud_SetAsyncBurstLimit(
+                (_pSystem == _pSnes || _pSystem == _pSnes9x2010) ? 1024 : 4095);
 
             /* AURORA_AUDIO_SPLIT_VOLUMES_V36_20260823
              * Select which saved final gain the shared mixer will use. */
@@ -144,6 +151,8 @@ Bool MainLoopProcess()
 		 * Mouse replaces gameplay port 1 on SNES and non-8-bit Sega.
 		 * Pads remain polled for menus and frontend hotkeys. */
 		if ((_pSystem == _pSnes ||
+              /* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
+              _pSystem == _pSnes9x2010 ||
 		     (_pSystem == _pSega && !PicoDriveBridge_Is8Bit())) &&
 		    InputSnesMouseShouldUse())
 		{
@@ -283,9 +292,12 @@ Bool MainLoopProcess()
                 PROF_ENTER("NesExecuteFrame");
                 _pNes->ExecuteFrame(&Input, pSurface, pMixBuffer, eMode);
                 PROF_LEAVE("NesExecuteFrame");
-                PROF_ENTER("NesTexUpload");
-                TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
-                PROF_LEAVE("NesTexUpload");
+                if (!QuicknesBridge_CanDirectGsVideo())
+                {
+                    PROF_ENTER("NesTexUpload");
+                    TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
+                    PROF_LEAVE("NesTexUpload");
+                }
             }
             else if (_pSystem == _pSega)
             {
@@ -451,6 +463,31 @@ Bool MainLoopProcess()
                     PROF_LEAVE("PceTexUploadFallback");
                 }
             }
+            else if (_pSystem == _pSnes9x2010)
+            {
+                /* AURORA_SNES9X2010_V1: do not enter SNESticle's SNCPU/PPU
+                 * helper. Snes9x renders into the ordinary Aurora surface.
+                 * Keep the shared mixer's host clock identical to native SNES. */
+                if (_AudMix)
+                {
+                    Uint32 uRateNum = 60, uRateDen = 1;
+                    GSK_GetRefreshRate(&uRateNum, &uRateDen);
+                    _AudMix->SetFrameRateRational(uRateNum, uRateDen);
+                }
+                /* Frame Skip=1 skips presentation only; core/audio still run. */
+                const Bool bRenderSnes9x = SNPPURenderShouldRenderFrame();
+                PROF_ENTER("Snes9x2010ExecuteFrame");
+                _pSnes9x2010->ExecuteFrame(
+                    &Input, bRenderSnes9x ? pSurface : NULL, pMixBuffer, eMode);
+                PROF_LEAVE("Snes9x2010ExecuteFrame");
+                if (bRenderSnes9x &&
+                    !Snes9x2010Bridge_CanDirectGsVideo())
+                {
+                    PROF_ENTER("Snes9x2010TexUpload");
+                    TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
+                    PROF_LEAVE("Snes9x2010TexUpload");
+                }
+            }
             else
             {
                 /* AURORA_MEGA_V2_SNES_AUDIO_CLOCK
@@ -497,6 +534,8 @@ Bool MainLoopProcess()
 		Bool bUsbGameplay =
 			(!_bMenu &&
 			 (_pSystem == _pSnes ||
+              /* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
+              _pSystem == _pSnes9x2010 ||
 			  (_pSystem == _pSega && !PicoDriveBridge_Is8Bit())) &&
 			 !_MainLoop_BlackScreen &&
 			 InputSnesMouseGetMode() == INPUT_SNES_MOUSE_USB) ? TRUE : FALSE;

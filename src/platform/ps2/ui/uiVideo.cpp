@@ -38,13 +38,19 @@ extern AudMixBuffer *_AudMix;
 
 void MainResetEmulator(void);
 Bool MainLoopReinitVideoMode(Int32 mode);
+/* AURORA_SNES9X2010_V1 */
+const Char *MainLoopSnesCoreGetName();
+void MainLoopSnesCoreCycleDir(Int32 dir);
+/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
+Int32 MainLoopSnesCoreGetPersisted();
+void MainLoopSnesCoreSetPersisted(Int32 value);
 
 /* ------------------------------------------------------------------ */
 /* Persistence                                                         */
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 37
+#define VIDEOCFG_VERSION 38
 /* AURORA_PCE_VOLUME_V37_20260823
  * v37 appends pcevol only; every v36 field keeps the same offset.
  * Internal 200 == UI 100. */
@@ -113,7 +119,9 @@ typedef struct
 	Int32  smscolorborder; /* 0=black, 1=SMS VDP backdrop */
 	Int32  smsfm;          /* 0=off, 1=Master System YM2413/OPLL */
 	Int32  pcevol;         /* v37: Beetle PCE Fast gain 0..400; UI /2 */
+	Int32  snescore;       /* v38: persisted SNES core selector */
 } VideoCfgT;
+#define VIDEOCFG_V37_BYTES (sizeof(VideoCfgT) - sizeof(Int32))
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
    test build. Keep it readable so installing this build never resets the
@@ -389,7 +397,8 @@ void VideoSettingsSave(void)
 	cfg.massenable = MassStorageIsEnabled() ? 1 : 0;
 	cfg.smbenable  = SmbSupportIsEnabled() ? 1 : 0;
 	cfg.mx4sioenable = Mx4sioIsEnabled() ? 1 : 0;
-		cfg.colorprofile = SNPPUColorGetProfile();
+		/* AURORA_SNES9X2010_V2_PS2LEAN_20260824: retain the v37 field/layout, but always persist default. */
+		cfg.colorprofile = SNPPU_COLOR_PROFILE_ORIGINAL;
 	cfg.famicloneaudio = g_FamicloneAudio ? 1 : 0;
 	cfg.fakesramsize = g_FakeSRAMSize;
 	cfg.forceregion = g_SnesForceRegion;
@@ -416,6 +425,8 @@ void VideoSettingsSave(void)
 	cfg.segaaudiorate = (Int32)PicoDriveBridge_GetAudioRate();
 	cfg.smscolorborder = PicoDriveBridge_GetSmsColorBorder() ? 1 : 0;
 	cfg.smsfm = PicoDriveBridge_GetSmsFm() ? 1 : 0;
+	/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
+	cfg.snescore = MainLoopSnesCoreGetPersisted();
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -430,6 +441,9 @@ void VideoSettingsLoad(void)
 	char      path[300];
 	Bool      loaded = FALSE;
 
+
+	/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
+	MainLoopSnesCoreSetPersisted(0);
 	memset(&cfg, 0, sizeof(cfg));
 	SNPPURenderSetSoftwareLayerMask(
 		SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
@@ -452,57 +466,63 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
+		else if (header.version == 37)
+		{
+			/* v37 is the exact prefix before snescore. */
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, VIDEOCFG_V37_BYTES);
+			if (loaded) cfg.version = VIDEOCFG_VERSION;
+		}
 		else if (header.version == 36)
 		{
 			/* v36 is exactly the v37 prefix without the appended PCE volume. */
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        sizeof(cfg) - sizeof(cfg.pcevol));
+			        VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 35)
 		{
 			/* v35 is byte-identical in size; this slot used to be the
 			 * legacy SNES rate value and is migrated below. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.pcevol)));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 34)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        (sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm));
+			        (VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 33)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate));
+			        ((VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 32)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			        ((VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 31)
 		{
 			/* AURORA_PICODRIVE_CURRENT_CFG_V32 */
-			memset(&cfg, 0, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)));
+			memset(&cfg, 0, ((VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)));
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			        ((VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 30)
 		{
 			/* v30 has the same byte layout as v31. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 29)
 		{
 			/* v29 was a temporary test config with broken menu-audio defaults.
 			 * Import its layout, then reset only those two settings once. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded)
 			{
 				cfg.version = VIDEOCFG_VERSION;
@@ -513,19 +533,19 @@ void VideoSettingsLoad(void)
 		else if (header.version == 28)
 		{
 			/* v28 has the same byte layout; only Menu Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 27)
 		{
 			/* v27 is the v28/v29 prefix without bgmenable. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 26)
 		{
 			/* v26 has the same byte layout; only Game Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((VIDEOCFG_V37_BYTES - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 25)
@@ -709,6 +729,8 @@ void VideoSettingsLoad(void)
 
 	if (loaded && cfg.magic == VIDEOCFG_MAGIC)
 	{
+		if (cfg.snescore >= 0 && cfg.snescore < 2)
+			MainLoopSnesCoreSetPersisted(cfg.snescore);
 		/* v1.0.2 allowed both SIO2 storage hooks to be saved at once.
 		   Prefer MMCE when importing such a legacy config; all new changes
 		   are mutually exclusive in the setters below. */
@@ -751,8 +773,8 @@ void VideoSettingsLoad(void)
 		if (cfg.massenable == 0 || cfg.massenable == 1) MassStorageSetEnabled(cfg.massenable);
 		if (cfg.smbenable == 0 || cfg.smbenable == 1) SmbSupportSetEnabled(cfg.smbenable);
 		if (cfg.mx4sioenable == 0 || cfg.mx4sioenable == 1) Mx4sioSetEnabled(cfg.mx4sioenable);
-		if (cfg.colorprofile >= 0 && cfg.colorprofile < SNPPU_COLOR_PROFILE_COUNT)
-			SNPPUColorSetProfile(cfg.colorprofile);
+		/* AURORA_SNES9X2010_V2_PS2LEAN_20260824: ignore legacy Composite configs; default is fixed. */
+		SNPPUColorSetProfile(SNPPU_COLOR_PROFILE_ORIGINAL);
 if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 {
 	g_FamicloneAudio = cfg.famicloneaudio ? TRUE : FALSE;
@@ -1072,12 +1094,12 @@ void CVideoScreen::Draw()
 	 * Display order: 0..9, 30..36, 40..43, 20..29, 10..19. */
 	int   iPage = (m_iSelect >= 50) ? 1 :
 	              ((m_iSelect >= 40) ? 3 :
-	              ((m_iSelect >= 30) ? 2 :
+	              ((m_iSelect >= 31) ? 2 :
 	              ((m_iSelect >= 20) ? 4 :
 	              ((m_iSelect >= 10) ? 5 : 0))));
 	const char *pWide = "Off";
-	const char *pColor = (SNPPUColorGetProfile() == SNPPU_COLOR_PROFILE_COMPOSITE)
-	                   ? "Composite" : "Original";
+	/* AURORA_SNES9X2010_V2_PS2LEAN_20260824: SNES colour profile is intentionally fixed to
+	 * the original/default palette on PS2; no menu row is exposed. */
 
 	if (g_GskWidescreen)
 		pWide = "On";
@@ -1101,19 +1123,17 @@ void CVideoScreen::Draw()
 
 	_VideoRow(vy, 1, m_iSelect, "Widescreen", pWide); vy += 12;
 
-	_VideoRow(vy, 2, m_iSelect, "SNES Colors", pColor); vy += 12;
-
 	snprintf(buf, sizeof(buf), "%d", g_GskOverscan);
-	_VideoRow(vy, 3, m_iSelect, "Overscan", buf);      vy += 12;
+	_VideoRow(vy, 2, m_iSelect, "Overscan", buf);      vy += 12;
 
 	snprintf(buf, sizeof(buf), "%d", g_GskDispOffX);
-	_VideoRow(vy, 4, m_iSelect, "Offset X", buf);      vy += 12;
+	_VideoRow(vy, 3, m_iSelect, "Offset X", buf);      vy += 12;
 
 	snprintf(buf, sizeof(buf), "%d", g_GskDispOffY);
-	_VideoRow(vy, 5, m_iSelect, "Offset Y", buf);      vy += 12;
+	_VideoRow(vy, 4, m_iSelect, "Offset Y", buf);      vy += 12;
 
-	_VideoRow(vy, 6, m_iSelect, "Cover Art", CoverIsEnabled() ? "On" : "Off"); vy += 12;
-	_VideoRow(vy, 7, m_iSelect, "SMS VDP border",
+	_VideoRow(vy, 5, m_iSelect, "Cover Art", CoverIsEnabled() ? "On" : "Off"); vy += 12;
+	_VideoRow(vy, 6, m_iSelect, "SMS VDP border",
 	          PicoDriveBridge_GetSmsColorBorder() ? "On" : "Off"); vy += 12;
 
 	}
@@ -1169,6 +1189,9 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 	else if (iPage == 4)
 	{
 		_VideoHeader(vy, "SNES Hacks"); vy += 14;
+		/* AURORA_SNES9X2010_V1_RUNTIMEFIX_20260824 -- runtime-only in V1. */
+		_VideoRow(vy, 30, m_iSelect, "SNES Core",
+			MainLoopSnesCoreGetName()); vy += 12;
 		_VideoRow(vy, 20, m_iSelect, "BG1 Layer",
 			_VideoHackLayerStatus(SNESPPU_MASK_BG1)); vy += 12;
 		_VideoRow(vy, 21, m_iSelect, "BG2 Layer",
@@ -1193,19 +1216,19 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 	else if (iPage == 2)
 	{
 		_VideoHeader(vy, "Performance"); vy += 14;
-		_VideoRow(vy, 30, m_iSelect, "Profile",
+		_VideoRow(vy, 31, m_iSelect, "Profile",
 			_VideoCompatProfileStatus()); vy += 12;
-		_VideoRow(vy, 31, m_iSelect, "GS Cache Sync",
+		_VideoRow(vy, 32, m_iSelect, "GS Cache Sync",
 			_VideoCompatGsCacheStatus()); vy += 12;
-		_VideoRow(vy, 32, m_iSelect, "GIF DMA Wait",
+		_VideoRow(vy, 33, m_iSelect, "GIF DMA Wait",
 			_VideoCompatGifWaitStatus()); vy += 12;
-		_VideoRow(vy, 33, m_iSelect, "Audio RPC Chunk",
+		_VideoRow(vy, 34, m_iSelect, "Audio RPC Chunk",
 			_VideoCompatAudioRpcStatus()); vy += 12;
-		_VideoRow(vy, 34, m_iSelect, "Audio Queue",
+		_VideoRow(vy, 35, m_iSelect, "Audio Queue",
 			_VideoCompatAudioQueueStatus()); vy += 12;
-		_VideoRow(vy, 35, m_iSelect, "Frame Skip",
+		_VideoRow(vy, 36, m_iSelect, "Frame Skip",
 			_VideoHackFrameSkipStatus()); vy += 12;
-		_VideoRow(vy, 36, m_iSelect, "MD rendering",
+		_VideoRow(vy, 37, m_iSelect, "MD rendering",
 			_VideoMdRenderingStatus()); vy += 12;
 
 	}
@@ -1248,22 +1271,22 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 	/* AURORA_PD_MEGA_FIX_20260820: Screen -> Audio -> Performance -> Controller -> Hacks -> Devices. */
 	if (trigger & PAD_CIRCLE)
 	{
-		if (m_iSelect < 10)       m_iSelect = 50;
-		else if (m_iSelect < 20)  m_iSelect = 0;
-		else if (m_iSelect < 30)  m_iSelect = 10;
-		else if (m_iSelect < 40)  m_iSelect = 40;
-		else if (m_iSelect < 50)  m_iSelect = 20;
-		else                      m_iSelect = 30;
+		if (m_iSelect < 10)        m_iSelect = 50;
+		else if (m_iSelect < 20)   m_iSelect = 0;
+		else if (m_iSelect <= 30)  m_iSelect = 10;
+		else if (m_iSelect < 40)   m_iSelect = 40;
+		else if (m_iSelect < 50)   m_iSelect = 20;
+		else                       m_iSelect = 31;
 	}
 
 	{
 		int lo, hi;
-		if (m_iSelect < 10)      { lo = 0;  hi = 7;  }
-		else if (m_iSelect < 20) { lo = 10; hi = 19; }
-		else if (m_iSelect < 30) { lo = 20; hi = 29; }
-		else if (m_iSelect < 40) { lo = 30; hi = 36; }
-		else if (m_iSelect < 50) { lo = 40; hi = 43; }
-		else                     { lo = 50; hi = 57; }
+		if (m_iSelect < 10)       { lo = 0;  hi = 6;  }
+		else if (m_iSelect < 20)  { lo = 10; hi = 19; }
+		else if (m_iSelect <= 30) { lo = 20; hi = 30; }
+		else if (m_iSelect < 40)  { lo = 31; hi = 37; }
+		else if (m_iSelect < 50)  { lo = 40; hi = 43; }
+		else                      { lo = 50; hi = 57; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1290,40 +1313,32 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 			GSK_SetWidescreen(g_GskWidescreen);
 			break;
 
-		case 2: /* SNES colour profile (live) */
-			SNPPUColorSetProfile(
-				SNPPUColorGetProfile() == SNPPU_COLOR_PROFILE_ORIGINAL
-				? SNPPU_COLOR_PROFILE_COMPOSITE
-				: SNPPU_COLOR_PROFILE_ORIGINAL);
-			break;
-
-		case 3: /* overscan 0..100 (live, step 5) */
+		case 2: /* overscan 0..100 (live, step 5) */
 			g_GskOverscan += dir * 5;
 			if (g_GskOverscan < 0)   g_GskOverscan = 0;
 			if (g_GskOverscan > 100) g_GskOverscan = 100;
 			GSK_SetOverscan(g_GskOverscan);
 			break;
 
-		case 4: /* offset X (live) */
+		case 3: /* offset X (live) */
 			g_GskDispOffX += dir;
 			if (g_GskDispOffX < -64) g_GskDispOffX = -64;
 			if (g_GskDispOffX >  64) g_GskDispOffX =  64;
 			GSK_SetDisplayOffset(g_GskDispOffX, g_GskDispOffY);
 			break;
 
-		case 5: /* offset Y (live) */
+		case 4: /* offset Y (live) */
 			g_GskDispOffY += dir;
 			if (g_GskDispOffY < -64) g_GskDispOffY = -64;
 			if (g_GskDispOffY >  64) g_GskDispOffY =  64;
 			GSK_SetDisplayOffset(g_GskDispOffX, g_GskDispOffY);
 			break;
 
-		case 6: /* cover art on/off (live; persisted on X like the rest) */
+		case 5: /* cover art on/off (live; persisted on X like the rest) */
 			CoverToggle();
 			break;
 
-
-		case 7: /* SMS VDP border color / black, live */
+		case 6: /* SMS VDP border color / black, live */
 			PicoDriveBridge_SetSmsColorBorder(
 				!PicoDriveBridge_GetSmsColorBorder());
 			break;
@@ -1540,31 +1555,34 @@ case 17: /* Famiclone Audio */
 				SNPPURenderSetObjLimitMode((Uint8)mode);
 			}
 			break;
-		case 30:
-			_VideoApplyCompatFlags(
-				g_VideoCompatFlags == VIDEO_COMPAT_ALL ? 0 : VIDEO_COMPAT_ALL);
+		case 30: /* AURORA_SNES9X2010_V1_RUNTIMEFIX_20260824 -- applies on next SNES launch. */
+			MainLoopSnesCoreCycleDir(dir);
 			break;
 		case 31:
 			_VideoApplyCompatFlags(
-				g_VideoCompatFlags ^ VIDEO_COMPAT_GS_FULL_CACHE);
+				g_VideoCompatFlags == VIDEO_COMPAT_ALL ? 0 : VIDEO_COMPAT_ALL);
 			break;
 		case 32:
 			_VideoApplyCompatFlags(
-				g_VideoCompatFlags ^ VIDEO_COMPAT_GIF_LONG_WAIT);
+				g_VideoCompatFlags ^ VIDEO_COMPAT_GS_FULL_CACHE);
 			break;
 		case 33:
 			_VideoApplyCompatFlags(
-				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_SMALL_RPC);
+				g_VideoCompatFlags ^ VIDEO_COMPAT_GIF_LONG_WAIT);
 			break;
 		case 34:
 			_VideoApplyCompatFlags(
-				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_DEEP_Q);
+				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_SMALL_RPC);
 			break;
 		case 35:
+			_VideoApplyCompatFlags(
+				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_DEEP_Q);
+			break;
+		case 36:
 			SNPPURenderSetSoftwareHackFlags(
 				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_FRAME_SKIP);
 			break;
-		case 36:
+		case 37:
 			{ int v = PicoDriveBridge_GetRenderingMode() + dir; if (v < 0) v = 2; if (v > 2) v = 0; PicoDriveBridge_SetRenderingMode(v); }
 			break;
 		case 40:
@@ -1589,8 +1607,8 @@ case 17: /* Famiclone Audio */
 	if (trigger & PAD_SQUARE)
 	{
 		if (m_iSelect >= 50)      m_iSelect = 0;
-		else if (m_iSelect >= 40) m_iSelect = 30;
-		else if (m_iSelect >= 30) m_iSelect = 50;
+		else if (m_iSelect >= 40) m_iSelect = 31;
+		else if (m_iSelect >= 31) m_iSelect = 50;
 		else if (m_iSelect >= 20) m_iSelect = 40;
 		else if (m_iSelect >= 10) m_iSelect = 20;
 		else                      m_iSelect = 10;

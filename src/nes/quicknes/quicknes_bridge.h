@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "types.h"
 namespace Emu { struct SysInputT; }
 class CRenderSurface;
 class CMixBuffer;
@@ -25,6 +26,12 @@ void QuicknesBridge_SoftReset(void);
 void QuicknesBridge_SetDutySwap(bool enabled);
 /* AURORA_CONTROLLER_OPTIONS_V2 */
 void QuicknesBridge_SetTurboSpeed(unsigned speedShift);
+/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
+void QuicknesBridge_InvalidateGsResources(void);
+bool QuicknesBridge_CanDirectGsVideo(void);
+bool QuicknesBridge_DrawDirectGs(Uint32 auroraOutBaseTBP,
+                                 Int32 logicalY,
+                                 Float32 intensity);
 void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
                              CRenderSurface *pTarget,
                              CMixBuffer *pMixBuf);

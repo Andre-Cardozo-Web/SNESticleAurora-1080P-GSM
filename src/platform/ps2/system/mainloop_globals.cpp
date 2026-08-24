@@ -27,6 +27,9 @@
 /* AURORA_PCE_EXPERIMENTAL_V1 */
 #include "pcesystem.h"
 #include "pcerom.h"
+/* AURORA_SNES9X2010_V1 */
+#include "snes9x2010system.h"
+#include "snes9x2010rom.h"
 #include "emusys.h"
 #include "emumovie.h"
 #include "rendersurface.h"
@@ -84,6 +87,9 @@ SegaSystem  *_pSega;
 SegaRom     *_pSegaRom;
 PceSystem   *_pPce;
 PceRom      *_pPceRom;
+/* AURORA_SNES9X2010_V1 */
+Snes9x2010System *_pSnes9x2010;
+Snes9x2010Rom    *_pSnes9x2010Rom;
 
 Char _RomName[256];
 Char _RomPath[1024];

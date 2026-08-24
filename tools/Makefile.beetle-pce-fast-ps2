@@ -27,6 +27,12 @@ CC ?= mips64r5900el-ps2-elf-gcc
 CXX ?= mips64r5900el-ps2-elf-g++
 AR ?= mips64r5900el-ps2-elf-ar
 
+# AURORA_PCE_INCREMENTAL_BUILD_V1_20260824
+# Keep a stable path to this external PS2 Makefile before Makefile.common
+# extends MAKEFILE_LIST. Object files depend on both build descriptions, so
+# flag/source-list changes invalidate only the Beetle objects that need it.
+AURORA_PCE_PS2_MAKEFILE := $(abspath $(firstword $(MAKEFILE_LIST)))
+
 include Makefile.common
 
 WARNINGS := \
@@ -52,17 +58,29 @@ CFLAGS += $(FLAGS) -std=gnu99
 CXXFLAGS += $(FLAGS) -std=gnu++11 -fno-exceptions -fno-rtti
 OBJECTS := $(SOURCES_CXX:.cpp=.o) $(SOURCES_C:.c=.o)
 
+# AURORA_PCE_INCREMENTAL_BUILD_V1_20260824
+# Header-aware incremental build. These flags only emit dependency metadata;
+# they do not alter generated machine code.
+DEPFLAGS := -MMD -MP
+DEPS := $(OBJECTS:.o=.d)
+-include $(DEPS)
+
+# If the PS2 build recipe or upstream source list/defines change, let Make
+# rebuild the affected core objects. No unconditional clean is necessary.
+$(OBJECTS): $(AURORA_PCE_PS2_MAKEFILE) Makefile.common
+
 .PHONY: all clean
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
+	@rm -f $@
 	$(AR) rcs $@ $(OBJECTS)
 
 %.o: %.cpp
-	$(CXX) -c -o $@ $< $(CPPFLAGS) $(CXXFLAGS)
+	$(CXX) -c -o $@ $< $(CPPFLAGS) $(CXXFLAGS) $(DEPFLAGS)
 
 %.o: %.c
-	$(CC) -c -o $@ $< $(CPPFLAGS) $(CFLAGS)
+	$(CC) -c -o $@ $< $(CPPFLAGS) $(CFLAGS) $(DEPFLAGS)
 
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	rm -f $(OBJECTS) $(DEPS) $(TARGET)

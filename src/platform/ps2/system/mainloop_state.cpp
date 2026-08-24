@@ -188,6 +188,62 @@ static Bool _MainLoopSramEnsureOneDir(const Char *pPath)
         ? TRUE : FALSE;
 }
 
+/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824
+ * BIOS files are user-supplied. Keep them beside Aurora's existing
+ * per-system SRAM/state tree on whichever SRAM storage policy is active. */
+Bool MainLoopEnsureSystemDirectory(Char *pOut, Int32 nOutBytes)
+{
+    const Char *pRoot;
+    Bool bMemCard;
+    Char Directory[512];
+    int nChars;
+
+    if (!pOut || nOutBytes <= 0)
+        return FALSE;
+    pOut[0] = '\0';
+
+    pRoot = MainLoopSramGetBrowseRoot();
+    bMemCard = MainLoopSramNeedsMemoryCardPreflight();
+    if (!pRoot || !*pRoot)
+        return FALSE;
+
+    if (!bMemCard && !_MainLoopSramEnsureOneDir(pRoot))
+        return FALSE;
+
+    nChars = snprintf(Directory, sizeof(Directory), "%s/SYSTEM", pRoot);
+    if (nChars < 0 || nChars >= (int)sizeof(Directory))
+        return FALSE;
+
+    if (!_MainLoopSramEnsureOneDir(Directory))
+    {
+        if (!bMemCard)
+            return FALSE;
+
+        {
+            int Result = MemCardCreateSave(
+                (char *)pRoot, _MainLoop_SaveTitle, TRUE);
+            if (Result < 0)
+            {
+                printf("[SYSTEM] MemCardCreateSave('%s') failed: %d\n",
+                       pRoot, Result);
+                return FALSE;
+            }
+        }
+
+        if (!_MainLoopSramEnsureOneDir(Directory))
+            return FALSE;
+    }
+
+    nChars = snprintf(pOut, (size_t)nOutBytes, "%s", Directory);
+    if (nChars < 0 || nChars >= nOutBytes)
+    {
+        pOut[0] = '\0';
+        return FALSE;
+    }
+    return TRUE;
+}
+
+
 static void _MainLoopSramBuildPath(Char *pPath, Int32 nPathBytes,
                                    const Char *pRoot, Bool bLegacyRoot)
 {
@@ -432,7 +488,8 @@ static Bool _MainLoopLoadSRAMFrom(MainLoopSramDeviceE eDevice,
         }
     }
 
-    if (_pSystem == _pSnes)
+    /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: both SNES cores also import the original root-level save. */
+    if (_pSystem == _pSnes || _pSystem == _pSnes9x2010)
     {
         _MainLoopSramBuildPath(Path, sizeof(Path), pRoot, TRUE);
         if (_MainLoopSramReadFile(Path, pSRAM, (Uint32)nSramBytes))
@@ -664,6 +721,7 @@ Bool _MainLoopCheckSRAM()
 #define MAINLOOP_STATE_SYSTEM_NES       1
 #define MAINLOOP_STATE_SYSTEM_SEGA      2
 #define MAINLOOP_STATE_SYSTEM_PCE       3
+#define MAINLOOP_STATE_SYSTEM_SNES9X2010 4 /* AURORA_SNES9X2010_V1 */
 #define MAINLOOP_STATE_RAW_BYTES \
     (sizeof(SnesStateT) > sizeof(NesStateT) \
         ? sizeof(SnesStateT) \
@@ -773,7 +831,8 @@ class MainLoopSegaStateScratchGuard
 {
 public:
     MainLoopSegaStateScratchGuard()
-        : m_bActive((_pSystem == _pSega || _pSystem == _pPce) ? TRUE : FALSE)
+        : m_bActive((_pSystem == _pSega || _pSystem == _pPce ||
+                     _pSystem == _pSnes9x2010) ? TRUE : FALSE)
     {
     }
 
@@ -809,7 +868,8 @@ static Uint8 *_MainLoopStateEnsureSegaStateData(Uint32 nBytes)
 
 static Uint32 _MainLoopStateCompressedLimit(Uint32 nRawBytes)
 {
-    if (_pSystem != _pSega && _pSystem != _pPce)
+    if (_pSystem != _pSega && _pSystem != _pPce &&
+        _pSystem != _pSnes9x2010)
         return (Uint32)sizeof(_MainLoop_StateCompressed);
 
     unsigned long long n =
@@ -819,7 +879,8 @@ static Uint32 _MainLoopStateCompressedLimit(Uint32 nRawBytes)
 
 static Uint8 *_MainLoopStateGetCompressedBuffer(Uint32 nNeed, Uint32 *pCapacity)
 {
-    if (_pSystem != _pSega && _pSystem != _pPce)
+    if (_pSystem != _pSega && _pSystem != _pPce &&
+        _pSystem != _pSnes9x2010)
     {
         if (pCapacity) *pCapacity = (Uint32)sizeof(_MainLoop_StateCompressed);
         return _MainLoop_StateCompressed;
@@ -850,6 +911,7 @@ static Uint32 _MainLoopStateGetSystemId()
     if (_pSystem == _pNes)  return MAINLOOP_STATE_SYSTEM_NES;
     if (_pSystem == _pSega) return MAINLOOP_STATE_SYSTEM_SEGA;
     if (_pSystem == _pPce)  return MAINLOOP_STATE_SYSTEM_PCE;
+    if (_pSystem == _pSnes9x2010) return MAINLOOP_STATE_SYSTEM_SNES9X2010;
     return MAINLOOP_STATE_SYSTEM_SNES;
 }
 
@@ -864,6 +926,11 @@ static Uint32 _MainLoopStateGetPayloadBytes()
     if (_pSystem == _pPce)
     {
         Int32 nBytes = _pPce ? _pPce->GetStateSize() : 0;
+        return nBytes > 0 ? (Uint32)nBytes : 0;
+    }
+    if (_pSystem == _pSnes9x2010)
+    {
+        Int32 nBytes = _pSnes9x2010 ? _pSnes9x2010->GetStateSize() : 0;
         return nBytes > 0 ? (Uint32)nBytes : 0;
     }
     if (_pSystem == _pNes)
@@ -892,7 +959,8 @@ static Uint8 *_MainLoopStateGetPayloadData()
 {
     if (_pSystem == _pNes)
         return (Uint8 *)&_NesState;
-    if (_pSystem == _pSega || _pSystem == _pPce)
+    if (_pSystem == _pSega || _pSystem == _pPce ||
+        _pSystem == _pSnes9x2010)
         return _MainLoopStateEnsureSegaStateData(
             _MainLoopStateGetPayloadBytes());
     return (Uint8 *)&_SnesState;
@@ -1556,7 +1624,8 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
     }
 
     if (_pSystem != _pSnes && _pSystem != _pNes &&
-        _pSystem != _pSega && _pSystem != _pPce)
+        _pSystem != _pSega && _pSystem != _pPce &&
+        _pSystem != _pSnes9x2010)
     {
         snprintf(pReason, nReasonBytes, "This system cannot save states.");
         return FALSE;
@@ -1587,6 +1656,15 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
         if (!_pPceRom || !_pPceRom->IsLoaded() || !_pPce || !_pPce->IsRomReady())
         {
             snprintf(pReason, nReasonBytes, "Beetle PCE Fast state unavailable.");
+            return FALSE;
+        }
+    }
+    else if (_pSystem == _pSnes9x2010)
+    {
+        if (!_pSnes9x2010Rom || !_pSnes9x2010Rom->IsLoaded() ||
+            !_pSnes9x2010 || !_pSnes9x2010->IsRomReady())
+        {
+            snprintf(pReason, nReasonBytes, "Snes9x 2010 state unavailable.");
             return FALSE;
         }
     }
@@ -1625,6 +1703,8 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
         snprintf(pReason, nReasonBytes, "Ready: PicoDrive cartridge state.");
     else if (_pSystem == _pPce)
         snprintf(pReason, nReasonBytes, "Ready: PC Engine HuCard state.");
+    else if (_pSystem == _pSnes9x2010)
+        snprintf(pReason, nReasonBytes, "Ready: Snes9x 2010 SNES state.");
     else
         snprintf(
             pReason,
@@ -1675,6 +1755,13 @@ static Bool _MainLoopStateGetRomIdentity(
         if (!_pPceRom || !_pPceRom->IsLoaded()) return FALSE;
         pRomData = _pPceRom->GetData(); nRomBytes = _pPceRom->GetBytes();
     }
+    else if (_pSystem == _pSnes9x2010)
+    {
+        if (!_pSnes9x2010Rom || !_pSnes9x2010Rom->IsLoaded()) return FALSE;
+        /* AURORA_SNES9X2010_V2_PS2LEAN_20260824: frontend backing is intentionally released. */
+        pRomData = _pSnes9x2010Rom->GetData();
+        nRomBytes = _pSnes9x2010Rom->GetBytes();
+    }
     else if (_pSnesRom && _pSnesRom->IsLoaded())
     {
         pRomData = _pSnesRom->GetData();
@@ -1684,13 +1771,16 @@ static Bool _MainLoopStateGetRomIdentity(
     {
         return FALSE;
     }
-    if (!pRomData || !nRomBytes)
+    if (!nRomBytes)
     {
         return FALSE;
     }
 
     if (!_MainLoop_StateRomCRCValid)
     {
+        /* AURORA_SNES9X2010_V2_PS2LEAN_20260824: only a non-primed fallback CRC needs raw bytes. */
+        if (!pRomData)
+            return FALSE;
         _MainLoop_StateRomCRC = (Uint32)mz_crc32(
             MZ_CRC32_INIT,
             pRomData,
@@ -1703,7 +1793,8 @@ static Bool _MainLoopStateGetRomIdentity(
     *pnBytes = nRomBytes;
     if (_pSystem == _pNes)
         *puFlags = _pNesRom->GetMapperNumber();
-    else if (_pSystem == _pSega || _pSystem == _pPce)
+    else if (_pSystem == _pSega || _pSystem == _pPce ||
+             _pSystem == _pSnes9x2010)
         *puFlags = 0;
     else
         *puFlags = _pSnesRom->m_Flags;
@@ -2062,7 +2153,9 @@ static void _MainLoopStateBuildBankPath(
         "%s/%s.%c%d%c",
         Directory,
         SaveName,
-        _pSystem == _pNes ? 'n' : (_pSystem == _pSega ? 'g' : 's'),
+        _pSystem == _pNes ? 'n' :
+            (_pSystem == _pSega ? 'g' :
+             (_pSystem == _pSnes9x2010 ? 'x' : 's')),
         iSlot + 1,
         iBank ? 'b' : 'a'
     );
@@ -2399,6 +2492,14 @@ Bool _MainLoopLoadState()
                 bRestoreOK = pPceStateData && nPceStateBytes &&
                     _pPce->RestoreStateChecked(pPceStateData, (Int32)nPceStateBytes);
             }
+            else if (_pSystem == _pSnes9x2010)
+            {
+                Uint8 *pS9xStateData = _MainLoopStateGetPayloadData();
+                Uint32 nS9xStateBytes = _MainLoopStateGetPayloadBytes();
+                bRestoreOK = pS9xStateData && nS9xStateBytes &&
+                    _pSnes9x2010->RestoreStateChecked(
+                        pS9xStateData, (Int32)nS9xStateBytes);
+            }
             else
                 bRestoreOK = _pSnes->RestoreState(&_SnesState);
         }
@@ -2577,6 +2678,14 @@ Bool _MainLoopSaveState()
         if (!_pPce->SaveStateChecked(pStateData, (Int32)nStateBytes))
         {
             _MainLoopStateSetMessage("Could not snapshot the Beetle PCE Fast state.");
+            return FALSE;
+        }
+    }
+    else if (_pSystem == _pSnes9x2010)
+    {
+        if (!_pSnes9x2010->SaveStateChecked(pStateData, (Int32)nStateBytes))
+        {
+            _MainLoopStateSetMessage("Could not snapshot the Snes9x 2010 state.");
             return FALSE;
         }
     }

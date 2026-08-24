@@ -275,7 +275,7 @@ Uint16 _MainLoopInput(Uint32 pad)
 	{
 		/* SNES only. NES keeps its existing QuickNES Circle/Triangle turbo
 		   and the historical R2-reserved behaviour. */
-		if (_pSystem == _pSnes)
+		if (_pSystem == _pSnes || _pSystem == _pSnes9x2010)
 		{
 			Uint32 uDirections = pad & SNES_DIRECTION_HOST_BUTTONS;
 			Uint32 uTurboButtons = pad & SNES_TURBO_HOST_BUTTONS;

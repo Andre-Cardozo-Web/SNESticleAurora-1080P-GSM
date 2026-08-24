@@ -4,8 +4,7 @@
 #include "pathext.h"
 
 #define PATHEXT_SIZE 		  (8)
-#define PATHEXT_MAXEXTENSIONS (16)
-
+#define PATHEXT_MAXEXTENSIONS (32) /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
 typedef struct 
 {
 	char			Ext[PATHEXT_SIZE];

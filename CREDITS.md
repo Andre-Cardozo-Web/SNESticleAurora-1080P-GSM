@@ -41,43 +41,51 @@ Changes developed for SNESticle Aurora may be cherry-picked, pulled, adapted or 
 
 Likewise, Aurora may independently incorporate useful work from related projects when appropriate, without implying that the projects share a release schedule, version series or development direction.
 
-## QuickNES
+## Emulator cores
 
-The NES QuickNES integration in Aurora uses a pinned fork of the
-QuickNES/libretro codebase:
+<!-- AURORA_ALL_CORES_CREDITS_V6_20260824 -->
+### QuickNES
+
+The NES integration uses the pinned QuickNES/libretro fork at `src/third_party/quicknes`.
 
 - **Original QuickNES / Nes_Emu:** Shay Green
 - **Libretro QuickNES core:** libretro contributors
-- **Aurora PS2 integration fork:** `itsveenee/QuickNES_Core`
-- **Aurora integration and PS2-specific glue:** Vinícius Nunes (`@itsveenee`)
+- **Aurora integration fork:** `itsveenee/QuickNES_Core`
+- **Aurora PS2 bridge and integration:** Vinícius Nunes (`@itsveenee`)
 
-The QuickNES submodule retains its own license and source-file notices.
-Those notices remain authoritative and must be preserved.
+Its bundled notices remain authoritative; the top-level GPLv2 mirror is `LICENSES/QuickNES-GPL-2.0.txt`.
 
-<!-- AURORA_BEETLE_PCE_FAST_CREDITS_V14 -->
-## Beetle PC Engine Fast
+### PicoDrive
 
-The experimental PC Engine / TurboGrafx-16 integration uses **Beetle PC Engine Fast**, the libretro port/fork of the **Mednafen PCE Fast** module.
+The experimental Mega Drive / Genesis, Master System / Mark III, Game Gear, 32X and Sega CD integration uses the pinned PicoDrive submodule at `src/third_party/picodrive`.
+
+- **Original/current PicoDrive lineage:** notaz, irixxxx and contributors
+- **Libretro core work:** libretro/PicoDrive contributors
+- **Aurora PS2 bridge and integration:** Vinícius Nunes (`@itsveenee`)
+
+Sega CD is exposed through path-only `.cue` loading and user-provided regional BIOS files. See `THIRD_PARTY.md` and `LICENSES/PicoDrive-COPYING.txt`.
+
+### Beetle PC Engine Fast
+
+The experimental PC Engine / TurboGrafx-16 HuCard and PC Engine CD integration uses Beetle PC Engine Fast, the libretro port/fork of Mednafen PCE Fast.
 
 - **Beetle PCE Fast / libretro core:** libretro contributors
 - **Underlying PCE Fast lineage:** Mednafen and its contributors
 - **Aurora integration fork:** `itsveenee/beetle-pce-fast-libretro`
-- **Aurora PS2 bridge, integration and PS2-specific optimization:** Vinícius Nunes (`@itsveenee`)
+- **Aurora PS2 bridge, integration and optimization:** Vinícius Nunes (`@itsveenee`)
 
-The PCE submodule retains its own copyright, license and source-file notices; those notices remain authoritative.
+PC Engine CD is exposed through path-only `.cue` loading and a user-provided `syscard3.pce`. See `LICENSES/Beetle-PCE-Fast-GPL-2.0.txt`.
+
+### Snes9x 2010
+
+The optional SNES core uses the pinned `itsveenee/snes9x2010` submodule at `src/third_party/snes9x2010`, based on Snes9x 2010 and its libretro integration.
+
+- **Snes9x emulator:** the Snes9x authors and contributors listed in its license
+- **Snes9x 2010 libretro core:** libretro contributors
+- **Aurora PS2 bridge, menu integration and optimization:** Vinícius Nunes (`@itsveenee`)
+
+Its terms are separate from Aurora's GPL-covered code. Preserve the authoritative submodule notices and the verbatim top-level mirror at `LICENSES/Snes9x2010-LICENSE.txt`.
 
 ## Third-party components
 
-SNESticle Aurora includes or integrates third-party components including InfoNES, QuickNES, FCEUmm, miniz, libxmp-lite and others.
-
-Their original copyright notices, authorship information and license files remain authoritative and must be preserved.
-
-See the repository LICENSE and the license files shipped with the corresponding third-party components.
-
-<!-- AURORA_PICODRIVE_CURRENT_CREDITS -->
-## PicoDrive
-
-Experimental Mega Drive / Genesis, Master System, Game Gear and 32X support
-uses PicoDrive (notaz and contributors; current development/fork contributors).
-Aurora's PS2 bridge/integration is maintained in `itsveenee/SNESticleAurora`.
-See `THIRD_PARTY.md` and `LICENSES/PicoDrive-COPYING.txt`.
+SNESticle Aurora also contains or integrates InfoNES, FCEUmm, miniz, libxmp-lite, PS2SDK-related code and other inherited components. Their original copyright, authorship, license and source-file notices remain authoritative and must be preserved. See `LICENSE`, `THIRD_PARTY.md`, and each component's bundled notices.

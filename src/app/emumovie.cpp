@@ -19,6 +19,7 @@
 
 #include "types.h"
 #include "emumovie.h"
+#include <stdio.h>
 using namespace Emu;
 
 /*-- Preprocessor Defines ------------------------------------------------------------------------*/
@@ -31,11 +32,17 @@ using namespace Emu;
 
 MovieClip::MovieClip(Uint32 uStateSize, Uint32 uMaxFrames)
 {
+    /* AURORA_SNES9X2010_V6_2_STABLEINIT_20260824
+     * Movie capture is a DEBUG-only input feature, yet the old constructor
+     * permanently reserved the largest emulator state plus 216,000 input
+     * frames.  That consumed roughly 2.6 MiB before a ROM was selected and
+     * starved the embedded Snes9x renderer.  Keep the exact capacity and
+     * allocate it only when recording actually begins. */
     m_uStateSize    = 0;
     m_uMaxStateSize = uStateSize;
-    m_pStateData    = (void *) malloc(uStateSize);
+    m_pStateData    = NULL;
 
-    m_pFrames    = (SysInputT *)malloc(sizeof(SysInputT) * uMaxFrames);
+    m_pFrames    = NULL;
     m_uMaxFrames = uMaxFrames;
 
     m_bRecording        = FALSE;
@@ -47,17 +54,68 @@ MovieClip::MovieClip(Uint32 uStateSize, Uint32 uMaxFrames)
 
 MovieClip::~MovieClip()
 {
+    Discard();
+}
+
+Bool MovieClip::EnsureStorage()
+{
+    void *pState;
+    SysInputT *pFrames;
+    size_t nFrameBytes;
+
+    if (m_pStateData && m_pFrames)
+        return TRUE;
+    if (!m_uMaxStateSize || !m_uMaxFrames ||
+        (size_t)m_uMaxFrames > ((size_t)-1) / sizeof(SysInputT))
+        return FALSE;
+
+    nFrameBytes = sizeof(SysInputT) * (size_t)m_uMaxFrames;
+    pState = malloc((size_t)m_uMaxStateSize);
+    pFrames = (SysInputT *)malloc(nFrameBytes);
+    if (!pState || !pFrames)
+    {
+        free(pState);
+        free(pFrames);
+        printf("Movie: not enough memory for capture buffers\n");
+        return FALSE;
+    }
+
     free(m_pStateData);
+    free(m_pFrames);
+    m_pStateData = pState;
+    m_pFrames = pFrames;
+    return TRUE;
+}
+
+void MovieClip::Discard()
+{
+    m_bRecording = FALSE;
+    m_bPlaying = FALSE;
+    m_nRecordedFrames = 0;
+    m_uPlayFrame = 0;
+    m_uStateSize = 0;
+    free(m_pStateData);
+    free(m_pFrames);
+    m_pStateData = NULL;
+    m_pFrames = NULL;
 }
 
 
 void MovieClip::RecordBegin(System *pSystem)
 {
-    assert(!IsRecording());
-    assert(!IsPlaying());
+    Int32 nStateSize;
 
-    m_uStateSize = pSystem->GetStateSize();
-    assert(m_uStateSize <= m_uMaxStateSize);
+    if (!pSystem || IsRecording() || IsPlaying())
+        return;
+
+    nStateSize = pSystem->GetStateSize();
+    if (nStateSize <= 0 || (Uint32)nStateSize > m_uMaxStateSize ||
+        !EnsureStorage())
+    {
+        printf("Movie: capture unavailable for this core/state size\n");
+        return;
+    }
+    m_uStateSize = (Uint32)nStateSize;
 
     // save the state
     pSystem->SaveState(m_pStateData, m_uStateSize);
@@ -69,14 +127,13 @@ void MovieClip::RecordBegin(System *pSystem)
 
 void MovieClip::RecordEnd()
 {
-    assert(IsRecording());
-
     m_bRecording      = FALSE;
 }
 
 Bool MovieClip::RecordFrame(SysInputT &input)
 {
-    if (m_nRecordedFrames < m_uMaxFrames)
+    if (m_bRecording && m_pFrames &&
+        m_nRecordedFrames < m_uMaxFrames)
     {
         m_pFrames[m_nRecordedFrames] = input;
         m_nRecordedFrames++;
@@ -89,9 +146,10 @@ Bool MovieClip::RecordFrame(SysInputT &input)
 
 void MovieClip::PlayBegin(System *pSystem)
 {
-    assert(!IsRecording());
-    assert(!IsPlaying());
-    assert(m_uStateSize > 0);
+    if (!pSystem || IsRecording() || IsPlaying() ||
+        !m_pStateData || !m_pFrames || !m_uStateSize ||
+        !m_nRecordedFrames)
+        return;
 
     // restore the state
     pSystem->RestoreState(m_pStateData, m_uStateSize);
@@ -102,14 +160,12 @@ void MovieClip::PlayBegin(System *pSystem)
 }
 void MovieClip::PlayEnd()
 {
-    assert(IsPlaying());
-
     m_bPlaying      = FALSE;
 }
 
 Bool MovieClip::PlayFrame(SysInputT &input)
 {
-    if (m_uPlayFrame < m_nRecordedFrames)
+    if (m_bPlaying && m_pFrames && m_uPlayFrame < m_nRecordedFrames)
     {
         input = m_pFrames[m_uPlayFrame];
         m_uPlayFrame++;
@@ -117,7 +173,6 @@ Bool MovieClip::PlayFrame(SysInputT &input)
     }
     return FALSE;
 }
-
 
 
 

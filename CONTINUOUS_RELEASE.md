@@ -1,4 +1,4 @@
-Automatically built from the latest commit on main. Includes PicoDrive and the experimental Beetle PCE Fast integration. The checked-out source tree (including recursive QuickNES, PicoDrive and Beetle PCE Fast submodules), manifest, checksums and third-party notices are attached. Beetle PCE Fast is distributed under GNU GPLv2; see Beetle-PCE-Fast-GPL-2.0.txt. PicoDrive has additional redistribution/non-commercial terms; see PicoDrive-COPYING.txt.
+Automatically built from the latest commit on main. Includes the recursive QuickNES, PicoDrive, Beetle PCE Fast and Snes9x 2010 cores. The checked-out source tree, manifest, checksums and third-party notices are attached. Review QuickNES-GPL-2.0.txt, PicoDrive-COPYING.txt, Beetle-PCE-Fast-GPL-2.0.txt and Snes9x2010-LICENSE.txt. PicoDrive and Snes9x 2010 retain their own additional/separate terms. AURORA_ALL_CORE_RELEASE_NOTICES_V6_20260824
 
 The only file you need to play is **SNESticle.elf**.
 

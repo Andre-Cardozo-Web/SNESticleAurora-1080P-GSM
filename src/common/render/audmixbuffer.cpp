@@ -365,6 +365,212 @@ Int32 AudMixBuffer::ConvertSamplesStereo_Linear48(
     return out;
 }
 
+/* AURORA_SNES9X2010_V4_PS2_PERF_20260824
+ * Direct libretro LRLR input for Beetle PCE Fast and Snes9x2010.
+ * This is equation/state equivalent to OutputSamplesStereo(), but fuses the
+ * bridge's deinterleave pass with output/resampling and avoids two 1024-frame
+ * channel planes.  PicoDrive retains its specialised +50% paths below. */
+static inline Int16 _AudMixCubic81(Int32 value)
+{
+    value = (value >= 0 ? value + 40 : value - 40) / 81;
+    if (value > 32767)  value = 32767;
+    if (value < -32768) value = -32768;
+    return (Int16)value;
+}
+
+Bool AudMixBuffer::OutputLibretroInterleaved(
+    const Int16 *pStereo, Int32 nFrames)
+{
+    Int32 i;
+
+    if (!pStereo || nFrames <= 0)
+        return TRUE;
+
+    if (m_uSampleRate == 48000)
+    {
+        if (m_nOutSamples + nFrames > AUDMIXBUFFER_MAXENQUEUE)
+            return TRUE;
+        for (i = 0; i < nFrames; ++i)
+        {
+            m_OutData[0][m_nOutSamples + i] = pStereo[i * 2 + 0];
+            m_OutData[1][m_nOutSamples + i] = pStereo[i * 2 + 1];
+        }
+        m_nOutSamples += nFrames;
+        return TRUE;
+    }
+
+    if (m_uSampleRate == 32000)
+    {
+        Int32 outNeeded;
+
+        if (nFrames > AUDMIXBUFFER_MAXENQUEUE * 2 / 3)
+            nFrames = AUDMIXBUFFER_MAXENQUEUE * 2 / 3;
+        outNeeded = (nFrames / 2) * 3;
+        if (m_nOutSamples + outNeeded > AUDMIXBUFFER_MAXENQUEUE)
+            return TRUE;
+
+        PROF_ENTER("Aud_Convert");
+        if (s_fastResample)
+        {
+            for (i = 0; i + 1 < nFrames; i += 2)
+            {
+                Int32 l0 = pStereo[(i + 0) * 2 + 0];
+                Int32 r0 = pStereo[(i + 0) * 2 + 1];
+                Int32 l1 = pStereo[(i + 1) * 2 + 0];
+                Int32 r1 = pStereo[(i + 1) * 2 + 1];
+                Int32 l2 = (i + 2 < nFrames)
+                    ? pStereo[(i + 2) * 2 + 0] : l1;
+                Int32 r2 = (i + 2 < nFrames)
+                    ? pStereo[(i + 2) * 2 + 1] : r1;
+
+                m_OutData[0][m_nOutSamples] = (Int16)l0;
+                m_OutData[1][m_nOutSamples++] = (Int16)r0;
+                m_OutData[0][m_nOutSamples] = (Int16)((l0 + 2 * l1) / 3);
+                m_OutData[1][m_nOutSamples++] = (Int16)((r0 + 2 * r1) / 3);
+                m_OutData[0][m_nOutSamples] = (Int16)((2 * l1 + l2) / 3);
+                m_OutData[1][m_nOutSamples++] = (Int16)((2 * r1 + r2) / 3);
+            }
+            if (nFrames > 0)
+            {
+                m_iPrevSample[0] = pStereo[(nFrames - 1) * 2 + 0];
+                m_iPrevSample[1] = pStereo[(nFrames - 1) * 2 + 1];
+            }
+        }
+        else if (nFrames >= 2)
+        {
+            Int32 histL = m_iPrevSample[0];
+            Int32 histR = m_iPrevSample[1];
+
+            for (i = 0; i + 3 < nFrames; i += 2)
+            {
+                Int32 l0 = pStereo[(i + 0) * 2 + 0];
+                Int32 r0 = pStereo[(i + 0) * 2 + 1];
+                Int32 l1 = pStereo[(i + 1) * 2 + 0];
+                Int32 r1 = pStereo[(i + 1) * 2 + 1];
+                Int32 l2 = pStereo[(i + 2) * 2 + 0];
+                Int32 r2 = pStereo[(i + 2) * 2 + 1];
+                Int32 l3 = pStereo[(i + 3) * 2 + 0];
+                Int32 r3 = pStereo[(i + 3) * 2 + 1];
+
+                m_OutData[0][m_nOutSamples] = (Int16)l0;
+                m_OutData[1][m_nOutSamples++] = (Int16)r0;
+                m_OutData[0][m_nOutSamples] = _AudMixCubic81(
+                    -4 * histL + 30 * l0 + 60 * l1 - 5 * l2);
+                m_OutData[1][m_nOutSamples++] = _AudMixCubic81(
+                    -4 * histR + 30 * r0 + 60 * r1 - 5 * r2);
+                m_OutData[0][m_nOutSamples] = _AudMixCubic81(
+                    -5 * l0 + 60 * l1 + 30 * l2 - 4 * l3);
+                m_OutData[1][m_nOutSamples++] = _AudMixCubic81(
+                    -5 * r0 + 60 * r1 + 30 * r2 - 4 * r3);
+                histL = l1;
+                histR = r1;
+            }
+
+            for (; i + 1 < nFrames; i += 2)
+            {
+                Int32 l0 = pStereo[(i + 0) * 2 + 0];
+                Int32 r0 = pStereo[(i + 0) * 2 + 1];
+                Int32 l1 = pStereo[(i + 1) * 2 + 0];
+                Int32 r1 = pStereo[(i + 1) * 2 + 1];
+                Int32 l2 = (i + 2 < nFrames)
+                    ? pStereo[(i + 2) * 2 + 0] : l1;
+                Int32 r2 = (i + 2 < nFrames)
+                    ? pStereo[(i + 2) * 2 + 1] : r1;
+
+                m_OutData[0][m_nOutSamples] = (Int16)l0;
+                m_OutData[1][m_nOutSamples++] = (Int16)r0;
+                m_OutData[0][m_nOutSamples] = (Int16)((l0 + 2 * l1) / 3);
+                m_OutData[1][m_nOutSamples++] = (Int16)((r0 + 2 * r1) / 3);
+                m_OutData[0][m_nOutSamples] = (Int16)((2 * l1 + l2) / 3);
+                m_OutData[1][m_nOutSamples++] = (Int16)((2 * r1 + r2) / 3);
+                histL = l1;
+                histR = r1;
+            }
+            m_iPrevSample[0] = histL;
+            m_iPrevSample[1] = histR;
+        }
+        PROF_LEAVE("Aud_Convert");
+        return TRUE;
+    }
+
+    /* Same state transitions and output order as
+       ConvertSamplesStereo_Linear48(), read directly from LRLR input. */
+    if (m_uSampleRate == 0 ||
+        m_nOutSamples >= AUDMIXBUFFER_MAXENQUEUE)
+        return TRUE;
+
+    i = 0;
+    if (!m_bLinearHavePrev)
+    {
+        m_iLinearPrev[0] = pStereo[0];
+        m_iLinearPrev[1] = pStereo[1];
+        m_uLinearResamplePhase = 0;
+        m_bLinearHavePrev = TRUE;
+        i = 1;
+    }
+
+    if (m_uSampleRate == 16000)
+    {
+        for (; i < nFrames; ++i)
+        {
+            Int32 l0, r0, l1, r1;
+            if (m_nOutSamples + 3 > AUDMIXBUFFER_MAXENQUEUE)
+                break;
+            l0 = m_iLinearPrev[0]; r0 = m_iLinearPrev[1];
+            l1 = pStereo[i * 2 + 0]; r1 = pStereo[i * 2 + 1];
+            m_OutData[0][m_nOutSamples] = (Int16)l0;
+            m_OutData[1][m_nOutSamples++] = (Int16)r0;
+            m_OutData[0][m_nOutSamples] = (Int16)((2 * l0 + l1) / 3);
+            m_OutData[1][m_nOutSamples++] = (Int16)((2 * r0 + r1) / 3);
+            m_OutData[0][m_nOutSamples] = (Int16)((l0 + 2 * l1) / 3);
+            m_OutData[1][m_nOutSamples++] = (Int16)((r0 + 2 * r1) / 3);
+            m_iLinearPrev[0] = l1; m_iLinearPrev[1] = r1;
+        }
+    }
+    else if (m_uSampleRate == 24000)
+    {
+        for (; i < nFrames; ++i)
+        {
+            Int32 l0, r0, l1, r1;
+            if (m_nOutSamples + 2 > AUDMIXBUFFER_MAXENQUEUE)
+                break;
+            l0 = m_iLinearPrev[0]; r0 = m_iLinearPrev[1];
+            l1 = pStereo[i * 2 + 0]; r1 = pStereo[i * 2 + 1];
+            m_OutData[0][m_nOutSamples] = (Int16)l0;
+            m_OutData[1][m_nOutSamples++] = (Int16)r0;
+            m_OutData[0][m_nOutSamples] = (Int16)((l0 + l1) / 2);
+            m_OutData[1][m_nOutSamples++] = (Int16)((r0 + r1) / 2);
+            m_iLinearPrev[0] = l1; m_iLinearPrev[1] = r1;
+        }
+    }
+    else
+    {
+        for (; i < nFrames &&
+               m_nOutSamples < AUDMIXBUFFER_MAXENQUEUE; ++i)
+        {
+            Int32 l0 = m_iLinearPrev[0], r0 = m_iLinearPrev[1];
+            Int32 l1 = pStereo[i * 2 + 0], r1 = pStereo[i * 2 + 1];
+            while (m_uLinearResamplePhase < 48000U &&
+                   m_nOutSamples < AUDMIXBUFFER_MAXENQUEUE)
+            {
+                Int32 frac = (Int32)(
+                    (m_uLinearResamplePhase * 32768U) / 48000U);
+                m_OutData[0][m_nOutSamples] =
+                    (Int16)(l0 + (((l1 - l0) * frac) >> 15));
+                m_OutData[1][m_nOutSamples] =
+                    (Int16)(r0 + (((r1 - r0) * frac) >> 15));
+                ++m_nOutSamples;
+                m_uLinearResamplePhase += m_uSampleRate;
+            }
+            if (m_uLinearResamplePhase >= 48000U)
+                m_uLinearResamplePhase -= 48000U;
+            m_iLinearPrev[0] = l1;
+            m_iLinearPrev[1] = r1;
+        }
+    }
+    return TRUE;
+}
+
 /* AURORA_PD_AUDIO_INTERLEAVED_FAST_V2_CPP_20260821
  * AURORA_PD_AUDIO_INTERLEAVED_ALL_RATES_V3_20260821
  * PicoDrive supplies interleaved stereo. Consume it directly for every
@@ -552,31 +758,46 @@ Bool AudMixBuffer::OutputPicoDriveInterleaved32000(
     if (m_nOutSamples + outNeeded > AUDMIXBUFFER_MAXENQUEUE)
         return TRUE;
 
-#define AURORA_PD32_FETCH(CH, IDX) \
+#define AURORA_PD32_V5_FETCH(CH, IDX) \
     ((IDX) < nPrefixFrames ? \
         ((CH) == 0 ? pPrefixLeft[(IDX)] : pPrefixRight[(IDX)]) : \
         _AudMixPicoGain150(pStereo[((IDX) - nPrefixFrames) * 2 + (CH)]))
 
-    for (i = 0; i + 1 < total; i += 2)
+    /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824
+     * The old loop gained sample i+2 as lookahead and gained it again as the
+     * next pair's i+0. Carry that exact Int16 value forward instead. */
     {
-        Int32 l0 = AURORA_PD32_FETCH(0, i);
-        Int32 r0 = AURORA_PD32_FETCH(1, i);
-        Int32 l1 = AURORA_PD32_FETCH(0, i + 1);
-        Int32 r1 = AURORA_PD32_FETCH(1, i + 1);
-        Int32 l2 = (i + 2 < total) ? AURORA_PD32_FETCH(0, i + 2) : l1;
-        Int32 r2 = (i + 2 < total) ? AURORA_PD32_FETCH(1, i + 2) : r1;
+        Int32 l0 = AURORA_PD32_V5_FETCH(0, 0);
+        Int32 r0 = AURORA_PD32_V5_FETCH(1, 0);
+        Int32 lastL = l0;
+        Int32 lastR = r0;
 
-        m_OutData[0][m_nOutSamples] = (Int16)l0;
-        m_OutData[1][m_nOutSamples++] = (Int16)r0;
-        m_OutData[0][m_nOutSamples] = (Int16)((l0 + 2 * l1) / 3);
-        m_OutData[1][m_nOutSamples++] = (Int16)((r0 + 2 * r1) / 3);
-        m_OutData[0][m_nOutSamples] = (Int16)((2 * l1 + l2) / 3);
-        m_OutData[1][m_nOutSamples++] = (Int16)((2 * r1 + r2) / 3);
+        for (i = 0; i + 1 < total; i += 2)
+        {
+            Int32 l1 = AURORA_PD32_V5_FETCH(0, i + 1);
+            Int32 r1 = AURORA_PD32_V5_FETCH(1, i + 1);
+            Int32 l2 = (i + 2 < total)
+                ? AURORA_PD32_V5_FETCH(0, i + 2) : l1;
+            Int32 r2 = (i + 2 < total)
+                ? AURORA_PD32_V5_FETCH(1, i + 2) : r1;
+
+            m_OutData[0][m_nOutSamples] = (Int16)l0;
+            m_OutData[1][m_nOutSamples++] = (Int16)r0;
+            m_OutData[0][m_nOutSamples] = (Int16)((l0 + 2 * l1) / 3);
+            m_OutData[1][m_nOutSamples++] = (Int16)((r0 + 2 * r1) / 3);
+            m_OutData[0][m_nOutSamples] = (Int16)((2 * l1 + l2) / 3);
+            m_OutData[1][m_nOutSamples++] = (Int16)((2 * r1 + r2) / 3);
+
+            lastL = l1;
+            lastR = r1;
+            l0 = l2;
+            r0 = r2;
+        }
+
+        m_iPrevSample[0] = lastL;
+        m_iPrevSample[1] = lastR;
     }
-
-    m_iPrevSample[0] = AURORA_PD32_FETCH(0, total - 1);
-    m_iPrevSample[1] = AURORA_PD32_FETCH(1, total - 1);
-#undef AURORA_PD32_FETCH
+#undef AURORA_PD32_V5_FETCH
     return TRUE;
 }
 
@@ -738,7 +959,46 @@ void AudMixBuffer::Flush()
 
 
 
-void AudMixBuffer::OutputSamplesMono(Int16 *pSamples,Int32 nSamples)
+void AudMixBuffer::OutputSamplesMono(Int16 *pSamples, Int32 nSamples)
 {
+    /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824
+     * QuickNES is mono and the native SNES mixer can also select mono.  When
+     * both histories match, the historical left/right cubic calls are
+     * mathematically identical. Run one and byte-copy its exact Int16 result.
+     * A mismatched history (for example immediately after a stereo source)
+     * takes the old path once and naturally converges the two histories. */
+    if (m_uSampleRate == 32000 && pSamples && nSamples >= 2 &&
+        m_iPrevSample[0] == m_iPrevSample[1])
+    {
+        Int32 estimated = nSamples * 6 / 4;
+        Int32 nIn = nSamples;
+        Int32 nOut;
+        Int16 *left;
+        Int16 *right;
+
+        /* Preserve OutputSamplesStereo's pre-clamp overflow decision. */
+        if (m_nOutSamples + estimated > AUDMIXBUFFER_MAXENQUEUE)
+            return;
+        if (nIn > AUDMIXBUFFER_MAXENQUEUE * 2 / 3)
+            nIn = AUDMIXBUFFER_MAXENQUEUE * 2 / 3;
+
+        left = m_OutData[0] + m_nOutSamples;
+        right = m_OutData[1] + m_nOutSamples;
+        PROF_ENTER("Aud_Convert");
+        if (s_fastResample)
+            nOut = AudMixConvertSamples2to3Fast(
+                left, pSamples, nIn, &m_iPrevSample[0]);
+        else
+            nOut = ConvertSamples2to3(
+                left, pSamples, nIn, &m_iPrevSample[0]);
+        PROF_LEAVE("Aud_Convert");
+
+        if (nOut > 0)
+            memcpy(right, left, (size_t)nOut * sizeof(left[0]));
+        m_iPrevSample[1] = m_iPrevSample[0];
+        m_nOutSamples += nOut;
+        return;
+    }
+
     OutputSamplesStereo(pSamples, pSamples, nSamples);
 }

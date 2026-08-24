@@ -33,6 +33,7 @@ class MovieClip
 public:
 						MovieClip(Uint32 uStateSize, Uint32 uMaxFrames);
 						~MovieClip();
+	void                Discard();
 
     void            	RecordBegin(System *pSystem);
     void            	RecordEnd();
@@ -47,6 +48,7 @@ public:
     Uint32          	GetPlayPosition() const								{return m_uPlayFrame;}
 
 private:
+    Bool                EnsureStorage();
     // state data at start of movie clip
     void *              m_pStateData;
     Uint32              m_uMaxStateSize;
@@ -69,7 +71,6 @@ private:
 
 } // namespace
 #endif // _emumovie_h
-
 
 
 

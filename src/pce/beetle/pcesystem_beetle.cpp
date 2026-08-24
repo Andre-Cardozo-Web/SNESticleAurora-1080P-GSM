@@ -8,6 +8,26 @@ extern PceRom *_pPceRom;
 PceSystem::PceSystem(){m_pPceRom=NULL;m_bRomReady=FALSE;m_nCachedStateBytes=0;m_uFrame=m_uLine=0;}
 PceSystem::~PceSystem(){PceBridge_Shutdown();}
 void PceSystem::SetRom(Emu::Rom *r){m_pPceRom=NULL;m_bRomReady=FALSE;m_nCachedStateBytes=0;m_uFrame=m_uLine=0;if(!r){PceBridge_Shutdown();return;}PceBridge_UnloadGame();if(r!=_pPceRom){printf("[PceSystem] rejected non-PceRom object\n");return;}PceRom *rom=(PceRom*)r;if(!rom->GetData()||!rom->GetBytes())return;const char *name=rom->GetSourceName();if(!name||!*name)name="game.pce";if(!PceBridge_LoadGame(rom->GetData(),(size_t)rom->GetBytes(),(size_t)rom->GetCapacity(),name)){printf("[PceSystem/Beetle] LOAD FAILED\n");return;}m_pPceRom=rom;m_bRomReady=TRUE;printf("[PceSystem/Beetle] LOAD OK; SRAM=%d\n",PceBridge_GetSRAMBytes());}
+
+/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
+Bool PceSystem::LoadDisc(const Char *path, const Char *systemPath)
+{
+    m_pPceRom = NULL;
+    m_bRomReady = FALSE;
+    m_nCachedStateBytes = 0;
+    m_uFrame = m_uLine = 0;
+    PceBridge_UnloadGame();
+    if (!PceBridge_LoadDisc(path, systemPath))
+    {
+        printf("[PceSystem/Beetle] PCE CD LOAD FAILED\n");
+        return FALSE;
+    }
+    m_bRomReady = TRUE;
+    printf("[PceSystem/Beetle] PCE CD LOAD OK; SRAM=%d\n",
+           PceBridge_GetSRAMBytes());
+    return TRUE;
+}
+
 void PceSystem::Reset(){m_uFrame=m_uLine=0;if(m_bRomReady)PceBridge_Reset();}
 void PceSystem::SoftReset(){m_uFrame=m_uLine=0;if(m_bRomReady)PceBridge_SoftReset();}
 void PceSystem::ExecuteFrame(Emu::SysInputT *in,CRenderSurface *dst,CMixBuffer *mix,ModeE mode){(void)mode;if(!m_bRomReady)return;PceBridge_RunFrame(in,dst,mix);++m_uFrame;m_uLine=0;}

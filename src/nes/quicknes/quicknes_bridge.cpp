@@ -22,6 +22,11 @@
 #include "mixbuffer.h"
 #include "snio.h"
 
+/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
+extern "C" {
+#include "gs.h"
+#include "gpprim.h"
+}
 /* SNESTICLE_QUICKNES_PS2_ALIGNMENT_V1
  * Keep the bridge under the same unaligned-access contract used by
  * QuickNES's PS2 objects. */
@@ -61,7 +66,10 @@ enum
 
 /* QuickNES renders palette indices into this buffer. The +16 horizontal
  * padding and +2 vertical rows are required by its native PPU renderer. */
-static Uint8 s_Video[QN_VIDEO_W * QN_VIDEO_H]
+/* Keep eight bytes before the QuickNES allocation so the active
+ * frame pointer (base + one 272-byte guard row + left 8) is
+ * 16-byte aligned for the GIF DMA source. */
+static Uint8 s_Video[QN_VIDEO_W * QN_VIDEO_H + 16]
     __attribute__((aligned(64)));
 
 /* SNESticle's framebuffer is 256x256 RGBA8. Cache the 256-entry mapping
@@ -70,6 +78,17 @@ static Uint32 s_RgbaPalette[256];
 static short  s_LastFramePalette[Nes_Emu::max_palette_size];
 static bool   s_PaletteValid = false;
 
+
+/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824
+ * Direct indexed-video state. Palette entries are kept in GS
+ * CSM1 order; texture and CLUT live in Aurora's reserved output slab. */
+static Uint32 s_GsPalette[256] __attribute__((aligned(64)));
+static short s_DirectLastPalette[Nes_Emu::max_palette_size];
+static bool s_DirectPaletteValid = false;
+static bool s_DirectClutResident = false;
+static bool s_DirectReady = false;
+static Uint32 s_DirectFrameSerial = 0;
+static Uint32 s_DirectUploadSerial = 0;
 /* Audio scratch is BSS/static, never EE thread stack. QuickNES's default
  * non-linear Nes_Buffer emits mono; SNESticle's AudMixBuffer duplicates it
  * to stereo and performs the existing 32 -> 48 kHz conversion. */
@@ -79,6 +98,16 @@ static Int16 s_Pending[4];
 static int   s_PendingCount = 0;
 
 
+static void qResetDirectVideo(void)
+{
+    memset(s_DirectLastPalette, 0, sizeof(s_DirectLastPalette));
+    s_DirectPaletteValid = false;
+    s_DirectClutResident = false;
+    s_DirectReady = false;
+    s_DirectFrameSerial = 0;
+    s_DirectUploadSerial = 0;
+}
+
 static void qResetTransient(void)
 {
     memset(s_Video, 0, sizeof(s_Video));
@@ -86,6 +115,7 @@ static void qResetTransient(void)
     memset(s_Pending, 0, sizeof(s_Pending));
     s_PendingCount = 0;
     s_PaletteValid = false;
+    qResetDirectVideo();
     s_TurboPhase = false;
     s_TurboFrame = 0;
 }
@@ -191,6 +221,112 @@ static void qRenderFrame(CRenderSurface *pTarget)
     }
 }
 
+enum
+{
+    QN_GS_TEX_TBP_OFFSET = 0x400,
+    QN_GS_CLUT_TBP_OFFSET = 0x580,
+    QN_GS_T8_TBW = 320
+};
+
+void QuicknesBridge_InvalidateGsResources(void)
+{
+    s_DirectUploadSerial = 0;
+    s_DirectClutResident = false;
+}
+
+bool QuicknesBridge_CanDirectGsVideo(void)
+{
+    return s_GameLoaded && s_DirectReady && s_DirectFrameSerial != 0;
+}
+
+static void qRefreshGsPalette(const Nes_Emu::frame_t &frame)
+{
+    if (s_DirectPaletteValid &&
+        memcmp(s_DirectLastPalette, frame.palette,
+               sizeof(s_DirectLastPalette)) == 0)
+        return;
+
+    for (unsigned i = 0; i < 256; ++i)
+    {
+        unsigned ci = (unsigned)(unsigned short)frame.palette[i];
+        unsigned dest = i;
+        unsigned block = i & 0x3fU;
+        if (ci >= (unsigned)Nes_Emu::color_table_size)
+            ci = 0;
+
+        /* GS CSM1 swaps each 8-entry 0x08/0x10 CLUT block. */
+        if ((block & 0x18U) == 0x08U)
+            dest += 8U;
+        else if ((block & 0x18U) == 0x10U)
+            dest -= 8U;
+
+        const Nes_Emu::rgb_t &rgb = Nes_Emu::nes_colors[ci];
+        s_GsPalette[dest] =
+            0x80000000u |
+            ((Uint32)rgb.blue << 16) |
+            ((Uint32)rgb.green << 8) |
+            (Uint32)rgb.red;
+    }
+
+    memcpy(s_DirectLastPalette, frame.palette,
+           sizeof(s_DirectLastPalette));
+    s_DirectPaletteValid = true;
+    s_DirectClutResident = false;
+}
+
+bool QuicknesBridge_DrawDirectGs(Uint32 auroraOutBaseTBP,
+                                 Int32 logicalY,
+                                 Float32 intensity)
+{
+    Uint32 texTBP, clutTBP, mod, modColor;
+    const Nes_Emu::frame_t &frame = s_pEmu->frame();
+
+    if (!auroraOutBaseTBP || !QuicknesBridge_CanDirectGsVideo() ||
+        !frame.pixels || frame.pitch != QN_VIDEO_W)
+        return false;
+
+    texTBP = auroraOutBaseTBP + QN_GS_TEX_TBP_OFFSET;
+    clutTBP = auroraOutBaseTBP + QN_GS_CLUT_TBP_OFFSET;
+
+    if (s_DirectUploadSerial != s_DirectFrameSerial)
+    {
+        /* Transfer the native 272-byte stride. UV 0..256 selects only the
+         * active image; the final 16 bytes are QuickNES's guard/padding. */
+        GPPrimUploadTexture((int)texTBP, QN_GS_T8_TBW,
+                            0, 0, GS_PSMT8,
+                            frame.pixels, QN_VIDEO_W,
+                            Nes_Emu::image_height);
+        s_DirectUploadSerial = s_DirectFrameSerial;
+    }
+
+    qRefreshGsPalette(frame);
+    if (!s_DirectClutResident)
+    {
+        GPPrimUploadTexture((int)clutTBP, 64,
+                            0, 0, GS_PSMCT32,
+                            s_GsPalette, 16, 16);
+        s_DirectClutResident = true;
+    }
+
+    GPPrimSetTex(texTBP, QN_GS_T8_TBW, 9, 8, GS_PSMT8,
+                 clutTBP, 64, GS_PSMCT32, 0);
+
+    if (intensity < 0.0f) intensity = 0.0f;
+    if (intensity > 1.0f) intensity = 1.0f;
+    mod = (Uint32)(128.0f * intensity + 0.5f);
+    if (mod > 128u) mod = 128u;
+    modColor = 0x80000000u | (mod << 16) | (mod << 8) | mod;
+
+    /* Same logical rectangles and half-texel UVs as the old generic branch:
+       Y=2 in 240p, Y=4 in 480i/1080i, always native 256x240. */
+    GPPrimTexRect(0, (Uint32)logicalY << 4, 8, 8,
+                  256u << 4, (Uint32)(logicalY + 240) << 4,
+                  (256u << 4) + 8u, (240u << 4) + 8u,
+                  10u << 4, modColor, 0);
+    return true;
+}
+
+
 static void qDrainAudio(CMixBuffer *pMix)
 {
     long count;
@@ -267,7 +403,7 @@ bool QuicknesBridge_Init(void)
 
     s_pEmu->set_palette_range(0);
     s_pEmu->set_sprite_mode(Nes_Emu::sprites_visible);
-    s_pEmu->set_pixels(s_Video, QN_VIDEO_W);
+    s_pEmu->set_pixels(s_Video + 8, QN_VIDEO_W);
 
     quicknes_snesticle_set_duty_swap(s_DutySwap ? 1 : 0);
     qResetTransient();
@@ -302,7 +438,7 @@ bool QuicknesBridge_LoadGame(const void *pData, size_t nBytes, const char *pName
         QuicknesBridge_UnloadGame();
 
     qResetTransient();
-    s_pEmu->set_pixels(s_Video, QN_VIDEO_W);
+    s_pEmu->set_pixels(s_Video + 8, QN_VIDEO_W);
 
     Mem_File_Reader reader(pData, (long)nBytes);
     const char *err = s_pEmu->load_ines(reader);
@@ -337,6 +473,7 @@ void QuicknesBridge_Reset(void)
         s_pEmu->reset(true, false);       /* power-cycle style reset */
     s_PendingCount = 0;
     s_PaletteValid = false;
+    qResetDirectVideo();
     s_TurboPhase = false;
     s_TurboFrame = 0;
 }
@@ -347,6 +484,7 @@ void QuicknesBridge_SoftReset(void)
         s_pEmu->reset(false, false);      /* NES RESET button */
     s_PendingCount = 0;
     s_PaletteValid = false;
+    qResetDirectVideo();
     s_TurboPhase = false;
     s_TurboFrame = 0;
 }
@@ -395,7 +533,22 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
         return;
     }
 
-    qRenderFrame(pTarget);
+    {
+        const Nes_Emu::frame_t &frame = s_pEmu->frame();
+        s_DirectReady =
+            frame.pixels && frame.pitch == QN_VIDEO_W &&
+            (((uintptr_t)frame.pixels & 15u) == 0u);
+        if (s_DirectReady)
+        {
+            if (++s_DirectFrameSerial == 0)
+            {
+                s_DirectFrameSerial = 1;
+                s_DirectUploadSerial = 0;
+            }
+        }
+        else
+            qRenderFrame(pTarget);
+    }
     qDrainAudio(pMixBuf);
 }
 
@@ -460,6 +613,7 @@ bool QuicknesBridge_LoadState(const void *pData, int nBytes)
      * file (it could belong to a different save slot). */
     s_PendingCount = 0;
     s_PaletteValid = false;
+    qResetDirectVideo();
     return true;
 }
 

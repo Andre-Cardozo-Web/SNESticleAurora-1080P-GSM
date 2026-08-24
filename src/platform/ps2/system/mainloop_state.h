@@ -34,6 +34,8 @@ void MainLoopSramCycleDevice();
 MainLoopSramDeviceE MainLoopSramGetDevice();
 const Char *MainLoopSramGetDeviceName();
 const Char *MainLoopSramGetBrowseRoot();
+/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: active SNESticle root plus the shared firmware directory. */
+Bool MainLoopEnsureSystemDirectory(Char *pOut, Int32 nOutBytes);
 Bool MainLoopSramNeedsMemoryCardPreflight();
 Bool _MainLoopLoadState();
 Bool _MainLoopSaveState();

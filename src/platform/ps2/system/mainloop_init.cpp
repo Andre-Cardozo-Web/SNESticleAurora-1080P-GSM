@@ -40,7 +40,11 @@
 #include "snppucolor.h"
 #include "snppurender.h"
 #include "sega/picodrive/picodrive_bridge.h"
+/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
+#include "nes/quicknes/quicknes_bridge.h"
 #include "pce/beetle/pce_bridge.h"
+/* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
+#include "snes/snes9x2010/snes9x2010_bridge.h"
 #include "emumovie.h"
 
 #include <sifrpc.h>
@@ -171,8 +175,10 @@ static Bool _MainLoopAllocVideoVram(void)
      * renderer cache that stores GS addresses/residency from the old epoch.
      * Cold boot is harmless: both invalidators are no-ops before first use. */
     SNPPURenderInvalidateGsResources();
+    QuicknesBridge_InvalidateGsResources();
     PicoDriveBridge_InvalidateGsResources();
     PceBridge_InvalidateGsResources();
+    Snes9x2010Bridge_InvalidateGsResources();
 
 	outTBP = GSK_VramAllocTBP(
 		_MainLoopAlignVramBytes(MAINLOOP_OUT_TEX_BYTES));
@@ -393,9 +399,12 @@ Bool MainLoopInit()
 	ScrPrintf("Thanks to ReyFxck for reviving SNESticle");
 	ScrPrintf("Original SNESticle by Icer Addis");
 	ScrPrintf("Thanks to Icer Addis for the original");
-	ScrPrintf("QuickNES core by Shay Green / libretro");
-	ScrPrintf("PicoDrive core by notaz / contributors");
-	ScrPrintf("Beetle PCE Fast core by Mednafen / libretro"); /* AURORA_PCE_EXPERIMENTAL_V1 */
+	/* AURORA_ALL_CORE_SPLASH_V6_20260824 */
+	ScrPrintf("QuickNES: Shay Green / libretro contributors");
+	ScrPrintf("PicoDrive: notaz / irixxxx / contributors");
+	ScrPrintf("Beetle PCE Fast: Mednafen / libretro contributors");
+	ScrPrintf("Snes9x 2010: Snes9x / libretro contributors");
+	ScrPrintf("Licenses/notices: repository LICENSES/");
 	ScrPrintf("Copyright (c) 1997-2004 Icer Addis");
 
 	ScrPrintf("BootPath: %s", MainGetBootPath());
@@ -432,6 +441,15 @@ Bool MainLoopInit()
     /* state.cfg can live on USB/MX4SIO/MMCE as well as a memory card. Load it
        only after the configured removable-storage backend is available. */
     MainLoopStateSettingsLoad();
+    /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: mkdir -p the active SNESticle/SYSTEM tree after storage init. */
+    {
+        Char SystemDirectory[512];
+        if (MainLoopEnsureSystemDirectory(
+                SystemDirectory, (Int32)sizeof(SystemDirectory)))
+            ScrPrintf("SYSTEM directory ready: %s", SystemDirectory);
+        else
+            ScrPrintf("SYSTEM directory unavailable (will retry on CD load)");
+    }
     if (g_GskVideoMode != GSK_GetActiveVideoMode())
     {
         GSK_ReinitVideo();
@@ -512,8 +530,20 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	_pSnes->Reset();
 
 	_pSnesRom = new SnesRom();
+	/* AURORA_SNES9X2010_V1: second SNES implementation shares the browser
+	 * entry type. The runtime Core selector decides which wrapper receives
+	 * a selected SNES image. */
+	_pSnes9x2010 = new Snes9x2010System();
+	_pSnes9x2010->Reset();
+	_pSnes9x2010Rom = new Snes9x2010Rom();
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"sfc");
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"smc");
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"fig");
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"swc");
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"gd3");
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"gd7");
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"dx2");
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"bsx");
 
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESPALETTE, (char *)"snpal");
 
@@ -551,6 +581,9 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 		PathExtAdd(MAINLOOP_ENTRYTYPE_PCEROM, _pPceRom->GetExtName(iExt));
 	}
 
+	/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: CUE is classified by first-track signature at launch. */
+	PathExtAdd(MAINLOOP_ENTRYTYPE_CDIMAGE, (char *)"cue");
+
 	_pNesFDSDisk = new NesDisk();
 	for (Uint32 iExt=0; iExt < _pNesFDSDisk->GetNumExts(); iExt++)
 	{
@@ -576,14 +609,18 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	}
 
 	// init menu
-	_MainLoop_pBrowserScreen = new CBrowserScreen(6000);
+	/* AURORA_SNES9X2010_V6_2_STABLEINIT_20260824
+	 * Browser storage already grows geometrically. Reserving 6000 records at
+	 * boot held about 1.55 MiB even in a small directory; 256 keeps identical
+	 * capacity semantics while paying only for entries that actually exist. */
+	_MainLoop_pBrowserScreen = new CBrowserScreen(256);
 	_MainLoop_pBrowserScreen->SetMsgFunc(_MainLoopBrowserEvent);
 	_MainLoop_pBrowserScreen->SetDir(MENU_STARTDIR);
 
 	/* Separate, smaller browser for state-file maintenance.  Keeping it
 	   independent means opening State Manager never destroys the user's
 	   current ROM-browser directory or selection. */
-	_MainLoop_pStateBrowserScreen = new CBrowserScreen(1024);
+	_MainLoop_pStateBrowserScreen = new CBrowserScreen(64);
 	_MainLoop_pStateBrowserScreen->SetMsgFunc(_MainLoopStateBrowserEvent);
 	_MainLoop_pStateBrowserScreen->SetStateManager(TRUE);
 
