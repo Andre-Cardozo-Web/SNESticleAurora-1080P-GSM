@@ -44,7 +44,10 @@ Bool MainLoopReinitVideoMode(Int32 mode);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 36
+#define VIDEOCFG_VERSION 37
+/* AURORA_PCE_VOLUME_V37_20260823
+ * v37 appends pcevol only; every v36 field keeps the same offset.
+ * Internal 200 == UI 100. */
 /* AURORA_AUDIO_SPLIT_VOLUMES_V36_20260823
  * v36 changes NO struct size or field offsets. The former legacy/reserved
  * snesaudiorate slot is now segavol; native SNES synthesis stays fixed 32k. */
@@ -109,6 +112,7 @@ typedef struct
 	Int32  segaaudiorate; /* independent PicoDrive PCM rate */
 	Int32  smscolorborder; /* 0=black, 1=SMS VDP backdrop */
 	Int32  smsfm;          /* 0=off, 1=Master System YM2413/OPLL */
+	Int32  pcevol;         /* v37: Beetle PCE Fast gain 0..400; UI /2 */
 } VideoCfgT;
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -408,6 +412,7 @@ void VideoSettingsSave(void)
 	cfg.bgmtrack = BgmGetTrackIndex();
 	cfg.mdrendering = PicoDriveBridge_GetRenderingMode();
 	cfg.segavol = AudMixSegaGetVolume();
+	cfg.pcevol = AudMixPceGetVolume();
 	cfg.segaaudiorate = (Int32)PicoDriveBridge_GetAudioRate();
 	cfg.smscolorborder = PicoDriveBridge_GetSmsColorBorder() ? 1 : 0;
 	cfg.smsfm = PicoDriveBridge_GetSmsFm() ? 1 : 0;
@@ -447,50 +452,57 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
+		else if (header.version == 36)
+		{
+			/* v36 is exactly the v37 prefix without the appended PCE volume. */
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
+			        sizeof(cfg) - sizeof(cfg.pcevol));
+			if (loaded) cfg.version = VIDEOCFG_VERSION;
+		}
 		else if (header.version == 35)
 		{
 			/* v35 is byte-identical in size; this slot used to be the
 			 * legacy SNES rate value and is migrated below. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.pcevol)));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 34)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm));
+			        (sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 33)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate));
+			        ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 32)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			        ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 31)
 		{
 			/* AURORA_PICODRIVE_CURRENT_CFG_V32 */
-			memset(&cfg, 0, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)));
+			memset(&cfg, 0, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)));
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			        (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			        ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 30)
 		{
 			/* v30 has the same byte layout as v31. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 29)
 		{
 			/* v29 was a temporary test config with broken menu-audio defaults.
 			 * Import its layout, then reset only those two settings once. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded)
 			{
 				cfg.version = VIDEOCFG_VERSION;
@@ -501,19 +513,19 @@ void VideoSettingsLoad(void)
 		else if (header.version == 28)
 		{
 			/* v28 has the same byte layout; only Menu Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 27)
 		{
 			/* v27 is the v28/v29 prefix without bgmenable. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 26)
 		{
 			/* v26 has the same byte layout; only Game Volume semantics changed. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, (sizeof(cfg) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, ((sizeof(cfg) - sizeof(cfg.pcevol)) - sizeof(cfg.smscolorborder) - sizeof(cfg.smsfm)) - sizeof(cfg.segavol) - sizeof(cfg.segaaudiorate) - sizeof(cfg.md6button) - sizeof(cfg.bgmtrack) - sizeof(cfg.mdrendering) - sizeof(Int32));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 25)
@@ -675,6 +687,11 @@ void VideoSettingsLoad(void)
 	 * exactly the same audible balance after upgrading. */
 	if (loaded && header.version <= 35)
 		cfg.segavol = cfg.gamevol;
+
+	/* PCE used Game Volume through v36. Preserve exactly that audible
+	 * level on upgrade: old UI 100/internal 200 -> PCE UI 100. */
+	if (loaded && header.version <= 36)
+		cfg.pcevol = cfg.gamevol;
 	if (loaded && header.version <= 33)
 		cfg.segaaudiorate = 16000;
 
@@ -725,6 +742,7 @@ void VideoSettingsLoad(void)
 			PicoDriveBridge_SetAudioRate(cfg.segaaudiorate);
 		if (cfg.gamevol >= 0 && cfg.gamevol <= 400) AudMixGameSetVolume(cfg.gamevol);
 		if (cfg.segavol >= 0 && cfg.segavol <= 400) AudMixSegaSetVolume(cfg.segavol);
+		if (cfg.pcevol >= 0 && cfg.pcevol <= 400) AudMixPceSetVolume(cfg.pcevol);
 		if (cfg.bgmtrack >= 1 && cfg.bgmtrack <= 64) BgmSetTrackIndex(cfg.bgmtrack);
 		if (cfg.mdrendering >= 0 && cfg.mdrendering <= 2)
 			PicoDriveBridge_SetRenderingMode(cfg.mdrendering);
@@ -1110,10 +1128,12 @@ void CVideoScreen::Draw()
 		_VideoRow(vy, 52, m_iSelect, "SNES volume", buf); vy += 12;
 		snprintf(buf, sizeof(buf), "%d", AudMixSegaGetVolume() / 2);
 		_VideoRow(vy, 53, m_iSelect, "SEGA volume", buf); vy += 12;
-		_VideoRow(vy, 54, m_iSelect, "SNES audio", "32 kHz native"); vy += 12;
+		snprintf(buf, sizeof(buf), "%d", AudMixPceGetVolume() / 2);
+		_VideoRow(vy, 54, m_iSelect, "PCE volume", buf); vy += 12;
+		_VideoRow(vy, 55, m_iSelect, "SNES audio", "32 kHz native"); vy += 12;
 		snprintf(buf, sizeof(buf), "%d kHz", (PicoDriveBridge_GetAudioRate() + 500) / 1000);
-		_VideoRow(vy, 55, m_iSelect, "SEGA audio", buf); vy += 12;
-		_VideoRow(vy, 56, m_iSelect, "SMS FM audio",
+		_VideoRow(vy, 56, m_iSelect, "SEGA audio", buf); vy += 12;
+		_VideoRow(vy, 57, m_iSelect, "SMS FM audio",
 		          PicoDriveBridge_GetSmsFm() ? "Enable" : "Disable"); vy += 12;
 	}
 	else if (iPage == 5)
@@ -1243,7 +1263,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		else if (m_iSelect < 30) { lo = 20; hi = 29; }
 		else if (m_iSelect < 40) { lo = 30; hi = 36; }
 		else if (m_iSelect < 50) { lo = 40; hi = 43; }
-		else                     { lo = 50; hi = 56; }
+		else                     { lo = 50; hi = 57; }
 		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
 		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
 	}
@@ -1320,17 +1340,20 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		case 53: /* SEGA volume: PicoDrive only, UI 0..200. */
 			{ int v = AudMixSegaGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; AudMixSegaSetVolume(v); }
 			break;
-		case 54:
+		case 54: /* PCE volume: Beetle PCE Fast only, UI 0..200. */
+			{ int v = AudMixPceGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; AudMixPceSetVolume(v); }
+			break;
+		case 55:
 			/* SNES stays native 32 kHz; row retained as informational. */
 			SnesAudioSetRate(SNSPCDSP_SAMPLERATE);
 			if (_pSystem == _pSnes && _AudMix)
 				_AudMix->SetSampleRate(SNSPCDSP_SAMPLERATE);
 			break;
-		case 55:
+		case 56:
 			PicoDriveBridge_SetAudioRate(
 				_VideoCycleSystemAudioRate(PicoDriveBridge_GetAudioRate(), dir));
 			break;
-		case 56: /* Master System YM2413/OPLL */
+		case 57: /* Master System YM2413/OPLL */
 			PicoDriveBridge_SetSmsFm(!PicoDriveBridge_GetSmsFm());
 			break;
 

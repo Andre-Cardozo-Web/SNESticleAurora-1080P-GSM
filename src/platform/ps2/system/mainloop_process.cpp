@@ -116,6 +116,7 @@ Bool MainLoopProcess()
             /* AURORA_AUDIO_SPLIT_VOLUMES_V36_20260823
              * Select which saved final gain the shared mixer will use. */
             AudMixSetSegaVolumeMode(_pSystem == _pSega ? 1 : 0);
+            AudMixSetPceVolumeMode(_pSystem == _pPce ? 1 : 0);
 
             /* Fill host-audio safety headroom BEFORE the first cold frame. */
             Aud_PrepareGameplayHeadroom();

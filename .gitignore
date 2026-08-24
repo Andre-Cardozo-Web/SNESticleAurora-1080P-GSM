@@ -27,3 +27,6 @@ copy.sh
 src/platform/ps2/iop/aurora_ps2mouse/*.elf
 src/platform/ps2/iop/aurora_ps2mouse/*.irx
 src/platform/ps2/iop/aurora_ps2mouse/obj/
+
+# Required PCE build tool
+!tools/namespace_pce_archive.py

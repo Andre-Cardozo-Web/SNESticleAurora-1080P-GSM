@@ -83,7 +83,10 @@ void AudMixGameSetVolume(int vol);
 int  AudMixGameGetVolume(void);
 void AudMixSegaSetVolume(int vol);
 int  AudMixSegaGetVolume(void);
+void AudMixPceSetVolume(int vol);
+int  AudMixPceGetVolume(void);
 void AudMixSetSegaVolumeMode(int enabled);
+void AudMixSetPceVolumeMode(int enabled);
 /* Experimental fast 32->48 kHz path used only by PicoDrive. */
 void AudMixSetFastResample(int enabled);
 #ifdef __cplusplus
