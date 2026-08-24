@@ -71,7 +71,8 @@ jobs:
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
       - name: Build
-        run: make AUTO_INSTALL=yes
+        # Limit only the final GCC LTO fan-out; normal compilation remains parallel.
+        run: make AUTO_INSTALL=yes LTO_LINK_JOBS=2
 
       - name: Checksums
         shell: bash

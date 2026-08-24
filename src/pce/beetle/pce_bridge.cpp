@@ -380,7 +380,9 @@ bool PceBridge_LoadGame(const void *data, size_t bytes, size_t capacity, const c
 {
     (void)capacity;
     if (!data || !bytes || bytes > (size_t)(4U*1024U*1024U+512U) || !PceBridge_Init()) return false;
-    if (s_GameLoaded) PceBridge_UnloadGame(); pceBuildInfo(name,data,bytes);
+    if (s_GameLoaded)
+        PceBridge_UnloadGame();
+    pceBuildInfo(name,data,bytes);
     struct retro_game_info info; memset(&info,0,sizeof(info)); info.path=s_ContentName; info.data=data; info.size=bytes;
     if (!PCE_retro_load_game(&info)) { printf("[PCE] retro_load_game failed: %s (%u bytes)\n",s_ContentName,(unsigned)bytes); s_ContentData=NULL;s_ContentBytes=0;return false; }
     s_GameLoaded=true; size_t sb=PCE_retro_get_memory_size(RETRO_MEMORY_SAVE_RAM); void *sp=PCE_retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);

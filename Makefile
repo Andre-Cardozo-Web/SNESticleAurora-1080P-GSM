@@ -35,6 +35,12 @@ PS2DEV_REPO ?= https://github.com/ps2dev/ps2dev.git
 PS2DEV_BUILD_DIR ?= $(HOME)/.cache/snesticle-ps2dev
 JOBS ?= 8
 LOAD_LIMIT ?= $(JOBS)
+
+# AURORA_CI_LTO_LINK_CAP_V1
+# Optional cap for GCC LTO workers. Empty locally = current behavior.
+# Continuous sets this to 2 to avoid memory spikes on GitHub runners.
+LTO_LINK_JOBS ?=
+LTO_LINK_FLAGS := $(if $(strip $(LTO_LINK_JOBS)),-flto=$(LTO_LINK_JOBS))
 OUTPUT_SYNC ?= --output-sync=target
 .DEFAULT_GOAL := fast
 
@@ -1008,7 +1014,7 @@ pce-core: $(PCE_LIB)
 	@$(PCE_NM) -g --defined-only "$(PCE_LIB)" | grep -E 'PCE_retro_(init|load_game|run|serialize)' | head -20
 
 $(TARGET): $(OBJS) $(PICODRIVE_LIB) $(QUICKNES_LIB) $(PCE_LIB) | $(OBJ_DIR)
-	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) "$(PICODRIVE_LIB)" "$(QUICKNES_LIB)" "$(PCE_LIB)" $(LIBDIRS) $(LIBS))
+	$(call RUN_LINK,$@,$(EE_CXX) $(LTO_LINK_FLAGS) -o "$@" $(OBJS) "$(PICODRIVE_LIB)" "$(QUICKNES_LIB)" "$(PCE_LIB)" $(LIBDIRS) $(LIBS))
 
 $(TARGET_STRIPPED): $(TARGET)
 	@cp -f "$(TARGET)" "$@"
