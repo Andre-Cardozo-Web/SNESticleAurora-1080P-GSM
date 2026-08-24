@@ -15,6 +15,7 @@
 #include "mainloop_ui.h"
 #include "mainloop_bgm.h"
 #include "sega/picodrive/picodrive_bridge.h"
+#include "pce/beetle/pce_bridge.h"
 
 #include "types.h"
 #include "console.h"
@@ -158,11 +159,32 @@ void MainLoopRender()
      * framebuffer in 240p/480i/1080i. Avoid clearing pixels that are
      * guaranteed to be replaced later in this same frame. */
     /* AURORA_PD_DIRECT_8BIT_SKIP_CLEAR_V4_20260821 */
+    /* AURORA_PCE_EXPERIMENTAL_V13_NATIVE_PAR_REBUILD
+     *
+     * PCE base geometry is 256x240 with a narrower-than-4:3 presentation.
+     * Use the same native-240p PCRTC technique already used by Aurora's
+     * NES/SNES path: change scanout magnification, NOT framebuffer sampling.
+     * Every one of the 256 source columns is still scanned exactly once.
+     *
+     * Keep menu/black-screen presentation untouched. The loaded system remains
+     * _pPce while Aurora's menu is open, so explicitly turn the PCE-only PAR
+     * correction back off there. GSK_SetNative240pPar internally affects only
+     * the 240p display mode.
+     */
+    if (_pSystem == _pPce)
+    {
+        GSK_SetNative240pPar(
+            (!_bMenu && !_MainLoop_BlackScreen) ? 1 : 0);
+    }
+
     GSK_SetGameplaySkipClear(
-        (!_bMenu && _pSystem == _pSega && !_MainLoop_BlackScreen &&
-         PicoDriveBridge_CanDirectGsVideo() &&
-         (PicoDriveBridge_IsMegaDrive() ||
-          g_GskVideoMode == GSK_VIDMODE_240P)) ? TRUE : FALSE);
+        (!_bMenu && !_MainLoop_BlackScreen &&
+         (((_pSystem == _pSega) &&
+           PicoDriveBridge_CanDirectGsVideo() &&
+           (PicoDriveBridge_IsMegaDrive() ||
+            g_GskVideoMode == GSK_VIDMODE_240P)) ||
+          ((_pSystem == _pPce) &&
+           PceBridge_CanDirectGsVideo()))) ? TRUE : FALSE);
     GSK_SetGameplayFastClear(
         (!_bMenu && _pSystem && !_MainLoop_BlackScreen) ? TRUE : FALSE);
     GSK_ResetFrame();
@@ -224,8 +246,15 @@ void MainLoopRender()
 
 
         /* AURORA_PD_DIRECT_8BIT_GS_V1_20260821 */
-        if (_pSystem == _pSega &&
-            PicoDriveBridge_CanDirectGsVideo())
+        if (_pSystem == _pPce &&
+            PceBridge_CanDirectGsVideo())
+        {
+            /* AURORA_PCE_EXPERIMENTAL_V10_DIRECT_GS */
+            PceBridge_DrawDirectGs(
+                _MainLoop_uOutTexTBP, fColor);
+        }
+        else if (_pSystem == _pSega &&
+                 PicoDriveBridge_CanDirectGsVideo())
         {
             /* AURORA_PD_DIRECT_T8_RENDER */
             PicoDriveBridge_DrawDirectGs(

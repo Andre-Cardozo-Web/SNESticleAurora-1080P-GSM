@@ -21,6 +21,9 @@
 #include "nesstate.h"
 #include "segasystem.h"
 #include "segarom.h"
+/* AURORA_PCE_EXPERIMENTAL_V1 */
+#include "pcesystem.h"
+#include "pcerom.h"
 #include "emusys.h"
 #include "emumovie.h"
 #include "rendersurface.h"
@@ -113,6 +116,8 @@ extern Bool            _MainLoop_bDiskInserted;
 /* AURORA_PICODRIVE_STAGE2 */
 extern SegaSystem     *_pSega;
 extern SegaRom        *_pSegaRom;
+extern PceSystem      *_pPce;
+extern PceRom         *_pPceRom;
 
 /* ---- ROM / framebuffer / audio buffers ---------------------------- */
 
@@ -197,6 +202,7 @@ enum
 	MAINLOOP_ENTRYTYPE_SNESROM     ,
 	MAINLOOP_ENTRYTYPE_SNESPALETTE ,
 	MAINLOOP_ENTRYTYPE_SEGAROM      ,
+	MAINLOOP_ENTRYTYPE_PCEROM       ,
 
 	MAINLOOP_ENTRYTYPE_NUM
 };

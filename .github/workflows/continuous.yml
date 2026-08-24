@@ -20,10 +20,32 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      # AURORA_CONTINUOUS_BEETLE_PCE_FAST_V14
+      - name: Verify required emulator submodules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f src/third_party/quicknes/Makefile
+          test -f src/third_party/picodrive/Makefile
+          test -f src/third_party/beetle-pce-fast/Makefile
+          test -f src/third_party/beetle-pce-fast/COPYING
+          test -f tools/Makefile.beetle-pce-fast-ps2
+
+          test "$(git config -f .gitmodules --get submodule.src/third_party/beetle-pce-fast.url)" = "https://github.com/itsveenee/beetle-pce-fast-libretro.git"
+          test "$(git config -f .gitmodules --get submodule.src/third_party/beetle-pce-fast.branch)" = "master"
+
+          echo "Recursive submodules:"
+          git submodule status --recursive
+          echo "Beetle PCE Fast commit:"
+          git -C src/third_party/beetle-pce-fast rev-parse HEAD
+
+
       # AURORA_CONTINUOUS_PICODRIVE_SOURCE_V4_2
       #
       # Continuous intentionally remains the COMPLETE build, including
-      # PicoDrive. Package the exact checked-out source tree BEFORE building,
+      # PicoDrive and Beetle PCE Fast. Package the exact checked-out source
+      # tree BEFORE building, while recursive submodules are populated.
       # while the recursive submodules are populated, so the release carries
       # the source corresponding to the linked binary.
       #
@@ -70,4 +92,4 @@ jobs:
           gh release delete continuous --cleanup-tag --yes || true
 
           # AURORA_BRANDING_RELEASE_ASSET_V9_20260821
-          gh release create continuous             build/SNESticle.elf             "$AURORA_SOURCE_BUNDLE"             /tmp/SOURCE-MANIFEST.txt             /tmp/SHA256SUMS.txt             LICENSE             BRANDING.md             LICENSES/PicoDrive-COPYING.txt             LICENSES/QuickNES-GPL-2.0.txt             THIRD_PARTY.md             --target "$GITHUB_SHA"             --title "Continuous Build"             --prerelease             --notes-file CONTINUOUS_RELEASE.md  # AURORA_CONTINUOUS_RELEASE_FILE_V8_20260821
+          gh release create continuous             build/SNESticle.elf             "$AURORA_SOURCE_BUNDLE"             /tmp/SOURCE-MANIFEST.txt             /tmp/SHA256SUMS.txt             LICENSE             BRANDING.md             LICENSES/PicoDrive-COPYING.txt             LICENSES/QuickNES-GPL-2.0.txt             LICENSES/Beetle-PCE-Fast-GPL-2.0.txt             THIRD_PARTY.md             --target "$GITHUB_SHA"             --title "Continuous Build"             --prerelease             --notes-file CONTINUOUS_RELEASE.md  # AURORA_CONTINUOUS_RELEASE_FILE_V8_20260821

@@ -11,7 +11,10 @@ NES emulation through **QuickNES** is based on the **QuickNES core originally by
 
 Mega Drive and Master System emulation through **PicoDrive** is based on the PicoDrive emulator originally by **@notaz**, with its libretro core maintained by **@irixxxx and libretro contributors**, and it is in **experimental** state for now. Aurora uses `itsveenee/picodrive` as a pinned Git submodule for its PS2 integration. See [THIRD_PARTY.md](THIRD_PARTY.md) and the license notices inside the PicoDrive submodule.
 
-SNESticle Aurora focuses on 240p CRT output, NES/QuickNES integration and experiments, real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
+<!-- AURORA_BEETLE_PCE_FAST_README_V14 -->
+PC Engine / TurboGrafx-16 emulation through **Beetle PC Engine Fast** is based on the libretro port/fork of **Mednafen PCE Fast**. Aurora uses `itsveenee/beetle-pce-fast-libretro` as a pinned Git submodule at `src/third_party/beetle-pce-fast`, with PS2-specific integration and performance changes maintained for Aurora. The current Aurora frontend integration is **experimental and HuCard-focused** (`.pce`, including the existing ZIP/GZ content paths); upstream Beetle PCE Fast also contains CD-ROM² support, but Aurora does not currently expose that disc-loading path. See [THIRD_PARTY.md](THIRD_PARTY.md) and `LICENSES/Beetle-PCE-Fast-GPL-2.0.txt`.
+
+SNESticle Aurora focuses on 240p CRT output, multi-system integration (including QuickNES, PicoDrive and Beetle PCE Fast), real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
 
 **Changes made in SNESticle Aurora may be reused, cherry-picked, pulled or incorporated into other projects subject to the applicable licenses.** SNESticle Aurora code covered by the GPL remains under GNU GPLv2; separately licensed third-party components remain under their own terms.
 
@@ -48,6 +51,7 @@ Emulation:
 * Support added for more NES mappers: 13, 16, 18, 27, 48, 64, 65, 67, 68, 72, 77, 80, 82, 92, 96, 99, 101, 105, 118, 119, 151, 153, 155, 157, 158, 159, 185, 188, 210, 216, and 552. Every licensed NES and Famicom game will boot now.
 * Changed SRAM and RAM initialization for both NES and SNES. This will fix all the very few games that rely on specific initial values to work properly.
 * Experimental Mega Drive / Genesis + Sega Master System / Mark III + Game Gear emulation with PicoDrive
+* Experimental PC Engine / TurboGrafx-16 HuCard emulation with Beetle PCE Fast (`.pce`, ZIP/GZ content paths; up to 5 pads)
 * Fixes and improvements for the 240p display modes, improved screen positioning and overscan settings for each system and graphical resolution/modes.
 * Turbo B/A for NES and SMS games
 * Turbo toggle (hold R2+ANY BUTTON) for SNES and MD games

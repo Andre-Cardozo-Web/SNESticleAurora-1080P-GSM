@@ -40,6 +40,7 @@
 #include "snppucolor.h"
 #include "snppurender.h"
 #include "sega/picodrive/picodrive_bridge.h"
+#include "pce/beetle/pce_bridge.h"
 #include "emumovie.h"
 
 #include <sifrpc.h>
@@ -171,6 +172,7 @@ static Bool _MainLoopAllocVideoVram(void)
      * Cold boot is harmless: both invalidators are no-ops before first use. */
     SNPPURenderInvalidateGsResources();
     PicoDriveBridge_InvalidateGsResources();
+    PceBridge_InvalidateGsResources();
 
 	outTBP = GSK_VramAllocTBP(
 		_MainLoopAlignVramBytes(MAINLOOP_OUT_TEX_BYTES));
@@ -393,6 +395,7 @@ Bool MainLoopInit()
 	ScrPrintf("Thanks to Icer Addis for the original");
 	ScrPrintf("QuickNES core by Shay Green / libretro");
 	ScrPrintf("PicoDrive core by notaz / contributors");
+	ScrPrintf("Beetle PCE Fast core by Mednafen / libretro"); /* AURORA_PCE_EXPERIMENTAL_V1 */
 	ScrPrintf("Copyright (c) 1997-2004 Icer Addis");
 
 	ScrPrintf("BootPath: %s", MainGetBootPath());
@@ -537,6 +540,15 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	for (Uint32 iExt=0; iExt < _pSegaRom->GetNumExts(); iExt++)
 	{
 		PathExtAdd(MAINLOOP_ENTRYTYPE_SEGAROM, _pSegaRom->GetExtName(iExt));
+	}
+
+	/* AURORA_PCE_EXPERIMENTAL_V1 */
+	_pPce = new PceSystem();
+	_pPce->Reset();
+	_pPceRom = new PceRom();
+	for (Uint32 iExt=0; iExt < _pPceRom->GetNumExts(); iExt++)
+	{
+		PathExtAdd(MAINLOOP_ENTRYTYPE_PCEROM, _pPceRom->GetExtName(iExt));
 	}
 
 	_pNesFDSDisk = new NesDisk();

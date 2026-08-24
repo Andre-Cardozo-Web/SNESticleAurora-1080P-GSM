@@ -1,4 +1,4 @@
-Automatically built from the latest commit on main. Includes PicoDrive. The checked-out source tree (including recursive submodules), manifest, checksums and third-party notices are attached. PicoDrive has additional redistribution/non-commercial terms; see PicoDrive-COPYING.txt.
+Automatically built from the latest commit on main. Includes PicoDrive and the experimental Beetle PCE Fast integration. The checked-out source tree (including recursive QuickNES, PicoDrive and Beetle PCE Fast submodules), manifest, checksums and third-party notices are attached. Beetle PCE Fast is distributed under GNU GPLv2; see Beetle-PCE-Fast-GPL-2.0.txt. PicoDrive has additional redistribution/non-commercial terms; see PicoDrive-COPYING.txt.
 
 The only file you need to play is **SNESticle.elf**.
 

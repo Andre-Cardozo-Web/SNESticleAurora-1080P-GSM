@@ -20,6 +20,26 @@ Attribution:
 The QuickNES source tree contains its own license and source-file notices.
 These files must be preserved when redistributing the QuickNES code.
 
+<!-- AURORA_BEETLE_PCE_FAST_THIRD_PARTY_V14 -->
+## Beetle PC Engine Fast
+
+Aurora integrates Beetle PC Engine Fast as the pinned Git submodule:
+
+`src/third_party/beetle-pce-fast`
+
+Repository relationships:
+
+- Aurora integration fork: **`itsveenee/beetle-pce-fast-libretro`**
+- Upstream libretro project: **`libretro/beetle-pce-fast-libretro`**
+- Core lineage: **Beetle PC Engine Fast / Mednafen PCE Fast**
+- Aurora PS2 integration and PS2-specific optimization work: **Vinícius Nunes (`@itsveenee`)**
+
+The PCE fork is a real GitHub fork of the libretro repository. Aurora keeps `origin` pointed at `itsveenee/beetle-pce-fast-libretro` and an `upstream` remote pointing at `libretro/beetle-pce-fast-libretro`. The parent SNESticleAurora repository pins a specific PCE commit via the Git submodule gitlink.
+
+The component's `COPYING` file is GNU GPL version 2 and is mirrored verbatim at `LICENSES/Beetle-PCE-Fast-GPL-2.0.txt`. The submodule's original source-file notices remain authoritative and must be preserved. Aurora's modified PCE source must be published before the parent repository is updated to point at that modified submodule commit.
+
+Aurora currently exposes a HuCard-focused frontend path. The upstream core contains additional functionality, including CD-ROM² support; that does not imply that every upstream loading path is exposed by Aurora on PS2.
+
 ## Other components
 
 Aurora also contains or integrates third-party components inherited from SNESticle/SNESticle Revive, including InfoNES, miniz, libxmp-lite and PS2SDK-related libraries. Refer to each component's bundled license and source-file notices.

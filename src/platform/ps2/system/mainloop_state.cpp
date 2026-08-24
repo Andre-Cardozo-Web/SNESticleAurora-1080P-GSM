@@ -25,6 +25,8 @@ int MCSave_WriteSync(int block, int *pResult);
 #include "mainloop_shared.h"
 #include "mainloop_state.h"
 
+/* AURORA_PCE_EXPERIMENTAL_V1 */
+
 /* The iaddis-era custom MCSAVE.IRX async memory-card writer has been
    retired -- see embedded_irx.cpp.  mainloop_iop.cpp no longer
    attempts to IOPLoadModule("MCSAVE.IRX") and never calls
@@ -108,6 +110,7 @@ static const Char *_MainLoopSramGetSystemDirectoryName()
 {
     if (_pSystem == _pNes)  return "NES";
     if (_pSystem == _pSega) return "SEGA";
+    if (_pSystem == _pPce)  return "PCE";
     return "SNES";
 }
 
@@ -660,6 +663,7 @@ Bool _MainLoopCheckSRAM()
 #define MAINLOOP_STATE_SYSTEM_SNES      0
 #define MAINLOOP_STATE_SYSTEM_NES       1
 #define MAINLOOP_STATE_SYSTEM_SEGA      2
+#define MAINLOOP_STATE_SYSTEM_PCE       3
 #define MAINLOOP_STATE_RAW_BYTES \
     (sizeof(SnesStateT) > sizeof(NesStateT) \
         ? sizeof(SnesStateT) \
@@ -769,7 +773,7 @@ class MainLoopSegaStateScratchGuard
 {
 public:
     MainLoopSegaStateScratchGuard()
-        : m_bActive(_pSystem == _pSega ? TRUE : FALSE)
+        : m_bActive((_pSystem == _pSega || _pSystem == _pPce) ? TRUE : FALSE)
     {
     }
 
@@ -805,7 +809,7 @@ static Uint8 *_MainLoopStateEnsureSegaStateData(Uint32 nBytes)
 
 static Uint32 _MainLoopStateCompressedLimit(Uint32 nRawBytes)
 {
-    if (_pSystem != _pSega)
+    if (_pSystem != _pSega && _pSystem != _pPce)
         return (Uint32)sizeof(_MainLoop_StateCompressed);
 
     unsigned long long n =
@@ -815,7 +819,7 @@ static Uint32 _MainLoopStateCompressedLimit(Uint32 nRawBytes)
 
 static Uint8 *_MainLoopStateGetCompressedBuffer(Uint32 nNeed, Uint32 *pCapacity)
 {
-    if (_pSystem != _pSega)
+    if (_pSystem != _pSega && _pSystem != _pPce)
     {
         if (pCapacity) *pCapacity = (Uint32)sizeof(_MainLoop_StateCompressed);
         return _MainLoop_StateCompressed;
@@ -845,6 +849,7 @@ static Uint32 _MainLoopStateGetSystemId()
 {
     if (_pSystem == _pNes)  return MAINLOOP_STATE_SYSTEM_NES;
     if (_pSystem == _pSega) return MAINLOOP_STATE_SYSTEM_SEGA;
+    if (_pSystem == _pPce)  return MAINLOOP_STATE_SYSTEM_PCE;
     return MAINLOOP_STATE_SYSTEM_SNES;
 }
 
@@ -854,6 +859,11 @@ static Uint32 _MainLoopStateGetPayloadBytes()
     if (_pSystem == _pSega)
     {
         Int32 nBytes = _pSega ? _pSega->GetStateSize() : 0;
+        return nBytes > 0 ? (Uint32)nBytes : 0;
+    }
+    if (_pSystem == _pPce)
+    {
+        Int32 nBytes = _pPce ? _pPce->GetStateSize() : 0;
         return nBytes > 0 ? (Uint32)nBytes : 0;
     }
     if (_pSystem == _pNes)
@@ -882,7 +892,7 @@ static Uint8 *_MainLoopStateGetPayloadData()
 {
     if (_pSystem == _pNes)
         return (Uint8 *)&_NesState;
-    if (_pSystem == _pSega)
+    if (_pSystem == _pSega || _pSystem == _pPce)
         return _MainLoopStateEnsureSegaStateData(
             _MainLoopStateGetPayloadBytes());
     return (Uint8 *)&_SnesState;
@@ -1545,7 +1555,8 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
         return FALSE;
     }
 
-    if (_pSystem != _pSnes && _pSystem != _pNes && _pSystem != _pSega)
+    if (_pSystem != _pSnes && _pSystem != _pNes &&
+        _pSystem != _pSega && _pSystem != _pPce)
     {
         snprintf(pReason, nReasonBytes, "This system cannot save states.");
         return FALSE;
@@ -1568,6 +1579,14 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
             !_pSega || !_pSega->IsRomReady())
         {
             snprintf(pReason, nReasonBytes, "PicoDrive state unavailable.");
+            return FALSE;
+        }
+    }
+    else if (_pSystem == _pPce)
+    {
+        if (!_pPceRom || !_pPceRom->IsLoaded() || !_pPce || !_pPce->IsRomReady())
+        {
+            snprintf(pReason, nReasonBytes, "Beetle PCE Fast state unavailable.");
             return FALSE;
         }
     }
@@ -1604,6 +1623,8 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
 
     if (_pSystem == _pSega)
         snprintf(pReason, nReasonBytes, "Ready: PicoDrive cartridge state.");
+    else if (_pSystem == _pPce)
+        snprintf(pReason, nReasonBytes, "Ready: PC Engine HuCard state.");
     else
         snprintf(
             pReason,
@@ -1649,6 +1670,11 @@ static Bool _MainLoopStateGetRomIdentity(
         pRomData = _pSegaRom->GetData();
         nRomBytes = _pSegaRom->GetBytes();
     }
+    else if (_pSystem == _pPce)
+    {
+        if (!_pPceRom || !_pPceRom->IsLoaded()) return FALSE;
+        pRomData = _pPceRom->GetData(); nRomBytes = _pPceRom->GetBytes();
+    }
     else if (_pSnesRom && _pSnesRom->IsLoaded())
     {
         pRomData = _pSnesRom->GetData();
@@ -1677,7 +1703,7 @@ static Bool _MainLoopStateGetRomIdentity(
     *pnBytes = nRomBytes;
     if (_pSystem == _pNes)
         *puFlags = _pNesRom->GetMapperNumber();
-    else if (_pSystem == _pSega)
+    else if (_pSystem == _pSega || _pSystem == _pPce)
         *puFlags = 0;
     else
         *puFlags = _pSnesRom->m_Flags;
@@ -2366,6 +2392,13 @@ Bool _MainLoopLoadState()
                 bRestoreOK = pSegaStateData && nSegaStateBytes &&
                     _pSega->RestoreStateChecked(pSegaStateData, (Int32)nSegaStateBytes);
             }
+            else if (_pSystem == _pPce)
+            {
+                Uint8 *pPceStateData = _MainLoopStateGetPayloadData();
+                Uint32 nPceStateBytes = _MainLoopStateGetPayloadBytes();
+                bRestoreOK = pPceStateData && nPceStateBytes &&
+                    _pPce->RestoreStateChecked(pPceStateData, (Int32)nPceStateBytes);
+            }
             else
                 bRestoreOK = _pSnes->RestoreState(&_SnesState);
         }
@@ -2536,6 +2569,14 @@ Bool _MainLoopSaveState()
         if (!_pSega->SaveStateChecked(pStateData, (Int32)nStateBytes))
         {
             _MainLoopStateSetMessage("Could not snapshot the PicoDrive state.");
+            return FALSE;
+        }
+    }
+    else if (_pSystem == _pPce)
+    {
+        if (!_pPce->SaveStateChecked(pStateData, (Int32)nStateBytes))
+        {
+            _MainLoopStateSetMessage("Could not snapshot the Beetle PCE Fast state.");
             return FALSE;
         }
     }

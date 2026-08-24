@@ -215,6 +215,22 @@ Uint16 _MainLoopInput(Uint32 pad)
 	if (pad & PAD_L2)
 		return 0;
 
+	/* AURORA_PCE_EXPERIMENTAL_V3
+	 * Cross=I, Square=II, Circle=Turbo I, Triangle=Turbo II. */
+	if (_pSystem == _pPce)
+	{
+		Uint32 uPce = pad & ~(PAD_SQUARE | PAD_CROSS | PAD_TRIANGLE | PAD_CIRCLE | PAD_R2);
+		const Bool bTurboOn = _MainLoopTurboHostIsOn();
+		if (pad & PAD_CROSS)  uPce |= PAD_SQUARE;
+		if (pad & PAD_SQUARE) uPce |= PAD_CROSS;
+		if (bTurboOn)
+		{
+			if (pad & PAD_CIRCLE)   uPce |= PAD_SQUARE;
+			if (pad & PAD_TRIANGLE) uPce |= PAD_CROSS;
+		}
+		return _MainLoopSnesInput(uPce);
+	}
+
 	/* AURORA_PICODRIVE_STAGE3_INPUT_DISPATCH
 	 * MD: SNES-style R2 turbo. SMS/GG: dedicated NES-style turbo buttons. */
 	if (_pSystem == _pSega)

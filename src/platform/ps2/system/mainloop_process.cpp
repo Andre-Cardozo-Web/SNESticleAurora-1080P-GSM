@@ -20,6 +20,8 @@
 #include "mainloop_exec.h"
 #include "mainloop_iop.h"
 #include "sega/picodrive/picodrive_bridge.h"
+/* AURORA_PCE_EXPERIMENTAL_V1 */
+#include "pce/beetle/pce_bridge.h"
 #include "gskit_backend.h"
 
 #include "types.h"
@@ -433,6 +435,19 @@ Bool MainLoopProcess()
                     PROF_ENTER("SegaTexUpload");
                     TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
                     PROF_LEAVE("SegaTexUpload");
+                }
+            }
+            else if (_pSystem == _pPce)
+            {
+                PROF_ENTER("PceExecuteFrame");
+                _pPce->ExecuteFrame(&Input, pSurface, pMixBuffer, eMode);
+                PROF_LEAVE("PceExecuteFrame");
+                /* AURORA_PCE_V10_DIRECT_PROCESS */
+                if (!PceBridge_CanDirectGsVideo())
+                {
+                    PROF_ENTER("PceTexUploadFallback");
+                    TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
+                    PROF_LEAVE("PceTexUploadFallback");
                 }
             }
             else

@@ -63,6 +63,17 @@ PICODRIVE_DIR ?= $(CURDIR)/src/third_party/picodrive
 PICODRIVE_LIB ?= $(PICODRIVE_DIR)/picodrive_libretro_ps2.a
 PICODRIVE_INC := $(PICODRIVE_DIR)/platform/libretro/libretro-common/include
 
+# AURORA_PCE_EXPERIMENTAL_V1
+PCE_DIR ?= $(CURDIR)/src/third_party/beetle-pce-fast
+PCE_RAW_LIB ?= $(PCE_DIR)/mednafen_pce_fast_libretro_ps2_raw.a
+PCE_LIB ?= $(PCE_DIR)/beetle_pce_fast_libretro_ps2.a
+PCE_PS2_MAKEFILE := $(CURDIR)/tools/Makefile.beetle-pce-fast-ps2
+PCE_NAMESPACE_TOOL := $(CURDIR)/tools/namespace_pce_archive.py
+PCE_PYTHON ?= python3
+PCE_NM ?= $(shell if command -v mips64r5900el-ps2-elf-nm >/dev/null 2>&1; then command -v mips64r5900el-ps2-elf-nm; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-nm" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-nm"; else echo nm; fi)
+PCE_OBJCOPY ?= $(shell if command -v mips64r5900el-ps2-elf-objcopy >/dev/null 2>&1; then command -v mips64r5900el-ps2-elf-objcopy; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-objcopy" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-objcopy"; else echo objcopy; fi)
+PCE_RANLIB ?= $(shell if command -v mips64r5900el-ps2-elf-ranlib >/dev/null 2>&1; then command -v mips64r5900el-ps2-elf-ranlib; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-ranlib" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-ranlib"; else echo ranlib; fi)
+
 # AURORA_PD_TRYAGAIN_V1_PS2_BUILD_PARITY
 # PicoDrive's standalone PS2 configure path explicitly uses -G0. Keep
 # the embedded libretro core on the same EE small-data ABI assumption;
@@ -423,7 +434,9 @@ INCS := \
 	-I$(PICODRIVE_INC) \
 	-I$(PICODRIVE_DIR) \
 	-I$(SRC_DIR)/sega/system \
-	-I$(SRC_DIR)/sega/picodrive
+	-I$(SRC_DIR)/sega/picodrive \
+	-I$(SRC_DIR)/pce/system \
+	-I$(SRC_DIR)/pce/beetle
 
 LIBDIRS := \
 	-L$(PS2SDK)/ee/lib \
@@ -613,7 +626,10 @@ SRCS := \
 	src/nes/quicknes/nessystem_quicknes.cpp \
 	src/sega/system/segarom.cpp \
 	src/sega/picodrive/picodrive_bridge.cpp \
-	src/sega/picodrive/segasystem_picodrive.cpp
+	src/sega/picodrive/segasystem_picodrive.cpp \
+	src/pce/system/pcerom.cpp \
+	src/pce/beetle/pce_bridge.cpp \
+	src/pce/beetle/pcesystem_beetle.cpp
 
 OBJS := \
 	$(patsubst src/%.c,$(OBJ_DIR)/%.o,$(filter %.c,$(SRCS))) \
@@ -976,8 +992,23 @@ $(PICODRIVE_LIB): FORCE_PICODRIVE
 	@$(MAKE) -C "$(PICODRIVE_DIR)" -f Makefile.libretro \
 		platform=ps2 CC="$(EE_CC) $(PICODRIVE_PS2_SAFE_FLAGS) $(PICODRIVE_OPLL_NS_FLAGS)" AR="$(PICODRIVE_AR)" PS2DEV="$(PS2DEV)" PS2SDK="$(PS2SDK)" use_libchdr=0 STATIC_LINKING=0 STATIC_LINKING_LINK=1 all
 
-$(TARGET): $(OBJS) $(PICODRIVE_LIB) $(QUICKNES_LIB) | $(OBJ_DIR)
-	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) "$(PICODRIVE_LIB)" "$(QUICKNES_LIB)" $(LIBDIRS) $(LIBS))
+$(PCE_RAW_LIB): $(PCE_PS2_MAKEFILE)
+	@printf '[ Beetle PCE Fast ] building raw PS2 static core\n'
+	@test -f "$(PCE_DIR)/Makefile" || { echo "ERROR: missing $(PCE_DIR)"; exit 1; }
+	@PATH="$(PS2DEV)/ee/bin:$(PS2DEV)/bin:$(PS2SDK)/bin:$$PATH" $(MAKE) -C "$(PCE_DIR)" -f "$(PCE_PS2_MAKEFILE)" CC="$(EE_CC)" CXX="$(EE_CXX)" AR="$(EE_AR)" clean
+	@PATH="$(PS2DEV)/ee/bin:$(PS2DEV)/bin:$(PS2SDK)/bin:$$PATH" $(MAKE) -C "$(PCE_DIR)" -f "$(PCE_PS2_MAKEFILE)" CC="$(EE_CC)" CXX="$(EE_CXX)" AR="$(EE_AR)" all
+
+$(PCE_LIB): $(PCE_RAW_LIB) $(PCE_NAMESPACE_TOOL)
+	@printf '[ Beetle PCE Fast ] namespacing embedded libretro core\n'
+	@$(PCE_PYTHON) "$(PCE_NAMESPACE_TOOL)" --nm "$(PCE_NM)" --objcopy "$(PCE_OBJCOPY)" --ranlib "$(PCE_RANLIB)" --raw "$(PCE_RAW_LIB)" --output "$(PCE_LIB)"
+
+.PHONY: pce-core
+pce-core: $(PCE_LIB)
+	@echo "[ Beetle PCE Fast ] core ready: $(PCE_LIB)"
+	@$(PCE_NM) -g --defined-only "$(PCE_LIB)" | grep -E 'PCE_retro_(init|load_game|run|serialize)' | head -20
+
+$(TARGET): $(OBJS) $(PICODRIVE_LIB) $(QUICKNES_LIB) $(PCE_LIB) | $(OBJ_DIR)
+	$(call RUN_LINK,$@,$(EE_CXX) -o "$@" $(OBJS) "$(PICODRIVE_LIB)" "$(QUICKNES_LIB)" "$(PCE_LIB)" $(LIBDIRS) $(LIBS))
 
 $(TARGET_STRIPPED): $(TARGET)
 	@cp -f "$(TARGET)" "$@"

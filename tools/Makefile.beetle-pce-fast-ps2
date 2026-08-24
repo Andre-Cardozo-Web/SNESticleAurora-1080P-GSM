@@ -1,0 +1,68 @@
+# AURORA_PCE_EXPERIMENTAL_V1
+# HuCard-first PS2 static build for beetle-pce-fast-libretro.
+# Kept outside the submodule so the core source stays pristine.
+
+DEBUG := 0
+FRONTEND_SUPPORTS_RGB565 := 1
+USE_CHEATS := 1
+CORE_DIR := .
+platform := ps2
+CACHE_CD := 0
+HAVE_HES := 0
+NEED_BPP := 32
+NEED_TREMOR := 0
+NEED_BLIP := 1
+NEED_CD := 1
+NEED_CRC32 := 1
+CORE_DEFINE := -DWANT_PCE_FAST_EMU
+HAVE_CHD := 0
+HAVE_CDROM := 0
+
+# Makefile.common includes its libretro-common helper sources only when this
+# is not 1. We still create a static archive ourselves below.
+STATIC_LINKING := 0
+TARGET := mednafen_pce_fast_libretro_ps2_raw.a
+
+CC ?= mips64r5900el-ps2-elf-gcc
+CXX ?= mips64r5900el-ps2-elf-g++
+AR ?= mips64r5900el-ps2-elf-ar
+
+include Makefile.common
+
+WARNINGS := \
+	-Wall \
+	-Wno-sign-compare \
+	-Wno-unused-variable \
+	-Wno-unused-function \
+	-Wno-uninitialized \
+	-Wno-strict-aliasing \
+	-Wno-unused-but-set-variable
+
+FLAGS += \
+	-G0 -O3 -DNDEBUG -fomit-frame-pointer -ffast-math -fno-math-errno -finline-functions -funroll-loops \
+	-fno-strict-aliasing -fwrapv -fsigned-char \
+	-ffunction-sections -fdata-sections \
+	-DPS2 -D_EE -DLSB_FIRST -DHAVE_UNISTD_H -DAURORA_PS2_PCE_FAST=1 \
+	$(INCFLAGS) $(ENDIANNESS_DEFINES) $(WARNINGS) \
+	-DMEDNAFEN_VERSION_NUMERIC=931 $(CORE_DEFINE) \
+	-DSTDC_HEADERS -D__STDC_LIMIT_MACROS -D__LIBRETRO__ -D_LOW_ACCURACY_ \
+	-DINLINE=inline
+
+CFLAGS += $(FLAGS) -std=gnu99
+CXXFLAGS += $(FLAGS) -std=gnu++11 -fno-exceptions -fno-rtti
+OBJECTS := $(SOURCES_CXX:.cpp=.o) $(SOURCES_C:.c=.o)
+
+.PHONY: all clean
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	$(AR) rcs $@ $(OBJECTS)
+
+%.o: %.cpp
+	$(CXX) -c -o $@ $< $(CPPFLAGS) $(CXXFLAGS)
+
+%.o: %.c
+	$(CC) -c -o $@ $< $(CPPFLAGS) $(CFLAGS)
+
+clean:
+	rm -f $(OBJECTS) $(TARGET)

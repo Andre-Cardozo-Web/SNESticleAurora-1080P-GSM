@@ -17,6 +17,8 @@
 #include "mainloop.h"
 #include "mainloop_shared.h"
 #include "sega/picodrive/picodrive_bridge.h"
+/* AURORA_PCE_EXPERIMENTAL_V1 */
+#include "pce/beetle/pce_bridge.h"
 #include "mainloop_state.h"
 #include "mainloop_ui.h"
 #include "snes.h"
@@ -276,6 +278,7 @@ static int _MainLoopZipNameIsRom(const char *pName)
                 case MAINLOOP_ENTRYTYPE_NESFDSDISK:
                 case MAINLOOP_ENTRYTYPE_NESFDSBIOS:
                 case MAINLOOP_ENTRYTYPE_SEGAROM:
+                case MAINLOOP_ENTRYTYPE_PCEROM:
                         return 1;
                 default:
                         return 0;
@@ -286,6 +289,7 @@ static int _MainLoopZipNameIsRom(const char *pName)
 /* AURORA_DYNAMIC_ROM_BUFFER_V1_20260823 */
 #define MAINLOOP_LEGACY_ROM_MAX_BYTES (8U * 1024U * 1024U + 1024U)
 #define MAINLOOP_SEGA_ROM_MAX_BYTES   (16U * 1024U * 1024U)
+#define MAINLOOP_PCE_ROM_MAX_BYTES    (4U * 1024U * 1024U + 512U)
 #define MAINLOOP_SEGA_PROBE_BYTES     0x8200U
 
 static void _MainLoopFreeRomBuffer(void)
@@ -346,9 +350,9 @@ static Int32 _MainLoopReadBinaryPrefix(
 
 static Uint32 _MainLoopRomPayloadLimit(PathExtTypeE eType)
 {
-    return (eType == MAINLOOP_ENTRYTYPE_SEGAROM)
-        ? MAINLOOP_SEGA_ROM_MAX_BYTES
-        : MAINLOOP_LEGACY_ROM_MAX_BYTES;
+    if (eType == MAINLOOP_ENTRYTYPE_SEGAROM) return MAINLOOP_SEGA_ROM_MAX_BYTES;
+    if (eType == MAINLOOP_ENTRYTYPE_PCEROM) return MAINLOOP_PCE_ROM_MAX_BYTES;
+    return MAINLOOP_LEGACY_ROM_MAX_BYTES;
 }
 
 static int _MainLoopZipDynamicEntryFilter(
@@ -367,6 +371,8 @@ static int _MainLoopZipDynamicEntryFilter(
             return nBytes <= MAINLOOP_LEGACY_ROM_MAX_BYTES;
         case MAINLOOP_ENTRYTYPE_SEGAROM:
             return nBytes <= MAINLOOP_SEGA_ROM_MAX_BYTES;
+        case MAINLOOP_ENTRYTYPE_PCEROM:
+            return nBytes <= MAINLOOP_PCE_ROM_MAX_BYTES;
         default:
             return 0;
     }
@@ -417,6 +423,9 @@ Bool _MainLoopLoadRomData(Emu::Rom *pRom, Uint8 *pRomData, Int32 nRomBytes)
            in-place CMemFileIO memcpy. SNES/NES retain the old path. */
         if (pRom == _pSegaRom)
             eError = _pSegaRom->AttachBuffer(
+                pRomData, (Uint32)nRomBytes, _RomDataCapacity);
+        else if (pRom == _pPceRom)
+            eError = _pPceRom->AttachBuffer(
                 pRomData, (Uint32)nRomBytes, _RomDataCapacity);
         else
             eError = pRom->LoadRom(&romfile);
@@ -495,6 +504,8 @@ void _MainLoopUnloadRom()
 	/* AURORA_PICODRIVE_STAGE2_UNLOAD: SetRom(NULL) fully deinitializes PicoDrive. */
 	if (_pSega) _pSega->SetRom(NULL);
 	if (_pSegaRom) _pSegaRom->Unload();
+	if (_pPce) _pPce->SetRom(NULL);
+	if (_pPceRom) _pPceRom->Unload();
 
     /* The cores are detached now; release ROM RAM before gsKit reallocates. */
     _MainLoopFreeRomBuffer();
@@ -625,6 +636,10 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
             break;
         case MAINLOOP_ENTRYTYPE_SNESROM:
             pSystem = _pSnes; pRom = _pSnesRom; pBios = NULL;
+            _MainLoop_fOutputIntensity = 1.0f;
+            break;
+        case MAINLOOP_ENTRYTYPE_PCEROM:
+            pSystem = _pPce; pRom = _pPceRom; pBios = NULL;
             _MainLoop_fOutputIntensity = 1.0f;
             break;
         default:
@@ -833,6 +848,8 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
             _pSegaRom->SetSourceName(SegaContentName);
             PicoDriveBridge_SetRegion((int)g_SnesForceRegion);
         }
+        else if (pSystem == _pPce && _pPceRom)
+            _pPceRom->SetSourceName(SegaContentName);
         pSystem->SetRom(pRom);
     }
 
@@ -853,6 +870,14 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         _MainLoopUnloadRom();
         MainLoopModalPrintf(60 * 3,
             "ERROR: PicoDrive cannot run this SEGA image");
+        return FALSE;
+    }
+
+    if (pSystem == _pPce && !_pPce->IsRomReady())
+    {
+        printf("[PCE] ROM rejected; aborting launch before mainloop\n");
+        _MainLoopUnloadRom();
+        MainLoopModalPrintf(60 * 3, "ERROR: Beetle PCE Fast cannot run this HuCard");
         return FALSE;
     }
 

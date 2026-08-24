@@ -54,6 +54,18 @@ QuickNES/libretro codebase:
 The QuickNES submodule retains its own license and source-file notices.
 Those notices remain authoritative and must be preserved.
 
+<!-- AURORA_BEETLE_PCE_FAST_CREDITS_V14 -->
+## Beetle PC Engine Fast
+
+The experimental PC Engine / TurboGrafx-16 integration uses **Beetle PC Engine Fast**, the libretro port/fork of the **Mednafen PCE Fast** module.
+
+- **Beetle PCE Fast / libretro core:** libretro contributors
+- **Underlying PCE Fast lineage:** Mednafen and its contributors
+- **Aurora integration fork:** `itsveenee/beetle-pce-fast-libretro`
+- **Aurora PS2 bridge, integration and PS2-specific optimization:** Vinícius Nunes (`@itsveenee`)
+
+The PCE submodule retains its own copyright, license and source-file notices; those notices remain authoritative.
+
 ## Third-party components
 
 SNESticle Aurora includes or integrates third-party components including InfoNES, QuickNES, FCEUmm, miniz, libxmp-lite and others.

@@ -5,3 +5,7 @@
 [submodule "src/third_party/picodrive"]
 	path = src/third_party/picodrive
 	url = https://github.com/itsveenee/picodrive.git
+[submodule "src/third_party/beetle-pce-fast"]
+	path = src/third_party/beetle-pce-fast
+	url = https://github.com/itsveenee/beetle-pce-fast-libretro.git
+	branch = master
