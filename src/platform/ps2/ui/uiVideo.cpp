@@ -1148,7 +1148,7 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 	}
 	else if (iPage == 4)
 	{
-		_VideoHeader(vy, "Software Hacks"); vy += 14;
+		_VideoHeader(vy, "SNES Hacks"); vy += 14;
 		_VideoRow(vy, 20, m_iSelect, "BG1 Layer",
 			_VideoHackLayerStatus(SNESPPU_MASK_BG1)); vy += 12;
 		_VideoRow(vy, 21, m_iSelect, "BG2 Layer",
