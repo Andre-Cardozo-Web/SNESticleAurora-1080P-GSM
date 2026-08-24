@@ -220,7 +220,15 @@ Uint16 _MainLoopInput(Uint32 pad)
 	if (_pSystem == _pPce)
 	{
 		Uint32 uPce = pad & ~(PAD_SQUARE | PAD_CROSS | PAD_TRIANGLE | PAD_CIRCLE | PAD_R2);
-		const Bool bTurboOn = _MainLoopTurboHostIsOn();
+
+		/* AURORA_PCE_TURBO_CADENCE_V1
+		 * PCE autofire needs one slower host cadence than the shared setting:
+		 * Max -> Half, Half -> Quarter, Quarter remains Quarter. */
+		Uint32 uPceTurboShift = (Uint32)_MainLoop_TurboSpeed + 1U;
+		if (uPceTurboShift > (Uint32)MAINLOOP_TURBO_SPEED_QUARTER)
+			uPceTurboShift = (Uint32)MAINLOOP_TURBO_SPEED_QUARTER;
+		const Uint32 uPceTurboElapsed = _MainLoop_TurboHostFrame - _MainLoop_TurboHostPhaseBase;
+		const Bool bTurboOn = (((uPceTurboElapsed >> uPceTurboShift) & 1U) == 0U) ? TRUE : FALSE;
 		if (pad & PAD_CROSS)  uPce |= PAD_SQUARE;
 		if (pad & PAD_SQUARE) uPce |= PAD_CROSS;
 		if (bTurboOn)
