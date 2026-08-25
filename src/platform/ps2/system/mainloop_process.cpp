@@ -70,9 +70,9 @@ Bool MainLoopProcess()
 
     PROF_ENTER("Frame");
 
-    PROF_ENTER("NetPlayRPCProcess");
-    NetPlayRPCProcess();
-    PROF_LEAVE("NetPlayRPCProcess");
+    /* AURORA_RUNTIME_LEAN_V1_FRONTEND_20260824
+     * NetPlayRPCProcess() is a permanent empty compatibility stub now that
+     * netplay runs directly on the EE. Do not pay a cross-TU call every frame. */
 
     PROF_ENTER("InputProcess");
     InputPoll();
@@ -520,11 +520,22 @@ Bool MainLoopProcess()
          * the emulation/render deadline. */
     }
 
-    _MainLoopCheckSRAM();
+    /* AURORA_RUNTIME_LEAN_V1_FRONTEND_20260824
+     * Native SNES already skips gameplay SRAM polling. NES/Sega/PCE can do
+     * the same because opening the in-game menu force-checks the full SRAM
+     * immediately before deciding whether it must be saved.
+     *
+     * SNES9x2010 is intentionally left on its old behavior: this patch does
+     * not optimize or otherwise change that core. */
+    if (_pSystem == _pSnes9x2010)
+        _MainLoopCheckSRAM();
 	/* Deferred menu work runs only after _MenuEnable has returned. In the
 	   L2+R2 path this leaves two complete frames for the menu/status to become
 	   visible before a synchronous SRAM write begins. */
-	_MenuRuntimeUpdate();
+    /* AURORA_RUNTIME_LEAN_V1_FRONTEND_20260824
+     * Deferred SRAM/menu work can only exist while the menu is active. */
+    if (_bMenu)
+        _MenuRuntimeUpdate();
 
 	MainLoopRender();
 

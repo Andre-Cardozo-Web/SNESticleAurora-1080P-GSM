@@ -16,6 +16,7 @@
 #include "audmixbuffer.h"
 extern AudMixBuffer *_AudMix;
 #include "snio.h"
+#include "snppurender.h"
 extern "C" {
 #include "gs.h"
 #include "gpprim.h"
@@ -46,6 +47,8 @@ bool PCE_retro_unserialize(const void *, size_t);
 void *PCE_retro_get_memory_data(unsigned);
 size_t PCE_retro_get_memory_size(unsigned);
 void PCE_retro_get_system_av_info(struct retro_system_av_info *);
+/* AURORA_V15_MULTICORE_SPRITE_LIMIT_20260824: PS2-only renderer hook inside the Beetle fork. */
+void PCE_AuroraSetSpriteLimiter(int level, int mode);
 }
 
 static bool s_Initialized = false;
@@ -685,6 +688,10 @@ void PceBridge_RunFrame(Emu::SysInputT *input, CRenderSurface *target, CMixBuffe
     s_pInput = input;
     s_pMix = mix;
     s_HaveVideo = false;
+
+    PCE_AuroraSetSpriteLimiter(
+        (int)SNPPURenderGetObjLimitLevel(),
+        (int)SNPPURenderGetObjLimitMode());
 
     PCE_retro_run();
 

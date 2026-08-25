@@ -15,7 +15,7 @@ Mega Drive, Master System, Game Gear, 32X and Sega CD emulation through **PicoDr
 
 PC Engine / TurboGrafx-16 emulation through **Beetle PC Engine Fast** is based on the libretro port/fork of **Mednafen PCE Fast**, maintained by libretro and Mednafen contributors. Aurora uses `itsveenee/beetle-pce-fast-libretro` with PS2-specific integration and optimization. HuCard (`.pce`, including ZIP/GZ paths) and experimental PC Engine CD `.cue` loading are exposed; CD firmware is user-supplied in `SNESticle/SYSTEM`. See [THIRD_PARTY.md](THIRD_PARTY.md) and `LICENSES/Beetle-PCE-Fast-GPL-2.0.txt`.
 
-There is currently an **experimental, NON-WORKING build** of**Snes9x 2010**, based on Snes9x and its libretro core contributors, from the pinned `itsveenee/snes9x2010` submodule. Its license is separate from Aurora's GPL-covered code and is mirrored at `LICENSES/Snes9x2010-LICENSE.txt`; preserve and review those terms before redistribution.
+There is currently an **experimental, NON-WORKING build** of **Snes9x 2010**, based on Snes9x and its libretro core contributors, from the pinned `itsveenee/snes9x2010` submodule. Its license is separate from Aurora's GPL-covered code and is mirrored at `LICENSES/Snes9x2010-LICENSE.txt`; preserve and review those terms before redistribution.
 
 SNESticle Aurora code covered by the GPL remains under GNU GPLv2; separately licensed third-party components remain under their own terms. **Code license and project branding are separate.** The applicable software licenses grant rights in the code; they do **not** grant permission to use the **SNESticle Aurora** name or the project-specific **Aurora** identity/branding for an unofficial fork, modified build, redistributed binary, or derivative project. Unless separately authorized by **@itsveenee**, use a distinct project/product name and distinct branding. Factual attribution such as **“based on SNESticle Aurora”** remains welcome. See [BRANDING.md](BRANDING.md).
 
@@ -77,7 +77,7 @@ Just for fun:
 
 
 <!-- AURORA_CD_FIRMWARE_V6_20260824 -->
-CD firmware and images:
+CD firmware and images **(experimental)**
 
 * Aurora creates `SYSTEM` under the active SNESticle data root, normally `mass0:/SNESticle/SYSTEM` when USB/MX4SIO is available or the configured Memory Card SNESticle directory otherwise.
 * Firmware is **not included**. For PC Engine CD, place `syscard3.pce` in `SYSTEM`. PicoDrive accepts regional Sega CD BIOS names documented in [THIRD_PARTY.md](THIRD_PARTY.md), preferably as `.bin`.

@@ -4,7 +4,10 @@
 
 DEBUG := 0
 FRONTEND_SUPPORTS_RGB565 := 1
-USE_CHEATS := 1
+# AURORA_RUNTIME_LEAN_V1_PCE_BUILD_20260824
+# Aurora has no PCE retro_cheat_* frontend path; do not advertise/compile the
+# optional cheat configuration for the PS2 static core.
+USE_CHEATS := 0
 CORE_DIR := .
 platform := ps2
 CACHE_CD := 0

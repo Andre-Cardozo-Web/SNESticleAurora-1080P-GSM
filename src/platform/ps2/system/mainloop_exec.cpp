@@ -29,9 +29,17 @@ Bool _ExecuteSnes(CRenderSurface *pSurface, CMixBuffer *pMixBuffer, Emu::SysInpu
 
             #if !MAINLOOP_SNESSTATEDEBUG
 //            pMixBuffer=NULL;
-            /* CPU overclock UI removed: always use the original ASM core. */
-            SNCPUSetExecuteFunc(SNCPUExecute_ASM);
-            SNSPCSetExecuteFunc(SNSPCExecute_C);
+            /* AURORA_RUNTIME_LEAN_V1_SNES_EXEC_20260824
+             * CPU overclock selection is gone, so these two executor pointers
+             * are process-lifetime constants in the normal SNESticle path.
+             * Configure them once instead of rewriting them every frame. */
+            static Bool s_bAuroraExecutorsConfigured = FALSE;
+            if (!s_bAuroraExecutorsConfigured)
+            {
+                SNCPUSetExecuteFunc(SNCPUExecute_ASM);
+                SNSPCSetExecuteFunc(SNSPCExecute_C);
+                s_bAuroraExecutorsConfigured = TRUE;
+            }
 
 		    PROF_ENTER("SnesExecuteFrame");
 			/* Skip presentation only; emulation still executes every frame. */

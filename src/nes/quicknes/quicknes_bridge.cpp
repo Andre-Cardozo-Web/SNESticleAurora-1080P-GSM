@@ -21,6 +21,7 @@
 #include "pixelformat.h"
 #include "mixbuffer.h"
 #include "snio.h"
+#include "snppurender.h"
 
 /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
 extern "C" {
@@ -513,6 +514,31 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
 {
     if (!s_GameLoaded || !s_pEmu)
         return;
+
+    /* AURORA_V15_MULTICORE_SPRITE_LIMIT_20260824
+     * Off keeps the NES hardware renderer at 8 sprites/scanline and all 64
+     * OAM entries. Scanline levels are the SNES severity ratios scaled to 8.
+     * Screen mode keeps the native 8/line rule and caps the first distinct
+     * OAM entries for the whole picture, matching the intent of SNES mode. */
+    {
+        static const int scanlineBudget[SNPPU_OBJ_LIMIT_NUM] =
+            { 8, 7, 6, 5, 4, 3, 2 };
+        static const int screenBudget[SNPPU_OBJ_LIMIT_NUM] =
+            { 64, 28, 24, 20, 16, 12, 8 };
+        int level = (int)SNPPURenderGetObjLimitLevel();
+        int mode = (int)SNPPURenderGetObjLimitMode();
+        int scanline = 8;
+        int screen = 64;
+
+        if (level > SNPPU_OBJ_LIMIT_OFF && level < SNPPU_OBJ_LIMIT_NUM)
+        {
+            if (mode == SNPPU_OBJ_LIMIT_MODE_SCREEN)
+                screen = screenBudget[level];
+            else
+                scanline = scanlineBudget[level];
+        }
+        s_pEmu->set_sprite_limits(scanline, screen);
+    }
 
     Uint8 p1 = 0;
     Uint8 p2 = 0;

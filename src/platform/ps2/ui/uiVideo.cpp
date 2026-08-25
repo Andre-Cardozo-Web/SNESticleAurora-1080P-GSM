@@ -960,15 +960,19 @@ static const char *_VideoHackMode7Status()
 
 static const char *_VideoHackSpriteLimiterStatus()
 {
+	/* AURORA_V15_MULTICORE_SPRITE_LIMIT_20260824
+	 * SNES values are OBJ-tile budgets. Other machines use different native
+	 * units/limits, so don't display a misleading SNES number there. */
+	const Bool bSnesUnits = (_pSystem == _pSnes) ? TRUE : FALSE;
 	switch (SNPPURenderGetObjLimitLevel())
 	{
-		case SNPPU_OBJ_LIMIT_LIGHT:   return "Light (28)";
-		case SNPPU_OBJ_LIMIT_MEDIUM:  return "Medium (24)";
-		case SNPPU_OBJ_LIMIT_STRONG:  return "Strong (20)";
-		case SNPPU_OBJ_LIMIT_EXTREME: return "Extreme (16)";
-		case SNPPU_OBJ_LIMIT_HEAVY:   return "Heavy (12)";
-		case SNPPU_OBJ_LIMIT_INSANE:  return "Insane (8)";
-		default:                      return "Off (34)";
+		case SNPPU_OBJ_LIMIT_LIGHT:   return bSnesUnits ? "Light (28)"   : "Light";
+		case SNPPU_OBJ_LIMIT_MEDIUM:  return bSnesUnits ? "Medium (24)"  : "Medium";
+		case SNPPU_OBJ_LIMIT_STRONG:  return bSnesUnits ? "Strong (20)"  : "Strong";
+		case SNPPU_OBJ_LIMIT_EXTREME: return bSnesUnits ? "Extreme (16)" : "Extreme";
+		case SNPPU_OBJ_LIMIT_HEAVY:   return bSnesUnits ? "Heavy (12)"   : "Heavy";
+		case SNPPU_OBJ_LIMIT_INSANE:  return bSnesUnits ? "Insane (8)"   : "Insane";
+		default:                      return bSnesUnits ? "Off (34)"      : "Off";
 	}
 }
 

@@ -20,6 +20,7 @@
 #include "audmixbuffer.h"
 extern AudMixBuffer *_AudMix;
 #include "snio.h"
+#include "snppurender.h"
 #include "snrom.h"
 
 extern "C" {
@@ -40,6 +41,7 @@ void PicoCartSetExternalRomBuffer(const unsigned char *rom,
 void PicoDriveLibretro_SetSkipNextVideoFrame(int skip);
 /* AURORA_PD_PALETTE_SERIAL_V7_BRIDGE_20260821 */
 unsigned int PicoDriveLibretro_GetPaletteSerial(void);
+void PicoDriveAurora_SetSpriteLimiter(int level, int mode); /* AURORA_V15_MULTICORE_SPRITE_LIMIT_20260824 */
 }
 
 static bool s_Initialized = false;
@@ -1515,6 +1517,10 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
 {
     bool skipVideo = s_SkipVideoNext;
     s_SkipVideoNext = false;
+
+    PicoDriveAurora_SetSpriteLimiter(
+        (int)SNPPURenderGetObjLimitLevel(),
+        (int)SNPPURenderGetObjLimitMode());
 
     if (!s_GameLoaded)
         return;

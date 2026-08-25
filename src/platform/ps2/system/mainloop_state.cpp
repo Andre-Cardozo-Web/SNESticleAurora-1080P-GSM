@@ -17,8 +17,6 @@
 #include "mainloop_iop.h"
 
 extern "C" {
-int MCSave_Write(char *pPath, char *pData, int nBytes);
-int MCSave_WriteSync(int block, int *pResult);
 #include "netplay_ee.h"
 }
 
@@ -27,16 +25,10 @@ int MCSave_WriteSync(int block, int *pResult);
 
 /* AURORA_PCE_EXPERIMENTAL_V1 */
 
-/* The iaddis-era custom MCSAVE.IRX async memory-card writer has been
-   retired -- see embedded_irx.cpp.  mainloop_iop.cpp no longer
-   attempts to IOPLoadModule("MCSAVE.IRX") and never calls
-   MCSave_Init(), so _MainLoop_bMCSaveReady always stays FALSE and
-   the synchronous newlib-stdio-via-iomanX path below is always
-   taken.  The flag itself is kept as a vestigial extern so the
-   build doesn't have to touch every call site that still tests it;
-   it is effectively dead code that branch predictors will fold out.
-   Defined in mainloop_iop.cpp. */
-extern Bool _MainLoop_bMCSaveReady;
+/* AURORA_RUNTIME_LEAN_V1_MCSAVE_20260824
+ * The old MCSAVE.IRX path is unreachable in Aurora: it is never loaded or
+ * initialized. mainloop_state therefore contains only the supported
+ * synchronous newlib/iomanX storage path. */
 
 #if MAINLOOP_HISTORY
 extern Uint32 _nHistory;
@@ -389,6 +381,9 @@ static Bool _MainLoopSaveSRAMTo(MainLoopSramDeviceE eDevice, Bool bSync)
     Char Path[1024];
     Uint8 *pSRAM;
 
+    /* AURORA_RUNTIME_LEAN_V1_MCSAVE_20260824: bSync only selected behavior in the retired async path. */
+    (void)bSync;
+
     if (nSramBytes <= 0)
         return FALSE;
     pSRAM = _pSystem->GetSRAMData();
@@ -411,21 +406,7 @@ static Bool _MainLoopSaveSRAMTo(MainLoopSramDeviceE eDevice, Bool bSync)
 
     ML_TRACE("SRAM save path: %s", Path);
 
-    /* The retired MCSAVE path is MC-specific. Never pass mass0 to it. */
-    if (bMemCard && _MainLoop_bMCSaveReady)
-    {
-        MCSave_WriteSync(TRUE, NULL);
-        MCSave_Write((char *)Path, (char *)pSRAM, nSramBytes);
-        if (bSync)
-        {
-            int Result = 0;
-            MCSave_WriteSync(TRUE, &Result);
-            if (Result)
-                _MainLoop_SRAMUpdated = FALSE;
-            return Result ? TRUE : FALSE;
-        }
-        return TRUE;
-    }
+    /* AURORA_RUNTIME_LEAN_V1_MCSAVE_20260824: unreachable legacy async-MC branch removed. */
 
     if (_MainLoopSramWriteFile(Path, pSRAM, (Uint32)nSramBytes))
     {
