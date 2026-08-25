@@ -426,16 +426,10 @@ void MainLoopRender()
 		if (_MainLoop_StatusCount > 0)
 		{
 			FontSelect(0);
-			/* AURORA_V15_STATUS_OUTLINE_20260824
-			 * Faux 1px outline only for transient cyan status prompts.
-			 * Two black underprints are deliberately local to this path: the
-			 * menu/font renderer and every persistent UI label stay untouched. */
-			FontColor4f(0.0f, 0.0f, 0.0f, 1.0f);
-			FontPrintf(19, 201, _MainLoop_StatusStr);
-			FontPrintf(21, 201, _MainLoop_StatusStr);
-			FontColor4f(0.0f, 0.8f, 0.8f, 1.0f);
+			/* AURORA_V15_STATUS_SHADOW_REVERT_20260824
+			 * Revert V15 black double-draw: transient status text is plain cyan again. */
+			FontColor4f(0.0, 0.8f, 0.8f, 1.0f);
 			FontPrintf(20, 200, _MainLoop_StatusStr);
-
 			_MainLoop_StatusCount--;
 		}
 	}

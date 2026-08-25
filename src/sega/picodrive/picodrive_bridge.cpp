@@ -41,6 +41,12 @@ void PicoCartSetExternalRomBuffer(const unsigned char *rom,
 void PicoDriveLibretro_SetSkipNextVideoFrame(int skip);
 /* AURORA_PD_PALETTE_SERIAL_V7_BRIDGE_20260821 */
 unsigned int PicoDriveLibretro_GetPaletteSerial(void);
+/* AURORA_PD_NATIVE_FASTPATH_V1_BRIDGE_20260824 */
+void PicoDriveAurora_RunFrameNative(
+    const uint16_t input_masks[4],
+    unsigned int pad_count,
+    int skip_video,
+    int refresh_variables);
 void PicoDriveAurora_SetSpriteLimiter(int level, int mode); /* AURORA_V15_MULTICORE_SPRITE_LIMIT_20260824 */
 }
 
@@ -1538,8 +1544,27 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
     /* AURORA_PD_FORCE_HW_SPRITE_LIMIT */
     PicoIn.opt &= ~POPT_DIS_SPRITE_LIM;
 
-    PicoDriveLibretro_SetSkipNextVideoFrame(skipVideo ? 1 : 0);
-    retro_run();
+    /* AURORA_PD_NATIVE_FASTPATH_V1_BRIDGE_20260824
+     * Sega Pico keeps retro_run() because that glue owns page/pen/overlay
+     * events. All other supported Sega hardware feeds PicoIn directly and
+     * calls PicoFrame() through the PS2-native core entry point. */
+    if (PicoIn.AHW & PAHW_PICO)
+    {
+        PicoDriveLibretro_SetSkipNextVideoFrame(skipVideo ? 1 : 0);
+        retro_run();
+    }
+    else
+    {
+        uint16_t inputMasks[4] = { 0, 0, 0, 0 };
+        int refreshVariables = s_VariablesChanged ? 1 : 0;
+
+        inputMasks[0] = (uint16_t)pdJoyMask(0);
+        inputMasks[1] = (uint16_t)pdJoyMask(1);
+
+        s_VariablesChanged = false;
+        PicoDriveAurora_RunFrameNative(
+            inputMasks, 2, skipVideo ? 1 : 0, refreshVariables);
+    }
 
     /* A skipped scheduler frame has advanced CPU/audio only. Its old GS
      * texture remains the image until the immediately-following drawn frame. */
