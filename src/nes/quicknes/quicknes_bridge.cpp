@@ -50,6 +50,13 @@ static bool s_TurboPhase  = false;
 static unsigned s_TurboSpeedShift = 0;
 static uint32_t s_TurboFrame = 0;
 
+/* AURORA_V18_SAFE_PERF_QUICKNES_LIMITER_CACHE_20260825
+ * set_sprite_limits() only writes the two rendering-limit fields after
+ * clamping. Cache the exact final arguments and touch the core only when
+ * those derived budgets really change. */
+static int s_LastSpriteScanlineLimit = -1;
+static int s_LastSpriteScreenLimit = -1;
+
 /* Reuse one native emulator for the process lifetime. Its constructor does
  * not allocate the cart/audio buffers; those are initialized lazily by
  * QuicknesBridge_Init()/LoadGame(). Reuse avoids libretro's global
@@ -119,6 +126,8 @@ static void qResetTransient(void)
     qResetDirectVideo();
     s_TurboPhase = false;
     s_TurboFrame = 0;
+    s_LastSpriteScanlineLimit = -1;
+    s_LastSpriteScreenLimit = -1;
 }
 
 static Uint8 qMapPad(Uint16 pad)
@@ -477,6 +486,8 @@ void QuicknesBridge_Reset(void)
     qResetDirectVideo();
     s_TurboPhase = false;
     s_TurboFrame = 0;
+    s_LastSpriteScanlineLimit = -1;
+    s_LastSpriteScreenLimit = -1;
 }
 
 void QuicknesBridge_SoftReset(void)
@@ -488,6 +499,8 @@ void QuicknesBridge_SoftReset(void)
     qResetDirectVideo();
     s_TurboPhase = false;
     s_TurboFrame = 0;
+    s_LastSpriteScanlineLimit = -1;
+    s_LastSpriteScreenLimit = -1;
 }
 
 void QuicknesBridge_SetDutySwap(bool enabled)
@@ -537,7 +550,13 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
             else
                 scanline = scanlineBudget[level];
         }
-        s_pEmu->set_sprite_limits(scanline, screen);
+        if (scanline != s_LastSpriteScanlineLimit ||
+            screen != s_LastSpriteScreenLimit)
+        {
+            s_pEmu->set_sprite_limits(scanline, screen);
+            s_LastSpriteScanlineLimit = scanline;
+            s_LastSpriteScreenLimit = screen;
+        }
     }
 
     Uint8 p1 = 0;

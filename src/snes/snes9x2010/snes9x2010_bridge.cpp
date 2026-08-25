@@ -123,6 +123,19 @@ static bool s_MouseDevice = false;
 static Int32 s_MouseDX = 0;
 static Int32 s_MouseDY = 0;
 static Uint32 s_MouseButtons = 0;
+
+/* AURORA_V18_SAFE_PERF_S9X_MENU_CACHE_20260825
+ * These six values are Aurora-owned menu state. The typed setter also
+ * reapplies SRAM policy and checks PPU/OBJ state, so repeating identical
+ * values every frame is pure host overhead. */
+static bool s_MenuOptionsValid = false;
+static Uint32 s_LastMenuSramKbits = 0;
+static int s_LastMenuRegion = 0;
+static unsigned s_LastMenuLayerMask = 0;
+static unsigned s_LastMenuHackFlags = 0;
+static unsigned s_LastMenuObjLevel = 0;
+static unsigned s_LastMenuObjMode = 0;
+
 static const void *s_ContentData = NULL;
 static size_t s_ContentBytes = 0;
 static char s_ContentName[1024] = "game.sfc";
@@ -363,13 +376,37 @@ static size_t s9xAudioBatch(const int16_t *data, size_t frames)
 /* Push every SNES-relevant menu value through one typed ABI. */
 static void s9xApplyAuroraMenuOptions(void)
 {
+    const Uint32 sramKbits = (Uint32)g_FakeSRAMSize;
+    const int region = (int)g_SnesForceRegion;
+    const unsigned layerMask =
+        (unsigned)SNPPURenderGetSoftwareLayerMask();
+    const unsigned hackFlags =
+        (unsigned)SNPPURenderGetSoftwareHackFlags();
+    const unsigned objLevel =
+        (unsigned)SNPPURenderGetObjLimitLevel();
+    const unsigned objMode =
+        (unsigned)SNPPURenderGetObjLimitMode();
+
+    if (s_MenuOptionsValid &&
+        sramKbits == s_LastMenuSramKbits &&
+        region == s_LastMenuRegion &&
+        layerMask == s_LastMenuLayerMask &&
+        hackFlags == s_LastMenuHackFlags &&
+        objLevel == s_LastMenuObjLevel &&
+        objMode == s_LastMenuObjMode)
+        return;
+
     S9X2010_S9xAuroraSetMenuOptions(
-        (uint32_t)g_FakeSRAMSize,
-        (int)g_SnesForceRegion,
-        (unsigned)SNPPURenderGetSoftwareLayerMask(),
-        (unsigned)SNPPURenderGetSoftwareHackFlags(),
-        (unsigned)SNPPURenderGetObjLimitLevel(),
-        (unsigned)SNPPURenderGetObjLimitMode());
+        (uint32_t)sramKbits, region, layerMask, hackFlags,
+        objLevel, objMode);
+
+    s_LastMenuSramKbits = sramKbits;
+    s_LastMenuRegion = region;
+    s_LastMenuLayerMask = layerMask;
+    s_LastMenuHackFlags = hackFlags;
+    s_LastMenuObjLevel = objLevel;
+    s_LastMenuObjMode = objMode;
+    s_MenuOptionsValid = true;
 }
 
 static int16_t s9xMouseDelta(Int32 value)
@@ -844,6 +881,9 @@ bool Snes9x2010Bridge_LoadGame(const void *data, size_t bytes,
     if (s_Initialized)
         Snes9x2010Bridge_Shutdown();
 
+    /* Fresh core/content lifetime: never inherit a valid host cache. */
+    s_MenuOptionsValid = false;
+
     /* Apply region before LoadROM and SRAM policy before discovery. */
     s9xApplyAuroraMenuOptions();
     S9X2010_S9xAuroraSetRomCapacity(
@@ -874,6 +914,9 @@ bool Snes9x2010Bridge_LoadGame(const void *data, size_t bytes,
     s_MouseButtons = 0;
 
     s_GameLoaded = true;
+    /* Pre-load ran before cartridge SRAM allocation. Force one first-frame
+     * push so S9xAuroraApplySramOverride() sees the allocated SRAM. */
+    s_MenuOptionsValid = false;
     size_t sb = S9X2010_retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
     void *sp = S9X2010_retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
     s_pSramData = (sp && sb && sb <= 0x7fffffffU) ? (Uint8 *)sp : NULL;
@@ -921,18 +964,25 @@ void Snes9x2010Bridge_UnloadGame(void)
     s_MouseButtons = 0;
     s_ContentData = NULL;
     s_ContentBytes = 0;
+    s_MenuOptionsValid = false;
 }
 
 void Snes9x2010Bridge_Reset(void)
 {
     if (s_GameLoaded)
+    {
         S9X2010_retro_reset();
+        s_MenuOptionsValid = false;
+    }
 }
 
 void Snes9x2010Bridge_SoftReset(void)
 {
     if (s_GameLoaded)
+    {
         S9X2010_retro_reset();
+        s_MenuOptionsValid = false;
+    }
 }
 
 void Snes9x2010Bridge_RunFrame(Emu::SysInputT *input,
