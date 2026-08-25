@@ -333,11 +333,20 @@ static void _TraceOAMAddressWrite(Uint32 uPort, Uint8 uData,
 void SnesPPU::UpdateOAMPriority()
 {
 	Uint16 uOldPriority = m_Regs.oampri.w;
+	Bool bPriorityRotation;
 
 	m_Regs.oampri.w = (m_Regs.oamaddr.w & 0x8000)
 		? ((m_Regs.oamaddr.w & 0x1FF) >> 2) : 0;
+	bPriorityRotation = (m_Regs.oamaddr.w & 0x8000) != 0;
 
-	if (m_Regs.oampri.w != uOldPriority && m_pRender)
+	/* AURORA_ACCURACY_OAM_FIRSTSPRITE_Y_V1_DIRTY_20260825
+	 * With priority rotation enabled the low two bits of Aurora's byte-phase
+	 * OAM address are semantically relevant too: phase 3 selects the SNES
+	 * FirstSprite+scanline evaluation mode. That phase can change without
+	 * changing oampri itself, so keep the derived OBJ visibility cache dirty
+	 * whenever priority rotation is active. WriteOAMBlock still publishes
+	 * a whole DMA burst only once, so the common OAM-DMA path stays cheap. */
+	if ((m_Regs.oampri.w != uOldPriority || bPriorityRotation) && m_pRender)
 		m_pRender->SetUpdateFlags(SNESPPURENDER_UPDATE_OBJ);
 }
 

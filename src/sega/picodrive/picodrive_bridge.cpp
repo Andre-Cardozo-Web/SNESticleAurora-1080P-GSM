@@ -180,6 +180,10 @@ static int s_MapLeft = -1, s_MapTop = -1;
 static int s_MapSrcW = -1, s_MapSrcH = -1;
 static int s_MapDstW = -1, s_MapDstH = -1;
 static int s_LastPortType[2] = { -1, -1 };
+/* AURORA_V17_SAFE_PERF_PD_LIMITER_20260824
+ * Push sprite-limiter state into PicoDrive only when the menu values change. */
+static int s_LastSpriteLimiterLevel = -1;
+static int s_LastSpriteLimiterMode = -1;
 
 
 static void pdLog(enum retro_log_level level, const char *fmt, ...)
@@ -1094,6 +1098,8 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes,
 
     pdAudioTailReset();
     s_GameLoaded = true;
+    s_LastSpriteLimiterLevel = -1;
+    s_LastSpriteLimiterMode = -1;
 
     /* Hardware is known only after retro_load_game(). Re-query core options
      * on the first real frame so non-MD/32X starts directly in Accurate. */
@@ -1524,9 +1530,17 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
     bool skipVideo = s_SkipVideoNext;
     s_SkipVideoNext = false;
 
-    PicoDriveAurora_SetSpriteLimiter(
-        (int)SNPPURenderGetObjLimitLevel(),
-        (int)SNPPURenderGetObjLimitMode());
+    {
+        const int limiterLevel = (int)SNPPURenderGetObjLimitLevel();
+        const int limiterMode = (int)SNPPURenderGetObjLimitMode();
+        if (limiterLevel != s_LastSpriteLimiterLevel ||
+            limiterMode != s_LastSpriteLimiterMode)
+        {
+            PicoDriveAurora_SetSpriteLimiter(limiterLevel, limiterMode);
+            s_LastSpriteLimiterLevel = limiterLevel;
+            s_LastSpriteLimiterMode = limiterMode;
+        }
+    }
 
     if (!s_GameLoaded)
         return;

@@ -31,6 +31,25 @@ Bool g_SnesCompatHongKong97SPCBoot = FALSE;
  * Exact clean normalized/headerless ROMs only. No ROM bytes are modified. */
 Bool g_SnesCompatTopGearFastRom = FALSE;
 
+/* AURORA_SUNSET_RIDERS_CRC_OBJ128_V2_ROM_20260825
+ * Diagnostic-only exact-CRC flag. CRC is from normalized/headerless ROM data.
+ * No ROM bytes are modified.
+ *   52ADA404 = Sunset Riders (USA)
+ *   64EDFC5D = Sunset Riders (Europe) */
+Bool g_SnesCompatSunsetRidersObj128 = FALSE;
+
+static Uint32 _SNRomSunsetRidersCRC32(const Uint8 *pData, Uint32 nBytes)
+{
+    Uint32 crc = 0xFFFFFFFFu;
+    while (nBytes--)
+    {
+        crc ^= *pData++;
+        for (Uint32 bit = 0; bit < 8; ++bit)
+            crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320u : 0u);
+    }
+    return crc ^ 0xFFFFFFFFu;
+}
+
 #ifndef SNES_HK97_SPC_BOOT
 #define SNES_HK97_SPC_BOOT 0
 #endif
@@ -1077,6 +1096,20 @@ if (m_pRomData && m_uRomBytes == 0x80000u)
         (uHK97CRC == 0xC6A95816u);
 }
 #endif
+
+/* AURORA_SUNSET_RIDERS_CRC_OBJ128_V2_GATE_20260825
+ * Exact clean 1 MiB images only. This runs before any compatibility
+ * byte-patching so altered dumps cannot match by title/header alone. */
+g_SnesCompatSunsetRidersObj128 = FALSE;
+if (m_pRomData && m_uRomBytes == 0x100000u)
+{
+    const Uint32 uSunsetRidersCRC =
+        _SNRomSunsetRidersCRC32(m_pRomData, m_uRomBytes);
+
+    g_SnesCompatSunsetRidersObj128 =
+        (uSunsetRidersCRC == 0x52ADA404u) || /* USA */
+        (uSunsetRidersCRC == 0x64EDFC5Du);   /* Europe */
+}
 
 /* AURORA_CRC_ZERO_INIT_DB_V8 + AURORA_TOP_GEAR_FASTROM_V1
  * Compute the untouched normalized/headerless CRC once, before V6 can mutate

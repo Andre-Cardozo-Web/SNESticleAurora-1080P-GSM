@@ -485,6 +485,71 @@ void SnesPPURender::UpdateOBJVisibility(Uint8 *pObjY, Uint8 *pObjSize, Int32 iOb
 	if (trackTiles)
 		memset(m_nObjTilePotential,0,sizeof(m_nObjTilePotential));
 
+	/* AURORA_ACCURACY_OAM_FIRSTSPRITE_Y_V1_VIS_20260825
+	 * Snes9x's special priority-rotation case is:
+	 *     OAMPriorityRotation && OAMFlip && (OAMAddr & 1)
+	 *
+	 * Aurora stores the internal OAM address in BYTE phases, therefore
+	 * OAMFlip==1 plus odd word address maps exactly to (oamaddr & 3) == 3.
+	 * In that state the PPU's range evaluation starts at
+	 *     (FirstSprite + scanline) & 127
+	 * independently for each line, before the existing 32-OBJ/34-tile limits.
+	 *
+	 * Keep Aurora's non-hardware per-screen limiter on its established path;
+	 * this branch covers normal hardware behavior and the scanline limiter. */
+	if (!screenLimited)
+	{
+		const SnesPPURegsT *pRegs = m_pPPU->GetRegs();
+		Bool bFirstSpritePlusY =
+			(pRegs->oamaddr.w & 0x8000) != 0 &&
+			(pRegs->oamaddr.w & 3) == 3;
+
+		if (bFirstSpritePlusY)
+		{
+			Int32 baseFirst = iObj & 0x7F;
+
+			for (Int32 line = 0; line < SNPPU_MAXLINE; line++)
+			{
+				Int32 obj = (baseFirst + line) & 0x7F;
+				Int32 left = nObjs;
+
+				while (left > 0 && m_nObjLine[line] < SNPPU_MAXOBJ)
+				{
+					Uint32 relY =
+						((Uint32)line - (Uint32)pObjY[obj]) & 0xFF;
+
+					if (relY < pObjSize[obj] &&
+					    _SnesPPUOBJVisibleX(m_Objs[obj].uPosX,
+					                           m_Objs[obj].uWidth))
+					{
+						m_ObjLine[line][m_nObjLine[line]++] = (Uint8)obj;
+
+						if (trackTiles)
+						{
+							Int32 x = (m_Objs[obj].uPosX & 0x100)
+								? ((Int32)(m_Objs[obj].uPosX & 0x1FF) - 512)
+								: (Int32)(m_Objs[obj].uPosX & 0x1FF);
+							Int32 counted = 0;
+
+							for (Int32 t = 0;
+							     t < (m_Objs[obj].uWidth >> 3); t++)
+							{
+								if (_SnesPPUOBJTileCountedX(
+									m_Objs[obj].uPosX, x + (t << 3)))
+									counted++;
+							}
+							m_nObjTilePotential[line] += (Uint16)counted;
+						}
+					}
+
+					obj = (obj + 1) & 0x7F;
+					left--;
+				}
+			}
+			return;
+		}
+	}
+
 	if (!screenLimited && !trackTiles)
 	{
 		while (nObjs>0)

@@ -18,6 +18,12 @@
 #define SNPPU_BGPLANE_SIZE 48
 #define SNPPURENDER_CHR64 (TRUE)
 
+/* AURORA_SUNSET_RIDERS_CRC_OBJ128_V2_RENDER_20260825
+ * Capacity is larger for the diagnostic, but normal ROMs still fetch at the
+ * existing 34-tile hardware budget. */
+extern Bool g_SnesCompatSunsetRidersObj128;
+#define AURORA_SUNSET_RIDERS_OBJ_FETCH_MAX 128
+
 static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPriority, SNMaskT *pOpaque);
 
 #if SNPPU_OBJ_CACHE || SNPPU_BG_CACHE
@@ -1499,7 +1505,8 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	SNMaskT BG3Pri;
 	Bool bBG3Pri;
 	SnesBGInfoT	BGInfo[4];
-	SnesRenderObj8T ObjLine[SNPPU_MAXOBJCHR];
+	/* AURORA_SUNSET_RIDERS_CRC_OBJ128_V2_ARRAY_20260825 */
+	SnesRenderObj8T ObjLine[AURORA_SUNSET_RIDERS_OBJ_FETCH_MAX];
 	Int32 nObjLine;
 	const SnesPPURegsT *pRegs = m_pPPU->GetRegs();
 	/* AURORA_SAFE_CODE_PERF_V1_PPU
@@ -1588,6 +1595,12 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 		Uint8 *list=m_ObjLine[iLine];
 		Int32 count=m_nObjLine[iLine];
 		Int32 budget=SNPPURenderGetObjTileBudget();
+		/* AURORA_SUNSET_RIDERS_CRC_OBJ128_V2_BUDGET_20260825
+		 * Diagnostic equivalent to Snes9x's raised MaxSpriteTilesPerLine:
+		 * bypass time-over only for the two exact Sunset Riders CRCs.
+		 * The existing m_ObjLine list still enforces max 32 OBJ/scanline. */
+		if (g_SnesCompatSunsetRidersObj128)
+			budget = AURORA_SUNSET_RIDERS_OBJ_FETCH_MAX;
 		/* AURORA_SAFE_HOTPATH_V4: when budget is the physical 34-tile limit, limiter
 		   pressure is inactive and the potential cache is intentionally ignored. */
 		if (budget<SNPPU_MAXOBJCHR && count>1 &&

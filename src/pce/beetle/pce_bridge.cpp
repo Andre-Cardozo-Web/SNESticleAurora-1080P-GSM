@@ -62,6 +62,11 @@ static bool s_HaveVideo = false;
 static Uint8 *s_pSramData = NULL;
 static Int32 s_SramBytes = 0;
 static unsigned s_SampleRate = 32000; /* AURORA_PCE_EXPERIMENTAL_V3 */
+/* AURORA_V17_SAFE_PERF_PCE_LIMITER_20260824
+ * Limiter settings are global menu state. Avoid two getters plus a
+ * core setter on every emulated frame when the values did not change. */
+static int s_AuroraLimiterLevel = -1;
+static int s_AuroraLimiterMode = -1;
 static const void *s_ContentData = NULL;
 static size_t s_ContentBytes = 0;
 static char s_ContentName[1024] = "game.pce";
@@ -525,7 +530,7 @@ bool PceBridge_LoadDisc(const char *path, const char *systemPath)
 void PceBridge_UnloadGame(void)
 {
     if (s_Initialized && s_GameLoaded) PCE_retro_unload_game();
-    s_GameLoaded=false;s_pInput=NULL;s_pMix=NULL;s_pSramData=NULL;s_SramBytes=0;s_VideoData=NULL;s_VideoW=s_VideoH=0;s_VideoPitch=0;s_HaveVideo=false;s_ContentData=NULL;s_ContentBytes=0;
+    s_GameLoaded=false;s_AuroraLimiterLevel=s_AuroraLimiterMode=-1;s_pInput=NULL;s_pMix=NULL;s_pSramData=NULL;s_SramBytes=0;s_VideoData=NULL;s_VideoW=s_VideoH=0;s_VideoPitch=0;s_HaveVideo=false;s_ContentData=NULL;s_ContentBytes=0;
 }
 void PceBridge_Reset(void){if(s_GameLoaded)PCE_retro_reset();}
 void PceBridge_SoftReset(void){if(s_GameLoaded)PCE_retro_reset();}
@@ -689,9 +694,17 @@ void PceBridge_RunFrame(Emu::SysInputT *input, CRenderSurface *target, CMixBuffe
     s_pMix = mix;
     s_HaveVideo = false;
 
-    PCE_AuroraSetSpriteLimiter(
-        (int)SNPPURenderGetObjLimitLevel(),
-        (int)SNPPURenderGetObjLimitMode());
+    {
+        const int limiterLevel = (int)SNPPURenderGetObjLimitLevel();
+        const int limiterMode = (int)SNPPURenderGetObjLimitMode();
+        if (limiterLevel != s_AuroraLimiterLevel ||
+            limiterMode != s_AuroraLimiterMode)
+        {
+            PCE_AuroraSetSpriteLimiter(limiterLevel, limiterMode);
+            s_AuroraLimiterLevel = limiterLevel;
+            s_AuroraLimiterMode = limiterMode;
+        }
+    }
 
     PCE_retro_run();
 
