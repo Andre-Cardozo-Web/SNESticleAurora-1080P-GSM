@@ -905,7 +905,7 @@ static void pdRenderToAurora(CRenderSurface *pTarget)
             {
                 for (x = 0; x < dstW; ++x)
                 {
-                    int sx = left + ((x * 2 + 1) / 3;
+                    int sx = left + ((x * 2 + 1) / 3);
                     out[x] = pdFetchRGBA(sx, sy, texW);
                 }
             }
