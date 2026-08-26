@@ -46,6 +46,7 @@ static bool s_Initialized = false;
 static bool s_GameLoaded  = false;
 static bool s_DutySwap    = false;
 static bool s_TurboPhase  = false;
+static bool s_SkipVideoNext = false; /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 /* AURORA_CONTROLLER_OPTIONS_V2: Max/Half/Quarter cadence. */
 static unsigned s_TurboSpeedShift = 0;
 static uint32_t s_TurboFrame = 0;
@@ -126,6 +127,7 @@ static void qResetTransient(void)
     qResetDirectVideo();
     s_TurboPhase = false;
     s_TurboFrame = 0;
+    s_SkipVideoNext = false;
     s_LastSpriteScanlineLimit = -1;
     s_LastSpriteScreenLimit = -1;
 }
@@ -521,10 +523,18 @@ void QuicknesBridge_SetTurboSpeed(unsigned speedShift)
     }
 }
 
+void QuicknesBridge_SetSkipVideo(bool skip)
+{
+    s_SkipVideoNext = skip;
+}
+
 void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
                              CRenderSurface *pTarget,
                              CMixBuffer *pMixBuf)
 {
+    const bool skipVideo = s_SkipVideoNext;
+    s_SkipVideoNext = false;
+
     if (!s_GameLoaded || !s_pEmu)
         return;
 
@@ -570,7 +580,9 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
         p2 = qMapPad(pInput->uPad[1]);
     }
 
-    const char *err = s_pEmu->emulate_frame((int)p1, (int)p2);
+    const char *err = skipVideo
+        ? s_pEmu->emulate_skip_frame((int)p1, (int)p2)
+        : s_pEmu->emulate_frame((int)p1, (int)p2);
     if (err)
     {
         printf("[QuickNES/native] emulate_frame failed: %s\n", err);
@@ -578,6 +590,7 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
         return;
     }
 
+    if (!skipVideo)
     {
         const Nes_Emu::frame_t &frame = s_pEmu->frame();
         s_DirectReady =
@@ -594,6 +607,8 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
         else
             qRenderFrame(pTarget);
     }
+    /* On skip, DirectReady/serial and the fallback surface intentionally
+     * remain the last displayed frame. Audio is still drained. */
     qDrainAudio(pMixBuf);
 }
 

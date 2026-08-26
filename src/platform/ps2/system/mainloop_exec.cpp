@@ -7,7 +7,6 @@
 #include "file.h"
 #include "mainloop_exec.h"
 #include "mainloop_shared.h"
-#include "snppurender.h" /* AURORA_V85_FRAME_SKIP_RENDER_ONLY */
 
 /* MAINLOOP_SNESSTATEDEBUG lives in mainloop_shared.h (included above). */
 
@@ -42,10 +41,9 @@ Bool _ExecuteSnes(CRenderSurface *pSurface, CMixBuffer *pMixBuffer, Emu::SysInpu
             }
 
 		    PROF_ENTER("SnesExecuteFrame");
-			/* Skip presentation only; emulation still executes every frame. */
-			CRenderSurface *pFrameSurface =
-				(pSurface && SNPPURenderShouldRenderFrame()) ? pSurface : NULL;
-		    _pSystem->ExecuteFrame(pInput, pFrameSurface, pMixBuffer, eMode);
+			/* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2: caller owns the one-shot
+			 * NULL surface decision; CPU/SPC still execute every frame. */
+		    _pSystem->ExecuteFrame(pInput, pSurface, pMixBuffer, eMode);
 		    PROF_LEAVE("SnesExecuteFrame");
             #else
 

@@ -29,6 +29,7 @@ extern "C" {
 #include "snppurender.h"
 #include "nes/quicknes/quicknes_bridge.h" /* QUICKNES_FAMICLONE_HOOK */
 #include "sega/picodrive/picodrive_bridge.h"
+#include "mainloop_safe_frameskip.h" /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 
 /* mc0:/SNESticle (defined in mainloop_globals.cpp). */
 extern Char _SramPath[256];
@@ -50,7 +51,7 @@ void MainLoopSnesCoreSetPersisted(Int32 value);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 38
+#define VIDEOCFG_VERSION 39
 /* AURORA_PCE_VOLUME_V37_20260823
  * v37 appends pcevol only; every v36 field keeps the same offset.
  * Internal 200 == UI 100. */
@@ -120,8 +121,11 @@ typedef struct
 	Int32  smsfm;          /* 0=off, 1=Master System YM2413/OPLL */
 	Int32  pcevol;         /* v37: Beetle PCE Fast gain 0..400; UI /2 */
 	Int32  snescore;       /* v38: persisted SNES core selector */
+	Int32  safeframeskip;  /* v39: 0=Off, 1..9 sensitivity; default 1 */
+	Int32  ggzoom;         /* v39: GG 160x144 -> 240x216, uniform 3:2 */
 } VideoCfgT;
-#define VIDEOCFG_V37_BYTES (sizeof(VideoCfgT) - sizeof(Int32))
+#define VIDEOCFG_V38_BYTES (sizeof(VideoCfgT) - 2 * sizeof(Int32))
+#define VIDEOCFG_V37_BYTES (VIDEOCFG_V38_BYTES - sizeof(Int32))
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
    test build. Keep it readable so installing this build never resets the
@@ -406,7 +410,9 @@ void VideoSettingsSave(void)
 		(~SNPPURenderGetSoftwareLayerMask()) &
 		(SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
 		 SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
-	cfg.sneshackflags = SNPPURenderGetSoftwareHackFlags();
+	/* Retire the old fixed SNES frameskip bit; index 36 no longer owns it. */
+	cfg.sneshackflags =
+		SNPPURenderGetSoftwareHackFlags() & ~SNPPU_HACK_FRAME_SKIP;
 	cfg.compatflags = g_VideoCompatFlags & VIDEO_COMPAT_ALL;
 	cfg.objlimit = SNPPURenderGetObjLimitLevel();
 	cfg.sramdevice = MainLoopSramGetDevice();
@@ -427,6 +433,9 @@ void VideoSettingsSave(void)
 	cfg.smsfm = PicoDriveBridge_GetSmsFm() ? 1 : 0;
 	/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
 	cfg.snescore = MainLoopSnesCoreGetPersisted();
+	/* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2: v39 append-only fields. */
+	cfg.safeframeskip = MainLoopSafeFrameskipGetLevel();
+	cfg.ggzoom = PicoDriveBridge_GetGgZoom() ? 1 : 0;
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -444,6 +453,10 @@ void VideoSettingsLoad(void)
 
 	/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
 	MainLoopSnesCoreSetPersisted(0);
+	/* AURORA_SAFE_FRAMESKIP_LEVELS_GGZOOM_V1:
+	 * pre-v39/no saved v39 defaults to conservative level 1. */
+	MainLoopSafeFrameskipSetLevel(4);
+	PicoDriveBridge_SetGgZoom(false);
 	memset(&cfg, 0, sizeof(cfg));
 	SNPPURenderSetSoftwareLayerMask(
 		SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
@@ -465,6 +478,12 @@ void VideoSettingsLoad(void)
 		if (header.version == VIDEOCFG_VERSION)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+		}
+		else if (header.version == 38)
+		{
+			/* v38 is the exact prefix before the two v39 fields. */
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, VIDEOCFG_V38_BYTES);
+			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 37)
 		{
@@ -722,6 +741,11 @@ void VideoSettingsLoad(void)
 		cfg.smsfm = 0;
 	}
 
+	/* The fixed 1-in-2 SNES frameskip is retired in v39. Clear it even
+	 * when importing a v38 file that had the old Performance row On. */
+	if (loaded)
+		cfg.sneshackflags &= ~SNPPU_HACK_FRAME_SKIP;
+
 	/* New policy applies exactly once to every pre-v22 config. Once the
 	 * user saves v22, a manual Full selection remains persistent. */
 	if (loaded && header.version < 22)
@@ -751,6 +775,11 @@ void VideoSettingsLoad(void)
 		if (cfg.covers == 0 || cfg.covers == 1) CoverSetEnabled(cfg.covers ? TRUE : FALSE);
 		if (cfg.smscolorborder == 0 || cfg.smscolorborder == 1)
 			PicoDriveBridge_SetSmsColorBorder(cfg.smscolorborder != 0);
+		if (header.version == VIDEOCFG_VERSION &&
+		    cfg.safeframeskip >= 0 && cfg.safeframeskip <= 9)
+			MainLoopSafeFrameskipSetLevel(cfg.safeframeskip);
+		if (cfg.ggzoom == 0 || cfg.ggzoom == 1)
+			PicoDriveBridge_SetGgZoom(cfg.ggzoom != 0);
 		if (cfg.smsfm == 0 || cfg.smsfm == 1)
 			PicoDriveBridge_SetSmsFm(cfg.smsfm != 0);
 		if (cfg.bgmvol >= 0 && cfg.bgmvol <= 400) BgmSetVolume(cfg.bgmvol);
@@ -901,6 +930,15 @@ static const char *_VideoMmceStatus()
 	return "Not Found";
 }
 
+static const char *_VideoSafeFrameskipStatus()
+{
+    static const char *const names[10] =
+        { "Off", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+    Int32 level = MainLoopSafeFrameskipGetLevel();
+    if (level < 0 || level > 9) level = 1;
+    return names[level];
+}
+
 static const char *_VideoFakeSRAMStatus()
 {
    switch (g_FakeSRAMSize)
@@ -980,12 +1018,6 @@ static const char *_VideoHackSpriteLimiterModeStatus()
 {
 	return SNPPURenderGetObjLimitMode() == SNPPU_OBJ_LIMIT_MODE_SCREEN
 		? "Per Screen" : "Per Scanline";
-}
-
-static const char *_VideoHackFrameSkipStatus()
-{
-	return (SNPPURenderGetSoftwareHackFlags() & SNPPU_HACK_FRAME_SKIP)
-		? "1" : "Off";
 }
 
 static const char *_VideoHackCpuOverclockStatus()
@@ -1139,6 +1171,10 @@ void CVideoScreen::Draw()
 	_VideoRow(vy, 5, m_iSelect, "Cover Art", CoverIsEnabled() ? "On" : "Off"); vy += 12;
 	_VideoRow(vy, 6, m_iSelect, "SMS VDP border",
 	          PicoDriveBridge_GetSmsColorBorder() ? "On" : "Off"); vy += 12;
+	_VideoRow(vy, 7, m_iSelect, "GG Zoom",
+	          PicoDriveBridge_GetGgZoom() ? "On" : "Off"); vy += 12;
+	_VideoRow(vy, 8, m_iSelect, "Safe Frameskip",
+	          _VideoSafeFrameskipStatus()); vy += 12;
 
 	}
 	else if (iPage == 1)
@@ -1230,8 +1266,6 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 			_VideoCompatAudioRpcStatus()); vy += 12;
 		_VideoRow(vy, 35, m_iSelect, "Audio Queue",
 			_VideoCompatAudioQueueStatus()); vy += 12;
-		_VideoRow(vy, 36, m_iSelect, "Frame Skip",
-			_VideoHackFrameSkipStatus()); vy += 12;
 		_VideoRow(vy, 37, m_iSelect, "MD rendering",
 			_VideoMdRenderingStatus()); vy += 12;
 
@@ -1285,14 +1319,25 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 
 	{
 		int lo, hi;
-		if (m_iSelect < 10)       { lo = 0;  hi = 6;  }
+		if (m_iSelect < 10)       { lo = 0;  hi = 8;  }
 		else if (m_iSelect < 20)  { lo = 10; hi = 19; }
 		else if (m_iSelect <= 30) { lo = 20; hi = 30; }
 		else if (m_iSelect < 40)  { lo = 31; hi = 37; }
 		else if (m_iSelect < 50)  { lo = 40; hi = 43; }
 		else                      { lo = 50; hi = 57; }
-		if (trigger & PAD_UP)    { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; }
-		if (trigger & PAD_DOWN)  { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; }
+		if (trigger & PAD_UP)
+		{
+			m_iSelect--;
+			if (m_iSelect < lo) m_iSelect = hi;
+			/* Keep retired index 36 unreachable without renumbering 37. */
+			if (m_iSelect == 36) m_iSelect = 35;
+		}
+		if (trigger & PAD_DOWN)
+		{
+			m_iSelect++;
+			if (m_iSelect > hi) m_iSelect = lo;
+			if (m_iSelect == 36) m_iSelect = 37;
+		}
 	}
 
 	if (trigger & PAD_LEFT)  dir = -1;
@@ -1346,6 +1391,18 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 			PicoDriveBridge_SetSmsColorBorder(
 				!PicoDriveBridge_GetSmsColorBorder());
 			break;
+		case 7: /* Game Gear exact 3:2 zoom, 160x144 -> 240x216 */
+			PicoDriveBridge_SetGgZoom(!PicoDriveBridge_GetGgZoom());
+			break;
+		case 8: /* Safe Frameskip sensitivity: Off, 1..9 */
+		{
+			Int32 level = MainLoopSafeFrameskipGetLevel();
+			level += (dir > 0) ? 1 : -1;
+			if (level > 9) level = 0;
+			if (level < 0) level = 9;
+			MainLoopSafeFrameskipSetLevel(level);
+			break;
+		}
 
 		case 50: /* Menu Music ON/OFF. */
 			BgmSetEnabled(!BgmIsEnabled());
@@ -1581,10 +1638,6 @@ case 17: /* Famiclone Audio */
 		case 35:
 			_VideoApplyCompatFlags(
 				g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_DEEP_Q);
-			break;
-		case 36:
-			SNPPURenderSetSoftwareHackFlags(
-				SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_FRAME_SKIP);
 			break;
 		case 37:
 			{ int v = PicoDriveBridge_GetRenderingMode() + dir; if (v < 0) v = 2; if (v > 2) v = 0; PicoDriveBridge_SetRenderingMode(v); }

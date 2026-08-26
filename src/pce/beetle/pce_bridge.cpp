@@ -49,6 +49,7 @@ size_t PCE_retro_get_memory_size(unsigned);
 void PCE_retro_get_system_av_info(struct retro_system_av_info *);
 /* AURORA_V15_MULTICORE_SPRITE_LIMIT_20260824: PS2-only renderer hook inside the Beetle fork. */
 void PCE_AuroraSetSpriteLimiter(int level, int mode);
+void PCE_AuroraSetSkipNextVideoFrame(int skip); /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 }
 
 static bool s_Initialized = false;
@@ -59,6 +60,9 @@ static const void *s_VideoData = NULL;
 static unsigned s_VideoW = 0, s_VideoH = 0;
 static size_t s_VideoPitch = 0;
 static bool s_HaveVideo = false;
+static bool s_SkipVideoNext = false;
+static bool s_SkipVideoActive = false;
+static bool s_PceDirectPixelsValid = false; /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 static Uint8 *s_pSramData = NULL;
 static Int32 s_SramBytes = 0;
 static unsigned s_SampleRate = 32000; /* AURORA_PCE_EXPERIMENTAL_V3 */
@@ -196,8 +200,12 @@ static bool pceEnvironment(unsigned cmd, void *data)
 
 static void pceVideoRefresh(const void *data, unsigned w, unsigned h, size_t pitch)
 {
+    /* A skipped Emulate() may still issue libretro video_cb with the
+     * old surface. Keep the last known frame/residency untouched. */
+    if (s_SkipVideoActive) return;
     if (!data || !w || !h || pitch < w * 2) { s_HaveVideo = false; return; }
     s_VideoData = data; s_VideoW = w; s_VideoH = h; s_VideoPitch = pitch; s_HaveVideo = true;
+    s_PceDirectPixelsValid = false;
 }
 
 static void pceAudioSample(int16_t l, int16_t r)
@@ -531,6 +539,7 @@ void PceBridge_UnloadGame(void)
 {
     if (s_Initialized && s_GameLoaded) PCE_retro_unload_game();
     s_GameLoaded=false;s_AuroraLimiterLevel=s_AuroraLimiterMode=-1;s_pInput=NULL;s_pMix=NULL;s_pSramData=NULL;s_SramBytes=0;s_VideoData=NULL;s_VideoW=s_VideoH=0;s_VideoPitch=0;s_HaveVideo=false;s_ContentData=NULL;s_ContentBytes=0;
+    s_SkipVideoNext=false;s_SkipVideoActive=false;s_PceDirectPixelsValid=false;
 }
 void PceBridge_Reset(void){if(s_GameLoaded)PCE_retro_reset();}
 void PceBridge_SoftReset(void){if(s_GameLoaded)PCE_retro_reset();}
@@ -561,6 +570,7 @@ static Uint32 s_PceDirectTexTBP = 0;
 void PceBridge_InvalidateGsResources(void)
 {
     s_PceDirectTexTBP = 0;
+    s_PceDirectPixelsValid = false;
 }
 
 bool PceBridge_CanDirectGsVideo(void)
@@ -605,6 +615,8 @@ bool PceBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     if (srcH > 240u)
         srcH = 240u;
 
+    if (s_PceDirectTexTBP != auroraOutBaseTBP)
+        s_PceDirectPixelsValid = false;
     s_PceDirectTexTBP = auroraOutBaseTBP;
 
     /* libretro's PCE surface is pitchPixels wide in memory.  Uploading the
@@ -618,10 +630,14 @@ bool PceBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     while ((1u << texLog2) < pitchPixels && texLog2 < 9u)
         ++texLog2;
 
-    GPPrimUploadTexture(
-        (int)s_PceDirectTexTBP, (int)texTBW,
-        0, 0, GS_PSMCT16,
-        (void *)src, (int)pitchPixels, (int)srcH);
+    if (!s_PceDirectPixelsValid)
+    {
+        GPPrimUploadTexture(
+            (int)s_PceDirectTexTBP, (int)texTBW,
+            0, 0, GS_PSMCT16,
+            (void *)src, (int)pitchPixels, (int)srcH);
+        s_PceDirectPixelsValid = true;
+    }
 
     GPPrimSetTex(
         s_PceDirectTexTBP, texTBW, texLog2, 8,
@@ -685,14 +701,28 @@ bool PceBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     return true;
 }
 
+void PceBridge_SetSkipVideo(bool skip)
+{
+    s_SkipVideoNext = skip;
+}
+
 void PceBridge_RunFrame(Emu::SysInputT *input, CRenderSurface *target, CMixBuffer *mix)
 {
+    const bool requestedSkip = s_SkipVideoNext;
+    s_SkipVideoNext = false;
+
     if (!s_GameLoaded)
         return;
 
+    /* Never skip before a valid previous image exists. Beetle itself
+     * normally protects its first frame for exactly this reason. */
+    const bool skipVideo = requestedSkip && s_HaveVideo && s_VideoData;
     s_pInput = input;
     s_pMix = mix;
-    s_HaveVideo = false;
+    if (!skipVideo)
+        s_HaveVideo = false;
+    s_SkipVideoActive = skipVideo;
+    PCE_AuroraSetSkipNextVideoFrame(skipVideo ? 1 : 0);
 
     {
         const int limiterLevel = (int)SNPPURenderGetObjLimitLevel();
@@ -707,9 +737,10 @@ void PceBridge_RunFrame(Emu::SysInputT *input, CRenderSurface *target, CMixBuffe
     }
 
     PCE_retro_run();
+    s_SkipVideoActive = false;
 
     /* V10: ordinary Beetle RGB565 geometry bypasses the RGBA32 surface. */
-    if (s_HaveVideo && !PceBridge_CanDirectGsVideo())
+    if (!skipVideo && s_HaveVideo && !PceBridge_CanDirectGsVideo())
         pceRender(target);
 
     if (s_pMix)

@@ -27,6 +27,8 @@ void PicoDriveBridge_SetRenderingMode(int mode);
 int  PicoDriveBridge_GetRenderingMode(void);
 void PicoDriveBridge_SetSmsColorBorder(bool enabled);
 bool PicoDriveBridge_GetSmsColorBorder(void);
+void PicoDriveBridge_SetGgZoom(bool enabled); /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
+bool PicoDriveBridge_GetGgZoom(void);
 void PicoDriveBridge_SetSmsFm(bool enabled);
 bool PicoDriveBridge_GetSmsFm(void);
 void PicoDriveBridge_SetAudioRate(int hz);

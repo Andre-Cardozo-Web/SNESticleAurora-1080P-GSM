@@ -18,6 +18,7 @@
 #include "mainloop_input.h"
 #include "mainloop_state.h"
 #include "mainloop_exec.h"
+#include "mainloop_safe_frameskip.h" /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 /* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
 #include "snppurender.h"
 #include "mainloop_iop.h"
@@ -269,6 +270,14 @@ Bool MainLoopProcess()
 
 			eMode = (NetInput.eGameState == NETPLAY_GAMESTATE_IDLE) ? Emu::System::MODE_ACCURATENONDETERMINISTIC : Emu::System::MODE_INACCURATEDETERMINISTIC;
 
+            /* Safe Frameskip is host-only. Never alter deterministic
+             * movie/netplay execution; Take() is still consumed below
+             * so no stale pending skip can leak out afterwards. */
+            const Bool bSafeFrameskipAllowed =
+                (NetInput.eGameState == NETPLAY_GAMESTATE_IDLE &&
+                 !s_pMovieClip->IsPlaying() &&
+                 !s_pMovieClip->IsRecording()) ? TRUE : FALSE;
+
             if (s_pMovieClip->IsRecording())
             {
                 if (!s_pMovieClip->RecordFrame(Input))
@@ -289,10 +298,14 @@ Bool MainLoopProcess()
                upload to the EE texture from here. */
             if (_pSystem == _pNes)
             {
+                const Bool bSafeSkipRequested = MainLoopSafeFrameskipTake();
+                const Bool bSafeSkip =
+                    (bSafeFrameskipAllowed && bSafeSkipRequested) ? TRUE : FALSE;
+                QuicknesBridge_SetSkipVideo(bSafeSkip ? true : false);
                 PROF_ENTER("NesExecuteFrame");
                 _pNes->ExecuteFrame(&Input, pSurface, pMixBuffer, eMode);
                 PROF_LEAVE("NesExecuteFrame");
-                if (!QuicknesBridge_CanDirectGsVideo())
+                if (!bSafeSkip && !QuicknesBridge_CanDirectGsVideo())
                 {
                     PROF_ENTER("NesTexUpload");
                     TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
@@ -417,6 +430,14 @@ Bool MainLoopProcess()
                     sPdPhase = 0;
                 }
 
+                Bool bSafeSkip = FALSE;
+                if (executeFrames > 0)
+                {
+                    const Bool bSafeSkipRequested = MainLoopSafeFrameskipTake();
+                    bSafeSkip =
+                        (bSafeFrameskipAllowed && bSafeSkipRequested) ? TRUE : FALSE;
+                }
+
                 PROF_ENTER("SegaExecuteFrame");
                 for (Int32 iPdFrame = 0;
                      iPdFrame < executeFrames;
@@ -426,9 +447,11 @@ Bool MainLoopProcess()
                      * In 60->50 conversion, the first of a two-frame burst is
                      * never displayed. CPU + audio still advance; only video
                      * rendering is skipped for that discarded frame. */
-                    PicoDriveBridge_SetSkipVideo(
+                    const Bool bCadenceDiscard =
                         (executeFrames > 1 &&
-                         iPdFrame + 1 < executeFrames) ? true : false);
+                         iPdFrame + 1 < executeFrames) ? TRUE : FALSE;
+                    PicoDriveBridge_SetSkipVideo(
+                        (bCadenceDiscard || bSafeSkip) ? true : false);
 
                     /* Sempre passe pSurface como fallback. No caminho direto
                      * ela não é tocada; se a geometria mudar durante retro_run,
@@ -443,7 +466,7 @@ Bool MainLoopProcess()
                 bDirectSega =
                     PicoDriveBridge_CanDirectGsVideo() ? TRUE : FALSE;
 
-                if (!bDirectSega && executeFrames > 0)
+                if (!bSafeSkip && !bDirectSega && executeFrames > 0)
                 {
                     PROF_ENTER("SegaTexUpload");
                     TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
@@ -452,11 +475,15 @@ Bool MainLoopProcess()
             }
             else if (_pSystem == _pPce)
             {
+                const Bool bSafeSkipRequested = MainLoopSafeFrameskipTake();
+                const Bool bSafeSkip =
+                    (bSafeFrameskipAllowed && bSafeSkipRequested) ? TRUE : FALSE;
+                PceBridge_SetSkipVideo(bSafeSkip ? true : false);
                 PROF_ENTER("PceExecuteFrame");
                 _pPce->ExecuteFrame(&Input, pSurface, pMixBuffer, eMode);
                 PROF_LEAVE("PceExecuteFrame");
                 /* AURORA_PCE_V10_DIRECT_PROCESS */
-                if (!PceBridge_CanDirectGsVideo())
+                if (!bSafeSkip && !PceBridge_CanDirectGsVideo())
                 {
                     PROF_ENTER("PceTexUploadFallback");
                     TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
@@ -474,13 +501,14 @@ Bool MainLoopProcess()
                     GSK_GetRefreshRate(&uRateNum, &uRateDen);
                     _AudMix->SetFrameRateRational(uRateNum, uRateDen);
                 }
-                /* Frame Skip=1 skips presentation only; core/audio still run. */
-                const Bool bRenderSnes9x = SNPPURenderShouldRenderFrame();
+                const Bool bSafeSkipRequested = MainLoopSafeFrameskipTake();
+                const Bool bSafeSkip =
+                    (bSafeFrameskipAllowed && bSafeSkipRequested) ? TRUE : FALSE;
                 PROF_ENTER("Snes9x2010ExecuteFrame");
                 _pSnes9x2010->ExecuteFrame(
-                    &Input, bRenderSnes9x ? pSurface : NULL, pMixBuffer, eMode);
+                    &Input, bSafeSkip ? NULL : pSurface, pMixBuffer, eMode);
                 PROF_LEAVE("Snes9x2010ExecuteFrame");
-                if (bRenderSnes9x &&
+                if (!bSafeSkip &&
                     !Snes9x2010Bridge_CanDirectGsVideo())
                 {
                     PROF_ENTER("Snes9x2010TexUpload");
@@ -508,7 +536,13 @@ Bool MainLoopProcess()
 						nSnesMouseY,
 						uSnesMouseButtons);
 				_SnesMouseWasActive = bSnesMouse;
-				_ExecuteSnes(pSurface, pMixBuffer, &Input, eMode);
+				{
+					const Bool bSafeSkipRequested = MainLoopSafeFrameskipTake();
+					const Bool bSafeSkip =
+						(bSafeFrameskipAllowed && bSafeSkipRequested) ? TRUE : FALSE;
+					_ExecuteSnes(bSafeSkip ? NULL : pSurface,
+					             pMixBuffer, &Input, eMode);
+				}
             }
 		    _iframetex^=1;
         }

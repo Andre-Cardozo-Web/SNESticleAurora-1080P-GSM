@@ -57,6 +57,7 @@ static int  s_AuroraRegion = SNES_FORCE_REGION_OFF;
 static bool s_VariablesChanged = false;
 static int  s_RenderingMode = 1; /* preferencia MD/32X: 0 Fast, 1 Good, 2 Accurate */
 static bool s_SmsColorBorder = true; /* VDP backdrop nas bordas do SMS */
+static bool s_GgZoom = false; /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 static bool s_SmsFm = false; /* Master System YM2413/OPLL */
 static int  s_AudioRate = 16000; /* AURORA_PD_POLISH_V3_20260820: follows Settings/Audio Frequency */
 static char s_AudioRateText[16] = "16000";
@@ -792,6 +793,7 @@ static void pdRenderToAurora(CRenderSurface *pTarget)
     int texW, texH, left, right, top, bottom;
     int srcW, srcH, dstW, dstH, dstX, dstY, cropX, cropY;
     int x, y;
+    bool ggZoom;
 
     if (!pTarget || !s_CoreTexture.Mem)
         return;
@@ -835,15 +837,23 @@ static void pdRenderToAurora(CRenderSurface *pTarget)
     }
 
     border = pdIsMasterSystem() ? pdSmsBorderRGBA() : 0xff000000u;
+    ggZoom = pdIsGameGear() && s_GgZoom &&
+             srcW == 160 && srcH == 144 &&
+             tw >= 240 && visH >= 216;
 
-    /* Vertical pixels are never rescaled. 224-line MD is centred 1:1 in the
-       240-line logical raster; SMS 192/224/240 and GG 144 follow the same rule. */
+    /* Normal modes stay 1:1 vertically. GG Zoom is the single exact
+     * exception: 160x144 -> 240x216 = 3/2 on BOTH axes. */
     cropY = srcH > (int)visH ? (srcH - (int)visH) / 2 : 0;
-    dstH = srcH > (int)visH ? (int)visH : srcH;
+    dstH = ggZoom ? 216 : (srcH > (int)visH ? (int)visH : srcH);
     dstY = ((int)visH - dstH) / 2;
 
     cropX = 0;
-    if (srcW == 320 && tw >= 256)
+    if (ggZoom)
+    {
+        dstW = 240;
+        dstX = ((int)tw - dstW) / 2;
+    }
+    else if (srcW == 320 && tw >= 256)
     {
         /* H40: exact 5 source pixels -> 4 logical pixels. This is an AREA
          * resample, not nearest-neighbour skipping, so the screen no longer
@@ -886,10 +896,20 @@ static void pdRenderToAurora(CRenderSurface *pTarget)
         for (x = dstX + dstW; x < (int)tw; ++x) dst[x] = border;
 
         {
-            int sy = top + cropY + (y - dstY);
+            int sy = ggZoom
+                   ? top + (((y - dstY) * 2 + 1) / 3)
+                   : top + cropY + (y - dstY);
             Uint32 *out = dst + dstX;
 
-            if (srcW == 320 && dstW == 256)
+            if (ggZoom)
+            {
+                for (x = 0; x < dstW; ++x)
+                {
+                    int sx = left + ((x * 2 + 1) / 3;
+                    out[x] = pdFetchRGBA(sx, sy, texW);
+                }
+            }
+            else if (srcW == 320 && dstW == 256)
             {
                 /* AURORA_PD_FAST_SHARP_240P_V2
                  * Nearest source-centre map for 320 -> 256.
@@ -1411,6 +1431,16 @@ bool PicoDriveBridge_GetSmsColorBorder(void)
     return s_SmsColorBorder;
 }
 
+void PicoDriveBridge_SetGgZoom(bool enabled)
+{
+    s_GgZoom = enabled;
+}
+
+bool PicoDriveBridge_GetGgZoom(void)
+{
+    return s_GgZoom;
+}
+
 void PicoDriveBridge_SetSmsFm(bool enabled)
 {
     if (s_SmsFm == enabled)
@@ -1749,7 +1779,7 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     int left, top;
     int srcW, srcH;
     int fbW, fbH, dstW, dstH, dstX, dstY;
-    int logicalX, logicalY;
+    int logicalX, logicalY, logicalW, logicalH;
     int presentTopLogical, presentTopPx, presentH;
     bool isMd;
     bool uploadPixels;
@@ -1871,9 +1901,16 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
          * - SMS 248 (1ª coluna mascarada): 8 px vazios à esquerda;
          * - GG 160x144: centralizado em 256x240;
          * - 480i/1080i preservam o antigo topo lógico Y=4. */
+        logicalW = srcW;
+        logicalH = srcH;
+        if (pdIsGameGear() && s_GgZoom && srcW == 160 && srcH == 144)
+        {
+            logicalW = 240;
+            logicalH = 216;
+        }
         logicalX = (pdIsMasterSystem() && srcW == 248)
-                 ? 8 : (256 - srcW) / 2;
-        logicalY = (240 - srcH) / 2;
+                 ? 8 : (256 - logicalW) / 2;
+        logicalY = (240 - logicalH) / 2;
 
         presentTopLogical = (fbH == 240) ? 0 : 4;
         presentTopPx =
@@ -1881,10 +1918,10 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
         presentH = fbH - presentTopPx;
 
         dstX = (fbW * logicalX + 128) / 256;
-        dstW = (fbW * srcW     + 128) / 256;
+        dstW = (fbW * logicalW + 128) / 256;
         dstY = presentTopPx +
                (presentH * logicalY + 120) / 240;
-        dstH = (presentH * srcH + 120) / 240;
+        dstH = (presentH * logicalH + 120) / 240;
 
         backdrop = pdScaleDirectColor(
             pdIsMasterSystem() ? pdSmsBorderRGBA() : 0xff000000u,

@@ -14,6 +14,7 @@ bool PceBridge_LoadDisc(const char *pPath, const char *pSystemPath);
 void PceBridge_UnloadGame(void);
 void PceBridge_Reset(void);
 void PceBridge_SoftReset(void);
+void PceBridge_SetSkipVideo(bool skip); /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 void PceBridge_RunFrame(Emu::SysInputT *pInput, CRenderSurface *pTarget, CMixBuffer *pMixBuf);
 int PceBridge_GetStateSize(void);
 int PceBridge_SaveState(void *pData, int nBytes);

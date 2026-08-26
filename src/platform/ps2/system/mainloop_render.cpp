@@ -14,6 +14,7 @@
 #include "mainloop_shared.h"
 #include "mainloop_ui.h"
 #include "mainloop_bgm.h"
+#include "mainloop_safe_frameskip.h" /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 #include "sega/picodrive/picodrive_bridge.h"
 /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
 #include "nes/quicknes/quicknes_bridge.h"
@@ -58,6 +59,190 @@ extern "C" {
 
 
 static Uint32 _uVblankCycle;
+
+/* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2
+ * Robust host-cadence detector. The cheap/menu path teaches a rolling
+ * 3-sample median, so one abnormally short or long flip can never poison the
+ * reference period. Once calibrated, gameplay contributes only healthy
+ * single-VBlank samples; missed VBlanks are detected but never learned.
+ *
+ * Level 0 disables recovery; level 1 keeps the original >1.50x threshold,
+ * while levels 2..9 lower it gradually to >1.30x. 1.30x remains above the
+ * 1.25x healthy-sample ceiling. No level can skip two frames in a row. */
+static Int32  s_SafeFrameskipLevel = 1;
+static Bool   s_SafeFrameskipPending = FALSE;
+static Bool   s_SafeFrameskipMustRender = FALSE;
+static Bool   s_SafeFrameskipWasGameplay = FALSE;
+static Uint32 s_SafeFrameskipLastFlip = 0;
+static Uint32 s_SafeFrameskipPeriod = 0;
+static Uint32 s_SafeFrameskipSamples[3] = { 0, 0, 0 };
+static Uint32 s_SafeFrameskipSampleCount = 0;
+static Uint32 s_SafeFrameskipSamplePos = 0;
+
+static Uint32 _MainLoopSafeFrameskipMedian3(Uint32 a, Uint32 b, Uint32 c)
+{
+    if (a > b) { const Uint32 x = a; a = b; b = x; }
+    if (b > c) { const Uint32 x = b; b = c; c = x; }
+    if (a > b) { const Uint32 x = a; a = b; b = x; }
+    return b;
+}
+
+static Uint32 _MainLoopSafeFrameskipThresholdPermille(void)
+{
+    Int32 level = s_SafeFrameskipLevel;
+    if (level < 1) level = 1;
+    if (level > 9) level = 9;
+    return 1500u - (Uint32)(level - 1) * 25u;
+}
+
+static void _MainLoopSafeFrameskipLearn(Uint32 delta, Bool gameplay)
+{
+    if (delta == 0)
+        return;
+
+    if (s_SafeFrameskipPeriod != 0)
+    {
+        if (gameplay)
+        {
+            /* Gameplay may refine only a healthy single-VBlank sample. */
+            if ((Uint64)delta * 4u < (Uint64)s_SafeFrameskipPeriod * 3u ||
+                (Uint64)delta * 4u > (Uint64)s_SafeFrameskipPeriod * 5u)
+                return;
+        }
+        else
+        {
+            /* Menu follows PAL/NTSC drift (20%) but rejects obvious
+             * half/double-VBlank scheduling noise. */
+            if ((Uint64)delta * 3u < (Uint64)s_SafeFrameskipPeriod * 2u ||
+                (Uint64)delta * 2u > (Uint64)s_SafeFrameskipPeriod * 3u)
+                return;
+        }
+    }
+
+    s_SafeFrameskipSamples[s_SafeFrameskipSamplePos] = delta;
+    s_SafeFrameskipSamplePos = (s_SafeFrameskipSamplePos + 1u) % 3u;
+    if (s_SafeFrameskipSampleCount < 3u)
+        ++s_SafeFrameskipSampleCount;
+
+    if (s_SafeFrameskipSampleCount == 1u)
+        s_SafeFrameskipPeriod = s_SafeFrameskipSamples[0];
+    else if (s_SafeFrameskipSampleCount == 2u)
+        s_SafeFrameskipPeriod = (Uint32)(
+            ((Uint64)s_SafeFrameskipSamples[0] +
+             (Uint64)s_SafeFrameskipSamples[1]) / 2u);
+    else
+        s_SafeFrameskipPeriod = _MainLoopSafeFrameskipMedian3(
+            s_SafeFrameskipSamples[0],
+            s_SafeFrameskipSamples[1],
+            s_SafeFrameskipSamples[2]);
+}
+
+Int32 MainLoopSafeFrameskipGetLevel(void)
+{
+    return s_SafeFrameskipLevel;
+}
+
+void MainLoopSafeFrameskipSetLevel(Int32 level)
+{
+    if (level < 0) level = 0;
+    if (level > 9) level = 9;
+    s_SafeFrameskipLevel = level;
+    s_SafeFrameskipPending = FALSE;
+    s_SafeFrameskipMustRender = FALSE;
+}
+
+Bool MainLoopSafeFrameskipGetEnabled(void)
+{
+    return s_SafeFrameskipLevel > 0 ? TRUE : FALSE;
+}
+
+void MainLoopSafeFrameskipSetEnabled(Bool enabled)
+{
+    if (!enabled)
+        MainLoopSafeFrameskipSetLevel(0);
+    else if (s_SafeFrameskipLevel <= 0)
+        MainLoopSafeFrameskipSetLevel(1);
+}
+
+Bool MainLoopSafeFrameskipTake(void)
+{
+    if (s_SafeFrameskipLevel <= 0)
+        return FALSE;
+
+    /* A safe skip always buys at least one mandatory rendered frame. */
+    if (s_SafeFrameskipMustRender)
+    {
+        s_SafeFrameskipMustRender = FALSE;
+        return FALSE;
+    }
+
+    if (!s_SafeFrameskipPending)
+        return FALSE;
+
+    s_SafeFrameskipPending = FALSE;
+    s_SafeFrameskipMustRender = TRUE;
+    return TRUE;
+}
+
+static void _MainLoopSafeFrameskipAfterFlip(void)
+{
+    const Uint32 now = ProfCtrGetCycle();
+    const Bool gameplay =
+        (!_bMenu && _pSystem && !_MainLoop_BlackScreen) ? TRUE : FALSE;
+
+    if (s_SafeFrameskipLastFlip != 0)
+    {
+        const Uint32 delta = now - s_SafeFrameskipLastFlip;
+
+        if (delta != 0)
+        {
+            const Uint32 thresholdPermille = _MainLoopSafeFrameskipThresholdPermille();
+            const Bool discontinuity =
+                (s_SafeFrameskipPeriod != 0 &&
+                 (Uint64)delta > (Uint64)s_SafeFrameskipPeriod * 4u)
+                ? TRUE : FALSE;
+
+            if (discontinuity)
+            {
+                /* A pause/debugger/IO stall is not recoverable video debt. */
+                s_SafeFrameskipPending = FALSE;
+                s_SafeFrameskipMustRender = FALSE;
+            }
+            else
+            {
+                _MainLoopSafeFrameskipLearn(delta, gameplay);
+
+                if (s_SafeFrameskipLevel > 0 && gameplay &&
+                    s_SafeFrameskipWasGameplay &&
+                    s_SafeFrameskipSampleCount >= 3u &&
+                    s_SafeFrameskipPeriod != 0 &&
+                    (Uint64)delta * 1000u >
+                    (Uint64)s_SafeFrameskipPeriod * thresholdPermille)
+                {
+                    s_SafeFrameskipPending = TRUE;
+                }
+                else if (gameplay && s_SafeFrameskipPending &&
+                         s_SafeFrameskipPeriod != 0 &&
+                         (Uint64)delta * 1000u <=
+                         (Uint64)s_SafeFrameskipPeriod * thresholdPermille)
+                {
+                    /* If an intervening host VBlank already recovered the
+                     * schedule, preserve the next real emulation frame. */
+                    s_SafeFrameskipPending = FALSE;
+                }
+            }
+        }
+    }
+
+    s_SafeFrameskipLastFlip = now;
+    s_SafeFrameskipWasGameplay = gameplay;
+
+    if (s_SafeFrameskipLevel <= 0 || !gameplay)
+    {
+        s_SafeFrameskipPending = FALSE;
+        s_SafeFrameskipMustRender = FALSE;
+    }
+}
 
 void MainLoopRender()
 {
@@ -459,6 +644,7 @@ void MainLoopRender()
     if ( (_iFrame&15)==0)   _uVblankCycle = ProfCtrGetCycle();
     GSK_SyncFlip();
     if ( (_iFrame&15)==0)   _uVblankCycle = ProfCtrGetCycle() - _uVblankCycle;
+    _MainLoopSafeFrameskipAfterFlip();
     PROF_LEAVE("WaitVBlank");
 
     /* AURORA_AUDIO_FAILSOFT_POSTVBLANK_V1
