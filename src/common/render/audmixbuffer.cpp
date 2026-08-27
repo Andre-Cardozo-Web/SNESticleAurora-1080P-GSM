@@ -1000,5 +1000,62 @@ void AudMixBuffer::OutputSamplesMono(Int16 *pSamples, Int32 nSamples)
         return;
     }
 
+    /* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: mono arbitrary-rate fast path (FDS is 32050 Hz). */
+    if (pSamples && nSamples > 0 && m_uSampleRate != 32000)
+    {
+        if (m_uSampleRate == 48000)
+        {
+            if (m_nOutSamples + nSamples <= AUDMIXBUFFER_MAXENQUEUE)
+            {
+                memcpy(m_OutData[0] + m_nOutSamples, pSamples, (size_t)nSamples * sizeof(Int16));
+                memcpy(m_OutData[1] + m_nOutSamples, pSamples, (size_t)nSamples * sizeof(Int16));
+                m_nOutSamples += nSamples;
+            }
+            return;
+        }
+        if (!m_bLinearHavePrev || m_iLinearPrev[0] == m_iLinearPrev[1])
+        {
+            Int32 i = 0;
+            if (!m_bLinearHavePrev)
+            {
+                m_iLinearPrev[0] = m_iLinearPrev[1] = pSamples[0];
+                m_uLinearResamplePhase = 0;
+                m_bLinearHavePrev = TRUE;
+                i = 1;
+            }
+            for (; i < nSamples; ++i)
+            {
+                Int32 s0 = m_iLinearPrev[0], s1 = pSamples[i];
+                if (m_uSampleRate == 16000)
+                {
+                    Int16 v;
+                    if (m_nOutSamples + 3 > AUDMIXBUFFER_MAXENQUEUE) break;
+                    v=(Int16)s0; m_OutData[0][m_nOutSamples]=m_OutData[1][m_nOutSamples++]=v;
+                    v=(Int16)((2*s0+s1)/3); m_OutData[0][m_nOutSamples]=m_OutData[1][m_nOutSamples++]=v;
+                    v=(Int16)((s0+2*s1)/3); m_OutData[0][m_nOutSamples]=m_OutData[1][m_nOutSamples++]=v;
+                }
+                else if (m_uSampleRate == 24000)
+                {
+                    Int16 v;
+                    if (m_nOutSamples + 2 > AUDMIXBUFFER_MAXENQUEUE) break;
+                    v=(Int16)s0; m_OutData[0][m_nOutSamples]=m_OutData[1][m_nOutSamples++]=v;
+                    v=(Int16)((s0+s1)/2); m_OutData[0][m_nOutSamples]=m_OutData[1][m_nOutSamples++]=v;
+                }
+                else
+                {
+                    while (m_uLinearResamplePhase < 48000U && m_nOutSamples < AUDMIXBUFFER_MAXENQUEUE)
+                    {
+                        Int32 frac=(Int32)((m_uLinearResamplePhase*32768U)/48000U);
+                        Int16 v=(Int16)(s0+(((s1-s0)*frac)>>15));
+                        m_OutData[0][m_nOutSamples]=m_OutData[1][m_nOutSamples++]=v;
+                        m_uLinearResamplePhase += m_uSampleRate;
+                    }
+                    if (m_uLinearResamplePhase >= 48000U) m_uLinearResamplePhase -= 48000U;
+                }
+                m_iLinearPrev[0] = m_iLinearPrev[1] = s1;
+            }
+            return;
+        }
+    }
     OutputSamplesStereo(pSamples, pSamples, nSamples);
 }

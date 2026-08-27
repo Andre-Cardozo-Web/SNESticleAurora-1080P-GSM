@@ -18,10 +18,12 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8").replace("\r\n", "\n")
 
 
+# AURORA_FCEUMM_FDS_GENERATOR_COMPAT_V8_1_20260827
 def replace_once(text: str, old: str, new: str, label: str) -> str:
-    count = text.count(old)
-    if count != 1:
-        fail(f"{label}: expected anchor exactly once, found {count}")
+    if new in text:
+        return text
+    if old not in text:
+        fail(f"{label}: expected anchor not found")
     return text.replace(old, new, 1)
 
 
@@ -197,6 +199,55 @@ def patch_fceu(text: str) -> str:
         "src/fceu.c pruned MMC5/NSF linker stubs",
     )
 
+    # AURORA_FCEUMM_FDS_LOADER_FIX_V2_20260826
+    text = replace_once(
+        text,
+        "FCEUGI *GameInfo = NULL;\n",
+        "FCEUGI *GameInfo = NULL;\n"
+        "extern void aurora_fds_trace(const char *stage);\n",
+        "src/fceu.c Aurora FDS trace extern",
+    )
+    text = replace_once(
+        text,
+        "\tGameInfo = malloc(sizeof(FCEUGI));\n"
+        "\tmemset(GameInfo, 0, sizeof(FCEUGI));\n",
+        "\taurora_fds_trace(\"core:FCEUI_LoadGame begin\");\n"
+        "\tGameInfo = malloc(sizeof(FCEUGI));\n"
+        "\tif (!GameInfo) {\n"
+        "\t\taurora_fds_trace(\"core:GameInfo malloc FAILED\");\n"
+        "\t\treturn 0;\n"
+        "\t}\n"
+        "\tmemset(GameInfo, 0, sizeof(FCEUGI));\n",
+        "src/fceu.c GameInfo allocation guard",
+    )
+    text = replace_once(
+        text,
+        "\tfp = FCEU_fopen(name, ipsfn, \"rb\", 0);\n"
+        "\tfree(ipsfn);\n\n"
+        "\tif (!fp) {\n",
+        "\taurora_fds_trace(\"core:opening FDS content\");\n"
+        "\tfp = FCEU_fopen(name, ipsfn, \"rb\", 0);\n"
+        "\tfree(ipsfn);\n\n"
+        "\tif (!fp) {\n"
+        "\t\taurora_fds_trace(\"core:FCEU_fopen content FAILED\");\n",
+        "src/fceu.c content fopen trace",
+    )
+    text = replace_once(
+        text,
+        "\tFCEU_ResetVidSys();\n"
+        "\t/* AURORA_FCEUMM_FDS_V0_6_LEAN_LOAD: FDS has no movie/cheat/Genie frontend. */\n"
+        "\tPowerNES();\n"
+        "\tFCEUSS_CheckStates();\n",
+        "\taurora_fds_trace(\"core:FDS loader returned success\");\n"
+        "\tFCEU_ResetVidSys();\n"
+        "\t/* AURORA_FCEUMM_FDS_V0_6_LEAN_LOAD: FDS has no movie/cheat/Genie frontend. */\n"
+        "\taurora_fds_trace(\"core:PowerNES begin\");\n"
+        "\tPowerNES();\n"
+        "\taurora_fds_trace(\"core:PowerNES done\");\n"
+        "\tFCEUSS_CheckStates();\n",
+        "src/fceu.c post-load/PowerNES trace",
+    )
+
     for marker in (
         "AURORA_FCEUMM_FDS_V0_6_FDS_ONLY_LOADER",
         "AURORA_FCEUMM_FDS_V0_6_NO_COPYFAMI",
@@ -282,6 +333,226 @@ def patch_state(text: str) -> str:
     for bad in ("FCEUMOV_", "FCEUnetplay", "FCEUNET_"):
         if bad in text:
             fail(f"src/state.c retained forbidden runtime reference: {bad}")
+    return text
+
+
+
+def patch_file(text: str) -> str:
+    # AURORA_FCEUMM_FDS_LOADER_FIX_V2_20260826
+    text = replace_once(
+        text,
+        "\tif (strchr(mode, 'r'))\n"
+        "\t\tipsfile = FCEUD_UTF8fopen(ipsfn, \"rb\");\n",
+        "\t/* AURORA_FCEUMM_FDS_LOADER_FIX_V2_20260826_NULL_IPS */\n"
+        "\tif (strchr(mode, 'r') && ipsfn && ipsfn[0])\n"
+        "\t\tipsfile = FCEUD_UTF8fopen(ipsfn, \"rb\");\n",
+        "src/file.c NULL IPS fopen guard",
+    )
+    text = replace_once(
+        text,
+        "\tfceufp = (FCEUFILE*)malloc(sizeof(FCEUFILE));\n\n",
+        "\tfceufp = (FCEUFILE*)malloc(sizeof(FCEUFILE));\n"
+        "\tif (!fceufp)\n"
+        "\t\treturn 0;\n\n",
+        "src/file.c FCEUFILE allocation guard",
+    )
+    return text
+
+
+def patch_fds(text: str) -> str:
+    # AURORA_FCEUMM_FDS_LOADER_FIX_V2_20260826
+    text = replace_once(
+        text,
+        '#include "netplay.h"\n',
+        '#include "netplay.h"\n\n'
+        'extern void aurora_fds_trace(const char *stage);\n',
+        "src/fds.c trace extern",
+    )
+    text = replace_once(
+        text,
+        "int FDSLoad(const char *name, FCEUFILE *fp) {\n"
+        "\tFILE *zp;\n",
+        "int FDSLoad(const char *name, FCEUFILE *fp) {\n"
+        "\tFILE *zp;\n"
+        "\taurora_fds_trace(\"core:FDSLoad begin\");\n",
+        "src/fds.c load begin trace",
+    )
+    text = replace_once(
+        text,
+        '\tif (!(zp = FCEUD_UTF8fopen(fn, "rb"))) {\n',
+        '\taurora_fds_trace("core:FDS BIOS fopen begin");\n'
+        '\tif (!(zp = FCEUD_UTF8fopen(fn, "rb"))) {\n'
+        '\t\taurora_fds_trace("core:FDS BIOS fopen FAILED");\n',
+        "src/fds.c BIOS fopen trace",
+    )
+    text = replace_once(
+        text,
+        "\tFDSBIOSsize = 8192;\n"
+        "\tFDSBIOS = (uint8*)FCEU_gmalloc(FDSBIOSsize);\n"
+        "\tSetupCartPRGMapping(0, FDSBIOS, FDSBIOSsize, 0);\n",
+        "\tFDSBIOSsize = 8192;\n"
+        "\tFDSBIOS = (uint8*)FCEU_malloc(FDSBIOSsize);\n"
+        "\tif (!FDSBIOS) {\n"
+        "\t\taurora_fds_trace(\"core:FDS BIOS malloc FAILED\");\n"
+        "\t\tfclose(zp);\n"
+        "\t\treturn 0;\n"
+        "\t}\n"
+        "\tSetupCartPRGMapping(0, FDSBIOS, FDSBIOSsize, 0);\n",
+        "src/fds.c BIOS allocation guard",
+    )
+    text = replace_once(
+        text,
+        "\tfclose(zp);\n\n"
+        "\tFCEU_fseek(fp, 0, SEEK_SET);\n",
+        "\tfclose(zp);\n"
+        "\taurora_fds_trace(\"core:FDS BIOS read OK\");\n\n"
+        "\tFCEU_fseek(fp, 0, SEEK_SET);\n",
+        "src/fds.c BIOS read trace",
+    )
+    text = replace_once(
+        text,
+        "\tif (!SubLoad(fp)) {\n",
+        "\taurora_fds_trace(\"core:FDS image parse begin\");\n"
+        "\tif (!SubLoad(fp)) {\n"
+        "\t\taurora_fds_trace(\"core:FDS image parse FAILED\");\n",
+        "src/fds.c SubLoad trace",
+    )
+
+    old_backups = (
+        "\t\tint x;\n"
+        "\t\tfor (x = 0; x < TotalSides; x++) {\n"
+        "\t\t\tdiskdatao[x] = (uint8*)FCEU_malloc(65500);\n"
+        "\t\t\tmemcpy(diskdatao[x], diskdata[x], 65500);\n"
+        "\t\t}\n\n"
+        "\t\tif ((tp = FCEU_fopen(fn, 0, \"rb\", 0))) {\n"
+    )
+    new_backups = (
+        "\t\tint x;\n"
+        "\t\taurora_fds_trace(\"core:FDS image parse OK; backup alloc begin\");\n"
+        "\t\tfor (x = 0; x < TotalSides; x++) {\n"
+        "\t\t\tdiskdatao[x] = (uint8*)FCEU_malloc(65500);\n"
+        "\t\t\tif (!diskdatao[x]) {\n"
+        "\t\t\t\tint y;\n"
+        "\t\t\t\taurora_fds_trace(\"core:FDS side backup malloc FAILED\");\n"
+        "\t\t\t\tfor (y = 0; y < x; y++) { free(diskdatao[y]); diskdatao[y] = 0; }\n"
+        "\t\t\t\tFreeFDSMemory();\n"
+        "\t\t\t\tif (FDSBIOS) free(FDSBIOS);\n"
+        "\t\t\t\tFDSBIOS = NULL;\n"
+        "\t\t\t\tfree(fn);\n"
+        "\t\t\t\treturn 0;\n"
+        "\t\t\t}\n"
+        "\t\t\tmemcpy(diskdatao[x], diskdata[x], 65500);\n"
+        "\t\t}\n"
+        "\t\taurora_fds_trace(\"core:FDS side backups OK; aux probe begin\");\n\n"
+        "\t\tif ((tp = FCEU_fopen(fn, 0, \"rb\", 0))) {\n"
+    )
+    text = replace_once(text, old_backups, new_backups, "src/fds.c diskdatao guard")
+
+    text = replace_once(
+        text,
+        "\t\tfree(fn);\n"
+        "\t}\n\n"
+        "\tGameInfo->type = GIT_FDS;\n",
+        "\t\tfree(fn);\n"
+        "\t}\n"
+        "\taurora_fds_trace(\"core:FDS aux probe done\");\n\n"
+        "\tGameInfo->type = GIT_FDS;\n",
+        "src/fds.c aux probe trace",
+    )
+
+    text = replace_once(
+        text,
+        "\tCHRRAMSize = 8192;\n"
+        "\tCHRRAM = (uint8*)FCEU_gmalloc(CHRRAMSize);\n"
+        "\tmemset(CHRRAM, 0, CHRRAMSize);\n",
+        "\tCHRRAMSize = 8192;\n"
+        "\tCHRRAM = (uint8*)FCEU_malloc(CHRRAMSize);\n"
+        "\tif (!CHRRAM) {\n"
+        "\t\taurora_fds_trace(\"core:FDS CHRRAM malloc FAILED\");\n"
+        "\t\tfor (x = 0; x < TotalSides; x++) if (diskdatao[x]) { free(diskdatao[x]); diskdatao[x] = 0; }\n"
+        "\t\tFreeFDSMemory();\n"
+        "\t\tif (FDSBIOS) free(FDSBIOS);\n"
+        "\t\tFDSBIOS = NULL;\n"
+        "\t\treturn 0;\n"
+        "\t}\n"
+        "\tmemset(CHRRAM, 0, CHRRAMSize);\n",
+        "src/fds.c CHRRAM guard",
+    )
+    text = replace_once(
+        text,
+        "\tFDSRAMSize = 32768;\n"
+        "\tFDSRAM = (uint8*)FCEU_gmalloc(FDSRAMSize);\n"
+        "\tmemset(FDSRAM, 0, FDSRAMSize);\n",
+        "\tFDSRAMSize = 32768;\n"
+        "\tFDSRAM = (uint8*)FCEU_malloc(FDSRAMSize);\n"
+        "\tif (!FDSRAM) {\n"
+        "\t\taurora_fds_trace(\"core:FDS FDSRAM malloc FAILED\");\n"
+        "\t\tif (CHRRAM) free(CHRRAM);\n"
+        "\t\tCHRRAM = NULL;\n"
+        "\t\tfor (x = 0; x < TotalSides; x++) if (diskdatao[x]) { free(diskdatao[x]); diskdatao[x] = 0; }\n"
+        "\t\tFreeFDSMemory();\n"
+        "\t\tif (FDSBIOS) free(FDSBIOS);\n"
+        "\t\tFDSBIOS = NULL;\n"
+        "\t\treturn 0;\n"
+        "\t}\n"
+        "\tmemset(FDSRAM, 0, FDSRAMSize);\n",
+        "src/fds.c FDSRAM guard",
+    )
+    text = replace_once(
+        text,
+        '\tFCEU_printf(" Sides: %d\\n\\n", TotalSides);\n\treturn 1;\n',
+        '\tFCEU_printf(" Sides: %d\\n\\n", TotalSides);\n'
+        '\taurora_fds_trace("core:FDSLoad success");\n'
+        '\treturn 1;\n',
+        "src/fds.c success trace",
+    )
+
+    # FDSClose leaked all FDS allocations if DiskWritten == 0.
+    start = text.index("void FDSClose(void) {\n")
+    end = len(text)
+    old_close = text[start:end]
+    new_close = """void FDSClose(void) {
+\tFILE *fp = NULL;
+\tint x;
+\tchar *fn = NULL;
+
+\taurora_fds_trace("core:FDSClose begin");
+
+\tif (DiskWritten) {
+\t\tfn = FCEU_MakeFName(FCEUMKF_FDS, 0, 0);
+\t\tif (fn)
+\t\t\tfp = FCEUD_UTF8fopen(fn, "wb");
+\t\tif (fp) {
+\t\t\tFCEU_printf("FDS Save \\"%s\\"\\n", fn);
+\t\t\tfor (x = 0; x < TotalSides; x++) {
+\t\t\t\tif (fwrite(diskdata[x], 1, 65500, fp) != 65500) {
+\t\t\t\t\tFCEU_PrintError("Error saving FDS image!");
+\t\t\t\t\tbreak;
+\t\t\t\t}
+\t\t\t}
+\t\t\tfclose(fp);
+\t\t}
+\t\tif (fn) free(fn);
+\t}
+
+\tfor (x = 0; x < 8; x++) {
+\t\tif (diskdatao[x]) {
+\t\t\tfree(diskdatao[x]);
+\t\t\tdiskdatao[x] = 0;
+\t\t}
+\t}
+\tFreeFDSMemory();
+\tif (FDSBIOS) free(FDSBIOS);
+\tFDSBIOS = NULL;
+\tif (FDSRAM) free(FDSRAM);
+\tFDSRAM = NULL;
+\tif (CHRRAM) free(CHRRAM);
+\tCHRRAM = NULL;
+\tDiskWritten = 0;
+\taurora_fds_trace("core:FDSClose done");
+}
+"""
+    text = text[:start] + new_close + text[end:]
     return text
 
 
@@ -437,8 +708,51 @@ static void fceu_init(const char * full_path) {
 
     text = replace_once(
         text,
-        "\tGameInfo = FCEUI_LoadGame(full_path);\n\temulator_set_input();\n",
+        "static void fceu_init(const char * full_path) {\n"
+        "\tFCEUI_Initialize();\n"
+        "\tFCEUI_SetBaseDirectory(aurora_system_directory);\n\n",
+        "/* AURORA_FCEUMM_FDS_LOADER_FIX_V2_20260826_TRACE */\n"
+        "/* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827: persistent trace retired after loader boot was proven. */\n"
+        "void aurora_fds_trace(const char *stage) {\n"
+        "\t(void)stage;\n"
+        "}\n\n"
+        "static void fceu_init(const char * full_path) {\n"
+        "\taurora_fds_trace(\"core:fceu_init begin\");\n"
+        "\tif (!FCEUI_Initialize()) {\n"
+        "\t\tGameInfo = NULL;\n"
+        "\t\taurora_fds_trace(\"core:FCEUI_Initialize FAILED\");\n"
+        "\t\treturn;\n"
+        "\t}\n"
+        "\taurora_fds_trace(\"core:FCEUI_Initialize OK\");\n"
+        "\tFCEUI_SetBaseDirectory(aurora_system_directory);\n\n",
+        "libretro initialize guard + trace",
+    )
+    text = replace_once(
+        text,
+        "\tFCEUI_SetSoundVolume(256);\n"
+        "\tFCEUI_Sound(32050);\n\n"
+        "\tGameInfo = FCEUI_LoadGame(full_path);\n",
+        "\tFCEUI_SetSoundVolume(256);\n"
+        "\tFCEUI_Sound(32050);\n"
+        "\taurora_fds_trace(\"core:sound configured\");\n\n"
+        "\taurora_fds_trace(\"core:FCEUI_LoadGame call\");\n"
         "\tGameInfo = FCEUI_LoadGame(full_path);\n"
+        "\taurora_fds_trace(GameInfo ? \"core:FCEUI_LoadGame returned OK\" : \"core:FCEUI_LoadGame returned FAIL\");\n",
+        "libretro load trace",
+    )
+
+    # AURORA_FCEUMM_FDS_LOADER_FIX_V2_1_20260827
+    # V2 already inserts a trace line between FCEUI_LoadGame() and
+    # emulator_set_input(), so match the instrumented form here.
+    text = replace_once(
+        text,
+        "\tGameInfo = FCEUI_LoadGame(full_path);\n"
+        "\taurora_fds_trace(GameInfo ? \"core:FCEUI_LoadGame returned OK\" : "
+        "\"core:FCEUI_LoadGame returned FAIL\");\n"
+        "\temulator_set_input();\n",
+        "\tGameInfo = FCEUI_LoadGame(full_path);\n"
+        "\taurora_fds_trace(GameInfo ? \"core:FCEUI_LoadGame returned OK\" : "
+        "\"core:FCEUI_LoadGame returned FAIL\");\n"
         "\tif (!GameInfo)\n"
         "\t\treturn;\n"
         "\temulator_set_input();\n",
@@ -482,34 +796,42 @@ static void fceu_init(const char * full_path) {
 static int aurora_skip_video = 0;
 
 void aurora_fds_set_skip_video(int skip) {
-\taurora_skip_video = skip ? 1 : 0;
+	aurora_skip_video = skip ? 1 : 0;
+}
+
+/* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827
+ * PS2/Aurora consumes FCEUmm's native 8-bit indexed XBuf and the existing
+ * 256-entry RGB555 palette directly. The GS performs palette lookup through
+ * a T8 texture + CLUT. This removes both software full-frame colour
+ * conversions from the normal FDS path.
+ */
+const uint8_t *aurora_fds_get_video_pixels(void) {
+	return XBuf;
+}
+
+const uint16_t *aurora_fds_get_video_palette(void) {
+	return palette;
 }
 
 void retro_run(void) {
-\tunsigned y, x;
-\tuint8_t *gfx;
-\tstatic uint16_t video_out[256 * 240];
-\tint32 ssize = 0;
-\tint skip_video = aurora_skip_video;
-\taurora_skip_video = 0;
+	unsigned y;
+	uint8_t *gfx;
+	int32 ssize = 0;
+	int skip_video = aurora_skip_video;
+	aurora_skip_video = 0;
 
-\tupdate_input();
+	update_input();
 
-\tFCEUI_Emulate(&gfx, &sound, &ssize, skip_video ? 1 : 0);
+	FCEUI_Emulate(&gfx, &sound, &ssize, skip_video ? 1 : 0);
 
-\tif (!skip_video) {
-\t\tgfx = XBuf;
-\t\tfor (y = 0; y < 240; y++)
-\t\t\tfor (x = 0; x < 256; x++, gfx++)
-\t\t\t\tvideo_out[y * 256 + x] = palette[*gfx];
+	/* No 8->16 software blit and no video_cb in the Aurora direct path.
+	 * XBuf/palette remain owned by FCEUmm and are read through the accessors
+	 * above after retro_run returns. */
 
-\t\tvideo_cb(video_out, 256, 240, 512);
-\t}
+	for (y = 0; y < ssize; y++)
+		sound[y] = (sound[y] << 16) | (sound[y] & 0xffff);
 
-\tfor (y = 0; y < ssize; y++)
-\t\tsound[y] = (sound[y] << 16) | (sound[y] & 0xffff);
-
-\taudio_batch_cb((const int16_t*)sound, ssize);
+	audio_batch_cb((const int16_t*)sound, ssize);
 }
 """
     text = replace_once(text, old_run, new_run, "libretro one-shot FDS video skip")
@@ -565,6 +887,7 @@ void retro_run(void) {
         "AURORA_FCEUMM_FDS_V0_6_NO_CART_SRAM",
         "AURORA_FCEUMM_FDS_V0_6_SYSTEM_BIOS",
         "AURORA_FCEUMM_FDS_V0_6_SAFE_SKIP",
+        "AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827",
         "AURORA_FCEUMM_FDS_V0_6_LOAD_RESULT",
         "AURORA_FCEUMM_FDS_V0_6_EXACT_AUDIO_RATE",
         "AURORA_FCEUMM_FDS_V0_6_STATE_SIZE_PER_GAME",
@@ -829,6 +1152,1922 @@ INPUTC *FCEU_InitJoyPad(int w) {
 """
 
 
+
+# AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827
+# Final pass over the generated FDS-only C overlays.
+def patch_v4_generated_libretro(text: str) -> str:
+    text = replace_once(
+        text,
+        "static uint32 JSReturn[2];\n",
+        "static uint32 JSReturn[2];\n"
+        "static uint8 aurora_direct_pad[2] = { 0, 0 };\n"
+        "static int32 aurora_audio_frames = 0;\n"
+        "extern void FCEUI_SetPaletteArray(uint8 *pal);\n",
+        "V4 direct pad/audio state",
+    )
+    old_update = """static void update_input(void) {
+\tunsigned i;
+\tunsigned char pad[2];
+
+\tpad[0] = 0;
+\tpad[1] = 0;
+
+\tpoll_cb();
+
+\tfor (i = 0; i < 8; i++) {
+\t\tpad[0] |= input_cb(0, RETRO_DEVICE_JOYPAD, 0, bindmap[i].retro) ? bindmap[i].nes : 0;
+\t\tpad[1] |= input_cb(1, RETRO_DEVICE_JOYPAD, 0, bindmap[i].retro) ? bindmap[i].nes : 0;
+\t}
+
+\t// This shouldn't matter. Why? Something very weird is going on.
+#if defined(__CELLOS_LV2__) || defined(_XBOX360) || defined(GEKKO) // <-- big endian
+\tJSReturn[0] = pad[0] | (pad[1] << 8);
+#else
+\tJSReturn[0] = pad[0];
+\tJSReturn[1] = pad[1];
+#endif
+}
+"""
+    new_update = """static void update_input(void) {
+\t/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
+#if defined(__CELLOS_LV2__) || defined(_XBOX360) || defined(GEKKO)
+\tJSReturn[0] = aurora_direct_pad[0] | (aurora_direct_pad[1] << 8);
+#else
+\tJSReturn[0] = aurora_direct_pad[0];
+\tJSReturn[1] = aurora_direct_pad[1];
+#endif
+}
+"""
+    text = replace_once(text, old_update, new_update, "V4 direct input")
+    anchor = """void aurora_fds_set_skip_video(int skip) {
+\taurora_skip_video = skip ? 1 : 0;
+}
+
+"""
+    extra = """void aurora_fds_set_skip_video(int skip) {
+\taurora_skip_video = skip ? 1 : 0;
+}
+
+void aurora_fds_set_pad_state(unsigned pad0, unsigned pad1) {
+\taurora_direct_pad[0] = (uint8)pad0;
+\taurora_direct_pad[1] = (uint8)pad1;
+}
+
+void aurora_fds_set_palette(const uint8 *rgb192) {
+\tFCEUI_SetPaletteArray((uint8 *)rgb192);
+}
+
+const int32 *aurora_fds_get_audio_mono(void) { return sound; }
+int aurora_fds_get_audio_frames(void) { return aurora_audio_frames; }
+
+"""
+    text = replace_once(text, anchor, extra, "V4 accessors")
+    text = replace_once(text,
+        "void retro_run(void) {\n\tunsigned y;\n\tuint8_t *gfx;\n",
+        "void retro_run(void) {\n\tuint8_t *gfx;\n",
+        "V4 retro_run index")
+    text = replace_once(text,
+        "\tfor (y = 0; y < ssize; y++)\n\t\tsound[y] = (sound[y] << 16) | (sound[y] & 0xffff);\n\n\taudio_batch_cb((const int16_t*)sound, ssize);\n}\n",
+        "\t/* Native mono WaveFinal is consumed directly by Aurora. */\n\taurora_audio_frames = ssize;\n}\n",
+        "V4 native mono audio")
+    return text
+
+
+def patch_v4_generated_video(text: str) -> str:
+    old = """int FCEU_InitVirtualVideo(void) {
+\tif (!XBuf)\t// Some driver code may allocate XBuf externally.
+\t\t\t\t// 256 bytes per scanline, * 240 scanline maximum, +8 for alignment,
+\t\tif (!(XBuf = (uint8*)(FCEU_malloc(256 * 256 + 8))))
+\t\t\treturn 0;
+\txbsave = XBuf;
+
+\tif (sizeof(uint8*) == 4) {
+\t\tuint32 m;
+\t\tm = (uint32)XBuf;
+\t\tm = (4 - m) & 3;
+\t\tXBuf += m;
+\t}
+\tmemset(XBuf, 128, 256 * 256);
+\treturn 1;
+}
+"""
+    new = """int FCEU_InitVirtualVideo(void) {
+\tif (!XBuf)
+\t\t/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: DMA-aligned T8 source. */
+\t\tif (!(XBuf = (uint8*)(FCEU_malloc(256 * 256 + 64))))
+\t\t\treturn 0;
+\txbsave = XBuf;
+\t{
+\t\tuint32 m = (uint32)XBuf;
+\t\tm = (64 - (m & 63)) & 63;
+\t\tXBuf += m;
+\t}
+\tmemset(XBuf, 128, 256 * 256);
+\treturn 1;
+}
+"""
+    text = replace_once(text, old, new, "V4 XBuf alignment")
+    text = replace_once(text,
+        """void FCEU_PutImageDummy(void) {
+\t/* AURORA_FCEUMM_FDS_V0_6_LEAN_VIDEO_DUMMY */
+\t#ifdef SHOWFPS
+\tShowFPS();
+\t#endif
+\tFCEU_DrawNTSCControlBars(XBuf);
+\tFCEU_DrawSaveStates(XBuf);
+\tif (howlong) howlong--;\t/* DrawMessage() */
+}
+""",
+        """void FCEU_PutImageDummy(void) {
+\t/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: Aurora owns the OSD. */
+\tif (howlong) howlong--;
+}
+""", "V4 dummy OSD")
+    text = replace_once(text,
+        """void FCEU_PutImage(void) {
+\t/* AURORA_FCEUMM_FDS_V0_6_LEAN_VIDEO */
+\t#ifdef SHOWFPS
+\tShowFPS();
+\t#endif
+\tFCEU_DrawSaveStates(XBuf);
+\tFCEU_DrawNTSCControlBars(XBuf);
+\tDrawMessage();
+\tFCEU_DrawInput(XBuf);
+}
+
+""",
+        """void FCEU_PutImage(void) {
+\t/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: no embedded core OSD. */
+\tif (howlong) howlong--;
+}
+
+""", "V4 image OSD")
+    return text
+
+
+# AURORA_FCEUMM_FDS_V5_CI_SMB_UPSTREAM_PERF_20260827
+# Behaviour-preserving hot paths adapted from current libretro-fceumm.
+def patch_v5_pputile(text: str) -> str:
+    old = """if (X1 >= 2) {
+\tuint8 *S = PALRAM;
+\tuint32 pixdata;
+
+\tpixdata = ppulut1[(pshift[0] >> (8 - XOffset)) & 0xFF] | ppulut2[(pshift[1] >> (8 - XOffset)) & 0xFF];
+
+\tpixdata |= ppulut3[XOffset | (atlatch << 3)];
+
+\tP[0] = S[pixdata & 0xF];
+\tpixdata >>= 4;
+\tP[1] = S[pixdata & 0xF];
+\tpixdata >>= 4;
+\tP[2] = S[pixdata & 0xF];
+\tpixdata >>= 4;
+\tP[3] = S[pixdata & 0xF];
+\tpixdata >>= 4;
+\tP[4] = S[pixdata & 0xF];
+\tpixdata >>= 4;
+\tP[5] = S[pixdata & 0xF];
+\tpixdata >>= 4;
+\tP[6] = S[pixdata & 0xF];
+\tpixdata >>= 4;
+\tP[7] = S[pixdata & 0xF];
+\tP += 8;
+}
+"""
+    new = """if (X1 >= 2) {
+\tuint32 pixdata;
+\tuint32 pair01, pair23;
+
+\tpixdata = ppulut1[(pshift[0] >> (8 - XOffset)) & 0xFF] | ppulut2[(pshift[1] >> (8 - XOffset)) & 0xFF];
+\tpixdata |= ppulut3[XOffset | (atlatch << 3)];
+
+\t/* AURORA_FCEUMM_FDS_V5_CI_SMB_UPSTREAM_PERF_20260827
+\t * Upstream a502ceaf: four 2-pixel LUT reads replace eight PALRAM
+\t * nibble gathers.  PS2 uses two aligned 32-bit stores instead of the
+\t * upstream unaligned 64-bit store, avoiding an R5900 alignment hazard. */
+\tpair01 = (uint32)fceu_bg_pair_lut[pixdata & 0xFF] |
+\t         ((uint32)fceu_bg_pair_lut[(pixdata >> 8) & 0xFF] << 16);
+\tpair23 = (uint32)fceu_bg_pair_lut[(pixdata >> 16) & 0xFF] |
+\t         ((uint32)fceu_bg_pair_lut[(pixdata >> 24) & 0xFF] << 16);
+\t*(uint32 *)(P + 0) = pair01;
+\t*(uint32 *)(P + 4) = pair23;
+\tP += 8;
+}
+"""
+    return replace_once(text, old, new, "V5 pputile pair LUT gather")
+
+
+def patch_v5_ppu(text: str) -> str:
+    count = text.count('#include "pputile.h"')
+    if count != 9:
+        fail(f"src/ppu.c pputile include count changed: {count}")
+    text = text.replace('#include "pputile.h"', '#include "pputile_fds.h"')
+
+    text = replace_once(
+        text,
+        "#define MMC5SPRVRAMADR(V)   &MMC5SPRVPage[(V) >> 10][(V)]\n",
+        "/* AURORA_FCEUMM_FDS_V5_CI_SMB_UPSTREAM_PERF_20260827\n"
+        " * Upstream a502ceaf/6911042c: 2-pixel palette-pair LUT. */\n"
+        "static uint16 fceu_bg_pair_lut[256];\n"
+        "static void FCEU_BuildBgPairLUT(void) {\n"
+        "\tint b;\n"
+        "\tfor (b = 0; b < 256; b++)\n"
+        "\t\tfceu_bg_pair_lut[b] = (uint16)PALRAM[b & 0x0F] |\n"
+        "\t\t\t((uint16)PALRAM[b >> 4] << 8);\n"
+        "}\n\n"
+        "#define MMC5SPRVRAMADR(V)   &MMC5SPRVPage[(V) >> 10][(V)]\n",
+        "V5 ppu pair LUT definition",
+    )
+
+    # 6911042c is essential: build only AFTER priority bit 0x40 is ORed into
+    # the universal-background palette entries.
+    text = replace_once(
+        text,
+        "\tPal[0] |= 64;\n"
+        "\tPal[4] |= 64;\n"
+        "\tPal[8] |= 64;\n"
+        "\tPal[0xC] |= 64;\n\n",
+        "\tPal[0] |= 64;\n"
+        "\tPal[4] |= 64;\n"
+        "\tPal[8] |= 64;\n"
+        "\tPal[0xC] |= 64;\n"
+        "\t/* AURORA_FCEUMM_FDS_V5_CI_SMB_UPSTREAM_PERF_20260827:\n"
+        "\t * priority-aware position matching upstream 6911042c. */\n"
+        "\tFCEU_BuildBgPairLUT();\n\n",
+        "V5 ppu priority-aware LUT rebuild",
+    )
+
+    text = replace_once(
+        text,
+        "\t\t\t\tif ((PPUViewer) && (scanline == PPUViewScanline)) UpdatePPUView(1);\n",
+        "\t\t\t\t/* AURORA_FCEUMM_FDS_V5_CI_SMB_UPSTREAM_PERF_20260827:\n"
+        "\t\t\t\t * embedded FDS-only core has no PPU viewer. */\n",
+        "V5 remove unused PPU Viewer branch",
+    )
+    return text
+
+
+def patch_v5_sound(text: str) -> str:
+    old = """\tif (!inie[0] && !inie[1]) {
+\t\tfor (V = start; V < end; V++)
+\t\t\tWave[V >> 4] += totalout;
+\t} else
+"""
+    new = """\tif (!inie[0] && !inie[1]) {
+\t\t/* AURORA_FCEUMM_FDS_V5_CI_SMB_UPSTREAM_PERF_20260827
+\t\t * Current upstream 9f6b84cf: amp[0]=amp[1]=0 here, therefore
+\t\t * totalout == wlookup1[0] == 0. The old loop only added zero. */
+\t} else
+"""
+    return replace_once(text, old, new, "V5 LQ silent-square no-op loop")
+
+
+# AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827
+# Final specialization pass over the generated FDS-only C files.
+# All removed alternatives are unreachable in this build by construction:
+# loader=FDS only; input=two ordinary pads; ResetCartMapping clears mapper PPU
+# hooks; FDS never installs MMC5/NSF/PPU/HBlank hooks.
+def patch_v6_pads(text: str) -> str:
+    return replace_once(
+        text,
+        "extern uint8 LastStrobe;\n\n",
+        "extern uint8 LastStrobe;\n\n"
+        "/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827\n"
+        " * Aurora has already converted both host pads to final NES bits before\n"
+        " * retro_run.  Updating joy[] here avoids the generic two-port callback\n"
+        " * walk without changing the strobe/read-bit state. */\n"
+        "void FCEU_SetJoyDirect(uint8 p0, uint8 p1) {\n"
+        "\tjoy[0] = p0;\n"
+        "\tjoy[1] = p1;\n"
+        "\tjoy[2] = 0;\n"
+        "\tjoy[3] = 0;\n"
+        "}\n\n",
+        "V6 direct two-pad setter",
+    )
+
+
+def patch_v6_libretro(text: str) -> str:
+    text = replace_once(
+        text,
+        "static uint8 aurora_direct_pad[2] = { 0, 0 };\n"
+        "static int32 aurora_audio_frames = 0;\n"
+        "extern void FCEUI_SetPaletteArray(uint8 *pal);\n",
+        "static int32 aurora_audio_frames = 0;\n"
+        "extern void FCEUI_SetPaletteArray(uint8 *pal);\n"
+        "/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827 */\n"
+        "extern void FCEU_SetJoyDirect(uint8 p0, uint8 p1);\n",
+        "V6 libretro direct-pad state removal",
+    )
+
+    old_update = """static void update_input(void) {
+\t/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
+#if defined(__CELLOS_LV2__) || defined(_XBOX360) || defined(GEKKO)
+\tJSReturn[0] = aurora_direct_pad[0] | (aurora_direct_pad[1] << 8);
+#else
+\tJSReturn[0] = aurora_direct_pad[0];
+\tJSReturn[1] = aurora_direct_pad[1];
+#endif
+}
+"""
+    text = replace_once(
+        text,
+        old_update,
+        "/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827:\n"
+        " * generic libretro input polling removed; Aurora pushes pad bytes. */\n",
+        "V6 remove generated update_input",
+    )
+
+    text = replace_once(
+        text,
+        "void aurora_fds_set_pad_state(unsigned pad0, unsigned pad1) {\n"
+        "\taurora_direct_pad[0] = (uint8)pad0;\n"
+        "\taurora_direct_pad[1] = (uint8)pad1;\n"
+        "}\n",
+        "void aurora_fds_set_pad_state(unsigned pad0, unsigned pad1) {\n"
+        "\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827 */\n"
+        "\tFCEU_SetJoyDirect((uint8)pad0, (uint8)pad1);\n"
+        "}\n",
+        "V6 direct pad setter call",
+    )
+
+    text = replace_once(
+        text,
+        "\tupdate_input();\n\n\tFCEUI_Emulate(&gfx, &sound, &ssize, skip_video ? 1 : 0);\n",
+        "\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827:\n"
+        "\t * pad bytes were pushed by aurora_fds_set_pad_state(). */\n"
+        "\tFCEUI_Emulate(&gfx, &sound, &ssize, skip_video ? 1 : 0);\n",
+        "V6 remove retro_run input callback",
+    )
+    return text
+
+
+def patch_v6_fceu(text: str) -> str:
+    text = replace_once(
+        text,
+        "void FCEUI_Emulate(uint8 **pXBuf, int32 **SoundBuf, int32 *SoundBufSize, int skip) {\n"
+        "\tint r, ssize;\n\n"
+        "\tFCEU_UpdateInput();\n",
+        "void FCEUI_Emulate(uint8 **pXBuf, int32 **SoundBuf, int32 *SoundBufSize, int skip) {\n"
+        "\tint ssize;\n\n"
+        "\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827:\n"
+        "\t * the retained two-pad backend already contains this frame's bytes. */\n",
+        "V6 FCEUI_Emulate generic input removal",
+    )
+    text = replace_once(
+        text,
+        "\tr = FCEUPPU_Loop(skip);\n",
+        "\tFCEUPPU_Loop(skip);\n",
+        "V6 unused PPU return removal",
+    )
+    return text
+
+
+def patch_v6_ppu(text: str) -> str:
+    # ResetRL's scanline input callback can never be installed by INPUT_FDS_C.
+    text = replace_once(
+        text,
+        "\tif (InputScanlineHook)\n\t\tInputScanlineHook(0, 0, 0, 0);\n",
+        "\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827:\n"
+        "\t * no zapper/peripheral scanline hook in the two-pad FDS build. */\n",
+        "V6 ResetRL scanline hook removal",
+    )
+
+    text = replace_once(
+        text,
+        "\t\tif (InputScanlineHook && (lastpixel - 16) >= 0) {\n"
+        "\t\t\tInputScanlineHook(Plinef, spork ? sprlinebuf : 0, linestartts, lasttile * 8 - 16);\n"
+        "\t\t}\n",
+        "\t\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827: no scanline input hook. */\n",
+        "V6 RefreshLine early scanline hook",
+    )
+    text = replace_once(
+        text,
+        "\tif (InputScanlineHook && (lastpixel - 16) >= 0) {\n"
+        "\t\tInputScanlineHook(Plinef, spork ? sprlinebuf : 0, linestartts, lasttile * 8 - 16);\n"
+        "\t}\n",
+        "\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827: no scanline input hook. */\n",
+        "V6 RefreshLine final scanline hook",
+    )
+
+    text = replace_once(
+        text,
+        "\tif(PEC586Hack)\n"
+        "\t\tvofs = ((RefreshAddr & 0x200) << 3) | ((RefreshAddr >> 12) & 7);\n"
+        "\telse\n"
+        "\t\tvofs = ((PPU[0] & 0x10) << 8) | ((RefreshAddr >> 12) & 7);\n",
+        "\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827: PEC586 is impossible in FDS. */\n"
+        "\tvofs = ((PPU[0] & 0x10) << 8) | ((RefreshAddr >> 12) & 7);\n",
+        "V6 RefreshLine PEC586 branch removal",
+    )
+
+    # Collapse MMC5 / mapper-hook / PEC586 alternatives to the ordinary FDS tile
+    # loop.  Keep LUT placement, palette priority bits and every tile iteration.
+    start = "#define PPUT_MMC5\n"
+    end = "\n#undef vofs\n"
+    if text.count(start) != 1 or text.count(end) != 1:
+        fail("V6 RefreshLine mapper-branch span mudou")
+    i = text.index(start)
+    j = text.index(end, i)
+    text = (
+        text[:i]
+        + "/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827\n"
+          " * FDS installs no MMC5/PEC586/PPU mapper hook: execute the exact\n"
+          " * ordinary tile body directly. */\n"
+          "\tfor (X1 = firsttile; X1 < lasttile; X1++) {\n"
+          "\t\t#include \"pputile_fds.h\"\n"
+          "\t}\n"
+        + text[j:]
+    )
+
+    text = replace_once(
+        text,
+        "\tif (MMC5Hack && (ScreenON || SpriteON)) MMC5_hb(scanline);\n\n"
+        "\tX6502_Run(256);\n",
+        "\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827: no MMC5 HBlank hook. */\n"
+        "\tX6502_Run(256);\n",
+        "V6 DoLine MMC5 hook removal",
+    )
+
+    irq_block = """\tif (GameHBIRQHook && (ScreenON || SpriteON) && ((PPU[0] & 0x38) != 0x18)) {
+\t\tX6502_Run(6);
+\t\tFixit2();
+\t\tX6502_Run(4);
+\t\tGameHBIRQHook();
+\t\tX6502_Run(85 - 16 - 10);
+\t} else {
+\t\tX6502_Run(6);\t// Tried 65, caused problems with Slalom(maybe others)
+\t\tFixit2();
+\t\tX6502_Run(85 - 6 - 16);
+
+\t\t// A semi-hack for Star Trek: 25th Anniversary
+\t\tif (GameHBIRQHook && (ScreenON || SpriteON) && ((PPU[0] & 0x38) != 0x18))
+\t\t\tGameHBIRQHook();
+\t}
+"""
+    irq_direct = """\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827
+\t * FDS has no GameHBIRQHook. This is exactly the old hook-null branch. */
+\tX6502_Run(6);
+\tFixit2();
+\tX6502_Run(85 - 6 - 16);
+"""
+    text = replace_once(text, irq_block, irq_direct, "V6 DoLine HBlank branch collapse")
+    text = replace_once(
+        text,
+        "\tif (GameHBIRQHook2 && (ScreenON || SpriteON))\n\t\tGameHBIRQHook2();\n",
+        "\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827: no secondary HBlank hook. */\n",
+        "V6 DoLine secondary HBlank removal",
+    )
+
+    fetch_start = "static void FetchSpriteData(void) {\n"
+    fetch_end = "static void RefreshSprites(void) {\n"
+    if text.count(fetch_start) != 1 or text.count(fetch_end) != 1:
+        fail("V6 FetchSpriteData span mudou")
+    i = text.index(fetch_start)
+    j = text.index(fetch_end, i)
+    fetch_direct = """static void FetchSpriteData(void) {
+\tuint8 ns, sb;
+\tSPR *spr;
+\tuint8 H;
+\tint n;
+\tint vofs;
+\tuint8 P0 = PPU[0];
+
+\tspr = (SPR*)SPRAM;
+\tH = 8;
+\tns = sb = 0;
+
+\tvofs = (uint32)(P0 & 0x8 & (((P0 & 0x20) ^ 0x20) >> 2)) << 9;
+\tH += (P0 & 0x20) >> 2;
+
+\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827
+\t * FDS has no PPU mapper hook and no MMC5 CHR path. This is the exact
+\t * old !PPU_hook / !MMC5 branch, without testing those globals per line. */
+\tfor (n = 63; n >= 0; n--, spr++) {
+\t\tif ((uint32)(scanline - spr->y) >= H) continue;
+\t\tif (ns < maxsprites) {
+\t\t\tif (n == 63) sb = 1;
+
+\t\t\t{
+\t\t\t\tSPRB dst;
+\t\t\t\tuint8 *C;
+\t\t\t\tint t;
+\t\t\t\tuint32 vadr;
+
+\t\t\t\tt = (int)scanline - (spr->y);
+
+\t\t\t\tif (Sprite16)
+\t\t\t\t\tvadr = ((spr->no & 1) << 12) + ((spr->no & 0xFE) << 4);
+\t\t\t\telse
+\t\t\t\t\tvadr = (spr->no << 4) + vofs;
+
+\t\t\t\tif (spr->atr & V_FLIP) {
+\t\t\t\t\tvadr += 7;
+\t\t\t\t\tvadr -= t;
+\t\t\t\t\tvadr += (P0 & 0x20) >> 1;
+\t\t\t\t\tvadr -= t & 8;
+\t\t\t\t} else {
+\t\t\t\t\tvadr += t;
+\t\t\t\t\tvadr += t & 8;
+\t\t\t\t}
+
+\t\t\t\tC = VRAMADR(vadr);
+\t\t\t\tdst.ca[0] = C[0];
+\t\t\t\tdst.ca[1] = C[8];
+\t\t\t\tdst.x = spr->x;
+\t\t\t\tdst.atr = spr->atr;
+\t\t\t\t*(uint32*)&SPRBUF[ns << 2] = *(uint32*)&dst;
+\t\t\t}
+
+\t\t\tns++;
+\t\t} else {
+\t\t\tPPU_status |= 0x20;
+\t\t\tbreak;
+\t\t}
+\t}
+
+\tif (ns > 8) PPU_status |= 0x20;
+\tnumsprites = ns;
+\tSpriteBlurp = sb;
+}
+
+"""
+    text = text[:i] + fetch_direct + text[j:]
+
+    text = replace_once(
+        text,
+        "\t\tif (GameInfo->type == GIT_NSF)\n"
+        "\t\t\tDoNSFFrame();\n"
+        "\t\telse {\n"
+        "\t\t\tif (VBlankON)\n"
+        "\t\t\t\tTriggerNMI();\n"
+        "\t\t}\n",
+        "\t\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827: FDS-only, never NSF. */\n"
+        "\t\tif (VBlankON)\n"
+        "\t\t\tTriggerNMI();\n",
+        "V6 PPU NSF vblank branch removal",
+    )
+
+    pre_render = """\t\t{
+\t\t\tint x;
+
+\t\t\tif (ScreenON || SpriteON) {
+\t\t\t\tif (GameHBIRQHook && ((PPU[0] & 0x38) != 0x18))
+\t\t\t\t\tGameHBIRQHook();
+\t\t\t\tif (PPU_hook)
+\t\t\t\t\tfor (x = 0; x < 42; x++) {
+\t\t\t\t\t\tPPU_hook(0x2000); PPU_hook(0);
+\t\t\t\t\t}
+\t\t\t\tif (GameHBIRQHook2)
+\t\t\t\t\tGameHBIRQHook2();
+\t\t\t}
+\t\t\tX6502_Run(85 - 16);
+\t\t\tif (ScreenON || SpriteON) {
+\t\t\t\tRefreshAddr = TempAddr;
+\t\t\t\tif (PPU_hook) PPU_hook(RefreshAddr & 0x3fff);
+\t\t\t}
+
+\t\t\t//Clean this stuff up later.
+\t\t\tspork = numsprites = 0;
+\t\t\tResetRL(XBuf);
+
+\t\t\tX6502_Run(16 - kook);
+\t\t\tkook ^= 1;
+\t\t}
+"""
+    pre_render_direct = """\t\t{
+\t\t\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827:
+\t\t\t * mapper HBlank/PPU hooks are null in FDS. Preserve cycle order. */
+\t\t\tX6502_Run(85 - 16);
+\t\t\tif (ScreenON || SpriteON)
+\t\t\t\tRefreshAddr = TempAddr;
+
+\t\t\tspork = numsprites = 0;
+\t\t\tResetRL(XBuf);
+
+\t\t\tX6502_Run(16 - kook);
+\t\t\tkook ^= 1;
+\t\t}
+"""
+    text = replace_once(text, pre_render, pre_render_direct, "V6 PPU pre-render hook collapse")
+
+    text = replace_once(
+        text,
+        "\t\tif (GameInfo->type == GIT_NSF)\n"
+        "\t\t\tX6502_Run((256 + 85) * 240);\n"
+        "\t\t#ifdef FRAMESKIP\n"
+        "\t\telse if (skip) {\n",
+        "\t\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827: no NSF visible-frame branch. */\n"
+        "\t\t#ifdef FRAMESKIP\n"
+        "\t\tif (skip) {\n",
+        "V6 PPU NSF visible branch removal",
+    )
+    text = replace_once(
+        text,
+        "\t\t#endif\n\t\telse {\n",
+        "\t\telse\n"
+        "\t\t#endif\n"
+        "\t\t{\n",
+        "V6 PPU normal-frame block",
+    )
+    text = replace_once(
+        text,
+        "\t\t\tif (MMC5Hack && (ScreenON || SpriteON)) MMC5_hb(scanline);\n",
+        "\t\t\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827: no MMC5 end-of-frame hook. */\n",
+        "V6 PPU end-frame MMC5 hook removal",
+    )
+    return text
+
+
+def patch_v6_sound(text: str) -> str:
+    text = replace_once(
+        text,
+        '#include "wave.h"\n',
+        '/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827: embedded core has no WAV recorder. */\n',
+        "V6 remove wave recorder header",
+    )
+    text = replace_once(
+        text,
+        "\tFCEU_WriteWaveData(WaveFinal, end);\t/* This function will just return\n"
+        "\t\t\t\t\t\t\t\t\t\tif sound recording is off. */\n",
+        "\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827:\n"
+        "\t * sound recording is not exposed by Aurora; avoid the per-frame call/VLA path. */\n",
+        "V6 remove disabled WAV call",
+    )
+    old = """\t} else {
+\t\tfor (V = start; V < end; V++)
+\t\t\tWave[V >> 4] += totalout;
+\t}
+}
+
+
+static void RDoNoise(void) {
+"""
+    new = """\t} else if (totalout) {
+\t\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827:
+\t\t * if tri+noise are inactive and the held DMC output also maps to 0,
+\t\t * the old loop only added zero. Preserve it when DMC contributes. */
+\t\tfor (V = start; V < end; V++)
+\t\t\tWave[V >> 4] += totalout;
+\t}
+}
+
+
+static void RDoNoise(void) {
+"""
+    text = replace_once(text, old, new, "V6 silent tri/noise/DMC zero loop")
+    return text
+
+
+def patch_v6_fds(text: str) -> str:
+    helper = """/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827
+ * Old FDS APU master-volume divisor is one of 2,3,4,5 on every generated
+ * sample.  cwave<=63 and amplitude<=32, so n=(cwave*amp)*4 is 0..8064.
+ * The reciprocal forms below are EXACT for every integer in that complete
+ * reachable range; they remove a MIPS integer divide from the sample loop. */
+static INLINE int32 AuroraFDSScaleMaster(uint32 sample, uint8 master) {
+\tuint32 n = sample << 2;
+\tswitch (master & 3) {
+\tcase 0: return (int32)(n >> 1);                    /* /2 */
+\tcase 1: return (int32)((n * 2731U) >> 13);         /* /3 exact for n<=8064 */
+\tcase 2: return (int32)(n >> 2);                    /* /4 */
+\tdefault:return (int32)((n * 3277U) >> 14);         /* /5 exact for n<=8064 */
+\t}
+}
+
+"""
+    text = replace_once(
+        text,
+        "static INLINE int32 FDSDoSound(void) {\n",
+        helper + "static INLINE int32 FDSDoSound(void) {\n",
+        "V6 FDS exact master-volume helper",
+    )
+    text = replace_once(
+        text,
+        "\t\treturn (fdso.cwave[b24latch68 >> 19] * k) * 4 / ((SPSG[0x9] & 0x3) + 2);\n",
+        "\t\treturn AuroraFDSScaleMaster(\n"
+        "\t\t\t(uint32)fdso.cwave[b24latch68 >> 19] * (uint32)k, SPSG[0x9]);\n",
+        "V6 FDS per-sample divide removal",
+    )
+
+    text = replace_once(
+        text,
+        "\tif (FSettings.SndRate) {\n"
+        "\t\tif (FSettings.soundq >= 1)\n"
+        "\t\t\tRenderSoundHQ();\n"
+        "\t\telse\n"
+        "\t\t\tRenderSound();\n"
+        "\t}\n"
+        "\tA -= 0x4080;\n",
+        "\tif (FSettings.SndRate)\n"
+        "\t\t/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827:\n"
+        "\t\t * this embedded target is permanently SOUND_QUALITY=0. */\n"
+        "\t\tRenderSound();\n"
+        "\tA -= 0x4080;\n",
+        "V6 FDS register-write LQ branch",
+    )
+    return text
+
+
+# AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827
+# Post-pass over the already-specialized V6 generated FDS-only files.
+
+def patch_v7_libretro(text: str) -> str:
+    text = replace_once(
+        text,
+        "static uint16_t palette[256];\n",
+        "static uint16_t palette[256];\n"
+        "/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827:\n"
+        " * host CLUT invalidation without scanning all 256 RGB555 entries. */\n"
+        "static uint32 aurora_palette_serial = 1;\n",
+        "V7 palette serial state",
+    )
+
+    old_set = """void FCEUD_SetPalette(unsigned char index, unsigned char r, unsigned char g, unsigned char b) {
+\tr >>= 3;
+\tg >>= 3;
+\tb >>= 3;
+\tpalette[index] = (r << 10) | (g << 5) | (b << 0);
+}
+"""
+    new_set = """void FCEUD_SetPalette(unsigned char index, unsigned char r, unsigned char g, unsigned char b) {
+\tuint16 value;
+\tr >>= 3;
+\tg >>= 3;
+\tb >>= 3;
+\tvalue = (uint16)((r << 10) | (g << 5) | (b << 0));
+\tif (palette[index] != value) {
+\t\tpalette[index] = value;
+\t\tif (++aurora_palette_serial == 0)
+\t\t\taurora_palette_serial = 1;
+\t}
+}
+"""
+    text = replace_once(text, old_set, new_set, "V7 FCEUD_SetPalette serial")
+
+    text = replace_once(
+        text,
+        """const uint16_t *aurora_fds_get_video_palette(void) {
+\treturn palette;
+}
+
+""",
+        """const uint16_t *aurora_fds_get_video_palette(void) {
+\treturn palette;
+}
+
+uint32 aurora_fds_get_palette_serial(void) {
+\treturn aurora_palette_serial;
+}
+
+""",
+        "V7 palette serial accessor",
+    )
+    return text
+
+
+def patch_v7_ppu(text: str) -> str:
+    old_lut = """static uint16 fceu_bg_pair_lut[256];
+static void FCEU_BuildBgPairLUT(void) {
+\tint b;
+\tfor (b = 0; b < 256; b++)
+\t\tfceu_bg_pair_lut[b] = (uint16)PALRAM[b & 0x0F] |
+\t\t\t((uint16)PALRAM[b >> 4] << 8);
+}
+"""
+    new_lut = """static uint16 fceu_bg_pair_lut[256];
+static uint8 fceu_bg_pair_lut_pal[16];
+static uint8 fceu_bg_pair_lut_valid = 0;
+
+static void FCEU_BuildBgPairLUT(void) {
+\tint b;
+
+\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827
+\t * RefreshLine may run several times in one scanline after PPU writes.
+\t * Rebuild the 256 pairs only when the 16 BG palette bytes changed. */
+\tif (fceu_bg_pair_lut_valid &&
+\t    memcmp(fceu_bg_pair_lut_pal, PALRAM, sizeof(fceu_bg_pair_lut_pal)) == 0)
+\t\treturn;
+
+\tmemcpy(fceu_bg_pair_lut_pal, PALRAM, sizeof(fceu_bg_pair_lut_pal));
+\tfor (b = 0; b < 256; b++)
+\t\tfceu_bg_pair_lut[b] = (uint16)PALRAM[b & 0x0F] |
+\t\t\t((uint16)PALRAM[b >> 4] << 8);
+\tfceu_bg_pair_lut_valid = 1;
+}
+"""
+    text = replace_once(text, old_lut, new_lut, "V7 cached PPU pair LUT")
+
+    text = replace_once(
+        text,
+        "\tif (norecurse) return;\n",
+        "\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: PPU_hook recursion path absent. */\n",
+        "V7 remove dead RefreshLine norecurse branch",
+    )
+
+    old_bg_disable = """\tif (rendis & 2) {// User asked to not display background data.
+\t\tuint32 tem;
+\t\ttem = Pal[0] | (Pal[0] << 8) | (Pal[0] << 16) | (Pal[0] << 24);
+\t\ttem |= 0x40404040;
+\t\tFCEU_dwmemset(target, tem, 256);
+\t}
+
+"""
+    text = replace_once(
+        text, old_bg_disable,
+        "\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: embedded frontend never disables BG rendering. */\n\n",
+        "V7 remove dead BG render-disable branch",
+    )
+    text = replace_once(
+        text,
+        "\tif (rendis & 1) return;\t//User asked to not display sprites.\n",
+        "\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: embedded frontend never disables sprite rendering. */\n",
+        "V7 remove dead sprite render-disable branch",
+    )
+
+    old = "\t\t\tif (PPU_hook) PPU_hook(tmp);\n"
+    if text.count(old) != 2:
+        fail(f"V7 A2007 PPU_hook count changed: {text.count(old)}")
+    text = text.replace(
+        old,
+        "\t\t\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: no FDS PPU mapper hook. */\n",
+    )
+    text = replace_once(
+        text,
+        "\t\tif (PPU_hook) PPU_hook(RefreshAddr & 0x3fff);\n",
+        "\t\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: no FDS PPU mapper hook. */\n",
+        "V7 A2007 post-read PPU hook",
+    )
+    text = replace_once(
+        text,
+        "\t\tif (PPU_hook)\n\t\t\tPPU_hook(RefreshAddr);\n",
+        "\t\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: no FDS PPU mapper hook. */\n",
+        "V7 B2006 PPU hook",
+    )
+    text = replace_once(
+        text,
+        "\tif (PPU_hook)\n\t\tPPU_hook(RefreshAddr & 0x3fff);\n",
+        "\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: no FDS PPU mapper hook. */\n",
+        "V7 B2007 PPU hook",
+    )
+
+    start = "\t\t#ifdef FRAMESKIP\n\t\tif (skip) {\n"
+    end = "\t\telse\n\t\t#endif\n\t\t{\n"
+    if text.count(start) != 1 or text.count(end) != 1:
+        fail(
+            "V7 PPU frameskip span mudou: "
+            f"start={text.count(start)} end={text.count(end)}"
+        )
+    i = text.index(start)
+    j = text.index(end, i)
+    skip = """\t\t#ifdef FRAMESKIP
+\t\tif (skip) {
+\t\t\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827
+\t\t\t * Pinned FCEUmm FRAMESKIP path, specialized to FDS-only.
+\t\t\t * CPU/FDS timers/APU still advance through X6502_Run(). */
+\t\t\tint y = (int)SPRAM[0] + 1;
+
+\t\t\tPPU_status |= 0x20;
+\t\t\tif (y < 240) {
+\t\t\t\tX6502_Run((256 + 85) * y);
+\t\t\t\tif (SpriteON)
+\t\t\t\t\tPPU_status |= 0x40;
+\t\t\t\tX6502_Run((256 + 85) * (240 - y));
+\t\t\t} else {
+\t\t\t\tX6502_Run((256 + 85) * 240);
+\t\t\t}
+\t\t}
+"""
+    text = text[:i] + skip + text[j:]
+    return text
+
+
+def patch_v7_fds(text: str) -> str:
+    old_decl = "static void FP_FASTAPASS(1) FDSFix(int a);"
+    if text.count(old_decl) != 1:
+        fail(f"V7 FDSFix declaration count changed: {text.count(old_decl)}")
+    text = text.replace(
+        old_decl,
+        "/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827 */\n"
+        "void FP_FASTAPASS(1) FDSFix(int a);",
+        1,
+    )
+    old_def = "static void FP_FASTAPASS(1) FDSFix(int a) {"
+    if text.count(old_def) != 1:
+        fail(f"V7 FDSFix definition count changed: {text.count(old_def)}")
+    text = text.replace(old_def, "void FP_FASTAPASS(1) FDSFix(int a) {", 1)
+
+    old_scale = """/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827
+ * Old FDS APU master-volume divisor is one of 2,3,4,5 on every generated
+ * sample.  cwave<=63 and amplitude<=32, so n=(cwave*amp)*4 is 0..8064.
+ * The reciprocal forms below are EXACT for every integer in that complete
+ * reachable range; they remove a MIPS integer divide from the sample loop. */
+static INLINE int32 AuroraFDSScaleMaster(uint32 sample, uint8 master) {
+\tuint32 n = sample << 2;
+\tswitch (master & 3) {
+\tcase 0: return (int32)(n >> 1);                    /* /2 */
+\tcase 1: return (int32)((n * 2731U) >> 13);         /* /3 exact for n<=8064 */
+\tcase 2: return (int32)(n >> 2);                    /* /4 */
+\tdefault:return (int32)((n * 3277U) >> 14);         /* /5 exact for n<=8064 */
+\t}
+}
+
+"""
+    new_scale = """/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827
+ * Cache all 64 carrier results for the current clamped amplitude/master.
+ * The exact V6 reciprocal formulas are now paid only when that key changes. */
+static uint16 AuroraFDSMixTable[64];
+static uint8 AuroraFDSMixKey = 0xFF;
+
+static INLINE int32 AuroraFDSScaleExact(uint32 sample, uint8 master) {
+\tuint32 n = sample << 2;
+\tswitch (master & 3) {
+\tcase 0: return (int32)(n >> 1);
+\tcase 1: return (int32)((n * 2731U) >> 13);
+\tcase 2: return (int32)(n >> 2);
+\tdefault:return (int32)((n * 3277U) >> 14);
+\t}
+}
+
+static INLINE void AuroraFDSRefreshMixTable(void) {
+\tuint32 k = amplitude[0];
+\tuint8 master = SPSG[0x9] & 3;
+\tuint8 key;
+\tint i;
+
+\tif (k > 0x20)
+\t\tk = 0x20;
+\tkey = (uint8)((k << 2) | master);
+\tif (key == AuroraFDSMixKey)
+\t\treturn;
+
+\tfor (i = 0; i < 64; ++i)
+\t\tAuroraFDSMixTable[i] =
+\t\t\t(uint16)AuroraFDSScaleExact((uint32)i * k, master);
+\tAuroraFDSMixKey = key;
+}
+
+"""
+    text = replace_once(text, old_scale, new_scale, "V7 cached FDS master-volume table")
+
+    old_return = """\t// Might need to emulate applying the amplitude to the waveform a bit better...
+\t{
+\t\tint k = amplitude[0];
+\t\tif (k > 0x20) k = 0x20;
+\t\treturn AuroraFDSScaleMaster(
+\t\t\t(uint32)fdso.cwave[b24latch68 >> 19] * (uint32)k, SPSG[0x9]);
+\t}
+"""
+    new_return = """\t// Might need to emulate applying the amplitude to the waveform a bit better...
+\tAuroraFDSRefreshMixTable();
+\treturn (int32)AuroraFDSMixTable[fdso.cwave[b24latch68 >> 19] & 0x3F];
+"""
+    text = replace_once(text, old_return, new_return, "V7 FDS cached sample lookup")
+
+    text = replace_once(
+        text,
+        "static int ta;\n",
+        "/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: dead ta counter removed. */\n",
+        "V7 dead FDS ta declaration",
+    )
+    text = replace_once(
+        text,
+        "\t\tta++;\n",
+        "\t\t/* V7: old ta++ debug counter removed. */\n",
+        "V7 dead FDS ta increment",
+    )
+
+    old_render = """static void RenderSound(void) {
+\tint32 end, start;
+\tint32 x;
+
+\tstart = FBC;
+\tend = (SOUNDTS << 16) / soundtsinc;
+\tif (end <= start)
+\t\treturn;
+\tFBC = end;
+
+\tif (!(SPSG[0x9] & 0x80))
+\t\tfor (x = start; x < end; x++) {
+\t\t\tuint32 t = FDSDoSound();
+\t\t\tt += t >> 1;
+\t\t\tt >>= 4;
+\t\t\tWave[x >> 4] += t;\t//(t>>2)-(t>>3); //>>3;
+\t\t}
+}
+"""
+    new_render = """static void RenderSound(void) {
+\tint32 end, start;
+\tint32 x;
+\tint32 waveIndex;
+\tint32 accum;
+
+\tstart = FBC;
+\tend = (SOUNDTS << 16) / soundtsinc;
+\tif (end <= start)
+\t\treturn;
+\tFBC = end;
+
+\tif (SPSG[0x9] & 0x80)
+\t\treturn;
+
+\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827
+\t * x>>4 maps up to 16 consecutive FDS sub-samples to one Wave[] cell.
+\t * FDSDoSound still executes once for every original x, in order. */
+\twaveIndex = start >> 4;
+\taccum = 0;
+\tfor (x = start; x < end; x++) {
+\t\tint32 t = FDSDoSound();
+\t\tint32 idx = x >> 4;
+
+\t\tt += t >> 1;
+\t\tt >>= 4;
+\t\tif (idx != waveIndex) {
+\t\t\tWave[waveIndex] += accum;
+\t\t\twaveIndex = idx;
+\t\t\taccum = 0;
+\t\t}
+\t\taccum += t;
+\t}
+\tif (accum)
+\t\tWave[waveIndex] += accum;
+}
+"""
+    text = replace_once(text, old_render, new_render, "V7 grouped FDS expansion Wave writes")
+    return text
+
+
+def patch_v7_x6502(text: str) -> str:
+    text = replace_once(
+        text,
+        "void FP_FASTAPASS(1) (*MapIRQHook)(int a);\n",
+        "void FP_FASTAPASS(1) (*MapIRQHook)(int a);\n"
+        "/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827:\n"
+        " * this generated archive can only run FDS, whose hook is FDSFix. */\n"
+        "void FP_FASTAPASS(1) FDSFix(int a);\n",
+        "V7 x6502 direct FDS IRQ declaration",
+    )
+
+    old = "\t\tif (MapIRQHook) MapIRQHook(temp);\n"
+    n = text.count(old)
+    if n != 2:
+        fail(f"V7 x6502 MapIRQHook calls: esperado 2, encontrado {n}")
+    text = text.replace(
+        old,
+        "\t\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: direct FDS timer/IRQ hook, same temp and instruction boundary. */\n"
+        "\t\tFDSFix(temp);\n",
+    )
+
+    text = replace_once(
+        text,
+        "static uint8 CycTable[256] =\n",
+        "static const uint8 CycTable[256] =\n",
+        "V7 x6502 immutable cycle table",
+    )
+    return text
+
+
+
+# AURORA_FCEUMM_FDS_V8_NTSC_LQ_PPU64_REVIVE_ACCURACY_20260827
+# Conservative FDS-only post-pass.  Keep FCEUmm's existing LQ filter/output.
+
+def v8_replace(text: str, old: str, new: str, label: str) -> str:
+    if new in text:
+        return text
+    if old not in text:
+        fail("V8 " + label + ": trecho esperado não encontrado")
+    return text.replace(old, new, 1)
+
+
+
+def patch_v8_fceu(text: str) -> str:
+    old = """void FCEU_ResetVidSys(void) {
+\tint w;
+
+\tif (GameInfo->vidsys == GIV_NTSC)
+\t\tw = 0;
+\telse if (GameInfo->vidsys == GIV_PAL)
+\t\tw = 1;
+\telse
+\t\tw = FSettings.PAL;
+
+\tPAL = w ? 1 : 0;
+
+\tFCEUPPU_SetVideoSystem(w);
+\tSetSoundVariables();
+}
+"""
+    new = """void FCEU_ResetVidSys(void) {
+\t/* AURORA_FCEUMM_FDS_V8_NTSC_LQ_PPU64_REVIVE_ACCURACY_20260827:
+\t * Famicom Disk System hardware is NTSC-only. */
+\tPAL = 0;
+\tFSettings.PAL = 0;
+\tFCEUPPU_SetVideoSystem(0);
+\tSetSoundVariables();
+}
+"""
+    text = v8_replace(text, old, new, "V8 FDS NTSC ResetVidSys")
+
+    old = """void FCEUI_SetVidSystem(int a) {
+\tFSettings.PAL = a ? 1 : 0;
+\tif (GameInfo) {
+\t\tFCEU_ResetVidSys();
+\t\tFCEU_ResetPalette();
+\t}
+}
+"""
+    new = """void FCEUI_SetVidSystem(int a) {
+\t(void)a;
+\tFSettings.PAL = 0;
+\tif (GameInfo) {
+\t\tFCEU_ResetVidSys();
+\t\tFCEU_ResetPalette();
+\t}
+}
+"""
+    text = v8_replace(text, old, new, "V8 FDS reject impossible PAL switch")
+
+    old = """int32 FCEUI_GetDesiredFPS(void) {
+\tif (PAL)
+\t\treturn(838977920);\t// ~50.007
+\telse
+\t\treturn(1008307711);\t// ~60.1
+}
+"""
+    new = """int32 FCEUI_GetDesiredFPS(void) {
+\treturn(1008307711); /* V8: FDS NTSC ~60.1 */
+}
+"""
+    text = v8_replace(text, old, new, "V8 FDS constant NTSC FPS")
+    return text
+
+
+
+def patch_v8_ppu(text: str) -> str:
+    text = v8_replace(
+        text,
+        "#define GETLASTPIXEL    (PAL ? ((timestamp * 48 - linestartts) / 15) : ((timestamp * 48 - linestartts) >> 4))\n",
+        "/* AURORA_FCEUMM_FDS_V8_NTSC_LQ_PPU64_REVIVE_ACCURACY_20260827: FDS NTSC-only. */\n"
+        "#define GETLASTPIXEL    ((timestamp * 48 - linestartts) >> 4)\n",
+        "V8 NTSC GETLASTPIXEL",
+    )
+
+    # V6 already specialized FetchSpriteData to the ordinary FDS path.
+    text = v8_replace(
+        text,
+        "\t\tif (ns < maxsprites) {\n",
+        "\t\tif (ns < 8) { /* V8: Aurora exposes no unlimited-sprites option for FDS. */\n",
+        "V8 fixed FDS sprite limit",
+    )
+    text = v8_replace(
+        text,
+        "\tif (ns > 8) PPU_status |= 0x20;\n\tnumsprites = ns;\n",
+        "\t/* V8: overflow is already latched in the ninth-sprite else branch. */\n\tnumsprites = ns;\n",
+        "V8 remove impossible post-loop sprite overflow branch",
+    )
+
+    text = v8_replace(
+        text,
+        "static uint8 sprlinebuf[256 + 8];\n",
+        "/* V8: aligned so the per-scanline scratch clear can use 64-bit stores. */\n"
+        "static uint8 sprlinebuf[256 + 8] __attribute__((aligned(64)));\n",
+        "V8 align sprite line buffer",
+    )
+    text = v8_replace(
+        text,
+        "\tFCEU_dwmemset(sprlinebuf, 0x80808080, 256);\n",
+        "\t{\n"
+        "\t\tuint64 *pClear = (uint64 *)sprlinebuf;\n"
+        "\t\tconst uint64 clear64 = 0x8080808080808080ULL;\n"
+        "\t\tint iClear;\n"
+        "\t\tfor (iClear = 0; iClear < 32; ++iClear)\n"
+        "\t\t\tpClear[iClear] = clear64;\n"
+        "\t}\n",
+        "V8 64-bit sprite scratch clear",
+    )
+
+    old = """\tif (ScreenON || SpriteON) {\t// Yes, very el-cheapo.
+\t\tif (PPU[1] & 0x01) {
+\t\t\tfor (x = 63; x >= 0; x--)
+\t\t\t\t*(uint32*)&target[x << 2] = (*(uint32*)&target[x << 2]) & 0x30303030;
+\t\t}
+\t}
+\tif ((PPU[1] >> 5) == 0x7) {
+\t\tfor (x = 63; x >= 0; x--)
+\t\t\t*(uint32*)&target[x << 2] = ((*(uint32*)&target[x << 2]) & 0x3f3f3f3f) | 0xc0c0c0c0;
+\t} else if (PPU[1] & 0xE0)
+\t\tfor (x = 63; x >= 0; x--)
+\t\t\t*(uint32*)&target[x << 2] = (*(uint32*)&target[x << 2]) | 0x40404040;
+\telse
+\t\tfor (x = 63; x >= 0; x--)
+\t\t\t*(uint32*)&target[x << 2] = ((*(uint32*)&target[x << 2]) & 0x3f3f3f3f) | 0x80808080;
+"""
+    new = """\t/* AURORA_FCEUMM_FDS_V8_NTSC_LQ_PPU64_REVIVE_ACCURACY_20260827
+\t * V4 aligns XBuf to 64 bytes and every 256-byte scanline remains aligned.
+\t * Fuse the old grayscale pass and emphasis pass into one byte-identical
+\t * 32-store uint64 pass. */
+\t{
+\t\tuint64 andMask;
+\t\tuint64 orMask;
+\t\tuint8 byteAnd;
+\t\tuint8 byteOr;
+\t\tuint8 emphasis = (PPU[1] >> 5) & 7;
+\t\tuint8 grayMask =
+\t\t\t((ScreenON || SpriteON) && (PPU[1] & 0x01)) ? 0x30 : 0xFF;
+
+\t\tif (emphasis == 7) {
+\t\t\tbyteAnd = grayMask & 0x3F;
+\t\t\tbyteOr = 0xC0;
+\t\t} else if (emphasis) {
+\t\t\tbyteAnd = grayMask;
+\t\t\tbyteOr = 0x40;
+\t\t} else {
+\t\t\tbyteAnd = grayMask & 0x3F;
+\t\t\tbyteOr = 0x80;
+\t\t}
+
+\t\tandMask = (uint64)byteAnd * 0x0101010101010101ULL;
+\t\torMask  = (uint64)byteOr  * 0x0101010101010101ULL;
+\t\tfor (x = 31; x >= 0; --x) {
+\t\t\tuint64 *p = ((uint64 *)target) + x;
+\t\t\t*p = (*p & andMask) | orMask;
+\t\t}
+\t}
+"""
+    text = v8_replace(text, old, new, "V8 fused 64-bit grayscale/emphasis")
+    return text
+
+
+
+def patch_v8_sound(text: str) -> str:
+    # Keep the old function-pointer declarations because legacy HQ helpers still
+    # compile, but hot call sites below use guarded direct LQ calls.
+    anchor = """static void (*DoSQ2)(void) = Dummyfunc;
+
+static uint32 ChannelBC[5];
+"""
+    replacement = """static void (*DoSQ2)(void) = Dummyfunc;
+
+/* AURORA_FCEUMM_FDS_V8_NTSC_LQ_PPU64_REVIVE_ACCURACY_20260827
+ * Embedded FDS always runs soundq=0.  Direct calls avoid indirect dispatch on
+ * register writes while soundtsinc==0 preserves Dummyfunc semantics. */
+static void RDoSQLQ(void);
+static void RDoTriangleNoisePCMLQ(void);
+static INLINE void AuroraFdsFlushSQ(void) {
+\tif (soundtsinc) RDoSQLQ();
+}
+static INLINE void AuroraFdsFlushTND(void) {
+\tif (soundtsinc) RDoTriangleNoisePCMLQ();
+}
+
+static uint32 ChannelBC[5];
+"""
+    text = v8_replace(text, anchor, replacement, "V8 LQ direct-call helpers")
+
+    # Replace only call expressions, not the legacy pointer assignments.
+    replacements = (
+        ("DoSQ1();", "AuroraFdsFlushSQ();"),
+        ("DoSQ2();", "AuroraFdsFlushSQ();"),
+        ("DoTriangle();", "AuroraFdsFlushTND();"),
+        ("DoNoise();", "AuroraFdsFlushTND();"),
+        ("DoPCM();", "AuroraFdsFlushTND();"),
+    )
+    for old_call, new_call in replacements:
+        text = text.replace(old_call, new_call)
+
+    old_period = """static void LoadDMCPeriod(uint8 V) {
+\tif (PAL)
+\t\tDMCPeriod = PALDMCTable[V];
+\telse
+\t\tDMCPeriod = NTSCDMCTable[V];
+}
+"""
+    new_period = """static void LoadDMCPeriod(uint8 V) {
+\tDMCPeriod = NTSCDMCTable[V]; /* V8: FDS hardware is NTSC-only. */
+}
+"""
+    text = v8_replace(text, old_period, new_period, "V8 NTSC DMC period")
+
+    old_noise = """\t\t\t\tif (PAL)
+\t\t\t\t\tnoiseacc += PALNoiseFreqTable[PSG[0xE] & 0xF] << (16 + 1);
+\t\t\t\telse
+\t\t\t\t\tnoiseacc += NTSCNoiseFreqTable[PSG[0xE] & 0xF] << (16 + 1);
+"""
+    text = text.replace(
+        old_noise,
+        "\t\t\t\tnoiseacc += NTSCNoiseFreqTable[PSG[0xE] & 0xF] << (16 + 1);\n",
+    )
+
+    # Replace the whole end-of-frame mixer with the exact old soundq=0 branch.
+    # SexyFilter remains untouched: audio character/output is intentionally kept.
+    start = "int FlushEmulateSound(void) {"
+    end = "int GetSoundBuffer(int32 **W) {"
+    i = text.find(start)
+    j = text.find(end, i + len(start)) if i >= 0 else -1
+    if i < 0 or j < 0:
+        fail("V8 FlushEmulateSound: limites não encontrados")
+    lq_flush = """int FlushEmulateSound(void) {
+\tint x;
+\tint32 end;
+
+\tif (!timestamp) return 0;
+\tif (!FSettings.SndRate || !soundtsinc) {
+\t\tfor (x = 0; x < 5; ++x)
+\t\t\tChannelBC[x] = 0;
+\t\tsoundtsoffs = 0;
+\t\tinbuf = 0;
+\t\treturn 0;
+\t}
+
+\t/* AURORA_FCEUMM_FDS_V8_NTSC_LQ_PPU64_REVIVE_ACCURACY_20260827:
+\t * exact legacy soundq=0 path, without HQ branches/function pointers. */
+\tAuroraFdsFlushSQ();
+\tAuroraFdsFlushTND();
+
+\tend = (SOUNDTS << 16) / soundtsinc;
+\tif (GameExpSound.Fill)
+\t\tGameExpSound.Fill(end & 0xF);
+
+\tSexyFilter(Wave, WaveFinal, end >> 4);
+
+\tif (end & 0xF)
+\t\tWave[0] = Wave[end >> 4];
+\tWave[end >> 4] = 0;
+
+\tfor (x = 0; x < 5; ++x)
+\t\tChannelBC[x] = end & 0xF;
+\tsoundtsoffs = (soundtsinc * (end & 0xF)) >> 16;
+\tend >>= 4;
+\tinbuf = end;
+\treturn end;
+}
+
+"""
+    text = text[:i] + lq_flush + text[j:]
+
+    # Keep MakeFilters/SexyFilter, but make SetSoundVariables the exact NTSC LQ
+    # configuration used by this archive.  Also explicitly zero soundtsinc when
+    # audio is disabled so the guarded direct workers remain a no-op.
+    start = "void SetSoundVariables(void) {"
+    end = "void FCEUI_Sound(int Rate) {"
+    i = text.find(start)
+    j = text.find(end, i + len(start)) if i >= 0 else -1
+    if i < 0 or j < 0:
+        fail("V8 SetSoundVariables: limites não encontrados")
+    setvars = """void SetSoundVariables(void) {
+\tint x;
+
+\tFSettings.soundq = 0;
+\tfhinc = 14915 * 24; /* exact old NTSC LQ branch */
+
+\tif (FSettings.SndRate) {
+\t\twlookup1[0] = 0;
+\t\tfor (x = 1; x < 32; ++x) {
+\t\t\twlookup1[x] = (double)16 * 16 * 16 * 4 * 95.52 /
+\t\t\t\t((double)8128 / (double)x + 100);
+\t\t\twlookup1[x] >>= 4;
+\t\t}
+\t\twlookup2[0] = 0;
+\t\tfor (x = 1; x < 203; ++x) {
+\t\t\twlookup2[x] = (double)16 * 16 * 16 * 4 * 163.67 /
+\t\t\t\t((double)24329 / (double)x + 100);
+\t\t\twlookup2[x] >>= 4;
+\t\t}
+\t} else {
+\t\tnesincsize = 0;
+\t\tsoundtsinc = 0;
+\t\treturn;
+\t}
+
+\t/* Keep the existing FCEUmm filter coefficients/output exactly. */
+\tMakeFilters(FSettings.SndRate);
+
+\tif (GameExpSound.RChange)
+\t\tGameExpSound.RChange();
+
+\tnesincsize = (int64)(((int64)1 << 17) * (double)NTSC_CPU /
+\t\t(FSettings.SndRate * 16));
+\tmemset(sqacc, 0, sizeof(sqacc));
+\tmemset(ChannelBC, 0, sizeof(ChannelBC));
+
+\tLoadDMCPeriod(DMCFormat & 0xF);
+\tsoundtsinc = (uint32)((uint64)((long double)NTSC_CPU * 65536) /
+\t\t(FSettings.SndRate * 16));
+}
+
+"""
+    text = text[:i] + setvars + text[j:]
+
+    text = v8_replace(
+        text,
+        """void FCEUI_SetSoundQuality(int quality) {
+\tFSettings.soundq = quality;
+\tSetSoundVariables();
+}
+""",
+        """void FCEUI_SetSoundQuality(int quality) {
+\t(void)quality;
+\tFSettings.soundq = 0;
+\tSetSoundVariables();
+}
+""",
+        "V8 force embedded FDS soundq=0",
+    )
+    return text
+
+
+
+
+# AURORA_FCEUMM_FDS_V8_1_GENERATOR_MAKE_FIX_20260827
+# AURORA_FCEUMM_FDS_V8_1_FDSWRITE_FIX_V3_20260827
+def patch_v8_fds(text: str) -> str:
+    # AURORA_FCEUMM_FDS_V8_1_FDSWRITE_FIX_V3_20260827
+    # V6 already specializes FDSSWrite() to the LQ RenderSound() path.
+    # V8 must not inspect or rewrite FDSSWrite at all.
+
+    name = "static void FDS_ESI(void)"
+    start = text.find(name)
+    if start < 0:
+        fail("V8 FDS: FDS_ESI não encontrado")
+
+    brace = text.find("{", start)
+    if brace < 0:
+        fail("V8 FDS: FDS_ESI sem corpo")
+
+    depth = 0
+    end = -1
+    pos = brace
+    while pos < len(text):
+        ch = text[pos]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = pos + 1
+                break
+        pos += 1
+
+    if end < 0:
+        fail("V8 FDS: FDS_ESI incompleto")
+
+    block = text[start:end]
+
+    if ("((int64)1 << 40) * FDSClock" in block and
+        "(int64)1 << 39" not in block and
+        "FSettings.soundq" not in block):
+        return text
+
+    if ("((int64)1 << 40) * FDSClock" in block and
+        "(int64)1 << 39" in block):
+        new_block = (
+            "static void FDS_ESI(void) {\n"
+            "\tif (FSettings.SndRate) {\n"
+            "\t\tfdso.cycles = ((int64)1 << 40) * FDSClock;\n"
+            "\t\tfdso.cycles /= FSettings.SndRate * 16;\n"
+            "\t}\n"
+            "}"
+        )
+        return text[:start] + new_block + text[end:]
+
+    fail("V8 FDS: FDS_ESI em forma não reconhecida")
+
+def patch_v8_x6502(text: str) -> str:
+    old = """\tif (PAL)
+\t\tcycles *= 15;\t// 15*4=60
+\telse
+\t\tcycles *= 16;\t// 16*4=64
+"""
+    text = text.replace(
+        old,
+        "\t/* AURORA_FCEUMM_FDS_V8_NTSC_LQ_PPU64_REVIVE_ACCURACY_20260827: FDS NTSC-only. */\n"
+        "\tcycles <<= 4;\n",
+    )
+    if "cycles *= 15" in text or "cycles *= 16" in text:
+        fail("V8 x6502 ainda contém branch PAL no caminho de ciclos")
+    return text
+
+
+
+# AURORA_FCEUMM_FDS_V9_INPUT_PALETTE_CPU_FASTPATH_20260827
+
+def patch_v9_ppu(text: str) -> str:
+    if "AURORA_FCEUMM_FDS_V9_INPUT_PALETTE_CPU_FASTPATH_20260827" in text:
+        return text
+
+    old = "static uint8 deemp = 0;\n"
+    if old not in text:
+        fail("V9 PPU: estado de deemphasis não encontrado")
+    text = text.replace(
+        old,
+        "static uint8 deemp = 0;\n"
+        "/* AURORA_FCEUMM_FDS_V9_INPUT_PALETTE_CPU_FASTPATH_20260827:\n"
+        " * expose the predominant emphasis used by FCEUmm's dynamic 0x40 bank. */\n"
+        "static int aurora_fds_last_deemph = 0;\n"
+        "int aurora_fds_get_deemph(void) { return aurora_fds_last_deemph; }\n",
+        1
+    )
+
+    old = "\t\t\tSetNESDeemph(maxref, 0);\n"
+    if old not in text:
+        fail("V9 PPU: SetNESDeemph(maxref) não encontrado")
+    text = text.replace(
+        old,
+        "\t\t\taurora_fds_last_deemph = maxref;\n"
+        "\t\t\tSetNESDeemph(maxref, 0);\n",
+        1
+    )
+    return text
+
+
+def patch_v9_x6502(text: str) -> str:
+    if "AURORA_FCEUMM_FDS_V9_INPUT_PALETTE_CPU_FASTPATH_20260827" in text:
+        return text
+
+    if '#include "cart.h"' not in text:
+        anchor = '#include "fceu.h"\n'
+        if anchor not in text:
+            fail("V9 x6502: include fceu.h não encontrado")
+        text = text.replace(anchor, anchor + '#include "cart.h"\n', 1)
+
+    old_read = (
+        "static INLINE uint8 RdMemNorm(uint32 A) {\n"
+        "\treturn(_DB = ARead[A](A));\n"
+        "}\n"
+    )
+    new_read = (
+        "static INLINE uint8 RdMemNorm(uint32 A) {\n"
+        "\t/* AURORA_FCEUMM_FDS_V9_INPUT_PALETTE_CPU_FASTPATH_20260827 */\n"
+        "\tif (A < 0x2000)\n"
+        "\t\treturn(_DB = RAM[A & 0x7FF]);\n"
+        "\tif (A >= 0x6000)\n"
+        "\t\treturn(_DB = Page[A >> 11][A]);\n"
+        "\treturn(_DB = ARead[A](A));\n"
+        "}\n"
+    )
+    if old_read not in text:
+        fail("V9 x6502: RdMemNorm original não encontrado")
+    text = text.replace(old_read, new_read, 1)
+
+    old_write = (
+        "static INLINE void WrMemNorm(uint32 A, uint8 V) {\n"
+        "\tBWrite[A](A, V);\n"
+        "}\n"
+    )
+    new_write = (
+        "static INLINE void WrMemNorm(uint32 A, uint8 V) {\n"
+        "\tif (A < 0x2000) {\n"
+        "\t\tRAM[A & 0x7FF] = V;\n"
+        "\t\treturn;\n"
+        "\t}\n"
+        "\tif (A >= 0x6000 && A < 0xE000) {\n"
+        "\t\tPage[A >> 11][A] = V;\n"
+        "\t\treturn;\n"
+        "\t}\n"
+        "\tBWrite[A](A, V);\n"
+        "}\n"
+    )
+    if old_write not in text:
+        fail("V9 x6502: WrMemNorm original não encontrado")
+    text = text.replace(old_write, new_write, 1)
+    return text
+
+
+
+# AURORA_FCEUMM_FDS_V10_RESTORE_EXPANSION_AUDIO_20260827
+
+def patch_v10_sound(text: str) -> str:
+    if "AURORA_FCEUMM_FDS_V10_RESTORE_EXPANSION_AUDIO_20260827" in text:
+        return text
+
+    include_anchor = '#include "sound.h"\n'
+    decl = (
+        '/* AURORA_FCEUMM_FDS_V10_RESTORE_EXPANSION_AUDIO_20260827 */\n'
+        'void FDSSound(int c);\n'
+    )
+    if "void FDSSound(int c);" not in text:
+        if include_anchor not in text:
+            fail("V10 sound: include sound.h não encontrado")
+        text = text.replace(include_anchor, include_anchor + decl, 1)
+
+    old = (
+        "\tif (GameExpSound.Fill)\n"
+        "\t\tGameExpSound.Fill(end & 0xF);\n"
+    )
+    new = (
+        "\t/* V10: FDS-only archive; mix expansion audio directly at the\n"
+        "\t * same pre-SexyFilter boundary used by stock FCEUmm. */\n"
+        "\tFDSSound(end & 0xF);\n"
+    )
+    if old in text:
+        text = text.replace(old, new, 1)
+    elif "FDSSound(end & 0xF);" not in text:
+        fail("V10 sound: ponto GameExpSound.Fill não encontrado")
+
+    return text
+
+
+def patch_v10_fds(text: str) -> str:
+    if "AURORA_FCEUMM_FDS_V10_RESTORE_EXPANSION_AUDIO_20260827" in text:
+        return text
+
+    grouped = """static void RenderSound(void) {
+\tint32 end, start;
+\tint32 x;
+\tint32 waveIndex;
+\tint32 accum;
+
+\tstart = FBC;
+\tend = (SOUNDTS << 16) / soundtsinc;
+\tif (end <= start)
+\t\treturn;
+\tFBC = end;
+
+\tif (SPSG[0x9] & 0x80)
+\t\treturn;
+
+\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827
+\t * x>>4 maps up to 16 consecutive FDS sub-samples to one Wave[] cell.
+\t * FDSDoSound still executes once for every original x, in order. */
+\twaveIndex = start >> 4;
+\taccum = 0;
+\tfor (x = start; x < end; x++) {
+\t\tint32 t = FDSDoSound();
+\t\tint32 idx = x >> 4;
+
+\t\tt += t >> 1;
+\t\tt >>= 4;
+\t\tif (idx != waveIndex) {
+\t\t\tWave[waveIndex] += accum;
+\t\t\twaveIndex = idx;
+\t\t\taccum = 0;
+\t\t}
+\t\taccum += t;
+\t}
+\tif (accum)
+\t\tWave[waveIndex] += accum;
+}
+"""
+
+    legacy = """static void RenderSound(void) {
+\tint32 end, start;
+\tint32 x;
+
+\tstart = FBC;
+\tend = (SOUNDTS << 16) / soundtsinc;
+\tif (end <= start)
+\t\treturn;
+\tFBC = end;
+
+\t/* AURORA_FCEUMM_FDS_V10_RESTORE_EXPANSION_AUDIO_20260827:
+\t * stock FCEUmm LQ expansion-channel accumulation. */
+\tif (!(SPSG[0x9] & 0x80))
+\t\tfor (x = start; x < end; x++) {
+\t\t\tuint32 t = FDSDoSound();
+\t\t\tt += t >> 1;
+\t\t\tt >>= 4;
+\t\t\tWave[x >> 4] += t;
+\t\t}
+}
+"""
+
+    if grouped in text:
+        text = text.replace(grouped, legacy, 1)
+    elif "AURORA_FCEUMM_FDS_V10_RESTORE_EXPANSION_AUDIO_20260827:" not in text:
+        start = text.find("static void RenderSound(void) {")
+        if start < 0:
+            fail("V10 FDS: RenderSound não encontrado")
+        end_anchor = "\nstatic void RenderSoundHQ(void) {"
+        end = text.find(end_anchor, start)
+        if end < 0:
+            fail("V10 FDS: fim de RenderSound não encontrado")
+        cur = text[start:end]
+        if "FBC" not in cur or "FDSDoSound()" not in cur or "Wave[" not in cur:
+            fail("V10 FDS: RenderSound não parece ser o renderer FDS esperado")
+        text = text[:start] + legacy.rstrip() + text[end:]
+
+    reset_sig = "void FDSSoundReset(void) {"
+    p = text.find(reset_sig)
+    if p < 0:
+        fail("V10 FDS: FDSSoundReset não encontrado")
+
+    reset_end = text.find("\n}", p)
+    if reset_end < 0:
+        fail("V10 FDS: fim de FDSSoundReset não encontrado")
+    block = text[p:reset_end + 2]
+
+    if "\tFBC = 0;" not in block:
+        anchor = "\tmemset(&fdso, 0, sizeof(fdso));\n"
+        if anchor not in block:
+            fail("V10 FDS: memset fdso não encontrado")
+        block = block.replace(
+            anchor,
+            anchor +
+            "\t/* V10: reset expansion-audio fractional cursor with the engine. */\n"
+            "\tFBC = 0;\n",
+            1
+        )
+        text = text[:p] + block + text[reset_end + 2:]
+
+    p = text.find(reset_sig)
+    reset_end = text.find("\n}", p)
+    block = text[p:reset_end + 2]
+    if "GameExpSound.Fill = FDSSound;" not in block:
+        anchor = "\tFDS_ESI();\n"
+        if anchor not in block:
+            fail("V10 FDS: FDS_ESI em reset não encontrado")
+        regs = (
+            "\tGameExpSound.HiSync = HQSync;\n"
+            "\tGameExpSound.HiFill = RenderSoundHQ;\n"
+            "\tGameExpSound.Fill = FDSSound;\n"
+            "\tGameExpSound.RChange = FDS_ESI;\n"
+        )
+        block = block.replace(anchor, anchor + regs, 1)
+        text = text[:p] + block + text[reset_end + 2:]
+
+    return text
+
+
+
+# AURORA_FCEUMM_FDS_V11_SAVESTATE_FASTPATH_20260827
+
+def aurora_v11_replace_c_function(text: str, signature: str,
+                                  replacement: str, label: str) -> str:
+    start = text.find(signature)
+    if start < 0:
+        fail("V11 " + label + ": função não encontrada")
+
+    brace = text.find("{", start + len(signature))
+    if brace < 0:
+        fail("V11 " + label + ": corpo não encontrado")
+
+    depth = 0
+    i = brace
+    state = "code"
+    quote = ""
+    end = -1
+
+    while i < len(text):
+        ch = text[i]
+        nx = text[i + 1] if i + 1 < len(text) else ""
+
+        if state == "line":
+            if ch == "\n":
+                state = "code"
+        elif state == "block":
+            if ch == "*" and nx == "/":
+                state = "code"
+                i += 1
+        elif state == "string":
+            if ch == "\\":
+                i += 1
+            elif ch == quote:
+                state = "code"
+        else:
+            if ch == "/" and nx == "/":
+                state = "line"
+                i += 1
+            elif ch == "/" and nx == "*":
+                state = "block"
+                i += 1
+            elif ch == '"' or ch == "'":
+                state = "string"
+                quote = ch
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        i += 1
+
+    if end < 0:
+        fail("V11 " + label + ": fechamento não encontrado")
+
+    return text[:start] + replacement.rstrip() + text[end:]
+
+
+def patch_v11_state(text: str) -> str:
+    marker = "AURORA_FCEUMM_FDS_V11_SAVESTATE_FASTPATH_20260827"
+    if marker in text:
+        return text
+
+    # SubWrite(NULL, sf) already exists specifically to calculate a block's
+    # serialized byte count without writing or touching emulated state.
+    anchor = "static SFORMAT *CheckS(SFORMAT *sf, uint32 tsize, char *desc) {"
+    p = text.find(anchor)
+    if p < 0:
+        fail("V11 state: CheckS anchor não encontrado")
+
+    helper = """/* AURORA_FCEUMM_FDS_V11_SAVESTATE_FASTPATH_20260827
+ * Exact serialized size without creating a temporary state.
+ * Each state chunk is one type byte + uint32 payload size + SubWrite payload;
+ * the FCS header is 16 bytes.  No PreSave/PostSave or disk XOR is required,
+ * because those operations change bytes, never descriptor sizes. */
+size_t FCEUSS_GetStateSize(void) {
+\tsize_t total = 16;
+
+\ttotal += 5 + (size_t)SubWrite(0, SFCPU);
+\ttotal += 5 + (size_t)SubWrite(0, SFCPUC);
+\ttotal += 5 + (size_t)SubWrite(0, FCEUPPU_STATEINFO);
+\ttotal += 5 + (size_t)SubWrite(0, FCEUCTRL_STATEINFO);
+\ttotal += 5 + (size_t)SubWrite(0, FCEUSND_STATEINFO);
+\ttotal += 5 + (size_t)SubWrite(0, SFMDATA);
+
+\treturn total;
+}
+
+"""
+    return text[:p] + helper + text[p:]
+
+
+def patch_v11_libretro(text: str) -> str:
+    marker = "AURORA_FCEUMM_FDS_V11_SAVESTATE_FASTPATH_20260827"
+    if marker in text:
+        return text
+
+    # Local declaration keeps this optimization isolated to the generated
+    # FDS-only frontend; no public FCEUmm header/API change is necessary.
+    decl_anchor = "static unsigned serialize_size = 0;\n"
+    if decl_anchor not in text:
+        fail("V11 libretro: serialize_size não encontrado")
+
+    text = text.replace(
+        decl_anchor,
+        "/* AURORA_FCEUMM_FDS_V11_SAVESTATE_FASTPATH_20260827 */\n"
+        "extern size_t FCEUSS_GetStateSize(void);\n"
+        + decl_anchor,
+        1
+    )
+
+    replacement = """size_t retro_serialize_size(void) {
+\t/* V11: exact metadata-only size query.  The old implementation allocated
+\t * 1 MB and performed a complete FCEUSS_Save() merely to discover this
+\t * number, making the first Aurora save effectively serialize twice. */
+\tif (serialize_size == 0)
+\t\tserialize_size = FCEUSS_GetStateSize();
+\treturn serialize_size;
+}"""
+
+    text = aurora_v11_replace_c_function(
+        text,
+        "size_t retro_serialize_size(void)",
+        replacement,
+        "libretro retro_serialize_size"
+    )
+    return text
+
+
+def patch_v11_fds(text: str) -> str:
+    marker = "AURORA_FCEUMM_FDS_V11_SAVESTATE_FASTPATH_20260827"
+    if marker in text:
+        return text
+
+    helper_anchor = "static void PreSave(void) {"
+    p = text.find(helper_anchor)
+    if p < 0:
+        fail("V11 FDS: PreSave não encontrado")
+
+    helper = """/* AURORA_FCEUMM_FDS_V11_SAVESTATE_FASTPATH_20260827
+ * diskdata/diskdatao come from malloc-compatible FCEU allocations and are
+ * naturally aligned for uint64 on EE.  65500 = 8187*8 + 4, so the whole
+ * XOR has an aligned 64-bit body plus one aligned uint32 tail.
+ * This is byte-for-byte identical to the old 65,500-iteration byte loop. */
+static INLINE void AuroraFDSXorStateSide(uint8 *dst, const uint8 *src) {
+\tuint64 *d64 = (uint64 *)dst;
+\tconst uint64 *s64 = (const uint64 *)src;
+\tint i;
+
+\tfor (i = 0; i < (65500 >> 3); ++i)
+\t\td64[i] ^= s64[i];
+
+\t*(uint32 *)(dst + (65500 & ~7)) ^=
+\t\t*(const uint32 *)(src + (65500 & ~7));
+}
+
+"""
+    text = text[:p] + helper + text[p:]
+
+    presave = """static void PreSave(void) {
+\tint x;
+\tfor (x = 0; x < TotalSides; x++)
+\t\tAuroraFDSXorStateSide(diskdata[x], diskdatao[x]);
+}"""
+    postsave = """static void PostSave(void) {
+\tint x;
+\tfor (x = 0; x < TotalSides; x++)
+\t\tAuroraFDSXorStateSide(diskdata[x], diskdatao[x]);
+}"""
+
+    text = aurora_v11_replace_c_function(
+        text, "static void PreSave(void)", presave, "FDS PreSave"
+    )
+    text = aurora_v11_replace_c_function(
+        text, "static void PostSave(void)", postsave, "FDS PostSave"
+    )
+    return text
+
+
 def audit_generated(files: dict[str, str]) -> None:
     # AURORA_FCEUMM_FDS_V0_6_15_PRUNED_LINK_STUBS_AUDIT
     fceu_fds = files["fceu_fds.c"]
@@ -853,6 +3092,10 @@ def audit_generated(files: dict[str, str]) -> None:
         fail("state_fds.c retained FILE-based FCEUSS_CheckStates")
     if "AURORA_FCEUMM_FDS_V0_6_14_LOCAL_ASPRINTF" not in general_fds:
         fail("general_fds.c did not enable local asprintf fallback")
+    if "AURORA_FCEUMM_FDS_LOADER_FIX_V2_20260826_TRACE" not in files["libretro_fds.c"]:
+        fail("libretro_fds.c missing persistent FDS trace")
+    if "AURORA_FCEUMM_FDS_LOADER_FIX_V2_20260826_NULL_IPS" not in files["file_fds.c"]:
+        fail("file_fds.c missing NULL IPS guard")
     for generated_name in ("input_fds.c", "pads_fds.c"):
         if "\\t" in files[generated_name]:
             fail(f"{generated_name}: retained literal \\t escape in generated C")
@@ -888,6 +3131,12 @@ def main() -> None:
         "state": core / "src/state.c",
         "general": core / "src/general.c",
         "video": core / "src/video.c",
+        "file": core / "src/file.c",
+        "fds": core / "src/fds.c",
+        "ppu": core / "src/ppu.c",
+        "pputile": core / "src/pputile.h",
+        "sound": core / "src/sound.c",
+        "x6502": core / "src/x6502.c",
     }
     for path in paths.values():
         if not path.is_file():
@@ -901,13 +3150,19 @@ def main() -> None:
     )
 
     generated = {
-        "fceu_fds.c": patch_fceu(originals["fceu"]),
-        "libretro_fds.c": patch_libretro(originals["libretro"]),
+        "fceu_fds.c": patch_v8_fceu(patch_v6_fceu(patch_fceu(originals["fceu"]))),
+        "libretro_fds.c": patch_v11_libretro(patch_v7_libretro(patch_v6_libretro(patch_v4_generated_libretro(patch_libretro(originals["libretro"]))))),
         "input_fds.c": INPUT_FDS_C,
-        "pads_fds.c": PADS_FDS_C,
-        "state_fds.c": patch_state(originals["state"]),
+        "pads_fds.c": patch_v6_pads(PADS_FDS_C),
+        "state_fds.c": patch_v11_state(patch_state(originals["state"])),
         "general_fds.c": patch_general(originals["general"]),
-        "video_fds.c": patch_video(originals["video"]),
+        "video_fds.c": patch_v4_generated_video(patch_video(originals["video"])),
+        "file_fds.c": patch_file(originals["file"]),
+        "fds_fds.c": patch_v11_fds(patch_v10_fds(patch_v8_fds(patch_v7_fds(patch_v6_fds(patch_fds(originals["fds"])))))),
+        "ppu_fds.c": patch_v9_ppu(patch_v8_ppu(patch_v7_ppu(patch_v6_ppu(patch_v5_ppu(originals["ppu"]))))),
+        "pputile_fds.h": patch_v5_pputile(originals["pputile"]),
+        "sound_fds.c": patch_v10_sound(patch_v8_sound(patch_v6_sound(patch_v5_sound(originals["sound"])))),
+        "x6502_fds.c": patch_v9_x6502(patch_v8_x6502(patch_v7_x6502(originals["x6502"]))),
     }
     audit_generated(generated)
     for name, body in generated.items():

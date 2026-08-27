@@ -16,6 +16,9 @@
 #include "emurom.h"
 #include "mainloop.h"
 #include "mainloop_shared.h"
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
+#include "nes/quicknes/quicknes_bridge.h"
+#include "nes/fceumm/fceumm_fds_bridge.h"
 #include "sega/picodrive/picodrive_bridge.h"
 /* AURORA_PCE_EXPERIMENTAL_V1 */
 #include "pce/beetle/pce_bridge.h"
@@ -534,6 +537,32 @@ Bool _MainLoopLoadBios(Emu::Rom *pRom, const Char *pFilePath)
         return TRUE;
 }
 
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: shared standard NES .pal, exactly 64 RGB triples. */
+Bool _MainLoopLoadNesPalette(const char *pFileName)
+{
+    Uint8 rgb[64 * 3], extra;
+    FILE *fp;
+    size_t got;
+    if (!pFileName) return FALSE;
+    fp = fopen(pFileName, "rb");
+    if (!fp) { MainLoopModalPrintf(60 * 3, "ERROR: cannot open NES palette"); return FALSE; }
+    got = fread(rgb, 1, sizeof(rgb), fp);
+    if (got != sizeof(rgb) || fread(&extra, 1, 1, fp) != 0)
+    {
+        fclose(fp);
+        MainLoopModalPrintf(60 * 3, "ERROR: NES .pal must be exactly 192 bytes");
+        return FALSE;
+    }
+    fclose(fp);
+    if (!QuicknesBridge_SetPalette(rgb) || !FceummFdsBridge_SetPalette(rgb))
+    {
+        MainLoopModalPrintf(60 * 3, "ERROR: could not apply NES palette");
+        return FALSE;
+    }
+    MainLoopStatusPrintf(120, "NES palette loaded.");
+    return TRUE;
+}
+
 Bool _MainLoopLoadSnesPalette(const char *pFileName)
 {
         Uint32 *pPalData;
@@ -729,7 +758,15 @@ static Bool _MainLoopExecuteFdsPath(const char *pMappedPath,
         return FALSE;
     }
 
-    if (!MainLoopEnsureSystemDirectory(SystemDirectory, (Int32)sizeof(SystemDirectory)))
+    /* AURORA_SYSTEM_BIOS_PATH_FIX_V1_20260826
+     * Prefer an already-existing disksys.rom, with mass0:/SNESticle/SYSTEM
+     * first. Only if no BIOS is found do we fall back to ensuring the normal
+     * firmware directory, so the subsequent error reports the intended path.
+     */
+    if (!MainLoopFindSystemFileDirectory(
+            SystemDirectory, (Int32)sizeof(SystemDirectory), "disksys.rom") &&
+        !MainLoopEnsureSystemDirectory(
+            SystemDirectory, (Int32)sizeof(SystemDirectory)))
     {
         MainLoopModalPrintf(60 * 4, "ERROR: cannot create SNESticle/SYSTEM");
         return FALSE;
@@ -742,9 +779,11 @@ static Bool _MainLoopExecuteFdsPath(const char *pMappedPath,
         return FALSE;
     }
 
+    printf("[FDS] BIOS probe: %s\n", BiosPath);
     pBios = fopen(BiosPath, "rb");
     if (!pBios)
     {
+        printf("[FDS] BIOS fopen failed: %s\n", BiosPath);
         MainLoopModalPrintf(60 * 5, "ERROR: put disksys.rom in SNESticle/SYSTEM");
         return FALSE;
     }
@@ -824,6 +863,8 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 
     if (eType == MAINLOOP_ENTRYTYPE_SNESPALETTE)
         return _MainLoopLoadSnesPalette(pFileName);
+    if (eType == MAINLOOP_ENTRYTYPE_NESPALETTE)
+        return _MainLoopLoadNesPalette(pFileName); /* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
 
     _MainLoopUnloadRom();
 

@@ -133,6 +133,7 @@ Bool FdsSystem::LoadDisk(const Char *path, const Char *systemPath)
     m_uFrame = m_uLine = 0;
     FceummFdsBridge_UnloadGame();
 
+    /* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827: loader proven; persistent frontend breadcrumbs removed. */
     if (!fdsInspectContent(path, &contentBytes, &contentCRC, &totalSides))
     {
         printf("[FdsSystem] invalid/unreadable FDS image: %s\n",

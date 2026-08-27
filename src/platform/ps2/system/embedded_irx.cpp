@@ -827,27 +827,19 @@ extern "C" int NetIfLoadEmbeddedIrx(void)
         return s_netif_loaded_result;
     }
 
-    ret = NetManInit();
-    if (ret < 0)
-    {
-        printf("NetIfLoadEmbeddedIrx: NetManInit failed (%d)\n", ret);
-        s_netif_loaded_result = -3;
-        return s_netif_loaded_result;
-    }
-
     ret = EmbeddedIrxLoad(smap_irx, sizeof(smap_irx), 0, NULL);
     if (ret < 0)
     {
         printf("NetIfLoadEmbeddedIrx: smap.irx failed (%d)\n", ret);
-        s_netif_loaded_result = -4;
+        s_netif_loaded_result = -3;
         return s_netif_loaded_result;
     }
 
-    ret = EmbeddedIrxLoad(ps2ip_irx, sizeof(ps2ip_irx), 0, NULL);
+    ret = NetManInit();
     if (ret < 0)
     {
-        printf("NetIfLoadEmbeddedIrx: ps2ip.irx failed (%d)\n", ret);
-        s_netif_loaded_result = -5;
+        printf("NetIfLoadEmbeddedIrx: NetManInit failed (%d)\n", ret);
+        s_netif_loaded_result = -4;
         return s_netif_loaded_result;
     }
 

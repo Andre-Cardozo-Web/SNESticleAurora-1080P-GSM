@@ -695,8 +695,16 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read4000(SNCpuT *pCpu, Uint32 uAddr)
             return uData;
         }
     case 0x4212:	// HVBJOY
-        return pIO->m_Regs.hvbjoy;
-
+    {
+        /* AURORA_FCEUMM_FDS_V8_1_COMPAT_REVIEW_20260827
+         * Adapted from SNESticleRevive's general line-zero
+         * accuracy fix; no title-specific IRQ workaround.
+         * Aurora's current active-line loop is 0..224. */
+        Uint8 uData = pIO->m_Regs.hvbjoy & (Uint8)~0x80;
+        if (pSnes->m_uLine >= 225)
+            uData |= 0x80;
+        return uData;
+    }
     case 0x4213:	// RDIO
         return pIO->m_Regs.wrio;
 
@@ -1916,6 +1924,8 @@ if (m_pRom)
 
 m_PPU.SetRegionPAL(bPAL);
     m_uLine = 0;
+    /* AURORA_FCEUMM_FDS_V8_1_COMPAT_REVIEW_20260827: line zero is never part of VBlank. */
+    m_IO.m_Regs.hvbjoy &= ~0x80;
 
 #if SNDBG_LOG
 	#if SNDBG_DEEP

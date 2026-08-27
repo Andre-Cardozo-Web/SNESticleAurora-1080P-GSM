@@ -18,6 +18,8 @@
 #include "sega/picodrive/picodrive_bridge.h"
 /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
 #include "nes/quicknes/quicknes_bridge.h"
+/* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827 */
+#include "nes/fceumm/fceumm_fds_bridge.h"
 #include "pce/beetle/pce_bridge.h"
 
 /* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
@@ -466,6 +468,15 @@ void MainLoopRender()
             QuicknesBridge_CanDirectGsVideo())
         {
             QuicknesBridge_DrawDirectGs(
+                _MainLoop_uOutTexTBP,
+                g_GskVideoMode == GSK_VIDMODE_240P ? 2 : 4,
+                fColor);
+        }
+        else if (_pSystem == _pFds &&
+                 FceummFdsBridge_CanDirectGsVideo())
+        {
+            /* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827: native FCEUmm XBuf -> GS T8 + CLUT. */
+            FceummFdsBridge_DrawDirectGs(
                 _MainLoop_uOutTexTBP,
                 g_GskVideoMode == GSK_VIDMODE_240P ? 2 : 4,
                 fColor);

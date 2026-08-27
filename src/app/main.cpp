@@ -29,6 +29,7 @@
 #include "types.h"
 #include "console.h"
 #include "mainloop.h"
+#include "mainloop_smb.h" /* AURORA_RESET_SMB_V1_20260827 */
 
 extern "C" {
 #include "excepHandler.h"
@@ -127,30 +128,109 @@ void MainSetBootDir(const char *pPath)
 	}
 }
 
+/* AURORA_RESET_SMB_V1_20260827
+ *
+ * A launcher-provided smb0:/smb1: path names the launcher's SMB mount.
+ * Aurora resets the IOP during startup, so that mount no longer exists when
+ * "Reset emulator" is selected later.
+ *
+ * Aurora's own ps2smb stack exposes the connected share as "smb:". Reconnect
+ * it first, then preserve only the path portion after the old device prefix.
+ */
+static int MainPrepareResetBootPath(const char *bootPath,
+                                    char *resolvedPath,
+                                    size_t resolvedPathSize)
+{
+    const char *suffix = NULL;
+
+    if (!bootPath || !bootPath[0] || !resolvedPath || resolvedPathSize == 0)
+        return 0;
+
+    if (!strncmp(bootPath, "smb:", 4) ||
+        !strncmp(bootPath, "SMB:", 4))
+    {
+        suffix = bootPath + 4;
+    }
+    else if (!strncmp(bootPath, "smb0:", 5) ||
+             !strncmp(bootPath, "SMB0:", 5) ||
+             !strncmp(bootPath, "smb1:", 5) ||
+             !strncmp(bootPath, "SMB1:", 5))
+    {
+        suffix = bootPath + 5;
+    }
+
+    if (!suffix)
+    {
+        if (strlen(bootPath) >= resolvedPathSize)
+            return 0;
+        strcpy(resolvedPath, bootPath);
+        return 1;
+    }
+
+    DLog("[reset] SMB boot detected: %s", bootPath);
+    DLog("[reset] reconnecting Aurora SMB mount");
+
+    /* AURORA_FCEUMM_FDS_V5_CI_SMB_UPSTREAM_PERF_20260827
+     * SMB support defaults OFF. V1 called SmbEnsureMounted() directly, which
+     * therefore returned -1 before loading SMB.CNF or touching the network.
+     * A reset of an SMB-launched ELF is itself an explicit request to use SMB:
+     * enable the feature and force a fresh share/auth session rather than
+     * trusting a stale s_mounted flag. */
+    SmbSupportSetEnabled(1);
+    SmbDisconnect();
+
+    if (SmbEnsureMounted() < 0)
+    {
+        DLog("[reset] SMB reconnect failed: error=%d status=%s",
+             SmbGetLastError(), SmbGetStatusText());
+        return 0;
+    }
+
+    if (snprintf(resolvedPath, resolvedPathSize,
+                 "smb:%s", suffix) >= (int)resolvedPathSize)
+    {
+        DLog("[reset] normalized SMB boot path is too long");
+        return 0;
+    }
+
+    DLog("[reset] SMB reconnect OK via %s; normalized path: %s",
+         SmbGetConfigPath()[0] ? SmbGetConfigPath() : "(unknown config)",
+         resolvedPath);
+    return 1; /* AURORA_FCEUMM_FDS_V5_CI_SMB_UPSTREAM_PERF_20260827 */
+}
+
 void MainResetEmulator(void)
 {
     const char *pBootPath = MainGetBootPath();
+    char resolvedBootPath[256];
     int ret;
 
     if (!pBootPath || !pBootPath[0])
         return;
 
+    if (!MainPrepareResetBootPath(
+            pBootPath, resolvedBootPath, sizeof(resolvedBootPath)))
+    {
+        DLog("[reset] could not prepare boot path: %s", pBootPath);
+        return;
+    }
+
     /*
      * Do not use LoadExecPS2 here. It goes through EELOAD and resets
      * the IOP before loading the target, losing non-ROM filesystem
-     * drivers such as USB/BDM.
+     * drivers such as USB/BDM/SMB.
      *
      * PS2SDK's elf-loader first installs a small loader below 0x00100000.
-     * That loader can read the current ELF while the existing mass/mmce/
-     * fileXio drivers are still alive, then resets the IOP only after
-     * the ELF has been loaded into EE RAM.
+     * The current filesystem stack remains alive until the target ELF has
+     * been loaded into EE RAM.
      */
-    DLog("[reset] reloading ELF: %s", pBootPath);
+    DLog("[reset] reloading ELF: %s", resolvedBootPath);
 
-    ret = LoadELFFromFile(pBootPath, 0, NULL);
+    ret = LoadELFFromFile(resolvedBootPath, 0, NULL);
 
     /* Success transfers execution and never normally gets here. */
-    DLog("[reset] LoadELFFromFile failed: %d (%s)", ret, pBootPath);
+    DLog("[reset] LoadELFFromFile failed: %d (%s)",
+         ret, resolvedBootPath);
 }
 
 /* Your program's main entry point */

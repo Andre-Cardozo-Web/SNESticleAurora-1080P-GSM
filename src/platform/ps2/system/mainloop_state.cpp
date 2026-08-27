@@ -180,20 +180,175 @@ static Bool _MainLoopSramEnsureOneDir(const Char *pPath)
         ? TRUE : FALSE;
 }
 
-/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824
- * BIOS files are user-supplied. Keep them beside Aurora's existing
- * per-system SRAM/state tree on whichever SRAM storage policy is active. */
+/* AURORA_SYSTEM_BIOS_PATH_FIX_V1_20260826
+ * SYSTEM stores user-supplied firmware, not SRAM. Do not let the SRAM target
+ * decide where BIOS files live.
+ *
+ * Prefer writable mass roots independently of the SRAM setting. This also
+ * covers a normal USB device exposed as mass0: and alternative mass aliases.
+ * If no mass root is writable, preserve the previous SRAM-root behaviour as
+ * a compatibility fallback (including the memory-card save-directory helper).
+ */
+static Bool _MainLoopSystemCopyDirectory(Char *pOut, Int32 nOutBytes,
+                                         const Char *pDirectory)
+{
+    int nChars;
+
+    if (!pOut || nOutBytes <= 0 || !pDirectory || !*pDirectory)
+        return FALSE;
+
+    nChars = snprintf(pOut, (size_t)nOutBytes, "%s", pDirectory);
+    if (nChars < 0 || nChars >= nOutBytes)
+    {
+        pOut[0] = '\0';
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static Bool _MainLoopSystemTryWritableRoot(Char *pOut, Int32 nOutBytes,
+                                           const Char *pRoot)
+{
+    Char Directory[512];
+    int nChars;
+
+    if (!pRoot || !*pRoot)
+        return FALSE;
+
+    if (!_MainLoopSramEnsureOneDir(pRoot))
+        return FALSE;
+
+    nChars = snprintf(Directory, sizeof(Directory), "%s/SYSTEM", pRoot);
+    if (nChars < 0 || nChars >= (int)sizeof(Directory))
+        return FALSE;
+
+    if (!_MainLoopSramEnsureOneDir(Directory))
+        return FALSE;
+
+    return _MainLoopSystemCopyDirectory(
+        pOut, nOutBytes, Directory);
+}
+
+static Bool _MainLoopSystemFileAtRoot(Char *pOut, Int32 nOutBytes,
+                                      const Char *pRoot,
+                                      const Char *pFileName)
+{
+    struct stat Status;
+    Char Directory[512];
+    Char FilePath[1024];
+    int nChars;
+
+    if (!pOut || nOutBytes <= 0 ||
+        !pRoot || !*pRoot || !pFileName || !*pFileName)
+        return FALSE;
+
+    nChars = snprintf(Directory, sizeof(Directory), "%s/SYSTEM", pRoot);
+    if (nChars < 0 || nChars >= (int)sizeof(Directory))
+        return FALSE;
+
+    nChars = snprintf(FilePath, sizeof(FilePath),
+                      "%s/%s", Directory, pFileName);
+    if (nChars < 0 || nChars >= (int)sizeof(FilePath))
+        return FALSE;
+
+    if (stat(FilePath, &Status) != 0 || S_ISDIR(Status.st_mode))
+        return FALSE;
+
+    return _MainLoopSystemCopyDirectory(
+        pOut, nOutBytes, Directory);
+}
+
+Bool MainLoopFindSystemFileDirectory(Char *pOut, Int32 nOutBytes,
+                                     const Char *pFileName)
+{
+    static const Char *pPreferredRoots[] =
+    {
+        "mass0:/SNESticle",
+        "mass1:/SNESticle",
+        "mass:/SNESticle",
+        NULL
+    };
+    static const Char *pFallbackRoots[] =
+    {
+        "mc0:/SNESticle",
+        "mc1:/SNESticle",
+        "mmce0:/SNESticle",
+        "mmce1:/SNESticle",
+        NULL
+    };
+    const Char *pActiveRoot;
+    Int32 i;
+
+    if (!pOut || nOutBytes <= 0 || !pFileName || !*pFileName)
+        return FALSE;
+    pOut[0] = '\0';
+
+    /* Canonical USB firmware tree wins first. */
+    for (i = 0; pPreferredRoots[i]; ++i)
+    {
+        if (_MainLoopSystemFileAtRoot(
+                pOut, nOutBytes, pPreferredRoots[i], pFileName))
+        {
+            printf("[SYSTEM] found %s in %s\n", pFileName, pOut);
+            return TRUE;
+        }
+    }
+
+    /* Preserve any configured/legacy root as a secondary lookup. */
+    pActiveRoot = MainLoopSramGetBrowseRoot();
+    if (pActiveRoot && *pActiveRoot &&
+        _MainLoopSystemFileAtRoot(
+            pOut, nOutBytes, pActiveRoot, pFileName))
+    {
+        printf("[SYSTEM] found %s in %s\n", pFileName, pOut);
+        return TRUE;
+    }
+
+    for (i = 0; pFallbackRoots[i]; ++i)
+    {
+        if (_MainLoopSystemFileAtRoot(
+                pOut, nOutBytes, pFallbackRoots[i], pFileName))
+        {
+            printf("[SYSTEM] found %s in %s\n", pFileName, pOut);
+            return TRUE;
+        }
+    }
+
+    pOut[0] = '\0';
+    return FALSE;
+}
+
 Bool MainLoopEnsureSystemDirectory(Char *pOut, Int32 nOutBytes)
 {
+    static const Char *pPreferredRoots[] =
+    {
+        "mass0:/SNESticle",
+        "mass1:/SNESticle",
+        "mass:/SNESticle",
+        NULL
+    };
     const Char *pRoot;
     Bool bMemCard;
     Char Directory[512];
     int nChars;
+    Int32 i;
 
     if (!pOut || nOutBytes <= 0)
         return FALSE;
     pOut[0] = '\0';
 
+    /* Firmware storage is independent of the SRAM destination. */
+    for (i = 0; pPreferredRoots[i]; ++i)
+    {
+        if (_MainLoopSystemTryWritableRoot(
+                pOut, nOutBytes, pPreferredRoots[i]))
+        {
+            printf("[SYSTEM] directory: %s\n", pOut);
+            return TRUE;
+        }
+    }
+
+    /* Compatibility fallback: retain the old selected SRAM root behaviour. */
     pRoot = MainLoopSramGetBrowseRoot();
     bMemCard = MainLoopSramNeedsMemoryCardPreflight();
     if (!pRoot || !*pRoot)
@@ -226,15 +381,13 @@ Bool MainLoopEnsureSystemDirectory(Char *pOut, Int32 nOutBytes)
             return FALSE;
     }
 
-    nChars = snprintf(pOut, (size_t)nOutBytes, "%s", Directory);
-    if (nChars < 0 || nChars >= nOutBytes)
-    {
-        pOut[0] = '\0';
+    if (!_MainLoopSystemCopyDirectory(
+            pOut, nOutBytes, Directory))
         return FALSE;
-    }
+
+    printf("[SYSTEM] fallback directory: %s\n", pOut);
     return TRUE;
 }
-
 
 static void _MainLoopSramBuildPath(Char *pPath, Int32 nPathBytes,
                                    const Char *pRoot, Bool bLegacyRoot)

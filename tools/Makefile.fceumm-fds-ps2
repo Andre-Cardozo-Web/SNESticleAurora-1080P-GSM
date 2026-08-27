@@ -1,3 +1,4 @@
+# AURORA_FCEUMM_FDS_V8_1_GENERATOR_MAKE_FIX_20260827: normalized generated FDS-only source set.
 # AURORA_FCEUMM_FDS_V0_6
 # FDS-only external PS2 static build for itsveenee/Fceumm-PS2.
 #
@@ -42,22 +43,18 @@ PREPARE_STAMP := $(GEN_DIR)/.prepared-v0_6
 #   * state.c and general.c are generated lean overlays with save-state support
 #     preserved but movie/netplay/cheat/Game-Genie runtime hooks removed.
 #   * video.c is a generated FDS-only overlay: no movie/VS/NSF draw branches.
+# AURORA_FCEUMM_FDS_LOADER_FIX_V2_20260826: fds.c/file.c use generated hardened overlays.
+# AURORA_FCEUMM_FDS_V5_CI_SMB_UPSTREAM_PERF_20260827: ppu.c/sound.c use generated FDS performance overlays.
 ORIGINAL_SOURCES := \
 	src/cart.c \
 	src/crc32.c \
 	src/debug.c \
 	src/fceu-endian.c \
 	src/fceustr.c \
-	src/fds.c \
-	src/file.c \
 	src/filter.c \
 	src/md5.c \
 	src/memory.c \
 	src/palette.c \
-	src/ppu.c \
-	src/sound.c \
-	src/wave.c \
-	src/x6502.c \
 	src/drivers/libretro/memstream.c
 
 GENERATED_SOURCES := \
@@ -67,7 +64,12 @@ GENERATED_SOURCES := \
 	$(GEN_DIR)/pads_fds.c \
 	$(GEN_DIR)/state_fds.c \
 	$(GEN_DIR)/general_fds.c \
-	$(GEN_DIR)/video_fds.c
+	$(GEN_DIR)/video_fds.c \
+	$(GEN_DIR)/file_fds.c \
+	$(GEN_DIR)/fds_fds.c \
+	$(GEN_DIR)/ppu_fds.c \
+	$(GEN_DIR)/sound_fds.c \
+	$(GEN_DIR)/x6502_fds.c
 
 ORIGINAL_OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(ORIGINAL_SOURCES))
 GENERATED_OBJECTS := \
@@ -77,7 +79,13 @@ GENERATED_OBJECTS := \
 	$(OBJ_DIR)/generated/pads_fds.o \
 	$(OBJ_DIR)/generated/state_fds.o \
 	$(OBJ_DIR)/generated/general_fds.o \
-	$(OBJ_DIR)/generated/video_fds.o
+	$(OBJ_DIR)/generated/video_fds.o \
+	$(OBJ_DIR)/generated/file_fds.o \
+	$(OBJ_DIR)/generated/fds_fds.o \
+	$(OBJ_DIR)/generated/ppu_fds.o \
+	$(OBJ_DIR)/generated/sound_fds.o \
+	$(OBJ_DIR)/generated/x6502_fds.o
+
 OBJECTS := $(ORIGINAL_OBJECTS) $(GENERATED_OBJECTS)
 DEPS := $(OBJECTS:.o=.d)
 
@@ -90,12 +98,13 @@ WARNINGS := \
 	-Wno-uninitialized \
 	-Wno-strict-aliasing
 
+# AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: real internal frameskip + FDS-only x6502 specialization.
 FLAGS := \
 	-G0 -O3 -DNDEBUG -fomit-frame-pointer -finline-functions \
 	-fno-strict-aliasing -fwrapv -funsigned-char \
 	-ffunction-sections -fdata-sections \
 	-DPS2 -D__PS2__ -D_EE -DHAVE_ASPRINTF -DLSB_FIRST -DLOCAL_LE=1 \
-	-D__LIBRETRO__ -DSOUND_QUALITY=0 -DPATH_MAX=1024 \
+	-D__LIBRETRO__ -DSOUND_QUALITY=0 -DFRAMESKIP -DPATH_MAX=1024 \
 	-DINLINE=inline -DPSS_STYLE=1 -DFCEU_VERSION_NUMERIC=9813 \
 	$(WARNINGS)
 
@@ -128,15 +137,17 @@ source-list:
 	@printf '%s\n' $(ORIGINAL_SOURCES)
 	@printf '%s\n' $(GENERATED_SOURCES)
 
-$(PREPARE_STAMP): $(PREPARE_TOOL) src/fceu.c src/drivers/libretro/libretro.c src/input.c src/input/pads.c src/state.c src/general.c src/video.c
+$(PREPARE_STAMP): $(PREPARE_TOOL) src/fceu.c src/drivers/libretro/libretro.c src/input.c src/input/pads.c src/state.c src/general.c src/video.c src/file.c src/fds.c src/ppu.c src/pputile.h src/sound.c src/x6502.c
 	@mkdir -p "$(GEN_DIR)"
 	$(PYTHON) "$(PREPARE_TOOL)" --core "$(CURDIR)" --out "$(GEN_DIR)"
 	@touch "$@"
 
 $(GENERATED_SOURCES): $(PREPARE_STAMP) ;
 
-$(ORIGINAL_OBJECTS): ps2sdk-headers $(AURORA_FCEUMM_PS2_MAKEFILE)
-$(GENERATED_OBJECTS): ps2sdk-headers $(AURORA_FCEUMM_PS2_MAKEFILE) $(PREPARE_STAMP)
+$(ORIGINAL_OBJECTS): $(AURORA_FCEUMM_PS2_MAKEFILE)
+$(ORIGINAL_OBJECTS): | ps2sdk-headers
+$(GENERATED_OBJECTS): $(AURORA_FCEUMM_PS2_MAKEFILE) $(PREPARE_STAMP)
+$(GENERATED_OBJECTS): | ps2sdk-headers
 
 $(TARGET): $(OBJECTS)
 	@mkdir -p "$(dir $@)"

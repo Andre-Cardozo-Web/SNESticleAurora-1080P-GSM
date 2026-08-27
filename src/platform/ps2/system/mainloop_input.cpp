@@ -216,6 +216,25 @@ Uint16 _MainLoopInput(Uint32 pad)
 	if (pad & PAD_L2)
 		return 0;
 
+    /* AURORA_FCEUMM_FDS_V9_INPUT_PALETTE_CPU_FASTPATH_20260827
+     * Same physical layout as QuickNES:
+     * Cross=A, Square=B, Circle=Turbo A, Triangle=Turbo B. */
+    if (_pSystem == _pFds)
+    {
+        Uint32 uFds = pad &
+            ~(PAD_CROSS | PAD_SQUARE | PAD_CIRCLE | PAD_TRIANGLE | PAD_R2);
+
+        if (pad & PAD_CROSS)  uFds |= PAD_CROSS;
+        if (pad & PAD_SQUARE) uFds |= PAD_SQUARE;
+
+        if (_MainLoopTurboHostIsOn())
+        {
+            if (pad & PAD_CIRCLE)   uFds |= PAD_CROSS;
+            if (pad & PAD_TRIANGLE) uFds |= PAD_SQUARE;
+        }
+        return _MainLoopSnesInput(uFds);
+    }
+
 	/* AURORA_PCE_EXPERIMENTAL_V3
 	 * Cross=I, Square=II, Circle=Turbo I, Triangle=Turbo II. */
 	if (_pSystem == _pPce)

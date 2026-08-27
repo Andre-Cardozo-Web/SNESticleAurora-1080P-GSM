@@ -319,25 +319,33 @@ Bool MainLoopProcess()
             else if (_pSystem == _pFds)
             {
                 /* AURORA_FCEUMM_FDS_V0_5_PROCESS */
-                FceummFdsBridge_SetSkipVideo(bSafeSkip ? true : false);
+                /* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827: bridge skip is one-shot; false is already the default. */
+                if (bSafeSkip)
+                    FceummFdsBridge_SetSkipVideo(true);
                 PROF_ENTER("FdsExecuteFrame");
                 _pFds->ExecuteFrame(&Input, pSurface, pMixBuffer, eMode);
                 PROF_LEAVE("FdsExecuteFrame");
                 {
-                    /* AURORA_FCEUMM_FDS_V0_6_DRIVE_SYNC */
-                    const Bool bWasInserted = _MainLoop_bDiskInserted;
-                    _MainLoop_iDisk = (Int32)FceummFdsBridge_GetSelectedSide();
-                    _MainLoop_bDiskInserted = FceummFdsBridge_IsDiskInserted()
-                        ? TRUE : FALSE;
-                    if (!bWasInserted && _MainLoop_bDiskInserted)
+                    /* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827: drive state changes only on load/eject/insert/restore. */
+                    unsigned fdsSide = 0;
+                    bool fdsInserted = false;
+                    if (FceummFdsBridge_ConsumeDriveStateChange(&fdsSide, &fdsInserted))
                     {
-                        MainLoopStatusPrintf(90,
-                            "FDS: Disk %d Side %c inserted",
-                            (int)(_MainLoop_iDisk >> 1) + 1,
-                            (_MainLoop_iDisk & 1) ? 'B' : 'A');
+                        const Bool bWasInserted = _MainLoop_bDiskInserted;
+                        _MainLoop_iDisk = (Int32)fdsSide;
+                        _MainLoop_bDiskInserted = fdsInserted ? TRUE : FALSE;
+                        if (!bWasInserted && _MainLoop_bDiskInserted)
+                        {
+                            MainLoopStatusPrintf(90,
+                                "FDS: Disk %d Side %c inserted",
+                                (int)(_MainLoop_iDisk >> 1) + 1,
+                                (_MainLoop_iDisk & 1) ? 'B' : 'A');
+                        }
                     }
                 }
-                if (!bSafeSkip)
+                /* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827: normal FDS presentation is native T8/CLUT.
+                 * Keep the historical RGBA upload only as a fallback. */
+                if (!bSafeSkip && !FceummFdsBridge_CanDirectGsVideo())
                 {
                     PROF_ENTER("FdsTexUpload");
                     TextureUpload(&_OutTex, pSurface->GetLinePtr(0));

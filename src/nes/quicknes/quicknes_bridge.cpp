@@ -39,6 +39,7 @@ extern "C" {
 #include "Nes_Buffer.h"
 #include "Data_Reader.h"
 #include "abstract_file.h"
+#include "nes_ntsc.h" /* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
 
 extern "C" void quicknes_snesticle_set_duty_swap(int enable);
 
@@ -86,6 +87,25 @@ static Uint8 s_Video[QN_VIDEO_W * QN_VIDEO_H + 16]
 static Uint32 s_RgbaPalette[256];
 static short  s_LastFramePalette[Nes_Emu::max_palette_size];
 static bool   s_PaletteValid = false;
+
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: raw 64xRGB .pal expanded by QuickNES's own nes_ntsc. */
+static bool s_CustomPaletteValid = false;
+static Uint8 s_CustomBasePalette[64 * 3];
+static Uint8 s_CustomExpandedPalette[Nes_Emu::color_table_size * 3];
+static void qGetRgb(unsigned ci, Uint8 *r, Uint8 *g, Uint8 *b)
+{
+    if (ci >= (unsigned)Nes_Emu::color_table_size) ci = 0;
+    if (s_CustomPaletteValid)
+    {
+        const Uint8 *p = s_CustomExpandedPalette + ci * 3;
+        *r=p[0]; *g=p[1]; *b=p[2];
+    }
+    else
+    {
+        const Nes_Emu::rgb_t &rgb = Nes_Emu::nes_colors[ci];
+        *r=rgb.red; *g=rgb.green; *b=rgb.blue;
+    }
+}
 
 
 /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824
@@ -194,15 +214,12 @@ static void qRenderFrame(CRenderSurface *pTarget)
             if (ci >= (unsigned)Nes_Emu::color_table_size)
                 ci = 0;
 
-            const Nes_Emu::rgb_t &rgb = Nes_Emu::nes_colors[ci];
+            Uint8 r, g, b;
+            qGetRgb(ci, &r, &g, &b);
 
             /* CRenderSurface PIXELFORMAT_RGBA8 on little-endian EE is
              * bytes R,G,B,A -> integer 0xAABBGGRR. */
-            s_RgbaPalette[i] =
-                0xff000000u |
-                ((Uint32)rgb.blue  << 16) |
-                ((Uint32)rgb.green << 8)  |
-                (Uint32)rgb.red;
+            s_RgbaPalette[i] = 0xff000000u | ((Uint32)b << 16) | ((Uint32)g << 8) | (Uint32)r;
         }
 
         memcpy(s_LastFramePalette, frame.palette,
@@ -272,12 +289,9 @@ static void qRefreshGsPalette(const Nes_Emu::frame_t &frame)
         else if ((block & 0x18U) == 0x10U)
             dest -= 8U;
 
-        const Nes_Emu::rgb_t &rgb = Nes_Emu::nes_colors[ci];
-        s_GsPalette[dest] =
-            0x80000000u |
-            ((Uint32)rgb.blue << 16) |
-            ((Uint32)rgb.green << 8) |
-            (Uint32)rgb.red;
+        Uint8 r, g, b;
+        qGetRgb(ci, &r, &g, &b);
+        s_GsPalette[dest] = 0x80000000u | ((Uint32)b << 16) | ((Uint32)g << 8) | (Uint32)r;
     }
 
     memcpy(s_DirectLastPalette, frame.palette,
@@ -509,6 +523,24 @@ void QuicknesBridge_SetDutySwap(bool enabled)
 {
     s_DutySwap = enabled;
     quicknes_snesticle_set_duty_swap(enabled ? 1 : 0);
+}
+
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: exact QuickNES libretro-style custom palette expansion. */
+bool QuicknesBridge_SetPalette(const Uint8 *rgb192)
+{
+    nes_ntsc_setup_t setup;
+    if (!rgb192) return false;
+    memcpy(s_CustomBasePalette, rgb192, sizeof(s_CustomBasePalette));
+    setup = nes_ntsc_rgb;
+    setup.palette = NULL;
+    setup.base_palette = s_CustomBasePalette;
+    setup.palette_out = s_CustomExpandedPalette;
+    nes_ntsc_init(NULL, &setup);
+    s_CustomPaletteValid = true;
+    s_PaletteValid = false;
+    s_DirectPaletteValid = false;
+    s_DirectClutResident = false;
+    return true;
 }
 
 void QuicknesBridge_SetTurboSpeed(unsigned speedShift)

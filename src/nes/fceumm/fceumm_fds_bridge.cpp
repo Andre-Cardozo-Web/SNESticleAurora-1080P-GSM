@@ -24,6 +24,15 @@
 #include "mixbuffer.h"
 #include "audmixbuffer.h"
 #include "snio.h"
+/* AURORA_FCEUMM_FDS_V9_INPUT_PALETTE_CPU_FASTPATH_20260827: exact QuickNES palette model. */
+#include "Nes_Emu.h"
+#include "nes_ntsc.h"
+
+/* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827: direct T8/CLUT upload, same GS primitive layer as QuickNES. */
+extern "C" {
+#include "gs.h"
+#include "gpprim.h"
+}
 
 extern AudMixBuffer *_AudMix;
 
@@ -51,6 +60,17 @@ bool FDS_retro_unserialize(const void *, size_t);
 void FDS_retro_get_system_av_info(struct retro_system_av_info *);
 void FDS_aurora_fds_set_system_directory(const char *);
 void FDS_aurora_fds_set_skip_video(int);
+/* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827: generated libretro native-video accessors. */
+const uint8_t *FDS_aurora_fds_get_video_pixels(void);
+const uint16_t *FDS_aurora_fds_get_video_palette(void);
+/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827 */
+uint32_t FDS_aurora_fds_get_palette_serial(void);
+int FDS_aurora_fds_get_deemph(void);
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
+void FDS_aurora_fds_set_pad_state(unsigned, unsigned);
+void FDS_aurora_fds_set_palette(const uint8_t *);
+const int32_t *FDS_aurora_fds_get_audio_mono(void);
+int FDS_aurora_fds_get_audio_frames(void);
 void FDS_FCEU_FDSEject(void);
 void FDS_FCEU_FDSSelect(void);
 void FDS_FCEU_FDSInsert(int);
@@ -59,6 +79,10 @@ void FDS_FCEU_FDSInsert(int);
 static bool s_Initialized = false;
 static bool s_GameLoaded = false;
 static bool s_SkipVideoNext = false;
+/* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827: avoid unchanged cross-archive setters. */
+static bool s_CoreSkipVideoApplied = false;
+static Uint16 s_LastPadRaw[2] = { 0, 0 };
+static bool s_LastPadRawValid = false;
 static Emu::SysInputT *s_pInput = NULL;
 static CRenderSurface *s_pTarget = NULL;
 static CMixBuffer *s_pMix = NULL;
@@ -71,13 +95,59 @@ static unsigned s_SelectedSide = 0;
 static bool s_DiskInserted = false;
 static unsigned s_SwapFramesRemaining = 0;
 static unsigned s_SwapTargetSide = 0;
+static bool s_DriveStateChanged = true; /* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827 */
 enum { FDS_SIDE_SWAP_DELAY_FRAMES = 60 };
 
 enum { FDS_AUDIO_CHUNK = 1024 };
 static Int16 s_AudioL[FDS_AUDIO_CHUNK];
 static Int16 s_AudioR[FDS_AUDIO_CHUNK];
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
+static Uint8 s_CustomPalette[64 * 3];
+static bool s_CustomPaletteValid = false;
+/* AURORA_FCEUMM_FDS_V9_INPUT_PALETTE_CPU_FASTPATH_20260827: QuickNES-compatible 512-color expansion. */
+static Uint8 s_CustomExpandedPalette[Nes_Emu::color_table_size * 3];
+static Uint32 s_HostPaletteSerial = 1;
+static Int32 s_DirectLastDeemph = -1;
 static Uint32 s_R5[32], s_G5[32], s_B5[32];
 static bool s_ColorTablesReady = false;
+
+/* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827
+ * Native FCEUmm framebuffer is 256x240 T8. XBuf in this old core is only
+ * guaranteed 4-byte alignment, while the GS upload path is happiest with
+ * DMA-friendly alignment. Use a static aligned fallback only when needed.
+ */
+enum
+{
+    FDS_GS_TEX_TBP_OFFSET  = 0x400,
+    FDS_GS_CLUT_TBP_OFFSET = 0x580,
+    FDS_GS_T8_TBW          = 256,
+    FDS_VIDEO_W            = 256,
+    FDS_VIDEO_H            = 240
+};
+
+static const Uint8 *s_DirectPixels = NULL;
+static const Uint16 *s_DirectPalette = NULL;
+/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: V4 allocates XBuf at 64-byte alignment; no staging copy needed. */
+static Uint32 s_DirectGsPalette[256] __attribute__((aligned(64)));
+static Uint32 s_DirectPaletteSerial = 0;
+static bool s_DirectPaletteValid = false;
+static bool s_DirectClutResident = false;
+static bool s_DirectReady = false;
+static Uint32 s_DirectFrameSerial = 0;
+static Uint32 s_DirectUploadSerial = 0;
+
+static void fdsResetDirectVideo(void)
+{
+    s_DirectPixels = NULL;
+    s_DirectPalette = NULL;
+    s_DirectPaletteSerial = 0;
+    s_DirectLastDeemph = -1;
+    s_DirectPaletteValid = false;
+    s_DirectClutResident = false;
+    s_DirectReady = false;
+    s_DirectFrameSerial = 0;
+    s_DirectUploadSerial = 0;
+}
 
 static void fdsResetDriveHostState(void)
 {
@@ -86,6 +156,7 @@ static void fdsResetDriveHostState(void)
     s_DiskInserted = false;
     s_SwapFramesRemaining = 0;
     s_SwapTargetSide = 0;
+    s_DriveStateChanged = true;
 }
 
 static void fdsInitColorTables(void)
@@ -201,6 +272,29 @@ static bool fdsPadHas(unsigned port, Uint16 bit)
     return pad != EMUSYS_DEVICE_DISCONNECTED && (pad & bit) != 0;
 }
 
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: map Aurora carrier bits once per frame. */
+static Uint8 fdsMapPad(Uint16 pad)
+{
+    Uint8 nes = 0;
+    if (pad == EMUSYS_DEVICE_DISCONNECTED) return 0;
+
+    /* AURORA_FCEUMM_FDS_V9_INPUT_PALETTE_CPU_FASTPATH_20260827 */
+    if (pad & SNESIO_JOY_B)      nes |= 0x01; /* Cross  -> A */
+    if (pad & SNESIO_JOY_Y)      nes |= 0x02; /* Square -> B */
+    if (pad & SNESIO_JOY_SELECT) nes |= 0x04;
+    if (pad & SNESIO_JOY_START)  nes |= 0x08;
+    if (pad & SNESIO_JOY_UP)     nes |= 0x10;
+    if (pad & SNESIO_JOY_DOWN)   nes |= 0x20;
+    if (pad & SNESIO_JOY_LEFT)   nes |= 0x40;
+    if (pad & SNESIO_JOY_RIGHT)  nes |= 0x80;
+
+    if ((nes & 0x10) && (nes & 0x20))
+        nes &= (Uint8)~(0x10 | 0x20);
+    if ((nes & 0x40) && (nes & 0x80))
+        nes &= (Uint8)~(0x40 | 0x80);
+    return nes;
+}
+
 static int16_t fdsInputState(unsigned port, unsigned device,
                              unsigned index, unsigned id)
 {
@@ -256,6 +350,7 @@ void FceummFdsBridge_UnloadGame(void)
     s_pTarget = NULL;
     s_pMix = NULL;
     fdsResetDriveHostState();
+    fdsResetDirectVideo();
 }
 
 void FceummFdsBridge_Shutdown(void)
@@ -296,11 +391,17 @@ bool FceummFdsBridge_LoadDisk(const char *path, const char *systemPath,
 
     s_GameLoaded = true;
     s_StateBytes = 0;
+    if (s_CustomPaletteValid) FDS_aurora_fds_set_palette(s_CustomPalette);
     s_TotalSides = totalSides;
     s_SelectedSide = 0;
     s_DiskInserted = true;
     s_SwapFramesRemaining = 0;
     s_SwapTargetSide = 0;
+    s_DriveStateChanged = true;
+    s_SkipVideoNext = false;
+    FDS_aurora_fds_set_skip_video(0);
+    s_CoreSkipVideoApplied = false;
+    s_LastPadRawValid = false;
 
     struct retro_system_av_info av;
     memset(&av, 0, sizeof(av));
@@ -316,16 +417,176 @@ bool FceummFdsBridge_LoadDisk(const char *path, const char *systemPath,
 void FceummFdsBridge_Reset(void)
 {
     if (s_GameLoaded) FDS_retro_reset();
+    fdsResetDirectVideo();
 }
 
 void FceummFdsBridge_SoftReset(void)
 {
     if (s_GameLoaded) FDS_retro_reset();
+    fdsResetDirectVideo();
 }
 
 void FceummFdsBridge_SetSkipVideo(bool skip)
 {
     s_SkipVideoNext = skip;
+}
+
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: live/shared raw 64xRGB palette. */
+bool FceummFdsBridge_SetPalette(const Uint8 *rgb192)
+{
+    nes_ntsc_setup_t setup;
+
+    if (!rgb192)
+        return false;
+
+    memcpy(s_CustomPalette, rgb192, sizeof(s_CustomPalette));
+
+    /* Same 64-base -> 512-emphasis expansion used by QuickNES. */
+    setup = nes_ntsc_rgb;
+    setup.palette = NULL;
+    setup.base_palette = s_CustomPalette;
+    setup.palette_out = s_CustomExpandedPalette;
+    nes_ntsc_init(NULL, &setup);
+
+    s_CustomPaletteValid = true;
+    if (++s_HostPaletteSerial == 0)
+        s_HostPaletteSerial = 1;
+
+    if (s_Initialized)
+        FDS_aurora_fds_set_palette(s_CustomPalette);
+
+    s_DirectPaletteValid = false;
+    s_DirectClutResident = false;
+    s_DirectLastDeemph = -1;
+    return true;
+}
+
+/* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827: a GS reinit invalidates VRAM addresses/residency, not core pixels. */
+void FceummFdsBridge_InvalidateGsResources(void)
+{
+    s_DirectUploadSerial = 0;
+    s_DirectClutResident = false;
+}
+
+bool FceummFdsBridge_CanDirectGsVideo(void)
+{
+    return s_GameLoaded && s_DirectReady &&
+           s_DirectPixels && s_DirectPalette &&
+           s_DirectFrameSerial != 0;
+}
+
+static void fdsRefreshDirectPalette(void)
+{
+    Int32 deemph;
+
+    if (!s_DirectPalette)
+        return;
+
+    deemph = (Int32)FDS_aurora_fds_get_deemph();
+    if (deemph < 0 || deemph > 7)
+        deemph = 0;
+
+    if (s_DirectPaletteValid &&
+        s_DirectPaletteSerial == s_HostPaletteSerial &&
+        s_DirectLastDeemph == deemph)
+        return;
+
+    for (unsigned i = 0; i < 256; ++i)
+    {
+        const unsigned base = i & 0x3fU;
+        const unsigned bank = i & 0xc0U;
+        unsigned tint = 0;
+        unsigned ci;
+        unsigned dest = i;
+        const unsigned block = i & 0x3fU;
+        Uint32 r, g, b;
+
+        if (bank == 0x40U)
+            tint = (unsigned)deemph;
+        else if (bank == 0xC0U)
+            tint = 7U;
+
+        ci = base | (tint << 6);
+
+        if (s_CustomPaletteValid)
+        {
+            const Uint8 *rgb = &s_CustomExpandedPalette[ci * 3U];
+            r = rgb[0];
+            g = rgb[1];
+            b = rgb[2];
+        }
+        else
+        {
+            const Nes_Emu::rgb_t &rgb = Nes_Emu::nes_colors[ci];
+            r = rgb.red;
+            g = rgb.green;
+            b = rgb.blue;
+        }
+
+        if ((block & 0x18U) == 0x08U)
+            dest += 8U;
+        else if ((block & 0x18U) == 0x10U)
+            dest -= 8U;
+
+        s_DirectGsPalette[dest] =
+            0x80000000u | (b << 16) | (g << 8) | r;
+    }
+
+    s_DirectPaletteSerial = s_HostPaletteSerial;
+    s_DirectLastDeemph = deemph;
+    s_DirectPaletteValid = true;
+    s_DirectClutResident = false;
+}
+
+bool FceummFdsBridge_DrawDirectGs(Uint32 auroraOutBaseTBP,
+                                  Int32 logicalY,
+                                  Float32 intensity)
+{
+    Uint32 texTBP, clutTBP, mod, modColor;
+    const Uint8 *uploadPixels;
+
+    if (!auroraOutBaseTBP || !FceummFdsBridge_CanDirectGsVideo())
+        return false;
+
+    texTBP = auroraOutBaseTBP + FDS_GS_TEX_TBP_OFFSET;
+    clutTBP = auroraOutBaseTBP + FDS_GS_CLUT_TBP_OFFSET;
+
+    if (s_DirectUploadSerial != s_DirectFrameSerial)
+    {
+        /* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827: XBuf is 64-byte aligned by the generated V4 video core. */
+        GPPrimUploadTexture(
+            (int)texTBP, FDS_GS_T8_TBW,
+            0, 0, GS_PSMT8,
+            (void *)s_DirectPixels, FDS_VIDEO_W, FDS_VIDEO_H);
+        s_DirectUploadSerial = s_DirectFrameSerial;
+    }
+
+    fdsRefreshDirectPalette();
+    if (!s_DirectClutResident)
+    {
+        GPPrimUploadTexture(
+            (int)clutTBP, 64,
+            0, 0, GS_PSMCT32,
+            s_DirectGsPalette, 16, 16);
+        s_DirectClutResident = true;
+    }
+
+    GPPrimSetTex(
+        texTBP, FDS_GS_T8_TBW, 8, 8, GS_PSMT8,
+        clutTBP, 64, GS_PSMCT32, 0);
+
+    if (intensity < 0.0f) intensity = 0.0f;
+    if (intensity > 1.0f) intensity = 1.0f;
+    mod = (Uint32)(128.0f * intensity + 0.5f);
+    if (mod > 128u) mod = 128u;
+    modColor = 0x80000000u | (mod << 16) | (mod << 8) | mod;
+
+    GPPrimTexRect(
+        0, (Uint32)logicalY << 4, 8, 8,
+        256u << 4, (Uint32)(logicalY + 240) << 4,
+        (256u << 4) + 8u, (240u << 4) + 8u,
+        10u << 4, modColor, 0);
+    return true;
 }
 
 static bool fdsAdvanceSelectionTo(unsigned target)
@@ -369,6 +630,7 @@ bool FceummFdsBridge_BeginSideSwap(void)
 
     FDS_FCEU_FDSEject();
     s_DiskInserted = false;
+    s_DriveStateChanged = true;
     s_SwapTargetSide = target;
     s_SwapFramesRemaining = FDS_SIDE_SWAP_DELAY_FRAMES;
     return true;
@@ -400,6 +662,17 @@ void FceummFdsBridge_GetDriveState(unsigned *selectedSide,
     if (swapTargetSide) *swapTargetSide = s_SwapTargetSide;
 }
 
+bool FceummFdsBridge_ConsumeDriveStateChange(unsigned *selectedSide,
+                                              bool *inserted)
+{
+    if (!s_DriveStateChanged)
+        return false;
+    s_DriveStateChanged = false;
+    if (selectedSide) *selectedSide = s_SelectedSide;
+    if (inserted) *inserted = s_GameLoaded && s_DiskInserted;
+    return true;
+} /* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827 */
+
 bool FceummFdsBridge_SetDriveState(unsigned selectedSide,
                                    bool inserted,
                                    unsigned swapFramesRemaining,
@@ -415,6 +688,7 @@ bool FceummFdsBridge_SetDriveState(unsigned selectedSide,
     s_DiskInserted = inserted;
     s_SwapFramesRemaining = swapFramesRemaining;
     s_SwapTargetSide = swapTargetSide;
+    s_DriveStateChanged = true;
     return true;
 }
 
@@ -450,6 +724,25 @@ bool FceummFdsBridge_LoadState(const void *data, int bytes)
     return FDS_retro_unserialize(data, (size_t)n);
 }
 
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: keep FCEUmm mono until Aurora's mono mixer. */
+static void fdsOutputNativeMono(void)
+{
+    const int32_t *src;
+    int frames, pos = 0;
+    if (!s_pMix) return;
+    src = FDS_aurora_fds_get_audio_mono();
+    frames = FDS_aurora_fds_get_audio_frames();
+    if (!src || frames <= 0) return;
+    while (pos < frames)
+    {
+        int n = frames - pos;
+        if (n > FDS_AUDIO_CHUNK) n = FDS_AUDIO_CHUNK;
+        for (int i = 0; i < n; ++i) s_AudioL[i] = (Int16)src[pos + i];
+        s_pMix->OutputSamplesMono(s_AudioL, n);
+        pos += n;
+    }
+}
+
 void FceummFdsBridge_RunFrame(Emu::SysInputT *input,
                               CRenderSurface *target,
                               CMixBuffer *mix)
@@ -463,8 +756,45 @@ void FceummFdsBridge_RunFrame(Emu::SysInputT *input,
     s_pTarget = target;
     s_pMix = mix;
 
-    FDS_aurora_fds_set_skip_video(skipVideo ? 1 : 0);
+    /* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827: unchanged input and skip state need no cross-archive setter. */
+    {
+        const Uint16 raw0 = input ? input->uPad[0] : 0;
+        const Uint16 raw1 = input ? input->uPad[1] : 0;
+        if (!s_LastPadRawValid || raw0 != s_LastPadRaw[0] || raw1 != s_LastPadRaw[1])
+        {
+            FDS_aurora_fds_set_pad_state(fdsMapPad(raw0), fdsMapPad(raw1));
+            s_LastPadRaw[0] = raw0;
+            s_LastPadRaw[1] = raw1;
+            s_LastPadRawValid = true;
+        }
+    }
+    if (skipVideo != s_CoreSkipVideoApplied)
+    {
+        FDS_aurora_fds_set_skip_video(skipVideo ? 1 : 0);
+        s_CoreSkipVideoApplied = skipVideo;
+    }
     FDS_retro_run();
+    fdsOutputNativeMono();
+
+    /* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827: XBuf and libretro palette storage are stable after load.
+     * Resolve their addresses only until direct T8 becomes ready. */
+    if (!skipVideo)
+    {
+        if (!s_DirectReady)
+        {
+            s_DirectPixels = FDS_aurora_fds_get_video_pixels();
+            s_DirectPalette = FDS_aurora_fds_get_video_palette();
+            s_DirectReady = (s_DirectPixels && s_DirectPalette);
+        }
+        if (s_DirectReady)
+        {
+            if (++s_DirectFrameSerial == 0)
+            {
+                s_DirectFrameSerial = 1;
+                s_DirectUploadSerial = 0;
+            }
+        }
+    }
 
     if (s_SwapFramesRemaining)
     {
@@ -479,6 +809,7 @@ void FceummFdsBridge_RunFrame(Emu::SysInputT *input,
             }
             FDS_FCEU_FDSInsert(0);
             s_DiskInserted = true;
+            s_DriveStateChanged = true; /* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827 */
         }
     }
 

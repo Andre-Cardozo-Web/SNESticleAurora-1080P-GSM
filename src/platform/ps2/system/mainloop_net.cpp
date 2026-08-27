@@ -112,70 +112,161 @@ void *_MainLoopNetCallback(NetPlayCallbackE eCallback, char *data, int size)
 
 char *_MainLoop_NetConfigPaths[]=
 {
-	(char *)"mc0:/SNESticle/",
-	_MainLoop_BootDir,
+    /* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827
+     * Keep Aurora-local config first, but also understand the standard uLE
+     * SYS-CONF location.  Local media matter for an SMB-launched ELF because
+     * the SMB device itself is not available until IP configuration succeeds. */
+    (char *)"mc0:/SNESticle/",
+    (char *)"mc1:/SNESticle/",
+    (char *)"mass0:/SNESticle/",
+    (char *)"mass1:/SNESticle/",
+    (char *)"mass:/SNESticle/",
+    _MainLoop_BootDir,
+    (char *)"mc0:/SYS-CONF/",
+    (char *)"mc1:/SYS-CONF/",
     NULL
 };
 
 
 
 
+/* AURORA_FCEUMM_FDS_V6_FDS_ONLY_HOTPATHS_SMB_STATIC_20260827: parse the standard PS2 IPCONFIG.DAT line:
+ *     PS2_IP NETMASK GATEWAY
+ * The original SNESticle function was only a stub returning FALSE, so every
+ * caller silently fell back to DHCP.  That cannot work on a plain crossover
+ * PC<->PS2 link unless the PC is also running a DHCP server. */
+static Bool _MainLoopParseIPv4(const char *text, struct in_addr *out)
+{
+    unsigned int a, b, c, d;
+    char tail;
+
+    if (!text || !out ||
+        sscanf(text, "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4 ||
+        a > 255 || b > 255 || c > 255 || d > 255)
+        return FALSE;
+
+    /* Same byte layout as PS2SDK IP4_ADDR on the little-endian EE. */
+    out->s_addr = ((Uint32)d << 24) | ((Uint32)c << 16) |
+                  ((Uint32)b << 8) | (Uint32)a;
+    return TRUE;
+}
+
+static FILE *_MainLoopOpenNetConfig(const char *path, char *resolved, size_t resolvedSize)
+{
+    FILE *fp;
+    const char *slash;
+
+    if (!path || !path[0] || !resolved || resolvedSize == 0)
+        return NULL;
+
+    snprintf(resolved, resolvedSize, "%s", path);
+    fp = fopen(resolved, "rb");
+    if (fp)
+        return fp;
+
+    /* Aurora historically asks for lowercase ipconfig.dat, while the common
+       PS2/uLaunchELF filename is IPCONFIG.DAT. Try that sibling as fallback. */
+    slash = strrchr(path, '/');
+    if (slash && strcmp(slash + 1, "ipconfig.dat") == 0)
+    {
+        size_t prefix = (size_t)(slash - path + 1);
+        static const char upperName[] = "IPCONFIG.DAT";
+        if (prefix + sizeof(upperName) <= resolvedSize)
+        {
+            memcpy(resolved, path, prefix);
+            memcpy(resolved + prefix, upperName, sizeof(upperName));
+            fp = fopen(resolved, "rb");
+            if (fp)
+                return fp;
+        }
+    }
+
+    resolved[0] = 0;
+    return NULL;
+}
+
 static Bool _MainLoopLoadNetConfig(t_ip_info *pConfig, const char *pConfigPath)
 {
-	// 
-	printf("netconfigload: %s\n", pConfigPath);
-	return FALSE;
+    FILE *fp;
+    char resolved[1024];
+    char line[256];
+    char ip[32], mask[32], gateway[32], extra[2];
+
+    if (!pConfig || !pConfigPath)
+        return FALSE;
+
+    fp = _MainLoopOpenNetConfig(pConfigPath, resolved, sizeof(resolved));
+    if (!fp)
+        return FALSE;
+
+    while (fgets(line, sizeof(line), fp))
+    {
+        char *p = line;
+        char *comment;
+        int fields;
+
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+            ++p;
+        if (!*p || *p == '#' || *p == ';')
+            continue;
+
+        comment = strpbrk(p, "#;");
+        if (comment)
+            *comment = 0;
+
+        fields = sscanf(p, "%31s %31s %31s %1s", ip, mask, gateway, extra);
+        if (fields != 3 ||
+            !_MainLoopParseIPv4(ip, &pConfig->ipaddr) ||
+            !_MainLoopParseIPv4(mask, &pConfig->netmask) ||
+            !_MainLoopParseIPv4(gateway, &pConfig->gw))
+        {
+            fclose(fp);
+            printf("netconfigload: malformed %s\n", resolved);
+            return FALSE;
+        }
+
+        pConfig->dhcp_enabled = 0;
+        pConfig->dhcp_status = DHCP_STATE_OFF;
+        fclose(fp);
+        printf("netconfigload: static %s (%s %s %s)\n",
+               resolved, ip, mask, gateway);
+        return TRUE;
+    }
+
+    fclose(fp);
+    printf("netconfigload: empty %s\n", resolved);
+    return FALSE;
 }
 
 Bool _MainLoopConfigureNetwork(char **ppSearchPaths, char *pConfigFileName)
 {
     t_ip_info config;
 
-	// reset ip configuration
+    (void)ppSearchPaths;
+    (void)pConfigFileName;
+
     memset(&config, 0, sizeof(config));
+    strcpy(config.netif_name, "sm0");
 
-	/* Modern PS2SDK SMAP registers as sm0. The original iaddis tree used
-	   sm1 with an older stack; keeping that name makes setconfig silently
-	   miss the only interface and DHCP never starts. */
-	strcpy(config.netif_name, "sm0");
+    /* Test configuration for a direct PC <-> PS2 Ethernet link. */
+    config.dhcp_enabled = 0;
+    IP4_ADDR((ip4_addr_t *)&config.ipaddr, 192, 168, 0, 10);
+    IP4_ADDR((ip4_addr_t *)&config.netmask, 255, 255, 255, 0);
+    IP4_ADDR((ip4_addr_t *)&config.gw, 192, 168, 0, 1);
 
-	// setup default config to have dhcp enabled
-	config.dhcp_enabled = 1;
-	config.ipaddr.s_addr = 0;
-	config.netmask.s_addr = 0;
-	config.gw.s_addr = 0;
+    if (ps2ip_setconfig(&config) <= 0)
+        return FALSE;
 
-	// go through all search paths
-	while (*ppSearchPaths!=NULL)
-	{
-		if (strlen(*ppSearchPaths) > 0)
-		{
-		    char Path[1024];
+    if (ps2ip_getconfig(config.netif_name, &config) > 0)
+    {
+        printf("%08X %08X %08X %d\n",
+               config.ipaddr.s_addr,
+               config.netmask.s_addr,
+               config.gw.s_addr,
+               config.dhcp_enabled);
+    }
 
-        	sprintf(Path, "%s%s", *ppSearchPaths, pConfigFileName);
-
-			// attempt to load configuration information
-			if (_MainLoopLoadNetConfig(&config, Path))
-			{
-				// loaded!
-				break;
-			}
-		}
-		ppSearchPaths++;
-	}
-
-	/* Apply DHCP/static configuration to the actual SMAP interface. */
-	/* This PS2SDK API returns 1 on success and 0 when sm0 was not found. */
-	if (ps2ip_setconfig(&config) <= 0)
-		return FALSE;
-
-	if (ps2ip_getconfig(config.netif_name,&config) > 0)
-	{
-		// print info about network configuration
-		printf("%08X %08X %08X %d\n", config.ipaddr.s_addr, config.netmask.s_addr, config.gw.s_addr, config.dhcp_enabled);
-	}
-
-	return TRUE;
+    return TRUE;
 }
 
 /* Modern netman + ps2ip + lwIP bring-up, mirroring

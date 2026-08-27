@@ -42,6 +42,8 @@
 #include "sega/picodrive/picodrive_bridge.h"
 /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
 #include "nes/quicknes/quicknes_bridge.h"
+/* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827 */
+#include "nes/fceumm/fceumm_fds_bridge.h"
 #include "pce/beetle/pce_bridge.h"
 /* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
 #include "snes/snes9x2010/snes9x2010_bridge.h"
@@ -176,6 +178,8 @@ static Bool _MainLoopAllocVideoVram(void)
      * Cold boot is harmless: both invalidators are no-ops before first use. */
     SNPPURenderInvalidateGsResources();
     QuicknesBridge_InvalidateGsResources();
+    /* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827: FDS direct T8 texture/CLUT live in this VRAM epoch too. */
+    FceummFdsBridge_InvalidateGsResources();
     PicoDriveBridge_InvalidateGsResources();
     PceBridge_InvalidateGsResources();
     Snes9x2010Bridge_InvalidateGsResources();
@@ -568,6 +572,8 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	{
 		PathExtAdd(MAINLOOP_ENTRYTYPE_NESROM, _pNesRom->GetExtName(iExt));
 	}
+	/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
+	PathExtAdd(MAINLOOP_ENTRYTYPE_NESPALETTE, (char *)"pal");
 
 	/* AURORA_PICODRIVE_STAGE2_INIT */
 	_pSega = new SegaSystem();

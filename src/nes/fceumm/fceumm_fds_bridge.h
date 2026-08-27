@@ -15,6 +15,14 @@ void FceummFdsBridge_UnloadGame(void);
 void FceummFdsBridge_Reset(void);
 void FceummFdsBridge_SoftReset(void);
 void FceummFdsBridge_SetSkipVideo(bool skip);
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: shared 192-byte NES RGB palette. */
+bool FceummFdsBridge_SetPalette(const Uint8 *rgb192);
+/* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827: direct native indexed-video path. */
+void FceummFdsBridge_InvalidateGsResources(void);
+bool FceummFdsBridge_CanDirectGsVideo(void);
+bool FceummFdsBridge_DrawDirectGs(Uint32 auroraOutBaseTBP,
+                                  Int32 logicalY,
+                                  Float32 intensity);
 void FceummFdsBridge_RunFrame(Emu::SysInputT *input,
                               CRenderSurface *target,
                               CMixBuffer *mix);
@@ -25,6 +33,9 @@ bool FceummFdsBridge_BeginSideSwap(void);
 bool FceummFdsBridge_IsSideSwapPending(void);
 unsigned FceummFdsBridge_GetSelectedSide(void);
 bool FceummFdsBridge_IsDiskInserted(void);
+/* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827: rare drive-state synchronization. */
+bool FceummFdsBridge_ConsumeDriveStateChange(unsigned *selectedSide,
+                                              bool *inserted);
 void FceummFdsBridge_GetDriveState(unsigned *selectedSide,
                                    bool *inserted,
                                    unsigned *swapFramesRemaining,

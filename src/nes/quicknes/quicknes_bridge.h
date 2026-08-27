@@ -24,6 +24,8 @@ void QuicknesBridge_UnloadGame(void);
 void QuicknesBridge_Reset(void);
 void QuicknesBridge_SoftReset(void);
 void QuicknesBridge_SetDutySwap(bool enabled);
+/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827: shared 192-byte NES RGB palette. */
+bool QuicknesBridge_SetPalette(const Uint8 *rgb192);
 /* AURORA_CONTROLLER_OPTIONS_V2 */
 void QuicknesBridge_SetTurboSpeed(unsigned speedShift);
 void QuicknesBridge_SetSkipVideo(bool skip); /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
