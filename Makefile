@@ -933,7 +933,7 @@ AURORA_PS2MOUSE_SOURCES := \
 	$(AURORA_PS2MOUSE_DIR)/imports.lst \
 	$(AURORA_PS2MOUSE_DIR)/irx_imports.h
 
-$(PS2MOUSE_IRX_PATH): $(AURORA_PS2MOUSE_SOURCES)
+$(PS2MOUSE_IRX_PATH): ensure-ps2dev $(AURORA_PS2MOUSE_SOURCES)
 	PATH="$(PS2DEV)/iop/bin:$(PS2DEV)/bin:$(PS2SDK)/bin:$$PATH" $(MAKE) -C $(AURORA_PS2MOUSE_DIR) PS2SDK="$(PS2SDK)" all
 
 # Build the local mouse IRX before the existing check-env recipe tests it.
