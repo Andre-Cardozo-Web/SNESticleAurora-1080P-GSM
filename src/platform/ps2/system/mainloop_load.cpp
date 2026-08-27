@@ -576,6 +576,7 @@ void _MainLoopUnloadRom()
 	   even though disk-swap input is still gated for Phase 5 - the
 	   wrapper itself exists and owns memory. */
 	_pNes->SetRom(NULL);
+	if (_pFds) _pFds->SetRom(NULL); /* AURORA_FCEUMM_FDS_V0_5_UNLOAD */
 	_pNesRom->Unload();
 	_pNesFDSDisk->Unload();
 	/* AURORA_PICODRIVE_STAGE2_UNLOAD: SetRom(NULL) fully deinitializes PicoDrive. */
@@ -706,6 +707,90 @@ static Bool _MainLoopExecuteDisc(const char *pMappedPath,
 }
 
 
+/* AURORA_FCEUMM_FDS_V0_5_PATH_BOOT
+ * FCEUmm's pinned libretro frontend requires a real full path. Keep the FDS
+ * image on storage and point the core at Aurora's existing SYSTEM directory.
+ */
+static Bool _MainLoopExecuteFdsPath(const char *pMappedPath,
+                                    const char *pOriginalPath,
+                                    Bool bLoadSRAM)
+{
+    Char SystemDirectory[512];
+    Char BiosPath[1024];
+    FILE *pBios;
+    long nBiosBytes;
+
+    if (!pMappedPath || !*pMappedPath || !pOriginalPath || !*pOriginalPath || !_pFds)
+        return FALSE;
+
+    if (!MainLoopEnsureGameplayRasterWidth(256))
+    {
+        MainLoopModalPrintf(60 * 3, "ERROR: cannot configure FDS video raster");
+        return FALSE;
+    }
+
+    if (!MainLoopEnsureSystemDirectory(SystemDirectory, (Int32)sizeof(SystemDirectory)))
+    {
+        MainLoopModalPrintf(60 * 4, "ERROR: cannot create SNESticle/SYSTEM");
+        return FALSE;
+    }
+
+    if (snprintf(BiosPath, sizeof(BiosPath), "%s/disksys.rom", SystemDirectory) >=
+        (int)sizeof(BiosPath))
+    {
+        MainLoopModalPrintf(60 * 4, "ERROR: FDS BIOS path is too long");
+        return FALSE;
+    }
+
+    pBios = fopen(BiosPath, "rb");
+    if (!pBios)
+    {
+        MainLoopModalPrintf(60 * 5, "ERROR: put disksys.rom in SNESticle/SYSTEM");
+        return FALSE;
+    }
+    if (fseek(pBios, 0, SEEK_END) != 0)
+    {
+        fclose(pBios);
+        MainLoopModalPrintf(60 * 5, "ERROR: cannot read SYSTEM/disksys.rom");
+        return FALSE;
+    }
+    nBiosBytes = ftell(pBios);
+    fclose(pBios);
+    if (nBiosBytes != 8192)
+    {
+        MainLoopModalPrintf(60 * 5, "ERROR: disksys.rom must be exactly 8192 bytes");
+        return FALSE;
+    }
+
+    _MainLoop_fOutputIntensity = 0.8f;
+    if (!_pFds->LoadDisk(pMappedPath, SystemDirectory) || !_pFds->IsRomReady())
+    {
+        _MainLoopUnloadRom();
+        MainLoopModalPrintf(60 * 5,
+            "ERROR: FCEUmm could not boot FDS; check SYSTEM/disksys.rom");
+        return FALSE;
+    }
+
+    _pSystem = _pFds;
+    _pFds->Reset();
+    _MainLoopGetName(_RomName, pOriginalPath);
+    snprintf(_RomPath, sizeof(_RomPath), "%s", pOriginalPath);
+    MainLoopStateOnRomChanged();
+    _MainLoopSetSampleRate(_pFds->GetSampleRate());
+    if (bLoadSRAM)
+        _MainLoopLoadSRAM();
+
+    if (_fbTexture[0]) _fbTexture[0]->Clear();
+    if (_fbTexture[1]) _fbTexture[1]->Clear();
+    if (_fbTexture[0]) TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
+
+    _MainLoop_iDisk = 0;
+    _MainLoop_bDiskInserted = TRUE;
+    ConPrint("FDS Loaded via FCEUmm: %s\n", pMappedPath);
+    return TRUE;
+}
+
+
 
 Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 {
@@ -747,6 +832,9 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 #endif
     _MainLoopResetInputChecksums();
 
+    /* AURORA_FCEUMM_FDS_V0_5_PATH_BOOT: only a plain .fds full path enters FCEUmm. */
+    if (eType == MAINLOOP_ENTRYTYPE_NESFDSDISK)
+        return _MainLoopExecuteFdsPath(pFileName, OriginalPath, bLoadSRAM);
 
     /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: never size/read a CUE or its tracks as a cartridge. */
     if (eType == MAINLOOP_ENTRYTYPE_CDIMAGE)
@@ -783,6 +871,14 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     else
     {
         nExpectedRomBytes = _MainLoopGetBinarySize(pFileName);
+    }
+
+    /* AURORA_FCEUMM_FDS_V0_5_ARCHIVE_GUARD: pinned FCEUmm needs fullpath. */
+    if (eType == MAINLOOP_ENTRYTYPE_NESFDSDISK)
+    {
+        MainLoopModalPrintf(60 * 4,
+            "FDS in ZIP/GZ is not supported yet; select a plain .fds file");
+        return FALSE;
     }
 
     if (nExpectedRomBytes <= 0 ||

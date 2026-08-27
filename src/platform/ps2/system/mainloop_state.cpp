@@ -703,6 +703,7 @@ Bool _MainLoopCheckSRAM()
 #define MAINLOOP_STATE_SYSTEM_SEGA      2
 #define MAINLOOP_STATE_SYSTEM_PCE       3
 #define MAINLOOP_STATE_SYSTEM_SNES9X2010 4 /* AURORA_SNES9X2010_V1 */
+#define MAINLOOP_STATE_SYSTEM_FDS       5 /* AURORA_FCEUMM_FDS_V0_6_STATE */
 #define MAINLOOP_STATE_RAW_BYTES \
     (sizeof(SnesStateT) > sizeof(NesStateT) \
         ? sizeof(SnesStateT) \
@@ -813,6 +814,7 @@ class MainLoopSegaStateScratchGuard
 public:
     MainLoopSegaStateScratchGuard()
         : m_bActive((_pSystem == _pSega || _pSystem == _pPce ||
+                     _pSystem == _pFds || /* AURORA_FCEUMM_FDS_V0_6_STATE */
                      _pSystem == _pSnes9x2010) ? TRUE : FALSE)
     {
     }
@@ -850,6 +852,7 @@ static Uint8 *_MainLoopStateEnsureSegaStateData(Uint32 nBytes)
 static Uint32 _MainLoopStateCompressedLimit(Uint32 nRawBytes)
 {
     if (_pSystem != _pSega && _pSystem != _pPce &&
+        _pSystem != _pFds && /* AURORA_FCEUMM_FDS_V0_6_STATE */
         _pSystem != _pSnes9x2010)
         return (Uint32)sizeof(_MainLoop_StateCompressed);
 
@@ -861,6 +864,7 @@ static Uint32 _MainLoopStateCompressedLimit(Uint32 nRawBytes)
 static Uint8 *_MainLoopStateGetCompressedBuffer(Uint32 nNeed, Uint32 *pCapacity)
 {
     if (_pSystem != _pSega && _pSystem != _pPce &&
+        _pSystem != _pFds && /* AURORA_FCEUMM_FDS_V0_6_STATE */
         _pSystem != _pSnes9x2010)
     {
         if (pCapacity) *pCapacity = (Uint32)sizeof(_MainLoop_StateCompressed);
@@ -892,6 +896,7 @@ static Uint32 _MainLoopStateGetSystemId()
     if (_pSystem == _pNes)  return MAINLOOP_STATE_SYSTEM_NES;
     if (_pSystem == _pSega) return MAINLOOP_STATE_SYSTEM_SEGA;
     if (_pSystem == _pPce)  return MAINLOOP_STATE_SYSTEM_PCE;
+    if (_pSystem == _pFds)  return MAINLOOP_STATE_SYSTEM_FDS; /* AURORA_FCEUMM_FDS_V0_6_STATE */
     if (_pSystem == _pSnes9x2010) return MAINLOOP_STATE_SYSTEM_SNES9X2010;
     return MAINLOOP_STATE_SYSTEM_SNES;
 }
@@ -902,6 +907,12 @@ static Uint32 _MainLoopStateGetPayloadBytes()
     if (_pSystem == _pSega)
     {
         Int32 nBytes = _pSega ? _pSega->GetStateSize() : 0;
+        return nBytes > 0 ? (Uint32)nBytes : 0;
+    }
+    if (_pSystem == _pFds)
+    {
+        /* AURORA_FCEUMM_FDS_V0_6_STATE: dynamic FCEUmm FDS snapshot. */
+        Int32 nBytes = _pFds ? _pFds->GetStateSize() : 0;
         return nBytes > 0 ? (Uint32)nBytes : 0;
     }
     if (_pSystem == _pPce)
@@ -941,6 +952,7 @@ static Uint8 *_MainLoopStateGetPayloadData()
     if (_pSystem == _pNes)
         return (Uint8 *)&_NesState;
     if (_pSystem == _pSega || _pSystem == _pPce ||
+        _pSystem == _pFds || /* AURORA_FCEUMM_FDS_V0_6_STATE */
         _pSystem == _pSnes9x2010)
         return _MainLoopStateEnsureSegaStateData(
             _MainLoopStateGetPayloadBytes());
@@ -1606,6 +1618,7 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
 
     if (_pSystem != _pSnes && _pSystem != _pNes &&
         _pSystem != _pSega && _pSystem != _pPce &&
+        _pSystem != _pFds && /* AURORA_FCEUMM_FDS_V0_6_STATE */
         _pSystem != _pSnes9x2010)
     {
         snprintf(pReason, nReasonBytes, "This system cannot save states.");
@@ -1619,6 +1632,15 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
         {
             snprintf(pReason, nReasonBytes,
                      "NES state unavailable for this cartridge/mapper.");
+            return FALSE;
+        }
+    }
+    else if (_pSystem == _pFds)
+    {
+        /* AURORA_FCEUMM_FDS_V0_6_STATE */
+        if (!_pFds || !_pFds->IsRomReady() || _pFds->GetStateSize() <= 0)
+        {
+            snprintf(pReason, nReasonBytes, "FCEUmm FDS state unavailable.");
             return FALSE;
         }
     }
@@ -1684,6 +1706,8 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
         snprintf(pReason, nReasonBytes, "Ready: PicoDrive cartridge state.");
     else if (_pSystem == _pPce)
         snprintf(pReason, nReasonBytes, "Ready: PC Engine HuCard state.");
+    else if (_pSystem == _pFds)
+        snprintf(pReason, nReasonBytes, "Ready: Famicom Disk System state."); /* AURORA_FCEUMM_FDS_V0_6_STATE */
     else if (_pSystem == _pSnes9x2010)
         snprintf(pReason, nReasonBytes, "Ready: Snes9x 2010 SNES state.");
     else
@@ -1711,7 +1735,7 @@ static Bool _MainLoopStateGetRomIdentity(
     Uint32 *pnBytes,
     Uint32 *puFlags)
 {
-    Uint8 *pRomData;
+    Uint8 *pRomData = NULL; /* AURORA_FCEUMM_FDS_V0_6_STATE */
     Uint32 nRomBytes;
 
     if (_pSystem == _pNes)
@@ -1722,6 +1746,18 @@ static Bool _MainLoopStateGetRomIdentity(
         }
         pRomData = _pNesRom->GetData();
         nRomBytes = _pNesRom->GetBytes();
+    }
+    else if (_pSystem == _pFds)
+    {
+        /* AURORA_FCEUMM_FDS_V0_6_STATE: full-path FDS has no frontend ROM buffer. */
+        if (!_pFds || !_pFds->IsRomReady() || !_pFds->GetContentBytes())
+            return FALSE;
+        nRomBytes = _pFds->GetContentBytes();
+        if (!_MainLoop_StateRomCRCValid)
+        {
+            _MainLoop_StateRomCRC = _pFds->GetContentCRC();
+            _MainLoop_StateRomCRCValid = TRUE;
+        }
     }
     else if (_pSystem == _pSega)
     {
@@ -1775,6 +1811,7 @@ static Bool _MainLoopStateGetRomIdentity(
     if (_pSystem == _pNes)
         *puFlags = _pNesRom->GetMapperNumber();
     else if (_pSystem == _pSega || _pSystem == _pPce ||
+             _pSystem == _pFds || /* AURORA_FCEUMM_FDS_V0_6_STATE */
              _pSystem == _pSnes9x2010)
         *puFlags = 0;
     else
@@ -2135,8 +2172,9 @@ static void _MainLoopStateBuildBankPath(
         Directory,
         SaveName,
         _pSystem == _pNes ? 'n' :
-            (_pSystem == _pSega ? 'g' :
-             (_pSystem == _pSnes9x2010 ? 'x' : 's')),
+            (_pSystem == _pFds ? 'f' : /* AURORA_FCEUMM_FDS_V0_6_STATE */
+             (_pSystem == _pSega ? 'g' :
+              (_pSystem == _pSnes9x2010 ? 'x' : 's'))),
         iSlot + 1,
         iBank ? 'b' : 'a'
     );
@@ -2459,6 +2497,14 @@ Bool _MainLoopLoadState()
             /* AURORA_PICODRIVE_STAGE2_STATE_RESTORE */
             if (_pSystem == _pNes)
                 bRestoreOK = _pNes->RestoreState(&_NesState);
+            else if (_pSystem == _pFds)
+            {
+                /* AURORA_FCEUMM_FDS_V0_6_STATE */
+                Uint8 *pFdsStateData = _MainLoopStateGetPayloadData();
+                Uint32 nFdsStateBytes = _MainLoopStateGetPayloadBytes();
+                bRestoreOK = pFdsStateData && nFdsStateBytes &&
+                    _pFds->RestoreStateChecked(pFdsStateData, (Int32)nFdsStateBytes);
+            }
             else if (_pSystem == _pSega)
             {
                 Uint8 *pSegaStateData = _MainLoopStateGetPayloadData();
@@ -2642,6 +2688,15 @@ Bool _MainLoopSaveState()
         if (_NesState.uMagic == 0)
         {
             _MainLoopStateSetMessage("Could not snapshot the NES core state.");
+            return FALSE;
+        }
+    }
+    else if (_pSystem == _pFds)
+    {
+        /* AURORA_FCEUMM_FDS_V0_6_STATE */
+        if (!_pFds->SaveStateChecked(pStateData, (Int32)nStateBytes))
+        {
+            _MainLoopStateSetMessage("Could not snapshot the FCEUmm FDS state.");
             return FALSE;
         }
     }

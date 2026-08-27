@@ -16,6 +16,7 @@
 #include "mainloop_debug.h"
 #include "mainloop_shared.h"
 #include "mainloop_input.h"
+#include "mainloop_ui.h" /* AURORA_FCEUMM_FDS_V0_6_DRIVE_SYNC */
 #include "mainloop_state.h"
 #include "mainloop_exec.h"
 #include "mainloop_safe_frameskip.h" /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
@@ -25,6 +26,7 @@
 #include "sega/picodrive/picodrive_bridge.h"
 /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
 #include "nes/quicknes/quicknes_bridge.h"
+#include "nes/fceumm/fceumm_fds_bridge.h" /* AURORA_FCEUMM_FDS_V0_5_PROCESS */
 /* AURORA_PCE_EXPERIMENTAL_V1 */
 #include "pce/beetle/pce_bridge.h"
 /* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
@@ -271,8 +273,8 @@ Bool MainLoopProcess()
 			eMode = (NetInput.eGameState == NETPLAY_GAMESTATE_IDLE) ? Emu::System::MODE_ACCURATENONDETERMINISTIC : Emu::System::MODE_INACCURATEDETERMINISTIC;
 
             /* Safe Frameskip is host-only. Never alter deterministic
-             * movie/netplay execution; Take() is still consumed below
-             * so no stale pending skip can leak out afterwards. */
+             * movie/netplay execution; the Auto scheduler receives
+             * allowed=FALSE and resets its host timing debt. */
             const Bool bSafeFrameskipAllowed =
                 (NetInput.eGameState == NETPLAY_GAMESTATE_IDLE &&
                  !s_pMovieClip->IsPlaying() &&
@@ -287,7 +289,12 @@ Bool MainLoopProcess()
                 }
             }
 
-            GPPrimDisableZBuf();
+            /* AURORA_SAFE_FRAMESKIP_PICODRIVE_AUTO_V1: one Auto decision per Aurora host tick,
+             * shared by SNES/Snes9x/QuickNES/PicoDrive/PCE. */
+            const Bool bSafeSkip =
+                MainLoopSafeFrameskipTake(bSafeFrameskipAllowed);
+            if (!bSafeSkip)
+                GPPrimDisableZBuf();
 
             /* Phase 2 of the NES integration: dispatch ExecuteFrame
                through the polymorphic Emu::System* when the loaded
@@ -298,9 +305,6 @@ Bool MainLoopProcess()
                upload to the EE texture from here. */
             if (_pSystem == _pNes)
             {
-                const Bool bSafeSkipRequested = MainLoopSafeFrameskipTake();
-                const Bool bSafeSkip =
-                    (bSafeFrameskipAllowed && bSafeSkipRequested) ? TRUE : FALSE;
                 QuicknesBridge_SetSkipVideo(bSafeSkip ? true : false);
                 PROF_ENTER("NesExecuteFrame");
                 _pNes->ExecuteFrame(&Input, pSurface, pMixBuffer, eMode);
@@ -310,6 +314,34 @@ Bool MainLoopProcess()
                     PROF_ENTER("NesTexUpload");
                     TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
                     PROF_LEAVE("NesTexUpload");
+                }
+            }
+            else if (_pSystem == _pFds)
+            {
+                /* AURORA_FCEUMM_FDS_V0_5_PROCESS */
+                FceummFdsBridge_SetSkipVideo(bSafeSkip ? true : false);
+                PROF_ENTER("FdsExecuteFrame");
+                _pFds->ExecuteFrame(&Input, pSurface, pMixBuffer, eMode);
+                PROF_LEAVE("FdsExecuteFrame");
+                {
+                    /* AURORA_FCEUMM_FDS_V0_6_DRIVE_SYNC */
+                    const Bool bWasInserted = _MainLoop_bDiskInserted;
+                    _MainLoop_iDisk = (Int32)FceummFdsBridge_GetSelectedSide();
+                    _MainLoop_bDiskInserted = FceummFdsBridge_IsDiskInserted()
+                        ? TRUE : FALSE;
+                    if (!bWasInserted && _MainLoop_bDiskInserted)
+                    {
+                        MainLoopStatusPrintf(90,
+                            "FDS: Disk %d Side %c inserted",
+                            (int)(_MainLoop_iDisk >> 1) + 1,
+                            (_MainLoop_iDisk & 1) ? 'B' : 'A');
+                    }
+                }
+                if (!bSafeSkip)
+                {
+                    PROF_ENTER("FdsTexUpload");
+                    TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
+                    PROF_LEAVE("FdsTexUpload");
                 }
             }
             else if (_pSystem == _pSega)
@@ -430,14 +462,6 @@ Bool MainLoopProcess()
                     sPdPhase = 0;
                 }
 
-                Bool bSafeSkip = FALSE;
-                if (executeFrames > 0)
-                {
-                    const Bool bSafeSkipRequested = MainLoopSafeFrameskipTake();
-                    bSafeSkip =
-                        (bSafeFrameskipAllowed && bSafeSkipRequested) ? TRUE : FALSE;
-                }
-
                 PROF_ENTER("SegaExecuteFrame");
                 for (Int32 iPdFrame = 0;
                      iPdFrame < executeFrames;
@@ -475,9 +499,6 @@ Bool MainLoopProcess()
             }
             else if (_pSystem == _pPce)
             {
-                const Bool bSafeSkipRequested = MainLoopSafeFrameskipTake();
-                const Bool bSafeSkip =
-                    (bSafeFrameskipAllowed && bSafeSkipRequested) ? TRUE : FALSE;
                 PceBridge_SetSkipVideo(bSafeSkip ? true : false);
                 PROF_ENTER("PceExecuteFrame");
                 _pPce->ExecuteFrame(&Input, pSurface, pMixBuffer, eMode);
@@ -501,9 +522,6 @@ Bool MainLoopProcess()
                     GSK_GetRefreshRate(&uRateNum, &uRateDen);
                     _AudMix->SetFrameRateRational(uRateNum, uRateDen);
                 }
-                const Bool bSafeSkipRequested = MainLoopSafeFrameskipTake();
-                const Bool bSafeSkip =
-                    (bSafeFrameskipAllowed && bSafeSkipRequested) ? TRUE : FALSE;
                 PROF_ENTER("Snes9x2010ExecuteFrame");
                 _pSnes9x2010->ExecuteFrame(
                     &Input, bSafeSkip ? NULL : pSurface, pMixBuffer, eMode);
@@ -537,9 +555,6 @@ Bool MainLoopProcess()
 						uSnesMouseButtons);
 				_SnesMouseWasActive = bSnesMouse;
 				{
-					const Bool bSafeSkipRequested = MainLoopSafeFrameskipTake();
-					const Bool bSafeSkip =
-						(bSafeFrameskipAllowed && bSafeSkipRequested) ? TRUE : FALSE;
 					_ExecuteSnes(bSafeSkip ? NULL : pSurface,
 					             pMixBuffer, &Input, eMode);
 				}

@@ -13,3 +13,8 @@
 	path = src/third_party/snes9x2010
 	url = https://github.com/itsveenee/snes9x2010.git
 	branch = master
+
+[submodule "src/third_party/fceumm-fds"]
+	path = src/third_party/fceumm-fds
+	url = https://github.com/itsveenee/Fceumm-PS2.git
+	branch = master

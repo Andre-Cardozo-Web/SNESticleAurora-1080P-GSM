@@ -60,19 +60,26 @@ extern "C" {
 
 static Uint32 _uVblankCycle;
 
-/* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2
- * Robust host-cadence detector. The cheap/menu path teaches a rolling
- * 3-sample median, so one abnormally short or long flip can never poison the
- * reference period. Once calibrated, gameplay contributes only healthy
- * single-VBlank samples; missed VBlanks are detected but never learned.
+/* AURORA_SAFE_FRAMESKIP_PICODRIVE_AUTO_V1
+ * Global adaptation of standalone PicoDrive's Auto Frameskip scheduler.
  *
- * Level 0 disables recovery; level 1 keeps the original >1.50x threshold,
- * while levels 2..9 lower it gradually to >1.30x. 1.30x remains above the
- * 1.25x healthy-sample ceiling. No level can skip two frames in a row. */
-static Int32  s_SafeFrameskipLevel = 1;
-static Bool   s_SafeFrameskipPending = FALSE;
-static Bool   s_SafeFrameskipMustRender = FALSE;
-static Bool   s_SafeFrameskipWasGameplay = FALSE;
+ * Standalone PicoDrive keeps an ideal timestamp (timestamp_aim), compares it
+ * with the current clock before each frame, skips video when it is more than
+ * one target frame late, permits up to max_skip consecutive skips (default 4),
+ * and trims timing debt beyond roughly three frames.
+ *
+ * Aurora's host loop is a presentation loop, so its target_frametime is the
+ * calibrated GS VBlank period. The decision is made once per host tick and is
+ * then shared by every core. A skipped tick still executes core CPU/audio but
+ * MainLoopRender consumes the one-shot below and does not present or wait for
+ * VBlank, which is what makes real catch-up possible.
+ *
+ * Menu value: 0=Off, 1..9=max_skip. Default=4, matching PicoDrive standalone.
+ */
+static Int32  s_SafeFrameskipLevel = 4;
+static Bool   s_SafeFrameskipSkipPresentation = FALSE;
+static Uint32 s_SafeFrameskipAim = 0;
+static Uint32 s_SafeFrameskipConsecutive = 0;
 static Uint32 s_SafeFrameskipLastFlip = 0;
 static Uint32 s_SafeFrameskipPeriod = 0;
 static Uint32 s_SafeFrameskipSamples[3] = { 0, 0, 0 };
@@ -87,12 +94,11 @@ static Uint32 _MainLoopSafeFrameskipMedian3(Uint32 a, Uint32 b, Uint32 c)
     return b;
 }
 
-static Uint32 _MainLoopSafeFrameskipThresholdPermille(void)
+static void _MainLoopSafeFrameskipResetTiming(void)
 {
-    Int32 level = s_SafeFrameskipLevel;
-    if (level < 1) level = 1;
-    if (level > 9) level = 9;
-    return 1500u - (Uint32)(level - 1) * 25u;
+    s_SafeFrameskipAim = 0;
+    s_SafeFrameskipConsecutive = 0;
+    s_SafeFrameskipSkipPresentation = FALSE;
 }
 
 static void _MainLoopSafeFrameskipLearn(Uint32 delta, Bool gameplay)
@@ -104,15 +110,14 @@ static void _MainLoopSafeFrameskipLearn(Uint32 delta, Bool gameplay)
     {
         if (gameplay)
         {
-            /* Gameplay may refine only a healthy single-VBlank sample. */
+            /* Only a healthy single-VBlank presentation may refine timing. */
             if ((Uint64)delta * 4u < (Uint64)s_SafeFrameskipPeriod * 3u ||
                 (Uint64)delta * 4u > (Uint64)s_SafeFrameskipPeriod * 5u)
                 return;
         }
         else
         {
-            /* Menu follows PAL/NTSC drift (20%) but rejects obvious
-             * half/double-VBlank scheduling noise. */
+            /* Menu can teach PAL/NTSC drift while rejecting half/double noise. */
             if ((Uint64)delta * 3u < (Uint64)s_SafeFrameskipPeriod * 2u ||
                 (Uint64)delta * 2u > (Uint64)s_SafeFrameskipPeriod * 3u)
                 return;
@@ -147,8 +152,7 @@ void MainLoopSafeFrameskipSetLevel(Int32 level)
     if (level < 0) level = 0;
     if (level > 9) level = 9;
     s_SafeFrameskipLevel = level;
-    s_SafeFrameskipPending = FALSE;
-    s_SafeFrameskipMustRender = FALSE;
+    _MainLoopSafeFrameskipResetTiming();
 }
 
 Bool MainLoopSafeFrameskipGetEnabled(void)
@@ -161,27 +165,78 @@ void MainLoopSafeFrameskipSetEnabled(Bool enabled)
     if (!enabled)
         MainLoopSafeFrameskipSetLevel(0);
     else if (s_SafeFrameskipLevel <= 0)
-        MainLoopSafeFrameskipSetLevel(1);
+        MainLoopSafeFrameskipSetLevel(4);
 }
 
-Bool MainLoopSafeFrameskipTake(void)
+Bool MainLoopSafeFrameskipTake(Bool allowed)
 {
-    if (s_SafeFrameskipLevel <= 0)
-        return FALSE;
+    Uint32 now;
+    Int32 diff;
+    const Int32 target = (Int32)s_SafeFrameskipPeriod;
+    Bool skip = FALSE;
 
-    /* A safe skip always buys at least one mandatory rendered frame. */
-    if (s_SafeFrameskipMustRender)
+    /* Exactly one presentation one-shot is produced by each host decision. */
+    s_SafeFrameskipSkipPresentation = FALSE;
+
+    if (!allowed || s_SafeFrameskipLevel <= 0 ||
+        s_SafeFrameskipSampleCount < 3u || target <= 0)
     {
-        s_SafeFrameskipMustRender = FALSE;
+        _MainLoopSafeFrameskipResetTiming();
         return FALSE;
     }
 
-    if (!s_SafeFrameskipPending)
-        return FALSE;
+    now = ProfCtrGetCycle();
 
-    s_SafeFrameskipPending = FALSE;
-    s_SafeFrameskipMustRender = TRUE;
-    return TRUE;
+    /* PicoDrive reset_timing equivalent. First eligible tick establishes aim. */
+    if (s_SafeFrameskipAim == 0)
+    {
+        s_SafeFrameskipAim = now;
+        s_SafeFrameskipConsecutive = 0;
+    }
+
+    /* PicoDrive: diff = timestamp_aim - timestamp. Uint32 subtraction then
+     * Int32 interpretation intentionally preserves short counter wraparound. */
+    diff = (Int32)(s_SafeFrameskipAim - now);
+
+    /* PicoDrive Auto: if more than one target frame late, discard video,
+     * limited by max_skip. Here the menu level IS max_skip. */
+    if (diff < -target)
+    {
+        if (s_SafeFrameskipConsecutive < (Uint32)s_SafeFrameskipLevel)
+        {
+            ++s_SafeFrameskipConsecutive;
+            skip = TRUE;
+        }
+        else
+        {
+            s_SafeFrameskipConsecutive = 0;
+        }
+    }
+    else
+    {
+        s_SafeFrameskipConsecutive = 0;
+    }
+
+    /* PicoDrive: don't go in debt too much. Keep the ideal clock no more than
+     * roughly three target frames behind before advancing this frame's aim. */
+    while (diff < -(target * 3))
+    {
+        s_SafeFrameskipAim += s_SafeFrameskipPeriod;
+        diff = (Int32)(s_SafeFrameskipAim - now);
+    }
+
+    /* PicoDrive advances timestamp_aim once for every emulated host tick,
+     * whether that tick is shown or skipped. */
+    s_SafeFrameskipAim += s_SafeFrameskipPeriod;
+    s_SafeFrameskipSkipPresentation = skip;
+    return skip;
+}
+
+Bool MainLoopSafeFrameskipConsumePresentationSkip(void)
+{
+    const Bool skip = s_SafeFrameskipSkipPresentation;
+    s_SafeFrameskipSkipPresentation = FALSE;
+    return skip;
 }
 
 static void _MainLoopSafeFrameskipAfterFlip(void)
@@ -193,61 +248,31 @@ static void _MainLoopSafeFrameskipAfterFlip(void)
     if (s_SafeFrameskipLastFlip != 0)
     {
         const Uint32 delta = now - s_SafeFrameskipLastFlip;
-
-        if (delta != 0)
-        {
-            const Uint32 thresholdPermille = _MainLoopSafeFrameskipThresholdPermille();
-            const Bool discontinuity =
-                (s_SafeFrameskipPeriod != 0 &&
-                 (Uint64)delta > (Uint64)s_SafeFrameskipPeriod * 4u)
-                ? TRUE : FALSE;
-
-            if (discontinuity)
-            {
-                /* A pause/debugger/IO stall is not recoverable video debt. */
-                s_SafeFrameskipPending = FALSE;
-                s_SafeFrameskipMustRender = FALSE;
-            }
-            else
-            {
-                _MainLoopSafeFrameskipLearn(delta, gameplay);
-
-                if (s_SafeFrameskipLevel > 0 && gameplay &&
-                    s_SafeFrameskipWasGameplay &&
-                    s_SafeFrameskipSampleCount >= 3u &&
-                    s_SafeFrameskipPeriod != 0 &&
-                    (Uint64)delta * 1000u >
-                    (Uint64)s_SafeFrameskipPeriod * thresholdPermille)
-                {
-                    s_SafeFrameskipPending = TRUE;
-                }
-                else if (gameplay && s_SafeFrameskipPending &&
-                         s_SafeFrameskipPeriod != 0 &&
-                         (Uint64)delta * 1000u <=
-                         (Uint64)s_SafeFrameskipPeriod * thresholdPermille)
-                {
-                    /* If an intervening host VBlank already recovered the
-                     * schedule, preserve the next real emulation frame. */
-                    s_SafeFrameskipPending = FALSE;
-                }
-            }
-        }
+        _MainLoopSafeFrameskipLearn(delta, gameplay);
     }
 
     s_SafeFrameskipLastFlip = now;
-    s_SafeFrameskipWasGameplay = gameplay;
 
+    /* Menus/boot are PicoDrive reset_timing equivalents for Aurora. Keep the
+     * learned VBlank period, but discard presentation debt/counters. */
     if (s_SafeFrameskipLevel <= 0 || !gameplay)
-    {
-        s_SafeFrameskipPending = FALSE;
-        s_SafeFrameskipMustRender = FALSE;
-    }
+        _MainLoopSafeFrameskipResetTiming();
 }
 
 void MainLoopRender()
 {
 	static Uint32 _iFrame=0;
         static int whichdrawbuf = 0;
+
+        /* AURORA_SAFE_FRAMESKIP_PICODRIVE_AUTO_V1: standalone PicoDrive skip path has no
+         * finalize/present/flip/VBlank wait. Core/audio already ran. */
+        if (MainLoopSafeFrameskipConsumePresentationSkip())
+        {
+            if (!_bMenu && _pSystem && !_MainLoop_BlackScreen)
+                Aud_BufferedAsyncStart();
+            ++_iFrame;
+            return;
+        }
 
         /* AURORA_SEGA_UI_PRESENTATION_V3
          *
@@ -304,6 +329,7 @@ void MainLoopRender()
         int native240pPar =
             (g_GskVideoMode == GSK_VIDMODE_240P &&
              (_pSystem == _pNes ||
+              _pSystem == _pFds || /* AURORA_FCEUMM_FDS_V0_5_RENDER */
               _pSystem == _pSnes ||
               _pSystem == _pSnes9x2010 ||
               (_pSystem == _pSega &&
@@ -472,7 +498,8 @@ void MainLoopRender()
     		PolyColor4f(fColor, fColor, fColor, 1.0f);
     
     
-                    if (g_GskVideoMode == GSK_VIDMODE_240P && _pSystem == _pNes)
+                    if (g_GskVideoMode == GSK_VIDMODE_240P &&
+                        (_pSystem == _pNes || _pSystem == _pFds)) /* AURORA_FCEUMM_FDS_V0_5_RENDER */
             {
     /*
      * InfoNES 240p overscan compensation.

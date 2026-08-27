@@ -12,6 +12,7 @@
 #include "mainloop.h"
 #include "input.h"
 #include "nes/quicknes/quicknes_bridge.h"
+#include "nes/fceumm/fceumm_fds_bridge.h" /* AURORA_FCEUMM_FDS_V0_6_SIDE_SWAP */
 #include "sega/picodrive/picodrive_bridge.h"
 #include "memcard.h"
 #include "prof.h"
@@ -378,6 +379,7 @@ void _MainLoopInputProcess(Uint32 buttons)
 	static Uint32 repeat=0;
 	static int _MenuTriggerTimeout[2] = {0,0};
 	static Bool bStateHotkeyHeld = FALSE;
+	static Bool bFdsSwapHotkeyHeld = FALSE; /* AURORA_FCEUMM_FDS_V0_6_SIDE_SWAP */
 	Uint32 trigger;
 
 	/* AURORA_INPUT_SUPPRESS_ALL_GAMEPLAY_V1_4_3 */
@@ -407,6 +409,40 @@ void _MainLoopInputProcess(Uint32 buttons)
 	    !(buttons & (PAD_CROSS | PAD_CIRCLE)))
 	{
 		bStateHotkeyHeld = FALSE;
+	}
+
+	if (!(buttons & PAD_L2) || !(buttons & PAD_TRIANGLE))
+		bFdsSwapHotkeyHeld = FALSE;
+
+	/* AURORA_FCEUMM_FDS_V0_6_SIDE_SWAP
+	 * FDS-only frontend hotkey. Eject immediately; the bridge counts 60
+	 * emulated FDS frames without blocking the EE thread, flips A<->B on the
+	 * SAME virtual disk, then reinserts. Consume the combo here so the DEBUG
+	 * L2+Triangle display toggle below cannot also fire. */
+	if (!_bMenu && _pSystem == _pFds && !bFdsSwapHotkeyHeld &&
+	    (buttons & PAD_L2) && (buttons & PAD_TRIANGLE) &&
+	    !(buttons & PAD_R2) &&
+	    (trigger & (PAD_L2 | PAD_TRIANGLE)))
+	{
+		bFdsSwapHotkeyHeld = TRUE;
+		_MenuTriggerTimeout[0] = 0;
+		_MenuTriggerTimeout[1] = 0;
+		if (FceummFdsBridge_BeginSideSwap())
+		{
+			_MainLoop_iDisk = (Int32)FceummFdsBridge_GetSelectedSide();
+			_MainLoop_bDiskInserted = FALSE;
+			MainLoopStatusPrintf(90,
+			    "FDS: disk ejected; opposite side in 1 second...");
+		}
+		else if (FceummFdsBridge_IsSideSwapPending())
+		{
+			MainLoopStatusPrintf(90, "FDS: side swap already pending.");
+		}
+		else
+		{
+			MainLoopStatusPrintf(120, "FDS: no opposite side available.");
+		}
+		return;
 	}
 
 	/* Release-build quick states, matching the recovered iaddis controls:

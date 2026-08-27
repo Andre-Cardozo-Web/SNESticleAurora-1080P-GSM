@@ -17,6 +17,8 @@
 #include "snstate.h"
 #include "snrom.h"
 #include "nessystem.h"
+/* AURORA_FCEUMM_FDS_V0_5_SHARED */
+#include "nes/fceumm/fdssystem.h"
 #include "nesrom.h"
 #include "nesstate.h"
 #include "segasystem.h"
@@ -109,6 +111,7 @@ extern SnesStateT      _SnesState;
    gated until Phase 5 -- we only need the variables themselves to
    exist so the linker is happy. */
 extern NesSystem      *_pNes;
+extern FdsSystem      *_pFds; /* AURORA_FCEUMM_FDS_V0_5_SHARED */
 extern NesRom         *_pNesRom;
 extern NesFDSBios     *_pNesFDSBios;
 extern NesDisk        *_pNesFDSDisk;

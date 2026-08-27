@@ -20,6 +20,8 @@
 #include "snstate.h"
 #include "snrom.h"
 #include "nessystem.h"
+/* AURORA_FCEUMM_FDS_V0_5_GLOBAL */
+#include "nes/fceumm/fdssystem.h"
 #include "nesrom.h"
 #include "nesstate.h"
 #include "segasystem.h"
@@ -76,6 +78,7 @@ SnesRom    *_pSnesRom;
    input -- that part of mainloop_input.cpp is still gated for
    Phase 5 (FDS support). */
 NesSystem   *_pNes;
+FdsSystem   *_pFds; /* AURORA_FCEUMM_FDS_V0_5_GLOBAL */
 NesRom      *_pNesRom;
 NesFDSBios  *_pNesFDSBios;
 NesDisk     *_pNesFDSDisk;

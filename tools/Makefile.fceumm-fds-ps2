@@ -1,0 +1,156 @@
+# AURORA_FCEUMM_FDS_V0_6
+# FDS-only external PS2 static build for itsveenee/Fceumm-PS2.
+#
+# The dependency checkout is read-only from this build's point of view.
+# Generated overlays, objects and archives live under Aurora/build/fceumm-fds.
+
+CC ?= mips64r5900el-ps2-elf-gcc
+AR ?= mips64r5900el-ps2-elf-ar
+RANLIB ?= mips64r5900el-ps2-elf-ranlib
+PYTHON ?= python3
+
+# AURORA_FCEUMM_FDS_V0_6_10_PS2SDK_INCLUDE_FIX
+# The isolated core does not include PS2SDK's samples/Makefile.eeglobal, so
+# unlike the original standalone FCEUmm build it must receive and expose the
+# SDK include roots explicitly.
+ifeq ($(strip $(PS2SDK)),)
+ifneq ($(strip $(PS2DEV)),)
+PS2SDK := $(PS2DEV)/ps2sdk
+endif
+endif
+
+LIBRETRO_DIR := src/drivers/libretro
+FCEU_DIR := src
+ZLIB_DIR := src/zlib
+
+AURORA_FCEUMM_PS2_MAKEFILE := $(abspath $(firstword $(MAKEFILE_LIST)))
+AURORA_ROOT := $(abspath $(dir $(AURORA_FCEUMM_PS2_MAKEFILE))/..)
+BUILD_DIR := $(AURORA_ROOT)/build/fceumm-fds
+GEN_DIR := $(BUILD_DIR)/generated
+OBJ_DIR := $(BUILD_DIR)/obj
+TARGET := $(BUILD_DIR)/fceumm_fds_libretro_ps2_raw.a
+PREPARE_TOOL := $(AURORA_ROOT)/tools/prepare_fceumm_fds_sources.py
+PREPARE_STAMP := $(GEN_DIR)/.prepared-v0_6
+
+# v0_4 pruning boundary:
+#   * FDS loader only (no iNES / UNIF / NSF)
+#   * no boards/*.c, mappers/*.c or zlib/*.c
+#   * no VS System translation unit
+#   * no generic input dispatcher and no peripheral input modules
+#   * only two standard joypads survive through generated input/pad overlays
+#   * no cheat.c, movie.c or netplay.c
+#   * state.c and general.c are generated lean overlays with save-state support
+#     preserved but movie/netplay/cheat/Game-Genie runtime hooks removed.
+#   * video.c is a generated FDS-only overlay: no movie/VS/NSF draw branches.
+ORIGINAL_SOURCES := \
+	src/cart.c \
+	src/crc32.c \
+	src/debug.c \
+	src/fceu-endian.c \
+	src/fceustr.c \
+	src/fds.c \
+	src/file.c \
+	src/filter.c \
+	src/md5.c \
+	src/memory.c \
+	src/palette.c \
+	src/ppu.c \
+	src/sound.c \
+	src/wave.c \
+	src/x6502.c \
+	src/drivers/libretro/memstream.c
+
+GENERATED_SOURCES := \
+	$(GEN_DIR)/fceu_fds.c \
+	$(GEN_DIR)/libretro_fds.c \
+	$(GEN_DIR)/input_fds.c \
+	$(GEN_DIR)/pads_fds.c \
+	$(GEN_DIR)/state_fds.c \
+	$(GEN_DIR)/general_fds.c \
+	$(GEN_DIR)/video_fds.c
+
+ORIGINAL_OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(ORIGINAL_SOURCES))
+GENERATED_OBJECTS := \
+	$(OBJ_DIR)/generated/fceu_fds.o \
+	$(OBJ_DIR)/generated/libretro_fds.o \
+	$(OBJ_DIR)/generated/input_fds.o \
+	$(OBJ_DIR)/generated/pads_fds.o \
+	$(OBJ_DIR)/generated/state_fds.o \
+	$(OBJ_DIR)/generated/general_fds.o \
+	$(OBJ_DIR)/generated/video_fds.o
+OBJECTS := $(ORIGINAL_OBJECTS) $(GENERATED_OBJECTS)
+DEPS := $(OBJECTS:.o=.d)
+
+WARNINGS := \
+	-Wall \
+	-Wno-sign-compare \
+	-Wno-unused-variable \
+	-Wno-unused-function \
+	-Wno-unused-but-set-variable \
+	-Wno-uninitialized \
+	-Wno-strict-aliasing
+
+FLAGS := \
+	-G0 -O3 -DNDEBUG -fomit-frame-pointer -finline-functions \
+	-fno-strict-aliasing -fwrapv -funsigned-char \
+	-ffunction-sections -fdata-sections \
+	-DPS2 -D__PS2__ -D_EE -DHAVE_ASPRINTF -DLSB_FIRST -DLOCAL_LE=1 \
+	-D__LIBRETRO__ -DSOUND_QUALITY=0 -DPATH_MAX=1024 \
+	-DINLINE=inline -DPSS_STYLE=1 -DFCEU_VERSION_NUMERIC=9813 \
+	$(WARNINGS)
+
+CFLAGS += $(FLAGS) -std=gnu99
+# src/file.c includes zlib.h even though __LIBRETRO__ disables the compressed
+# code paths. Keep headers visible, but compile no zlib translation unit.
+# AURORA_FCEUMM_FDS_V0_6_13_GENERATED_INPUT_FIX
+# Prefer FCEUmm's own headers before PS2SDK headers.  This keeps generic
+# names such as input.h bound to the pinned core, while <tamtypes.h> still
+# resolves from the modern PS2SDK common/include directory.
+INCDIRS := \
+	-I$(LIBRETRO_DIR) \
+	-I$(FCEU_DIR) \
+	-I$(FCEU_DIR)/input \
+	-I$(ZLIB_DIR) \
+	-I$(PS2SDK)/common/include \
+	-I$(PS2SDK)/ee/include
+DEPFLAGS := -MMD -MP
+
+-include $(DEPS)
+
+.PHONY: all clean source-list ps2sdk-headers
+all: $(TARGET)
+
+ps2sdk-headers:
+	@test -n "$(PS2SDK)" || { echo "ERROR: PS2SDK is empty in FCEUmm FDS submake"; exit 1; }
+	@test -f "$(PS2SDK)/common/include/tamtypes.h" || { echo "ERROR: missing $(PS2SDK)/common/include/tamtypes.h"; exit 1; }
+
+source-list:
+	@printf '%s\n' $(ORIGINAL_SOURCES)
+	@printf '%s\n' $(GENERATED_SOURCES)
+
+$(PREPARE_STAMP): $(PREPARE_TOOL) src/fceu.c src/drivers/libretro/libretro.c src/input.c src/input/pads.c src/state.c src/general.c src/video.c
+	@mkdir -p "$(GEN_DIR)"
+	$(PYTHON) "$(PREPARE_TOOL)" --core "$(CURDIR)" --out "$(GEN_DIR)"
+	@touch "$@"
+
+$(GENERATED_SOURCES): $(PREPARE_STAMP) ;
+
+$(ORIGINAL_OBJECTS): ps2sdk-headers $(AURORA_FCEUMM_PS2_MAKEFILE)
+$(GENERATED_OBJECTS): ps2sdk-headers $(AURORA_FCEUMM_PS2_MAKEFILE) $(PREPARE_STAMP)
+
+$(TARGET): $(OBJECTS)
+	@mkdir -p "$(dir $@)"
+	@rm -f "$@"
+	$(AR) rcs "$@" $(OBJECTS)
+	$(RANLIB) "$@"
+
+$(OBJ_DIR)/%.o: %.c
+	@mkdir -p "$(dir $@)"
+	$(CC) -c -o "$@" "$<" $(CFLAGS) $(INCDIRS) $(DEPFLAGS)
+
+$(OBJ_DIR)/generated/%.o: $(GEN_DIR)/%.c
+	@mkdir -p "$(dir $@)"
+	$(CC) -c -o "$@" "$<" $(CFLAGS) $(INCDIRS) $(DEPFLAGS)
+
+clean:
+	rm -rf "$(BUILD_DIR)"

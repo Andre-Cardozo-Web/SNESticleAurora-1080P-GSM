@@ -401,6 +401,8 @@ Bool MainLoopInit()
 	ScrPrintf("Thanks to Icer Addis for the original");
 	/* AURORA_ALL_CORE_SPLASH_V6_20260824 */
 	ScrPrintf("QuickNES: Shay Green / libretro contributors");
+	/* AURORA_FCEUMM_FDS_SPLASH_V1 */
+	ScrPrintf("FCEUmm FDS WIP: FCE Ultra / libretro");
 	ScrPrintf("PicoDrive: notaz / irixxxx / contributors");
 	ScrPrintf("Beetle PCE Fast: Mednafen / libretro contributors");
 	ScrPrintf("Snes9x 2010: Snes9x / libretro contributors");
@@ -556,6 +558,10 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	   comes in Phase 3. */
 	_pNes = new NesSystem();
 	_pNes->Reset();
+
+	/* AURORA_FCEUMM_FDS_V0_5_INIT: dedicated FDS system; .nes stays QuickNES. */
+	_pFds = new FdsSystem();
+	_pFds->Reset();
 
 	_pNesRom = new NesRom();
 	for (Uint32 iExt=0; iExt < _pNesRom->GetNumExts(); iExt++)

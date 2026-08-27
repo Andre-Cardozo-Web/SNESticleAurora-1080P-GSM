@@ -587,16 +587,20 @@ static inline void pdInvalidateDirectVideoInfo()
 
 static int16_t pdJoyMask(unsigned port)
 {
-    unsigned int m = 0;
     Uint16 p;
+    unsigned int m;
 
     if (port >= EMUSYS_DEVICE_NUM)
         return 0;
 
     if (port == 0 && s_MouseActive)
     {
-        if (s_MouseButtons & 1u) m |= 1u << RETRO_DEVICE_ID_JOYPAD_B;
-        if (s_MouseButtons & 2u) m |= 1u << RETRO_DEVICE_ID_JOYPAD_A;
+        /* AURORA_PD_HOST_JOYMASK_BITWISE_V1_20260826
+         * Exact branchless form of:
+         *   mouse bit 0 -> libretro B bit 0
+         *   mouse bit 1 -> libretro A bit 8 */
+        m = (s_MouseButtons & 1u) |
+            ((s_MouseButtons & 2u) << 7);
         return (int16_t)m;
     }
 
@@ -606,27 +610,30 @@ static int16_t pdJoyMask(unsigned port)
     if (p == EMUSYS_DEVICE_DISCONNECTED)
         return 0;
 
-    if (pdPadHas(p, SNESIO_JOY_UP))    m |= 1u << RETRO_DEVICE_ID_JOYPAD_UP;
-    if (pdPadHas(p, SNESIO_JOY_DOWN))  m |= 1u << RETRO_DEVICE_ID_JOYPAD_DOWN;
-    if (pdPadHas(p, SNESIO_JOY_LEFT))  m |= 1u << RETRO_DEVICE_ID_JOYPAD_LEFT;
-    if (pdPadHas(p, SNESIO_JOY_RIGHT)) m |= 1u << RETRO_DEVICE_ID_JOYPAD_RIGHT;
+    /* Exact SNES carrier -> libretro bit permutation.
+     * The apply script verifies both header layouts and exhaustively checks
+     * all 65,536 Uint16 input values before this code may be installed. */
+    m  = ((unsigned int)(p & SNESIO_JOY_UP)    >> 7);
+    m |= ((unsigned int)(p & SNESIO_JOY_DOWN)  >> 5);
+    m |= ((unsigned int)(p & SNESIO_JOY_LEFT)  >> 3);
+    m |= ((unsigned int)(p & SNESIO_JOY_RIGHT) >> 1);
 
     if (pdIs8Bit())
     {
-        if (pdPadHas(p, SNESIO_JOY_B))     m |= 1u << RETRO_DEVICE_ID_JOYPAD_B;
-        if (pdPadHas(p, SNESIO_JOY_A))     m |= 1u << RETRO_DEVICE_ID_JOYPAD_A;
-        if (pdPadHas(p, SNESIO_JOY_START)) m |= 1u << RETRO_DEVICE_ID_JOYPAD_START;
+        m |= ((unsigned int)(p & SNESIO_JOY_B)     >> 15);
+        m |= ((unsigned int)(p & SNESIO_JOY_A)      << 1);
+        m |= ((unsigned int)(p & SNESIO_JOY_START)  >> 9);
     }
     else
     {
-        if (pdPadHas(p, SNESIO_JOY_A))      m |= 1u << RETRO_DEVICE_ID_JOYPAD_Y;
-        if (pdPadHas(p, SNESIO_JOY_B))      m |= 1u << RETRO_DEVICE_ID_JOYPAD_B;
-        if (pdPadHas(p, SNESIO_JOY_Y))      m |= 1u << RETRO_DEVICE_ID_JOYPAD_A;
-        if (pdPadHas(p, SNESIO_JOY_L))      m |= 1u << RETRO_DEVICE_ID_JOYPAD_L;
-        if (pdPadHas(p, SNESIO_JOY_X))      m |= 1u << RETRO_DEVICE_ID_JOYPAD_X;
-        if (pdPadHas(p, SNESIO_JOY_R))      m |= 1u << RETRO_DEVICE_ID_JOYPAD_R;
-        if (pdPadHas(p, SNESIO_JOY_SELECT)) m |= 1u << RETRO_DEVICE_ID_JOYPAD_SELECT;
-        if (pdPadHas(p, SNESIO_JOY_START))  m |= 1u << RETRO_DEVICE_ID_JOYPAD_START;
+        m |= ((unsigned int)(p & SNESIO_JOY_A)      >> 6);
+        m |= ((unsigned int)(p & SNESIO_JOY_B)      >> 15);
+        m |= ((unsigned int)(p & SNESIO_JOY_Y)      >> 6);
+        m |= ((unsigned int)(p & SNESIO_JOY_L)      << 5);
+        m |= ((unsigned int)(p & SNESIO_JOY_X)      << 3);
+        m |= ((unsigned int)(p & SNESIO_JOY_R)      << 7);
+        m |= ((unsigned int)(p & SNESIO_JOY_SELECT) >> 11);
+        m |= ((unsigned int)(p & SNESIO_JOY_START)  >> 9);
     }
 
     return (int16_t)m;
@@ -1599,7 +1606,8 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
     }
     else
     {
-        uint16_t inputMasks[4] = { 0, 0, 0, 0 };
+        /* AURORA_PD_2PAD_STACK_V1_20260826: native fast path consumes [0] and [1] only. */
+        uint16_t inputMasks[2];
         int refreshVariables = s_VariablesChanged ? 1 : 0;
 
         inputMasks[0] = (uint16_t)pdJoyMask(0);

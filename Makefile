@@ -80,6 +80,24 @@ PCE_NM ?= $(shell if command -v mips64r5900el-ps2-elf-nm >/dev/null 2>&1; then c
 PCE_OBJCOPY ?= $(shell if command -v mips64r5900el-ps2-elf-objcopy >/dev/null 2>&1; then command -v mips64r5900el-ps2-elf-objcopy; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-objcopy" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-objcopy"; else echo objcopy; fi)
 PCE_RANLIB ?= $(shell if command -v mips64r5900el-ps2-elf-ranlib >/dev/null 2>&1; then command -v mips64r5900el-ps2-elf-ranlib; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-ranlib" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-ranlib"; else echo ranlib; fi)
 
+# AURORA_FCEUMM_FDS_V0_6_CONFIG_BEGIN
+# FCEUmm is embedded only for Famicom Disk System. Build products live in the
+# Aurora build tree, never inside the pinned dependency checkout.
+FCEUMM_FDS_DIR ?= $(CURDIR)/src/third_party/fceumm-fds
+FCEUMM_FDS_LIBRETRO_INC := $(FCEUMM_FDS_DIR)/src/drivers/libretro
+FCEUMM_FDS_BUILD_DIR ?= $(CURDIR)/build/fceumm-fds
+FCEUMM_FDS_RAW_LIB ?= $(FCEUMM_FDS_BUILD_DIR)/fceumm_fds_libretro_ps2_raw.a
+FCEUMM_FDS_LIB ?= $(FCEUMM_FDS_BUILD_DIR)/fceumm_fds_libretro_ps2.a
+FCEUMM_FDS_PS2_MAKEFILE := $(CURDIR)/tools/Makefile.fceumm-fds-ps2
+FCEUMM_FDS_NAMESPACE_TOOL := $(CURDIR)/tools/namespace_fceumm_fds_archive.py
+FCEUMM_FDS_PREPARE_TOOL := $(CURDIR)/tools/prepare_fceumm_fds_sources.py
+FCEUMM_FDS_PYTHON ?= python3
+FCEUMM_FDS_NM ?= $(shell if command -v mips64r5900el-ps2-elf-nm >/dev/null 2>&1; then command -v mips64r5900el-ps2-elf-nm; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-nm" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-nm"; else echo nm; fi)
+FCEUMM_FDS_OBJCOPY ?= $(shell if command -v mips64r5900el-ps2-elf-objcopy >/dev/null 2>&1; then command -v mips64r5900el-ps2-elf-objcopy; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-objcopy" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-objcopy"; else echo objcopy; fi)
+FCEUMM_FDS_RANLIB ?= $(shell if command -v mips64r5900el-ps2-elf-ranlib >/dev/null 2>&1; then command -v mips64r5900el-ps2-elf-ranlib; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-ranlib" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-ranlib"; else echo ranlib; fi)
+FCEUMM_FDS_CORE_DEPS := $(FCEUMM_FDS_DIR)/src/fceu.c $(FCEUMM_FDS_DIR)/src/fds.c $(FCEUMM_FDS_DIR)/src/input.c $(FCEUMM_FDS_DIR)/src/input/pads.c $(FCEUMM_FDS_DIR)/src/state.c $(FCEUMM_FDS_DIR)/src/general.c $(FCEUMM_FDS_DIR)/src/video.c $(FCEUMM_FDS_DIR)/src/drivers/libretro/libretro.c $(FCEUMM_FDS_PS2_MAKEFILE) $(FCEUMM_FDS_PREPARE_TOOL)
+# AURORA_FCEUMM_FDS_V0_6_CONFIG_END
+
 # AURORA_SNES9X2010_V1
 # AURORA_SNES9X2010_V2_PS2LEAN_20260824: standalone PS2 lean core; no MSU/HD/Blargg/core-options UI.
 SNES9X2010_DIR ?= $(CURDIR)/src/third_party/snes9x2010
@@ -496,6 +514,7 @@ INCS := \
 	-I$(GSKIT)/include \
 	-I$(QUICKNES_INC) \
 	-I$(QUICKNES_NATIVE_INC) \
+	-I$(FCEUMM_FDS_LIBRETRO_INC) \
 	-I$(PICODRIVE_INC) \
 	-I$(PICODRIVE_DIR) \
 	-I$(SRC_DIR)/sega/system \
@@ -691,6 +710,8 @@ SRCS := \
 	src/nes/system/nesrom.cpp \
 	src/nes/quicknes/quicknes_bridge.cpp \
 	src/nes/quicknes/nessystem_quicknes.cpp \
+	src/nes/fceumm/fceumm_fds_bridge.cpp \
+	src/nes/fceumm/fdssystem.cpp \
 	src/sega/system/segarom.cpp \
 	src/sega/picodrive/picodrive_bridge.cpp \
 	src/sega/picodrive/segasystem_picodrive.cpp \
@@ -1085,6 +1106,30 @@ pce-core: $(PCE_LIB)
 	@echo "[ Beetle PCE Fast ] core ready: $(PCE_LIB)"
 	@$(PCE_NM) -g --defined-only "$(PCE_LIB)" | grep -E 'PCE_retro_(init|load_game|run|serialize)' | head -20
 
+# AURORA_FCEUMM_FDS_V0_6_RULES_BEGIN
+# Always enter the external core Makefile. It is incremental and creates all
+# objects/archives under build/fceumm-fds, outside the pinned FCEUmm checkout.
+.PHONY: FORCE_FCEUMM_FDS_INCREMENTAL
+FORCE_FCEUMM_FDS_INCREMENTAL:
+
+$(FCEUMM_FDS_RAW_LIB): FORCE_FCEUMM_FDS_INCREMENTAL $(FCEUMM_FDS_PS2_MAKEFILE) $(FCEUMM_FDS_PREPARE_TOOL) $(FCEUMM_FDS_CORE_DEPS)
+	@printf '[ FCEUmm FDS ] checking lean FDS-only/two-pad PS2 core\n'
+	@test -f "$(FCEUMM_FDS_DIR)/src/fds.c" || { echo "ERROR: missing FCEUmm checkout: $(FCEUMM_FDS_DIR)"; exit 1; }
+	+@PATH="$(PS2DEV)/ee/bin:$(PS2DEV)/bin:$(PS2SDK)/bin:$$PATH" $(MAKE) --no-print-directory -C "$(FCEUMM_FDS_DIR)" -f "$(FCEUMM_FDS_PS2_MAKEFILE)" PS2DEV="$(PS2DEV)" PS2SDK="$(PS2SDK)" CC="$(EE_CC)" AR="$(EE_AR)" RANLIB="$(FCEUMM_FDS_RANLIB)" PYTHON="$(FCEUMM_FDS_PYTHON)" all # AURORA_FCEUMM_FDS_V0_6_10_PS2SDK_INCLUDE_FIX
+
+$(FCEUMM_FDS_LIB): $(FCEUMM_FDS_RAW_LIB) $(FCEUMM_FDS_NAMESPACE_TOOL)
+	@printf '[ FCEUmm FDS ] namespacing embedded libretro core\n'
+	@$(FCEUMM_FDS_PYTHON) "$(FCEUMM_FDS_NAMESPACE_TOOL)" --nm "$(FCEUMM_FDS_NM)" --objcopy "$(FCEUMM_FDS_OBJCOPY)" --ranlib "$(FCEUMM_FDS_RANLIB)" --raw "$(FCEUMM_FDS_RAW_LIB)" --output "$(FCEUMM_FDS_LIB)"
+
+.PHONY: fceumm-fds-core fceumm-fds-clean
+fceumm-fds-core: $(FCEUMM_FDS_LIB)
+	@echo "[ FCEUmm FDS ] runtime-ready lean core: $(FCEUMM_FDS_LIB)"
+	@$(FCEUMM_FDS_NM) -g --defined-only "$(FCEUMM_FDS_LIB)" | grep -E 'FDS_(retro_(init|load_game|run|serialize|serialize_size|unserialize)|FCEU_FDS(Eject|Select|Insert)|aurora_fds_set_system_directory)' | head -30
+
+fceumm-fds-clean:
+	@rm -rf "$(FCEUMM_FDS_BUILD_DIR)"
+# AURORA_FCEUMM_FDS_V0_6_RULES_END
+
 # AURORA_SNES9X2010_V1
 $(SNES9X2010_RAW_LIB): $(SNES9X2010_PS2_MAKEFILE) $(SNES9X2010_CORE_DEPS)
 	@printf '[ Snes9x 2010 ] updating raw PS2 static core\n'
@@ -1116,8 +1161,9 @@ $(SNES9X2010_MODE_STAMP):
 	@rm -f "$(BUILD_META_DIR)/snes9x2010-mode-0" "$(BUILD_META_DIR)/snes9x2010-mode-1"
 	@touch "$@"
 
-$(TARGET): $(OBJS) $(PICODRIVE_LIB) $(QUICKNES_LIB) $(PCE_LIB) $(SNES9X2010_LINK_DEPS) | $(OBJ_DIR)
-	$(call RUN_LINK,$@,$(EE_CXX) $(LTO_LINK_FLAGS) -Xlinker --gc-sections -Xlinker -Map -Xlinker "$(OBJ_DIR)/SNESticle.map" -o "$@" $(OBJS) "$(PICODRIVE_LIB)" "$(QUICKNES_LIB)" "$(PCE_LIB)" $(SNES9X2010_LINK_ARGS) $(LIBDIRS) $(LIBS))
+# AURORA_FCEUMM_FDS_V0_5_RUNTIME_LINK
+$(TARGET): $(OBJS) $(PICODRIVE_LIB) $(QUICKNES_LIB) $(PCE_LIB) $(FCEUMM_FDS_LIB) $(SNES9X2010_LINK_DEPS) | $(OBJ_DIR)
+	$(call RUN_LINK,$@,$(EE_CXX) $(LTO_LINK_FLAGS) -Xlinker --gc-sections -Xlinker -Map -Xlinker "$(OBJ_DIR)/SNESticle.map" -o "$@" $(OBJS) "$(PICODRIVE_LIB)" "$(QUICKNES_LIB)" "$(PCE_LIB)" "$(FCEUMM_FDS_LIB)" $(SNES9X2010_LINK_ARGS) $(LIBDIRS) $(LIBS))
 
 $(TARGET_STRIPPED): $(TARGET)
 	@cp -f "$(TARGET)" "$@"

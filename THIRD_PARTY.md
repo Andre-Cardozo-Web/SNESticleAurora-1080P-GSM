@@ -12,6 +12,15 @@ Third-party licenses govern their respective code and assets; they do **not** gr
 
 Aurora integrates the pinned `itsveenee/QuickNES_Core` Git submodule at `src/third_party/quicknes`, based on QuickNES / Nes_Emu by Shay Green and the libretro core maintained by libretro contributors. Preserve all notices in the submodule. Its GNU GPLv2 text is mirrored at `LICENSES/QuickNES-GPL-2.0.txt`.
 
+<!-- AURORA_FCEUMM_FDS_THIRD_PARTY_V1 -->
+### FCEUmm (Famicom Disk System re-integration — WIP)
+
+Aurora integrates the pinned `itsveenee/Fceumm-PS2` Git submodule at `src/third_party/fceumm-fds`. The current Aurora re-integration is **experimental and not working yet**. It is deliberately built as an FDS-only embedded core; NES/Famicom cartridge emulation remains on QuickNES.
+
+FCEUmm is distributed under the GNU GPLv2. Preserve the original source-file notices and the submodule's `Copying`; a verbatim mirror of that GPLv2 text is included at `LICENSES/FCEUmm-GPL-2.0.txt`.
+
+The Famicom Disk System BIOS is copyrighted firmware and is not distributed by Aurora. A user-supplied `disksys.rom` is expected in `SNESticle/SYSTEM` for this experimental integration.
+
 ### PicoDrive
 
 Aurora builds the pinned `itsveenee/picodrive` submodule at `src/third_party/picodrive`, from the PicoDrive lineage by notaz, irixxxx and contributors. Aurora-owned PS2 bridge code is maintained in the parent repository; all upstream source headers and notices remain authoritative.
