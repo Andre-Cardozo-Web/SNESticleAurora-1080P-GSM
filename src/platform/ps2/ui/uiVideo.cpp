@@ -51,8 +51,8 @@ void MainLoopSnesCoreSetPersisted(Int32 value);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 40
-/* AURORA_SAFE_FRAMESKIP_PICODRIVE_AUTO_V1: v40 changes Safe Frameskip semantics only; layout is v39-compatible. */
+#define VIDEOCFG_VERSION 41
+/* AURORA_FAMICOM_MIC_CFG41_20260828: v41 keeps the layout and migrates every older Safe Frameskip to 1 once. */
 /* AURORA_PCE_VOLUME_V37_20260823
  * v37 appends pcevol only; every v36 field keeps the same offset.
  * Internal 200 == UI 100. */
@@ -122,7 +122,7 @@ typedef struct
 	Int32  smsfm;          /* 0=off, 1=Master System YM2413/OPLL */
 	Int32  pcevol;         /* v37: Beetle PCE Fast gain 0..400; UI /2 */
 	Int32  snescore;       /* v38: persisted SNES core selector */
-	Int32  safeframeskip;  /* v40: 0=Off, 1..9=max auto skips; default 4 */
+	Int32  safeframeskip;  /* v41: 0=Off, 1=max auto skip; legacy/default 1 */
 	Int32  ggzoom;         /* v39: GG 160x144 -> 240x216, uniform 3:2 */
 } VideoCfgT;
 #define VIDEOCFG_V38_BYTES (sizeof(VideoCfgT) - 2 * sizeof(Int32))
@@ -454,8 +454,8 @@ void VideoSettingsLoad(void)
 
 	/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
 	MainLoopSnesCoreSetPersisted(0);
-	/* AURORA_SAFE_FRAMESKIP_PICODRIVE_AUTO_V1: standalone PicoDrive Auto default max_skip = 4. */
-	MainLoopSafeFrameskipSetLevel(4);
+	/* AURORA_FAMICOM_MIC_CFG41_20260828: conservative Aurora default. */
+	MainLoopSafeFrameskipSetLevel(1);
 	PicoDriveBridge_SetGgZoom(false);
 	memset(&cfg, 0, sizeof(cfg));
 	SNPPURenderSetSoftwareLayerMask(
@@ -479,9 +479,9 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
-		else if (header.version == 39)
+		else if (header.version == 40 || header.version == 39)
 		{
-			/* v39 has the same bytes as v40; only Safe Frameskip semantics changed. */
+			/* v39/v40 are byte-identical to v41; migration policy is below. */
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
@@ -752,9 +752,11 @@ void VideoSettingsLoad(void)
 	if (loaded)
 		cfg.sneshackflags &= ~SNPPU_HACK_FRAME_SKIP;
 
-	/* AURORA_SAFE_FRAMESKIP_PICODRIVE_AUTO_V1: v39 stored sensitivity, not max_skip. */
-	if (loaded && header.version == 39)
-		cfg.safeframeskip = (cfg.safeframeskip == 0) ? 0 : 4;
+	/* AURORA_FAMICOM_MIC_CFG41_20260828
+	 * Every config written before v41 gets Safe Frameskip=1 exactly once.
+	 * After the user saves v41, the selected 0..9 value persists normally. */
+	if (loaded && header.version < VIDEOCFG_VERSION)
+		cfg.safeframeskip = 1;
 
 	/* New policy applies exactly once to every pre-v22 config. Once the
 	 * user saves v22, a manual Full selection remains persistent. */
@@ -786,7 +788,7 @@ void VideoSettingsLoad(void)
 		if (cfg.smscolorborder == 0 || cfg.smscolorborder == 1)
 			PicoDriveBridge_SetSmsColorBorder(cfg.smscolorborder != 0);
 		if (header.version >= 39 && header.version <= VIDEOCFG_VERSION &&
-		    cfg.safeframeskip >= 0 && cfg.safeframeskip <= 9)
+		    cfg.safeframeskip >= 0 && cfg.safeframeskip <= 1)
 			MainLoopSafeFrameskipSetLevel(cfg.safeframeskip);
 		if (cfg.ggzoom == 0 || cfg.ggzoom == 1)
 			PicoDriveBridge_SetGgZoom(cfg.ggzoom != 0);
@@ -945,7 +947,7 @@ static const char *_VideoSafeFrameskipStatus()
     static const char *const names[10] =
         { "Off", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
     Int32 level = MainLoopSafeFrameskipGetLevel();
-    if (level < 0 || level > 9) level = 4;
+    if (level < 0 || level > 1) level = 1;
     return names[level];
 }
 
@@ -1404,12 +1406,12 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		case 7: /* Game Gear exact 3:2 zoom, 160x144 -> 240x216 */
 			PicoDriveBridge_SetGgZoom(!PicoDriveBridge_GetGgZoom());
 			break;
-		case 8: /* Safe Frameskip sensitivity: Off, 1..9 */
+		case 8: /* Safe Frameskip: Off, On */
 		{
 			Int32 level = MainLoopSafeFrameskipGetLevel();
 			level += (dir > 0) ? 1 : -1;
-			if (level > 9) level = 0;
-			if (level < 0) level = 9;
+			if (level > 1) level = 0;
+			if (level < 0) level = 1;
 			MainLoopSafeFrameskipSetLevel(level);
 			break;
 		}

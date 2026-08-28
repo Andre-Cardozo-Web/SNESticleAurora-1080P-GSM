@@ -1018,12 +1018,33 @@ static int JPType[2] = { SI_NONE, SI_NONE };
 static INPUTC DummyJPort = { 0, 0, 0, 0, 0, 0 };
 static INPUTC *JPorts[2] = { &DummyJPort, &DummyJPort };
 
+/* AURORA_FAMICOM_MIC_CFG41_20260828 */
+static uint8 AuroraFamicomMic = 0;
+static uint8 AuroraFamicomMicPhase = 0;
+
+void FCEU_SetMicrophoneDirect(int active) {
+\tconst uint8 next = active ? 1 : 0;
+\tif (next != AuroraFamicomMic)
+\t\tAuroraFamicomMicPhase = 0;
+\tAuroraFamicomMic = next;
+}
+
 void (*InputScanlineHook)(uint8 *bg, uint8 *spr, uint32 linets, int final) = 0;
 
 static DECLFR(JPRead) {
 \tuint8 ret = 0;
 \tif (JPorts[A & 1]->Read)
 \t\tret |= JPorts[A & 1]->Read(A & 1);
+
+\t/* AURORA_FAMICOM_MIC_CFG41_20260828
+\t * Famicom controller II microphone: $4016 D2 only. Alternate the
+\t * one-bit level while held so transition-detecting games respond. */
+\tif (!(A & 1) && AuroraFamicomMic) {
+\t\tAuroraFamicomMicPhase ^= 1;
+\t\tif (AuroraFamicomMicPhase)
+\t\t\tret |= 0x04;
+\t}
+
 \tret |= X.DB & 0xC0;
 \treturn ret;
 }

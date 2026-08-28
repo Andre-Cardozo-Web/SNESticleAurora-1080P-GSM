@@ -12,6 +12,7 @@
  */
 
 #include <stdio.h>
+#include <libpad.h>
 
 #include "mainloop_debug.h"
 #include "mainloop_shared.h"
@@ -37,6 +38,7 @@
 #include "console.h"
 #include "input.h"
 #include "snes.h"
+#include "snio.h" /* AURORA_FAMICOM_MIC_CFG41_20260828: NES/FDS microphone carrier */
 #include "rendersurface.h"
 #include "mixbuffer.h"
 #include "prof.h"
@@ -197,8 +199,23 @@ Bool MainLoopProcess()
 				   inputs are merged: if both press the same direction the
 				   result is identical to a single press, so users can use
 				   whichever they prefer (or both). */
-				Input.uPad[iPad] = _MainLoopInput(InputGetPadData(iPad)
-				                               | InputGetPadDpadFromAnalog(iPad));
+				const Uint32 uHostPad = InputGetPadData(iPad)
+				                          | InputGetPadDpadFromAnalog(iPad);
+				Input.uPad[iPad] = _MainLoopInput(uHostPad);
+
+				/* AURORA_FAMICOM_MIC_CFG41_20260828
+				 * L2 is already consumed by _MainLoopInput(), so START can
+				 * never leak to NES pad 1. Reuse the otherwise ignored NES
+				 * carrier SNESIO_JOY_L on P1 so netplay/movie input keeps the
+				 * microphone event in-band. The bridges convert it to the
+				 * Famicom controller-II microphone at $4016 D2. */
+				if (iPad == 0 && (_pSystem == _pNes || _pSystem == _pFds))
+				{
+					Input.uPad[0] &= (Uint16)~SNESIO_JOY_L;
+					if ((uHostPad & (PAD_L2 | PAD_START)) ==
+					    (PAD_L2 | PAD_START))
+						Input.uPad[0] |= SNESIO_JOY_L;
+				}
 			} else
 			{
 				Input.uPad[iPad] = EMUSYS_DEVICE_DISCONNECTED;

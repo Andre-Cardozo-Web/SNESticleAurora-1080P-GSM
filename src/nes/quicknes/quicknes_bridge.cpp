@@ -42,6 +42,7 @@ extern "C" {
 #include "nes_ntsc.h" /* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
 
 extern "C" void quicknes_snesticle_set_duty_swap(int enable);
+extern "C" void quicknes_snesticle_set_microphone(int enable); /* AURORA_FAMICOM_MIC_CFG41_20260828 */
 
 static bool s_Initialized = false;
 static bool s_GameLoaded  = false;
@@ -603,6 +604,14 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
     Uint8 p2 = 0;
     s_TurboPhase = (((s_TurboFrame >> s_TurboSpeedShift) & 1U) == 0U);
     ++s_TurboFrame;
+
+    /* AURORA_FAMICOM_MIC_CFG41_20260828:
+     * SNESIO_JOY_L is a host-only NES carrier; qMapPad intentionally ignores
+     * it. The QuickNES core exposes it as the Famicom pad-II mic on $4016 D2. */
+    quicknes_snesticle_set_microphone(
+        (pInput &&
+         pInput->uPad[0] != EMUSYS_DEVICE_DISCONNECTED &&
+         (pInput->uPad[0] & SNESIO_JOY_L)) ? 1 : 0);
 
     if (pInput)
     {

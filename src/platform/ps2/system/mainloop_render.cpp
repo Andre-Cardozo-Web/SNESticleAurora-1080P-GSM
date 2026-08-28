@@ -76,9 +76,10 @@ static Uint32 _uVblankCycle;
  * MainLoopRender consumes the one-shot below and does not present or wait for
  * VBlank, which is what makes real catch-up possible.
  *
- * Menu value: 0=Off, 1..9=max_skip. Default=4, matching PicoDrive standalone.
+ * Menu value: 0=Off, 1=max_skip. Aurora default=1.
+ * AURORA_FAMICOM_MIC_CFG41_20260828
  */
-static Int32  s_SafeFrameskipLevel = 4;
+static Int32  s_SafeFrameskipLevel = 1;
 static Bool   s_SafeFrameskipSkipPresentation = FALSE;
 static Uint32 s_SafeFrameskipAim = 0;
 static Uint32 s_SafeFrameskipConsecutive = 0;
@@ -152,7 +153,7 @@ Int32 MainLoopSafeFrameskipGetLevel(void)
 void MainLoopSafeFrameskipSetLevel(Int32 level)
 {
     if (level < 0) level = 0;
-    if (level > 9) level = 9;
+    if (level > 1) level = 1;
     s_SafeFrameskipLevel = level;
     _MainLoopSafeFrameskipResetTiming();
 }
@@ -167,7 +168,7 @@ void MainLoopSafeFrameskipSetEnabled(Bool enabled)
     if (!enabled)
         MainLoopSafeFrameskipSetLevel(0);
     else if (s_SafeFrameskipLevel <= 0)
-        MainLoopSafeFrameskipSetLevel(4);
+        MainLoopSafeFrameskipSetLevel(1);
 }
 
 Bool MainLoopSafeFrameskipTake(Bool allowed)

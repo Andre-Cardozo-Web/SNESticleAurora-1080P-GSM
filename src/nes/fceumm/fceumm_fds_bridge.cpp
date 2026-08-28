@@ -74,6 +74,7 @@ int FDS_aurora_fds_get_audio_frames(void);
 void FDS_FCEU_FDSEject(void);
 void FDS_FCEU_FDSSelect(void);
 void FDS_FCEU_FDSInsert(int);
+void FDS_FCEU_SetMicrophoneDirect(int); /* AURORA_FAMICOM_MIC_CFG41_20260828 */
 }
 
 static bool s_Initialized = false;
@@ -825,6 +826,14 @@ void FceummFdsBridge_RunFrame(Emu::SysInputT *input,
     s_pInput = input;
     s_pTarget = target;
     s_pMix = mix;
+
+    /* AURORA_FAMICOM_MIC_CFG41_20260828:
+     * carrier comes from physical pad 1, emulated signal is controller-II
+     * microphone data on $4016 D2. */
+    FDS_FCEU_SetMicrophoneDirect(
+        (input &&
+         input->uPad[0] != EMUSYS_DEVICE_DISCONNECTED &&
+         (input->uPad[0] & SNESIO_JOY_L)) ? 1 : 0);
 
     /* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827: unchanged input and skip state need no cross-archive setter. */
     {
