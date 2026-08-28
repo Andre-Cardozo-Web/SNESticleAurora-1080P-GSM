@@ -79,8 +79,7 @@ void FDS_FCEU_FDSInsert(int);
 static bool s_Initialized = false;
 static bool s_GameLoaded = false;
 static bool s_SkipVideoNext = false;
-/* AURORA_FCEUMM_FDS_V12_3B_BRIDGE_HOTPATH_FIX_20260827: avoid unchanged cross-archive setters. */
-static bool s_CoreSkipVideoApplied = false;
+/* AURORA_V3_SAFE_FDS_ONESHOT_SKIP_DECL_20260828 */
 static Uint16 s_LastPadRaw[2] = { 0, 0 };
 static bool s_LastPadRawValid = false;
 static Emu::SysInputT *s_pInput = NULL;
@@ -400,7 +399,7 @@ bool FceummFdsBridge_LoadDisk(const char *path, const char *systemPath,
     s_DriveStateChanged = true;
     s_SkipVideoNext = false;
     FDS_aurora_fds_set_skip_video(0);
-    s_CoreSkipVideoApplied = false;
+    /* AURORA_V3_SAFE_FDS_ONESHOT_SKIP_LOAD_20260828 */
     s_LastPadRawValid = false;
 
     struct retro_system_av_info av;
@@ -411,6 +410,58 @@ bool FceummFdsBridge_LoadDisk(const char *path, const char *systemPath,
 
     printf("[FCEUmm/FDS] LOAD OK: %s; sides=%u; audio=%u Hz; SYSTEM=%s\n",
            path, s_TotalSides, s_SampleRate, systemPath);
+    return true;
+}
+
+/* AURORA_FDS_V4_ZIP_BRIDGE_IMPL_20260828 */
+bool FceummFdsBridge_LoadDiskMemory(const void *data, Uint32 bytes,
+                                    const char *contentName,
+                                    const char *systemPath,
+                                    unsigned totalSides)
+{
+    struct retro_game_info info;
+    struct retro_system_av_info av;
+
+    if (!data || bytes < 65500U || bytes > 524016U ||
+        !contentName || !*contentName ||
+        !systemPath || !*systemPath ||
+        totalSides < 1 || totalSides > 8)
+        return false;
+
+    if (s_GameLoaded)
+        FceummFdsBridge_UnloadGame();
+
+    FDS_aurora_fds_set_system_directory(systemPath);
+    if (!FceummFdsBridge_Init())
+        return false;
+
+    memset(&info, 0, sizeof(info));
+    info.path = contentName;
+    info.data = data;
+    info.size = (size_t)bytes;
+    info.meta = NULL;
+
+    if (!FDS_retro_load_game(&info))
+        return false;
+
+    s_GameLoaded = true;
+    s_StateBytes = 0;
+    if (s_CustomPaletteValid) FDS_aurora_fds_set_palette(s_CustomPalette);
+    s_TotalSides = totalSides;
+    s_SelectedSide = 0;
+    s_DiskInserted = true;
+    s_SwapFramesRemaining = 0;
+    s_SwapTargetSide = 0;
+    s_DriveStateChanged = true;
+    s_SkipVideoNext = false;
+    FDS_aurora_fds_set_skip_video(0);
+    s_LastPadRawValid = false;
+
+    memset(&av, 0, sizeof(av));
+    FDS_retro_get_system_av_info(&av);
+    if (av.timing.sample_rate >= 8000.0 && av.timing.sample_rate <= 96000.0)
+        s_SampleRate = (unsigned)(av.timing.sample_rate + 0.5);
+
     return true;
 }
 
@@ -478,6 +529,8 @@ bool FceummFdsBridge_CanDirectGsVideo(void)
 static void fdsRefreshDirectPalette(void)
 {
     Int32 deemph;
+    bool fullRefresh;
+    unsigned first, last;
 
     if (!s_DirectPalette)
         return;
@@ -486,12 +539,19 @@ static void fdsRefreshDirectPalette(void)
     if (deemph < 0 || deemph > 7)
         deemph = 0;
 
-    if (s_DirectPaletteValid &&
-        s_DirectPaletteSerial == s_HostPaletteSerial &&
-        s_DirectLastDeemph == deemph)
+    fullRefresh =
+        !s_DirectPaletteValid ||
+        s_DirectPaletteSerial != s_HostPaletteSerial;
+
+    if (!fullRefresh && s_DirectLastDeemph == deemph)
         return;
 
-    for (unsigned i = 0; i < 256; ++i)
+    /* AURORA_V3_SAFE_FDS_PARTIAL_CLUT_20260828:
+     * only bank 0x40 depends on the current de-emphasis. */
+    first = fullRefresh ? 0u : 0x40u;
+    last  = fullRefresh ? 256u : 0x80u;
+
+    for (unsigned i = first; i < last; ++i)
     {
         const unsigned base = i & 0x3fU;
         const unsigned bank = i & 0xc0U;
@@ -778,11 +838,9 @@ void FceummFdsBridge_RunFrame(Emu::SysInputT *input,
             s_LastPadRawValid = true;
         }
     }
-    if (skipVideo != s_CoreSkipVideoApplied)
-    {
-        FDS_aurora_fds_set_skip_video(skipVideo ? 1 : 0);
-        s_CoreSkipVideoApplied = skipVideo;
-    }
+    /* AURORA_V3_SAFE_FDS_ONESHOT_SKIP_RUN_20260828 */
+    if (skipVideo)
+        FDS_aurora_fds_set_skip_video(1);
     FDS_retro_run();
     fdsOutputNativeMono();
 

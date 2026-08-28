@@ -48,6 +48,8 @@ void PicoDriveAurora_RunFrameNative(
     int skip_video,
     int refresh_variables);
 void PicoDriveAurora_SetSpriteLimiter(int level, int mode); /* AURORA_V15_MULTICORE_SPRITE_LIMIT_20260824 */
+/* AURORA_V6_SMS_PHYSICAL_PAUSE_NATIVE_DECL_20260828 */
+void PicoSmsInjectPauseNmi(int normal_pause_pressed);
 }
 
 static bool s_Initialized = false;
@@ -59,6 +61,8 @@ static int  s_RenderingMode = 1; /* preferencia MD/32X: 0 Fast, 1 Good, 2 Accura
 static bool s_SmsColorBorder = true; /* VDP backdrop nas bordas do SMS */
 static bool s_GgZoom = false; /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 static bool s_SmsFm = false; /* Master System YM2413/OPLL */
+/* AURORA_V6_SMS_PHYSICAL_PAUSE_BRIDGE_20260828 */
+static bool s_AltSmsPausePending = false;
 static int  s_AudioRate = 16000; /* AURORA_PD_POLISH_V3_20260820: follows Settings/Audio Frequency */
 static char s_AudioRateText[16] = "16000";
 
@@ -158,7 +162,9 @@ static Uint32 s_PaletteRGBA[256];
 static Uint32 s_Color555RGBA[32768];
 static bool s_Color555RGBAReady = false;
 /* AURORA_MD_DIRECT_CLUT_CACHE_V1 */
-static Uint16 s_DirectLastClut[256];
+/* AURORA_V3_SAFE_PD_NO_DEAD_CLUT_SHADOW_20260828:
+ * serial + residency are the complete live state; the old 512-byte shadow
+ * was write-only and never read anywhere in Aurora. */
 static bool s_DirectClutValid = false;
 static Uint32 s_DirectPaletteSerial = 0;
 /* AURORA_PD_DIRECT_FRAME_REUSE_V2_FIELDS_20260821 */
@@ -1364,6 +1370,8 @@ void PicoDriveBridge_UnloadGame(void)
     }
 
     s_GameLoaded = false;
+    /* AURORA_V6_SMS_PHYSICAL_PAUSE_LIFETIME_20260828 */
+    s_AltSmsPausePending = false;
     s_DirectClutValid = false;
     s_DirectInfoValid = false;
     s_DirectInfoCanGs = false;
@@ -1386,6 +1394,8 @@ void PicoDriveBridge_UnloadGame(void)
 
 void PicoDriveBridge_Reset(void)
 {
+    /* AURORA_V6_SMS_PHYSICAL_PAUSE_RESET_20260828 */
+    s_AltSmsPausePending = false;
     if (s_GameLoaded)
         retro_reset();
     pdAudioTailReset();
@@ -1394,6 +1404,8 @@ void PicoDriveBridge_Reset(void)
 
 void PicoDriveBridge_SoftReset(void)
 {
+    /* AURORA_V6_SMS_PHYSICAL_PAUSE_SOFTRESET_20260828 */
+    s_AltSmsPausePending = false;
     if (s_GameLoaded)
         retro_reset();
     pdAudioTailReset();
@@ -1501,6 +1513,14 @@ bool PicoDriveBridge_IsMasterSystem(void)
 bool PicoDriveBridge_Is8Bit(void)
 {
     return s_GameLoaded && pdIs8Bit();
+}
+
+/* AURORA_V6_SMS_PHYSICAL_PAUSE_QUEUE_20260828
+ * Hidden alternate input only. It does not replace or mask controller Start. */
+void PicoDriveBridge_QueueMasterSystemPause(void)
+{
+    if (s_GameLoaded && pdIsMasterSystem())
+        s_AltSmsPausePending = true;
 }
 
 void PicoDriveBridge_SetRegion(int auroraRegion)
@@ -1612,6 +1632,21 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
 
         inputMasks[0] = (uint16_t)pdJoyMask(0);
         inputMasks[1] = (uint16_t)pdJoyMask(1);
+
+        /* AURORA_V6_SMS_PHYSICAL_PAUSE_CONSUME_20260828
+         * Consume on the first actual emulated SMS frame, not merely host
+         * VBlank. This remains correct with 0/2-frame cadence conversion. */
+        if (s_AltSmsPausePending)
+        {
+            if (pdIsMasterSystem())
+            {
+                const int normalPause =
+                    (inputMasks[0] &
+                     (uint16_t)(1u << RETRO_DEVICE_ID_JOYPAD_START)) ? 1 : 0;
+                PicoSmsInjectPauseNmi(normalPause);
+            }
+            s_AltSmsPausePending = false;
+        }
 
         s_VariablesChanged = false;
         PicoDriveAurora_RunFrameNative(
@@ -1839,10 +1874,8 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
             {
                 GPPrimUploadTexture((int)clutTBP, 64, 0, 0,
                                     GS_PSM_CT16, s_CoreTexture.Clut, 16, 16);
-                /* Keep the shadow copy for diagnostics/lifetime parity, but
-                 * touch it only when the palette actually changes. */
-                memcpy(s_DirectLastClut, s_CoreTexture.Clut,
-                       sizeof(s_DirectLastClut));
+                /* AURORA_V3_SAFE_PD_NO_DEAD_CLUT_COPY_20260828:
+                 * no write-only shadow memcpy. */
                 s_DirectPaletteSerial = paletteSerial;
                 s_DirectClutValid = true;
             }

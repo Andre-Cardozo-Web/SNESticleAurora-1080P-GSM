@@ -121,7 +121,7 @@ static Uint32 s_DirectUploadSerial = 0;
 /* Audio scratch is BSS/static, never EE thread stack. QuickNES's default
  * non-linear Nes_Buffer emits mono; SNESticle's AudMixBuffer duplicates it
  * to stereo and performs the existing 32 -> 48 kHz conversion. */
-static Int16 s_Audio[QN_AUDIO_MAX];
+/* AURORA_V3_SAFE_QN_DIRECT_AUDIO_DECL_20260828 */
 static Int16 s_AudioOut[QN_AUDIO_MAX + 4];
 static Int16 s_Pending[4];
 static int   s_PendingCount = 0;
@@ -366,7 +366,14 @@ static void qDrainAudio(CMixBuffer *pMix)
         return;
     }
 
-    count = s_pEmu->read_samples((short *)s_Audio, QN_AUDIO_MAX);
+    /* AURORA_V3_SAFE_QN_DIRECT_AUDIO_DRAIN_20260828:
+     * preserve the 0..3-sample prefix and let QuickNES write directly after it. */
+    if (s_PendingCount > 0)
+        memcpy(s_AudioOut, s_Pending,
+               (size_t)s_PendingCount * sizeof(s_Pending[0]));
+
+    count = s_pEmu->read_samples(
+        (short *)(s_AudioOut + s_PendingCount), QN_AUDIO_MAX);
     if (count <= 0)
     {
         pMix->Flush();
@@ -375,16 +382,7 @@ static void qDrainAudio(CMixBuffer *pMix)
     if (count > QN_AUDIO_MAX)
         count = QN_AUDIO_MAX;
 
-    /* AURORA_MEGA_V4_QUICKNES_BRIDGE_BULK_COPY
-     * These three arrays are independent host-side PCM buffers. The old
-     * loops performed straight Int16 copies with no mapper/APU side effects,
-     * so libc bulk copies are byte-identical and avoid per-sample loop work. */
     int n = s_PendingCount + (int)count;
-    if (s_PendingCount > 0)
-        memcpy(s_AudioOut, s_Pending,
-               (size_t)s_PendingCount * sizeof(s_Pending[0]));
-    memcpy(s_AudioOut + s_PendingCount, s_Audio,
-           (size_t)count * sizeof(s_Audio[0]));
 
     /* AudMixBuffer's existing 32->48 kHz path expects input counts divisible
      * by four. Keep only the tail (0..3 samples) for the next frame. */

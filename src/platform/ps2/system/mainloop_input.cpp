@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <libpad.h>
+#include <libpwroff.h> /* AURORA_V6_PHYSICAL_CONSOLE_BUTTON_20260828 */
 
 #include "mainloop_input.h"
 #include "mainloop_iop.h"
@@ -46,6 +47,89 @@ static Uint32 _MainLoop_TurboPhaseBase = 0;
  * instead of the emulated-core frame counter. */
 static Uint32 _MainLoop_TurboHostFrame = 0;
 static Uint32 _MainLoop_TurboHostPhaseBase = 0;
+
+/* AURORA_V6_PHYSICAL_CONSOLE_BUTTON_STATE_20260828
+ * Undocumented alternate controls:
+ *   PicoDrive + real Master System -> console PAUSE NMI
+ *   Famicom Disk System           -> same side-swap action as L2+Triangle
+ *
+ * init_poweroff_driver() already called poweroffInit() during app boot.
+ * The RPC callback below only writes an event latch; all emulator work stays
+ * on the normal frontend thread. */
+enum MainLoopPhysicalConsoleButtonModeE
+{
+    MAINLOOP_PHYSICAL_BUTTON_NONE = 0,
+    MAINLOOP_PHYSICAL_BUTTON_SMS_PAUSE = 1,
+    MAINLOOP_PHYSICAL_BUTTON_FDS_SIDE = 2
+};
+
+static volatile Int32 s_PhysicalConsoleButtonMode =
+    MAINLOOP_PHYSICAL_BUTTON_NONE;
+static volatile Int32 s_PhysicalConsoleButtonEvent =
+    MAINLOOP_PHYSICAL_BUTTON_NONE;
+static Bool s_PhysicalConsoleButtonCallbackInstalled = FALSE;
+
+static void _MainLoopPhysicalConsoleButtonCallback(void *arg)
+{
+    const Int32 mode = s_PhysicalConsoleButtonMode;
+    (void)arg;
+
+    if (mode == MAINLOOP_PHYSICAL_BUTTON_SMS_PAUSE ||
+        mode == MAINLOOP_PHYSICAL_BUTTON_FDS_SIDE)
+        s_PhysicalConsoleButtonEvent = mode;
+}
+
+static Int32 _MainLoopPollPhysicalConsoleButton(void)
+{
+    Int32 desired = MAINLOOP_PHYSICAL_BUTTON_NONE;
+    Int32 event;
+
+    if (!_bMenu && _pSystem == _pSega &&
+        PicoDriveBridge_IsMasterSystem())
+        desired = MAINLOOP_PHYSICAL_BUTTON_SMS_PAUSE;
+    else if (!_bMenu && _pSystem == _pFds)
+        desired = MAINLOOP_PHYSICAL_BUTTON_FDS_SIDE;
+
+    s_PhysicalConsoleButtonMode = desired;
+
+    /* Lazy registration: if SMS/FDS is never entered, pre-V6 callback state
+     * is completely untouched. Outside SMS/FDS the callback is a no-op,
+     * matching the current Aurora state where poweroffInit has no user cb. */
+    if (desired != MAINLOOP_PHYSICAL_BUTTON_NONE &&
+        !s_PhysicalConsoleButtonCallbackInstalled)
+    {
+        poweroffSetCallback(_MainLoopPhysicalConsoleButtonCallback, NULL);
+        s_PhysicalConsoleButtonCallbackInstalled = TRUE;
+    }
+
+    event = s_PhysicalConsoleButtonEvent;
+    if (event == MAINLOOP_PHYSICAL_BUTTON_NONE)
+        return MAINLOOP_PHYSICAL_BUTTON_NONE;
+
+    s_PhysicalConsoleButtonEvent = MAINLOOP_PHYSICAL_BUTTON_NONE;
+
+    /* Drop stale events if menu/core changed between RPC and frontend frame. */
+    return event == desired ? event : MAINLOOP_PHYSICAL_BUTTON_NONE;
+}
+
+static void _MainLoopFdsSideSwapAction(void)
+{
+    if (FceummFdsBridge_BeginSideSwap())
+    {
+        _MainLoop_iDisk = (Int32)FceummFdsBridge_GetSelectedSide();
+        _MainLoop_bDiskInserted = FALSE;
+        MainLoopStatusPrintf(90,
+            "FDS: disk ejected; opposite side in 1 second...");
+    }
+    else if (FceummFdsBridge_IsSideSwapPending())
+    {
+        MainLoopStatusPrintf(90, "FDS: side swap already pending.");
+    }
+    else
+    {
+        MainLoopStatusPrintf(120, "FDS: no opposite side available.");
+    }
+}
 
 void MainLoopTurboSetSpeed(MainLoopTurboSpeedE eSpeed)
 {
@@ -433,6 +517,23 @@ void _MainLoopInputProcess(Uint32 buttons)
 	if (!(buttons & PAD_L2) || !(buttons & PAD_TRIANGLE))
 		bFdsSwapHotkeyHeld = FALSE;
 
+	/* AURORA_V6_PHYSICAL_CONSOLE_BUTTON_CONSUME_20260828 */
+	{
+		const Int32 physicalEvent = _MainLoopPollPhysicalConsoleButton();
+
+		if (physicalEvent == MAINLOOP_PHYSICAL_BUTTON_SMS_PAUSE)
+		{
+			PicoDriveBridge_QueueMasterSystemPause();
+		}
+		else if (physicalEvent == MAINLOOP_PHYSICAL_BUTTON_FDS_SIDE)
+		{
+			_MenuTriggerTimeout[0] = 0;
+			_MenuTriggerTimeout[1] = 0;
+			_MainLoopFdsSideSwapAction();
+			return;
+		}
+	}
+
 	/* AURORA_FCEUMM_FDS_V0_6_SIDE_SWAP
 	 * FDS-only frontend hotkey. Eject immediately; the bridge counts 60
 	 * emulated FDS frames without blocking the EE thread, flips A<->B on the
@@ -446,21 +547,8 @@ void _MainLoopInputProcess(Uint32 buttons)
 		bFdsSwapHotkeyHeld = TRUE;
 		_MenuTriggerTimeout[0] = 0;
 		_MenuTriggerTimeout[1] = 0;
-		if (FceummFdsBridge_BeginSideSwap())
-		{
-			_MainLoop_iDisk = (Int32)FceummFdsBridge_GetSelectedSide();
-			_MainLoop_bDiskInserted = FALSE;
-			MainLoopStatusPrintf(90,
-			    "FDS: disk ejected; opposite side in 1 second...");
-		}
-		else if (FceummFdsBridge_IsSideSwapPending())
-		{
-			MainLoopStatusPrintf(90, "FDS: side swap already pending.");
-		}
-		else
-		{
-			MainLoopStatusPrintf(120, "FDS: no opposite side available.");
-		}
+		/* AURORA_V6_PHYSICAL_CONSOLE_BUTTON_FDS_SHARED_20260828 */
+		_MainLoopFdsSideSwapAction();
 		return;
 	}
 

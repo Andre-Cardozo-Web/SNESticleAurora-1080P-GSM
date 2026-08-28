@@ -120,10 +120,15 @@ Bool MainLoopProcess()
              * FDS also produces roughly one 48 kHz frame of audio per host
              * tick. 1024 drains faster than production while preventing an
              * accumulated backlog from becoming one 4095-frame SIF RPC. */
+            /* AURORA_V3_SAFE_AUDIO_BURST_20260828:
+             * <=960 host frames/tick at PAL50 worst case for these cores. */
             Aud_SetAsyncBurstLimit(
                 (_pSystem == _pSnes ||
                  _pSystem == _pSnes9x2010 ||
-                 _pSystem == _pFds) ? 1024 : 4095);
+                 _pSystem == _pFds ||
+                 _pSystem == _pPce ||
+                 _pSystem == _pSega ||
+                 _pSystem == _pNes) ? 1024 : 4095);
 
             /* AURORA_AUDIO_SPLIT_VOLUMES_V36_20260823
              * Select which saved final gain the shared mixer will use. */

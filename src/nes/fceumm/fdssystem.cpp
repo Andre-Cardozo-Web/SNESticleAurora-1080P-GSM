@@ -8,6 +8,48 @@
 #include "nes/fceumm/fceumm_fds_bridge.h"
 #include "miniz.h"
 
+/* AURORA_FDS_V4_ZIP_INSPECT_20260828 */
+static Bool fdsInspectMemory(const Uint8 *data, Uint32 bytes,
+                             Uint32 *contentCRC,
+                             unsigned *totalSides)
+{
+    const Uint32 sideBytes = 65500U;
+    const Uint32 maxSides = 8U;
+    unsigned sides;
+
+    if (!data || !contentCRC || !totalSides ||
+        bytes < sideBytes || bytes > 16U + maxSides * sideBytes)
+        return FALSE;
+
+    if (bytes >= 16U && !memcmp(data, "FDS\x1a", 4))
+    {
+        sides = data[4];
+        if (sides < 1U) sides = 1U;
+        if (sides > maxSides) sides = maxSides;
+        if (bytes != 16U + sides * sideBytes)
+            return FALSE;
+    }
+    else if (bytes >= 16U &&
+             !memcmp(data + 1, "*NINTENDO-HVC*", 14))
+    {
+        if ((bytes % sideBytes) != 0U)
+            return FALSE;
+        sides = bytes / sideBytes;
+        if (sides < 1U || sides > maxSides)
+            return FALSE;
+    }
+    else
+    {
+        return FALSE;
+    }
+
+    *contentCRC = (Uint32)mz_crc32(
+        MZ_CRC32_INIT, data, (size_t)bytes);
+    *totalSides = sides;
+    return TRUE;
+}
+
+
 static Bool fdsInspectContent(const Char *path,
                               Uint32 *contentBytes,
                               Uint32 *contentCRC,
@@ -152,6 +194,38 @@ Bool FdsSystem::LoadDisk(const Char *path, const Char *systemPath)
     return TRUE;
 }
 
+/* AURORA_FDS_V4_ZIP_SYSTEM_MEMORY_20260828 */
+Bool FdsSystem::LoadDiskMemory(const void *data, Uint32 bytes,
+                               const Char *contentName,
+                               const Char *systemPath)
+{
+    Uint32 contentCRC = 0;
+    unsigned totalSides = 0;
+
+    m_bRomReady = FALSE;
+    m_nCachedStateBytes = 0;
+    m_nContentBytes = 0;
+    m_uContentCRC = 0;
+    m_uFrame = m_uLine = 0;
+    FceummFdsBridge_UnloadGame();
+
+    if (!contentName || !*contentName || !systemPath || !*systemPath ||
+        !fdsInspectMemory((const Uint8 *)data, bytes,
+                          &contentCRC, &totalSides))
+        return FALSE;
+
+    if (!FceummFdsBridge_LoadDiskMemory(
+            data, bytes, contentName, systemPath, totalSides))
+        return FALSE;
+
+    m_nContentBytes = bytes;
+    m_uContentCRC = contentCRC;
+    m_bRomReady = TRUE;
+    printf("[FdsSystem] memory identity bytes=%u crc=%08X sides=%u\n",
+           (unsigned)m_nContentBytes, (unsigned)m_uContentCRC, totalSides);
+    return TRUE;
+}
+
 void FdsSystem::Reset()
 {
     m_uFrame = m_uLine = 0;
@@ -216,7 +290,9 @@ Bool FdsSystem::SaveStateChecked(void *state, Int32 bytes)
         return FALSE;
 
     coreBytes = total - (Int32)sizeof(header);
-    memset(state, 0, (size_t)total);
+    /* AURORA_V3_SAFE_FDS_STATE_NO_FULL_CLEAR_20260828 */
+    memset(&header, 0, sizeof(header));
+    memcpy(state, &header, sizeof(header));
     payload = ((Uint8 *)state) + sizeof(header);
 
     FceummFdsBridge_GetDriveState(
@@ -224,7 +300,6 @@ Bool FdsSystem::SaveStateChecked(void *state, Int32 bytes)
     if (FceummFdsBridge_SaveState(payload, coreBytes) != coreBytes)
         return FALSE;
 
-    memset(&header, 0, sizeof(header));
     header.uMagic = FDS_STATE_MAGIC;
     header.uVersion = FDS_STATE_VERSION;
     header.nPayloadBytes = (Uint32)coreBytes;

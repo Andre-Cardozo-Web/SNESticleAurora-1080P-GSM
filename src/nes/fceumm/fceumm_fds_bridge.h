@@ -11,6 +11,11 @@ bool FceummFdsBridge_Init(void);
 void FceummFdsBridge_Shutdown(void);
 bool FceummFdsBridge_LoadDisk(const char *path, const char *systemPath,
                               unsigned totalSides);
+/* AURORA_FDS_V4_ZIP_BRIDGE_MEMORY_20260828 */
+bool FceummFdsBridge_LoadDiskMemory(const void *data, Uint32 bytes,
+                                    const char *contentName,
+                                    const char *systemPath,
+                                    unsigned totalSides);
 void FceummFdsBridge_UnloadGame(void);
 void FceummFdsBridge_Reset(void);
 void FceummFdsBridge_SoftReset(void);

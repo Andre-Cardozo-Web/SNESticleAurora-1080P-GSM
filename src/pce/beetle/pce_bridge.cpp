@@ -722,7 +722,9 @@ void PceBridge_RunFrame(Emu::SysInputT *input, CRenderSurface *target, CMixBuffe
     if (!skipVideo)
         s_HaveVideo = false;
     s_SkipVideoActive = skipVideo;
-    PCE_AuroraSetSkipNextVideoFrame(skipVideo ? 1 : 0);
+    /* AURORA_V3_SAFE_PCE_ONESHOT_SKIP_20260828 */
+    if (skipVideo)
+        PCE_AuroraSetSkipNextVideoFrame(1);
 
     {
         const int limiterLevel = (int)SNPPURenderGetObjLimitLevel();

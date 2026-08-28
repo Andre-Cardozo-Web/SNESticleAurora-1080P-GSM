@@ -3134,6 +3134,490 @@ def patch_v14_libretro(text: str) -> str:
         fail("V14 libretro: FCEUD_SoundToggle pós-load não encontrado")
     return text.replace(old, new, 1)
 
+
+# AURORA_V3_SAFE_FDS_GENERATOR_20260828
+def patch_v3_safe_ppu(text: str) -> str:
+    marker = "AURORA_V3_SAFE_FDS_PPU_LUT_DIRTY_20260828"
+    if marker in text:
+        return text
+
+    old_cache = '''static uint16 fceu_bg_pair_lut[256];
+static uint8 fceu_bg_pair_lut_pal[16];
+static uint8 fceu_bg_pair_lut_valid = 0;
+
+static void FCEU_BuildBgPairLUT(void) {
+\tint b;
+
+\t/* AURORA_FCEUMM_FDS_V7_REAL_FRAMESKIP_CPU_APU_20260827
+\t * RefreshLine may run several times in one scanline after PPU writes.
+\t * Rebuild the 256 pairs only when the 16 BG palette bytes changed. */
+\tif (fceu_bg_pair_lut_valid &&
+\t    memcmp(fceu_bg_pair_lut_pal, PALRAM, sizeof(fceu_bg_pair_lut_pal)) == 0)
+\t\treturn;
+
+\tmemcpy(fceu_bg_pair_lut_pal, PALRAM, sizeof(fceu_bg_pair_lut_pal));
+\tfor (b = 0; b < 256; b++)
+\t\tfceu_bg_pair_lut[b] = (uint16)PALRAM[b & 0x0F] |
+\t\t\t((uint16)PALRAM[b >> 4] << 8);
+\tfceu_bg_pair_lut_valid = 1;
+}
+'''
+    new_cache = '''static uint16 fceu_bg_pair_lut[256];
+static uint8 fceu_bg_pair_lut_valid = 0;
+static uint8 fceu_bg_pair_lut_dirty = 1;
+
+static void FCEU_BuildBgPairLUT(void) {
+\tint b;
+
+\t/* AURORA_V3_SAFE_FDS_PPU_LUT_DIRTY_20260828
+\t * B2007/Power/LoadState invalidate this only when PALRAM[0..15] can
+\t * actually change. RefreshLine therefore pays one byte test instead of
+\t * a 16-byte memcmp. */
+\tif (fceu_bg_pair_lut_valid && !fceu_bg_pair_lut_dirty)
+\t\treturn;
+
+\tfor (b = 0; b < 256; b++)
+\t\tfceu_bg_pair_lut[b] = (uint16)PALRAM[b & 0x0F] |
+\t\t\t((uint16)PALRAM[b >> 4] << 8);
+\tfceu_bg_pair_lut_valid = 1;
+\tfceu_bg_pair_lut_dirty = 0;
+}
+'''
+    text = replace_once(text, old_cache, new_cache, "V3 PPU pair-LUT dirty cache")
+
+    old_pal_write = '''\t} else {
+\t\tif (!(tmp & 3)) {
+\t\t\tif (!(tmp & 0xC))
+\t\t\t\tPALRAM[0x00] = PALRAM[0x04] = PALRAM[0x08] = PALRAM[0x0C] = V & 0x3F;
+\t\t\telse
+\t\t\t\tUPALRAM[((tmp & 0xC) >> 2) - 1] = V & 0x3F;
+\t\t} else
+\t\t\tPALRAM[tmp & 0x1F] = V & 0x3F;
+\t}
+'''
+    new_pal_write = '''\t} else {
+\t\tconst uint8 aurora_pal_v = V & 0x3F;
+\t\tif (!(tmp & 3)) {
+\t\t\tif (!(tmp & 0xC)) {
+\t\t\t\tif (PALRAM[0x00] != aurora_pal_v)
+\t\t\t\t\tfceu_bg_pair_lut_dirty = 1;
+\t\t\t\tPALRAM[0x00] = PALRAM[0x04] = PALRAM[0x08] = PALRAM[0x0C] = aurora_pal_v;
+\t\t\t} else
+\t\t\t\tUPALRAM[((tmp & 0xC) >> 2) - 1] = aurora_pal_v;
+\t\t} else {
+\t\t\tconst uint32 aurora_pal_i = tmp & 0x1F;
+\t\t\tif (aurora_pal_i < 0x10 && PALRAM[aurora_pal_i] != aurora_pal_v)
+\t\t\t\tfceu_bg_pair_lut_dirty = 1;
+\t\t\tPALRAM[aurora_pal_i] = aurora_pal_v;
+\t\t}
+\t}
+'''
+    text = replace_once(text, old_pal_write, new_pal_write, "V3 B2007 LUT invalidation")
+
+    text = replace_once(
+        text,
+        "\tmemset(PALRAM, 0x00, 0x20);\n",
+        "\tmemset(PALRAM, 0x00, 0x20);\n"
+        "\tfceu_bg_pair_lut_valid = 0;\n"
+        "\tfceu_bg_pair_lut_dirty = 1;\n",
+        "V3 PPU power LUT invalidation",
+    )
+
+    text = replace_once(
+        text,
+        '''void FCEUPPU_LoadState(int version) {
+\tTempAddr = TempAddrT;
+\tRefreshAddr = RefreshAddrT;
+}''',
+        '''void FCEUPPU_LoadState(int version) {
+\tTempAddr = TempAddrT;
+\tRefreshAddr = RefreshAddrT;
+\t/* AURORA_V3_SAFE_FDS_PPU_LUT_DIRTY_20260828 */
+\tfceu_bg_pair_lut_dirty = 1;
+}''',
+        "V3 PPU load-state LUT invalidation",
+    )
+    return text
+
+
+def patch_v3_safe_sound(text: str) -> str:
+    marker = "AURORA_V3_SAFE_FDS_SOUNDTSINC_CONST_20260828"
+    if marker in text:
+        return text
+
+    text = replace_once(
+        text,
+        "uint32 soundtsinc = 0;\n",
+        "uint32 soundtsinc = 0;\n"
+        "/* AURORA_V3_SAFE_FDS_SOUNDTSINC_CONST_20260828\n"
+        " * NTSC_CPU*65536/(32050*16) truncates exactly to 228733. */\n"
+        "#define AURORA_FDS_SOUNDTSINC_32050 228733U\n",
+        "V3 soundtsinc constant declaration",
+    )
+
+    old = "(SOUNDTS << 16) / soundtsinc"
+    count = text.count(old)
+    if count != 3:
+        fail(f"V3 sound_fds divisions: esperado 3, encontrado {count}")
+    text = text.replace(old, "(SOUNDTS << 16) / AURORA_FDS_SOUNDTSINC_32050")
+    return text
+
+
+def patch_v3_safe_fds(text: str) -> str:
+    marker = "AURORA_V3_SAFE_FDS_RESTORE_XOR64_20260828"
+    if marker in text:
+        return text
+
+    signature = "static void FDSStateRestore(int version) {"
+    if text.count(signature) != 1:
+        fail("V3 FDSStateRestore signature não é única")
+
+    text = text.replace(
+        signature,
+        "static INLINE void AuroraFDSXorStateSide(uint8 *dst, const uint8 *src);\n"
+        "/* AURORA_V3_SAFE_FDS_RESTORE_XOR64_20260828 */\n"
+        + signature,
+        1,
+    )
+
+    replacement = '''static void FDSStateRestore(int version) {
+\tint x;
+
+\tsetmirror(((FDSRegs[5] & 8) >> 3) ^ 1);
+
+\tif (version >= 9810)
+\t\tfor (x = 0; x < TotalSides; x++)
+\t\t\tAuroraFDSXorStateSide(diskdata[x], diskdatao[x]);
+}'''
+    text = aurora_v11_replace_c_function(
+        text,
+        "static void FDSStateRestore(int version)",
+        replacement,
+        "V3 FDS restore XOR64",
+    )
+
+    old_div = "(SOUNDTS << 16) / soundtsinc"
+    if text.count(old_div) != 1:
+        fail(f"V3 fds_fds RenderSound division count: {text.count(old_div)}")
+    text = text.replace(
+        old_div,
+        "(SOUNDTS << 16) / 228733U /* AURORA_V3_SAFE_FDS_FIXED_RENDER_DIV_20260828 */",
+        1,
+    )
+    return text
+
+
+# AURORA_FDS_V4_ZIP_GENERATOR_20260828
+
+# AURORA_FDS_V4_ZIP_SAFE_20260828
+def patch_v4_zip_file(text: str) -> str:
+    marker = "AURORA_FDS_V4_ZIP_MEMVIEW_20260828"
+    if marker in text:
+        return text
+
+    text = replace_once(
+        text,
+        '''typedef struct {
+\tuint8 *data;
+\tuint32 size;
+\tuint32 location;
+} MEMWRAP;
+''',
+        '''typedef struct {
+\tuint8 *data;
+\tuint32 size;
+\tuint32 location;
+} MEMWRAP;
+
+/* AURORA_FDS_V4_ZIP_MEMVIEW_20260828
+ * Borrowed, read-only view of Aurora's already-extracted .fds payload.
+ * The wrapper owns only this tiny descriptor; it never owns/frees data. */
+#define AURORA_FDS_MEMVIEW_TYPE 4U
+typedef struct {
+\tconst uint8 *data;
+\tuint32 size;
+\tuint32 location;
+} AURORA_FDS_MEMVIEW;
+
+FCEUFILE *FCEU_fopen_memory(const void *data, uint32 size) {
+\tFCEUFILE *fp;
+\tAURORA_FDS_MEMVIEW *view;
+
+\tif (!data || !size)
+\t\treturn 0;
+
+\tfp = (FCEUFILE *)malloc(sizeof(FCEUFILE));
+\tif (!fp)
+\t\treturn 0;
+
+\tview = (AURORA_FDS_MEMVIEW *)malloc(sizeof(AURORA_FDS_MEMVIEW));
+\tif (!view) {
+\t\tfree(fp);
+\t\treturn 0;
+\t}
+
+\tview->data = (const uint8 *)data;
+\tview->size = size;
+\tview->location = 0;
+\tfp->fp = view;
+\tfp->type = AURORA_FDS_MEMVIEW_TYPE;
+\treturn fp;
+}
+''',
+        "V4 borrowed FDS memory view",
+    )
+
+    for signature, body, label in (
+        (
+            "int FCEU_fclose(FCEUFILE *fp) {\n",
+            '''int FCEU_fclose(FCEUFILE *fp) {
+\tif (fp && fp->type == AURORA_FDS_MEMVIEW_TYPE) {
+\t\tfree(fp->fp);
+\t\tfp->fp = 0;
+\t\tfree(fp);
+\t\treturn 1;
+\t}
+''',
+            "V4 memory-view close",
+        ),
+        (
+            "uint64 FCEU_fread(void *ptr, size_t size, size_t nmemb, FCEUFILE *fp) {\n",
+            '''uint64 FCEU_fread(void *ptr, size_t size, size_t nmemb, FCEUFILE *fp) {
+\tif (fp && fp->type == AURORA_FDS_MEMVIEW_TYPE) {
+\t\tAURORA_FDS_MEMVIEW *view = (AURORA_FDS_MEMVIEW *)fp->fp;
+\t\tuint64 requested;
+\t\tuint32 available;
+\t\tuint32 copy;
+
+\t\tif (!view || !ptr || !size || !nmemb || view->location >= view->size)
+\t\t\treturn 0;
+
+\t\trequested = (uint64)size * (uint64)nmemb;
+\t\tavailable = view->size - view->location;
+\t\tcopy = requested < (uint64)available ? (uint32)requested : available;
+\t\tmemcpy(ptr, view->data + view->location, copy);
+\t\tview->location += copy;
+\t\treturn copy / size;
+\t}
+''',
+            "V4 memory-view fread",
+        ),
+        (
+            "int FCEU_fseek(FCEUFILE *fp, long offset, int whence) {\n",
+            '''int FCEU_fseek(FCEUFILE *fp, long offset, int whence) {
+\tif (fp && fp->type == AURORA_FDS_MEMVIEW_TYPE) {
+\t\tAURORA_FDS_MEMVIEW *view = (AURORA_FDS_MEMVIEW *)fp->fp;
+\t\tlong target;
+
+\t\tif (!view)
+\t\t\treturn -1;
+
+\t\tswitch (whence) {
+\t\tcase SEEK_SET: target = offset; break;
+\t\tcase SEEK_CUR: target = (long)view->location + offset; break;
+\t\tcase SEEK_END: target = (long)view->size + offset; break;
+\t\tdefault: return -1;
+\t\t}
+\t\tif (target < 0 || (uint32)target > view->size)
+\t\t\treturn -1;
+\t\tview->location = (uint32)target;
+\t\treturn 0;
+\t}
+''',
+            "V4 memory-view fseek",
+        ),
+        (
+            "uint64 FCEU_ftell(FCEUFILE *fp) {\n",
+            '''uint64 FCEU_ftell(FCEUFILE *fp) {
+\tif (fp && fp->type == AURORA_FDS_MEMVIEW_TYPE) {
+\t\tAURORA_FDS_MEMVIEW *view = (AURORA_FDS_MEMVIEW *)fp->fp;
+\t\treturn view ? view->location : 0;
+\t}
+''',
+            "V4 memory-view ftell",
+        ),
+        (
+            "void FCEU_rewind(FCEUFILE *fp) {\n",
+            '''void FCEU_rewind(FCEUFILE *fp) {
+\tif (fp && fp->type == AURORA_FDS_MEMVIEW_TYPE) {
+\t\tAURORA_FDS_MEMVIEW *view = (AURORA_FDS_MEMVIEW *)fp->fp;
+\t\tif (view) view->location = 0;
+\t\treturn;
+\t}
+''',
+            "V4 memory-view rewind",
+        ),
+        (
+            "int FCEU_fgetc(FCEUFILE *fp) {\n",
+            '''int FCEU_fgetc(FCEUFILE *fp) {
+\tif (fp && fp->type == AURORA_FDS_MEMVIEW_TYPE) {
+\t\tAURORA_FDS_MEMVIEW *view = (AURORA_FDS_MEMVIEW *)fp->fp;
+\t\tif (view && view->location < view->size)
+\t\t\treturn view->data[view->location++];
+\t\treturn EOF;
+\t}
+''',
+            "V4 memory-view fgetc",
+        ),
+        (
+            "uint64 FCEU_fgetsize(FCEUFILE *fp) {\n",
+            '''uint64 FCEU_fgetsize(FCEUFILE *fp) {
+\tif (fp && fp->type == AURORA_FDS_MEMVIEW_TYPE) {
+\t\tAURORA_FDS_MEMVIEW *view = (AURORA_FDS_MEMVIEW *)fp->fp;
+\t\treturn view ? view->size : 0;
+\t}
+''',
+            "V4 memory-view fgetsize",
+        ),
+    ):
+        text = replace_once(text, signature, body, label)
+
+    return text
+
+
+def patch_v4_zip_fceu(text: str) -> str:
+    marker = "AURORA_FDS_V4_ZIP_MEMORY_LOADER_20260828"
+    if marker in text:
+        return text
+
+    text = replace_once(
+        text,
+        "int FDSLoad(const char *name, FCEUFILE *fp);\n",
+        "int FDSLoad(const char *name, FCEUFILE *fp);\n"
+        "extern FCEUFILE *FCEU_fopen_memory(const void *data, uint32 size);\n",
+        "V4 memory-loader declaration",
+    )
+
+    anchor = "/* AURORA_FCEUMM_FDS_V0_6_NO_COPYFAMI */\n"
+    if text.count(anchor) != 1:
+        fail("V4 FDS memory loader: NO_COPYFAMI anchor não é único")
+
+    func = '''/* AURORA_FDS_V4_ZIP_MEMORY_LOADER_20260828
+ * Load a validated .fds image from Aurora-owned memory. FDSLoad() copies every
+ * disk side before return, so the caller may free the borrowed input buffer. */
+FCEUGI *FCEUI_LoadGameMemory(const char *name, const void *data, uint32 size) {
+\tFCEUFILE *fp;
+
+\tif (!name || !name[0] || !data || size < 65500U || size > 524016U)
+\t\treturn 0;
+
+\tResetGameLoaded();
+
+\tGameInfo = malloc(sizeof(FCEUGI));
+\tif (!GameInfo)
+\t\treturn 0;
+\tmemset(GameInfo, 0, sizeof(FCEUGI));
+
+\tGameInfo->soundchan = 0;
+\tGameInfo->soundrate = 0;
+\tGameInfo->name = 0;
+\tGameInfo->type = GIT_CART;
+\tGameInfo->vidsys = GIV_USER;
+\tGameInfo->input[0] = GameInfo->input[1] = -1;
+\tGameInfo->inputfc = -1;
+\tGameInfo->cspecial = 0;
+
+\tFCEU_printf("Loading %s from memory...\\n\\n", name);
+\tGetFileBase(name);
+
+\tfp = FCEU_fopen_memory(data, size);
+\tif (!fp) {
+\t\tfree(GameInfo);
+\t\tGameInfo = 0;
+\t\treturn 0;
+\t}
+
+\tif (!FDSLoad(name, fp)) {
+\t\tFCEU_fclose(fp);
+\t\tfree(GameInfo);
+\t\tGameInfo = 0;
+\t\treturn 0;
+\t}
+
+\tFCEU_fclose(fp);
+
+\tFCEU_ResetVidSys();
+\tPowerNES();
+\tFCEUSS_CheckStates();
+\tFCEU_LoadGamePalette();
+\tFCEU_ResetPalette();
+\tFCEU_ResetMessages();
+
+\treturn GameInfo;
+}
+
+'''
+    text = text.replace(anchor, func + anchor, 1)
+    return text
+
+
+def patch_v4_zip_libretro(text: str) -> str:
+    marker = "AURORA_FDS_V4_ZIP_LIBRETRO_MEMORY_20260828"
+    if marker in text:
+        return text
+
+    anchor = "static void fceu_init(const char * full_path) {"
+    if text.count(anchor) != 1:
+        fail("V4 libretro memory loader: fceu_init anchor não é único")
+
+    text = text.replace(
+        anchor,
+        "/* AURORA_FDS_V4_ZIP_LIBRETRO_MEMORY_20260828 */\n"
+        "extern FCEUGI *FCEUI_LoadGameMemory(const char *name, const void *data, uint32 size);\n\n"
+        + anchor,
+        1,
+    )
+
+    deinit_anchor = "void retro_deinit(void) {\n"
+    if text.count(deinit_anchor) != 1:
+        fail("V4 libretro memory loader: retro_deinit anchor não é único")
+
+    mem_init = '''static void fceu_init_memory(const char *name, const void *data, uint32 size) {
+\tFCEUI_Initialize();
+\tFCEUI_SetSoundVolume(256);
+\tFCEUI_Sound(32050);
+
+\tGameInfo = FCEUI_LoadGameMemory(name, data, size);
+\tif (GameInfo) {
+\t\temulator_set_input();
+\t\temulator_set_custom_palette();
+\t\tFCEUI_SetSoundVolume(150);
+\t}
+}
+
+'''
+    text = text.replace(deinit_anchor, mem_init + deinit_anchor, 1)
+
+    old_load = '''bool retro_load_game(const struct retro_game_info *game) {
+\t/* AURORA_FCEUMM_FDS_V0_6_LOAD_RESULT */
+\tif (!game || !game->path || !game->path[0])
+\t\treturn false;
+\t/* AURORA_FCEUMM_FDS_V0_6_STATE_SIZE_PER_GAME */
+\tserialize_size = 0;
+\tfceu_init(game->path);
+\treturn GameInfo != NULL;
+}
+'''
+    new_load = '''bool retro_load_game(const struct retro_game_info *game) {
+\t/* AURORA_FCEUMM_FDS_V0_6_LOAD_RESULT */
+\tif (!game || !game->path || !game->path[0])
+\t\treturn false;
+\t/* AURORA_FCEUMM_FDS_V0_6_STATE_SIZE_PER_GAME */
+\tserialize_size = 0;
+
+\t/* AURORA_FDS_V4_ZIP_LIBRETRO_MEMORY_20260828 */
+\tif (game->data && game->size) {
+\t\tif (game->size < 65500U || game->size > 524016U)
+\t\t\treturn false;
+\t\tfceu_init_memory(game->path, game->data, (uint32)game->size);
+\t} else {
+\t\tfceu_init(game->path);
+\t}
+\treturn GameInfo != NULL;
+}
+'''
+    text = replace_once(text, old_load, new_load, "V4 libretro memory dispatch")
+    return text
 def audit_generated(files: dict[str, str]) -> None:
     # AURORA_FCEUMM_FDS_V0_6_15_PRUNED_LINK_STUBS_AUDIT
     fceu_fds = files["fceu_fds.c"]
@@ -3216,18 +3700,18 @@ def main() -> None:
     )
 
     generated = {
-        "fceu_fds.c": patch_v8_fceu(patch_v6_fceu(patch_fceu(originals["fceu"]))),
-        "libretro_fds.c": patch_v14_libretro(patch_v11_libretro(patch_v7_libretro(patch_v6_libretro(patch_v4_generated_libretro(patch_libretro(originals["libretro"])))))),
+        "fceu_fds.c": patch_v4_zip_fceu(patch_v8_fceu(patch_v6_fceu(patch_fceu(originals["fceu"])))),
+        "libretro_fds.c": patch_v4_zip_libretro(patch_v14_libretro(patch_v11_libretro(patch_v7_libretro(patch_v6_libretro(patch_v4_generated_libretro(patch_libretro(originals["libretro"]))))))),
         "input_fds.c": INPUT_FDS_C,
         "pads_fds.c": patch_v6_pads(PADS_FDS_C),
         "state_fds.c": patch_v11_state(patch_state(originals["state"])),
         "general_fds.c": patch_general(originals["general"]),
         "video_fds.c": patch_v4_generated_video(patch_video(originals["video"])),
-        "file_fds.c": patch_file(originals["file"]),
-        "fds_fds.c": patch_v14_fds(patch_v11_fds(patch_v10_fds(patch_v8_fds(patch_v7_fds(patch_v6_fds(patch_fds(originals["fds"]))))))),
-        "ppu_fds.c": patch_v9_ppu(patch_v8_ppu(patch_v7_ppu(patch_v6_ppu(patch_v5_ppu(originals["ppu"]))))),
+        "file_fds.c": patch_v4_zip_file(patch_file(originals["file"])),
+        "fds_fds.c": patch_v3_safe_fds(patch_v14_fds(patch_v11_fds(patch_v10_fds(patch_v8_fds(patch_v7_fds(patch_v6_fds(patch_fds(originals["fds"])))))))),
+        "ppu_fds.c": patch_v3_safe_ppu(patch_v9_ppu(patch_v8_ppu(patch_v7_ppu(patch_v6_ppu(patch_v5_ppu(originals["ppu"])))))),
         "pputile_fds.h": patch_v5_pputile(originals["pputile"]),
-        "sound_fds.c": patch_v10_sound(patch_v8_sound(patch_v6_sound(patch_v5_sound(originals["sound"])))),
+        "sound_fds.c": patch_v3_safe_sound(patch_v10_sound(patch_v8_sound(patch_v6_sound(patch_v5_sound(originals["sound"]))))),
         "x6502_fds.c": patch_v9_x6502(patch_v8_x6502(patch_v7_x6502(originals["x6502"]))),
     }
     audit_generated(generated)

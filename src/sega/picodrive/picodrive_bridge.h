@@ -38,6 +38,8 @@ int  PicoDriveBridge_GetNominalFrameRate(void);
 /* AURORA_PD_MEGA_FIX_20260820 */
 bool PicoDriveBridge_IsMasterSystem(void);
 bool PicoDriveBridge_Is8Bit(void);
+/* AURORA_V6_SMS_PHYSICAL_PAUSE_BRIDGE_20260828 */
+void PicoDriveBridge_QueueMasterSystemPause(void);
 
 /* Aurora Region Select values are passed straight in:
  * Off/Auto=0, NTSC-U, NTSC-J, PAL. */

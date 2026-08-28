@@ -28,6 +28,9 @@ public:
 
     virtual void SetRom(Emu::Rom *pRom);
     Bool LoadDisk(const Char *path, const Char *systemPath);
+    /* AURORA_FDS_V4_ZIP_SAFE_20260828 */
+    Bool LoadDiskMemory(const void *data, Uint32 bytes,
+                        const Char *contentName, const Char *systemPath);
     virtual void Reset();
     virtual void SoftReset();
     virtual void ExecuteFrame(Emu::SysInputT *input,

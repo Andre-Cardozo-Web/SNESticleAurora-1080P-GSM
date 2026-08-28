@@ -362,6 +362,11 @@ static int _MainLoopZipNameIsRom(const char *pName)
 #define MAINLOOP_SEGA_ROM_MAX_BYTES   (16U * 1024U * 1024U)
 #define MAINLOOP_PCE_ROM_MAX_BYTES    (4U * 1024U * 1024U + 512U)
 #define MAINLOOP_SEGA_PROBE_BYTES     0x8200U
+/* AURORA_FDS_V4_ZIP_LIMITS_20260828 */
+#define MAINLOOP_FDS_SIDE_BYTES       65500U
+#define MAINLOOP_FDS_MAX_SIDES        8U
+#define MAINLOOP_FDS_ZIP_MIN_BYTES    MAINLOOP_FDS_SIDE_BYTES
+#define MAINLOOP_FDS_ZIP_MAX_BYTES    (16U + MAINLOOP_FDS_MAX_SIDES * MAINLOOP_FDS_SIDE_BYTES)
 
 static void _MainLoopFreeRomBuffer(void)
 {
@@ -437,9 +442,12 @@ static int _MainLoopZipDynamicEntryFilter(
     {
         case MAINLOOP_ENTRYTYPE_SNESROM:
         case MAINLOOP_ENTRYTYPE_NESROM:
-        case MAINLOOP_ENTRYTYPE_NESFDSDISK:
         case MAINLOOP_ENTRYTYPE_NESFDSBIOS:
             return nBytes <= MAINLOOP_LEGACY_ROM_MAX_BYTES;
+        case MAINLOOP_ENTRYTYPE_NESFDSDISK:
+            /* AURORA_FDS_V4_ZIP_FILTER_20260828 */
+            return nBytes >= MAINLOOP_FDS_ZIP_MIN_BYTES &&
+                   nBytes <= MAINLOOP_FDS_ZIP_MAX_BYTES;
         case MAINLOOP_ENTRYTYPE_SEGAROM:
             return nBytes <= MAINLOOP_SEGA_ROM_MAX_BYTES;
         case MAINLOOP_ENTRYTYPE_PCEROM:
@@ -830,6 +838,131 @@ static Bool _MainLoopExecuteFdsPath(const char *pMappedPath,
 }
 
 
+/* AURORA_FDS_V4_ZIP_LOADER_20260828 */
+static Bool _MainLoopExecuteFdsZip(const char *pZipPath,
+                                   const char *pOriginalZipPath,
+                                   const char *pMemberName,
+                                   unsigned int uZipIndex,
+                                   Int32 nExpectedBytes,
+                                   Bool bLoadSRAM)
+{
+    Char SystemDirectory[512];
+    Char BiosPath[1024];
+    char LoadedName[512];
+    const char *pCoreName;
+    FILE *pBios;
+    long nBiosBytes;
+    Uint8 *pData;
+    Int32 nRead;
+    Bool bLoaded;
+
+    if (!pZipPath || !*pZipPath ||
+        !pOriginalZipPath || !*pOriginalZipPath ||
+        !pMemberName || !*pMemberName || !_pFds ||
+        nExpectedBytes < (Int32)MAINLOOP_FDS_ZIP_MIN_BYTES ||
+        (Uint32)nExpectedBytes > MAINLOOP_FDS_ZIP_MAX_BYTES)
+        return FALSE;
+
+    if (!MainLoopEnsureGameplayRasterWidth(256))
+        return FALSE;
+
+    if (!MainLoopFindSystemFileDirectory(
+            SystemDirectory, (Int32)sizeof(SystemDirectory), "disksys.rom") &&
+        !MainLoopEnsureSystemDirectory(
+            SystemDirectory, (Int32)sizeof(SystemDirectory)))
+        return FALSE;
+
+    if (snprintf(BiosPath, sizeof(BiosPath), "%s/disksys.rom",
+                 SystemDirectory) >= (int)sizeof(BiosPath))
+        return FALSE;
+
+    pBios = fopen(BiosPath, "rb");
+    if (!pBios)
+    {
+        MainLoopModalPrintf(60 * 5,
+            "ERROR: put disksys.rom in SNESticle/SYSTEM");
+        return FALSE;
+    }
+    if (fseek(pBios, 0, SEEK_END) != 0)
+    {
+        fclose(pBios);
+        return FALSE;
+    }
+    nBiosBytes = ftell(pBios);
+    fclose(pBios);
+    if (nBiosBytes != 8192)
+    {
+        MainLoopModalPrintf(60 * 5,
+            "ERROR: disksys.rom must be exactly 8192 bytes");
+        return FALSE;
+    }
+
+    pData = (Uint8 *)memalign(64, (size_t)nExpectedBytes);
+    if (!pData)
+    {
+        MainLoopModalPrintf(60 * 3,
+            "ERROR: not enough memory for FDS ZIP");
+        return FALSE;
+    }
+
+    LoadedName[0] = 0;
+    nRead = MinizReadZipEntryToBuffer(
+        pZipPath, uZipIndex, pData, nExpectedBytes,
+        LoadedName, (int)sizeof(LoadedName));
+
+    if (nRead != nExpectedBytes || strcmp(LoadedName, pMemberName) != 0)
+    {
+        free(pData);
+        MainLoopModalPrintf(60 * 4,
+            "ERROR: cannot extract complete FDS from ZIP");
+        return FALSE;
+    }
+
+    pCoreName = strrchr(pMemberName, '/');
+    if (!pCoreName)
+        pCoreName = strrchr(pMemberName, '\\');
+    pCoreName = pCoreName ? pCoreName + 1 : pMemberName;
+    if (!*pCoreName)
+    {
+        free(pData);
+        return FALSE;
+    }
+
+    _MainLoop_fOutputIntensity = 0.8f;
+    bLoaded = _pFds->LoadDiskMemory(
+        pData, (Uint32)nRead, pCoreName, SystemDirectory);
+
+    free(pData);
+
+    if (!bLoaded || !_pFds->IsRomReady())
+    {
+        _MainLoopUnloadRom();
+        MainLoopModalPrintf(60 * 5,
+            "ERROR: FCEUmm could not boot FDS from ZIP");
+        return FALSE;
+    }
+
+    _pSystem = _pFds;
+    _pFds->Reset();
+    _MainLoopGetName(_RomName, pMemberName);
+    snprintf(_RomPath, sizeof(_RomPath), "%s", pOriginalZipPath);
+    MainLoopStateOnRomChanged();
+    _MainLoopSetSampleRate(_pFds->GetSampleRate());
+    if (bLoadSRAM)
+        _MainLoopLoadSRAM();
+
+    if (_fbTexture[0]) _fbTexture[0]->Clear();
+    if (_fbTexture[1]) _fbTexture[1]->Clear();
+    if (_fbTexture[0])
+        TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
+
+    _MainLoop_iDisk = 0;
+    _MainLoop_bDiskInserted = TRUE;
+    ConPrint("FDS Loaded from ZIP: %s -> %s (%d bytes)\n",
+             pZipPath, pMemberName, nRead);
+    return TRUE;
+}
+
 
 Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 {
@@ -914,11 +1047,16 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         nExpectedRomBytes = _MainLoopGetBinarySize(pFileName);
     }
 
-    /* AURORA_FCEUMM_FDS_V0_5_ARCHIVE_GUARD: pinned FCEUmm needs fullpath. */
+    /* AURORA_FDS_V4_ZIP_DISPATCH_20260828 */
     if (eType == MAINLOOP_ENTRYTYPE_NESFDSDISK)
     {
+        if (eSourceType == MAINLOOP_ENTRYTYPE_ZIP && bZipIndexValid)
+            return _MainLoopExecuteFdsZip(
+                pFileName, OriginalPath, ZipMemberName,
+                uZipIndex, nExpectedRomBytes, bLoadSRAM);
+
         MainLoopModalPrintf(60 * 4,
-            "FDS in ZIP/GZ is not supported yet; select a plain .fds file");
+            "FDS in GZ is not supported; use plain .fds or ZIP");
         return FALSE;
     }
 
