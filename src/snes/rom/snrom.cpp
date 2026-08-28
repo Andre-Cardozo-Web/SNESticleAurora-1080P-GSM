@@ -38,7 +38,7 @@ Bool g_SnesCompatTopGearFastRom = FALSE;
  *   64EDFC5D = Sunset Riders (Europe) */
 Bool g_SnesCompatSunsetRidersObj128 = FALSE;
 
-static Uint32 _SNRomSunsetRidersCRC32(const Uint8 *pData, Uint32 nBytes)
+static Uint32 _SNRomRuntimeCRC32(const Uint8 *pData, Uint32 nBytes)
 {
     Uint32 crc = 0xFFFFFFFFu;
     while (nBytes--)
@@ -1063,6 +1063,7 @@ Emu::Rom::LoadErrorE SnesRom::LoadRom(CDataIO *pFileIO, Uint8 *pBuffer, Uint32 n
 	SNRomInfoT *pCartInfo;
 	SNRomInfoT *pLoCartInfo;
 	SNRomInfoT *pHiCartInfo;
+	Bool bOriginalDSP1Op28 = FALSE;
 
 	/* Look at both header positions before choosing a mapper.  If a valid
 	   header claims the opposite location, normalize a copier type-1 image
@@ -1077,6 +1078,24 @@ Emu::Rom::LoadErrorE SnesRom::LoadRom(CDataIO *pFileIO, Uint8 *pBuffer, Uint32 n
 			pLoCartInfo = GetCartInfo(32704);
 			pHiCartInfo = GetCartInfo(65472);
 		}
+	}
+
+	/* AURORA_UPSTREAM_20260827_DSP1_OP28_REVISION_V1
+	 * Identify the untouched normalized/headerless image before any Aurora
+	 * compatibility byte patch can run.  Pilotwings shipped on boards with multiple DSP revisions. Prefer the
+	 * original DSP-1/1A op28 behavior for USA/Japan/Europe; a later PAL
+	 * board revision with DSP-1B cannot be distinguished from ROM data alone.
+	 *   266C44ED = Pilotwings (USA)
+	 *   77871727 = Pilotwings (Japan)
+	 *   DEF45776 = Pilotwings (Europe; DSP-1 and later DSP-1B boards exist) */
+	if (m_pRomData && m_uRomBytes == 0x80000u)
+	{
+		const Uint32 uPilotwingsCRC =
+			_SNRomRuntimeCRC32(m_pRomData, m_uRomBytes);
+		bOriginalDSP1Op28 =
+			(uPilotwingsCRC == 0x266C44EDu) || /* USA */
+			(uPilotwingsCRC == 0x77871727u) || /* Japan */
+			(uPilotwingsCRC == 0xDEF45776u);   /* Europe: prefer original DSP-1 behavior */
 	}
 
 /* AURORA_SONIC_BLAST_MAN_COLOR_V7
@@ -1104,7 +1123,7 @@ g_SnesCompatSunsetRidersObj128 = FALSE;
 if (m_pRomData && m_uRomBytes == 0x100000u)
 {
     const Uint32 uSunsetRidersCRC =
-        _SNRomSunsetRidersCRC32(m_pRomData, m_uRomBytes);
+        _SNRomRuntimeCRC32(m_pRomData, m_uRomBytes);
 
     g_SnesCompatSunsetRidersObj128 =
         (uSunsetRidersCRC == 0x52ADA404u) || /* USA */
@@ -1271,6 +1290,11 @@ if (m_pRomData && m_uRomBytes)
 
 		m_eMapping = SNROM_MAPPING_EXLOROM;
 	}
+
+	/* The CRC alone is not enough: require the cartridge header to have
+	 * classified the image as DSP-1 before enabling a DSP-1 revision quirk. */
+	if ((m_Flags & SNROM_FLAG_DSP1) && bOriginalDSP1Op28)
+		m_Flags |= SNROM_FLAG_DSP1_ORIGINAL_OP28;
 
 	m_bLoaded   = true;
 	return LOADERROR_NONE;

@@ -1,4 +1,5 @@
 #include <ctype.h>
+extern "C" const char *AuroraNetGetConfigDiag(void);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +29,8 @@ enum SmbStatusE
     SMB_STATUS_CONFIG_INVALID,
     SMB_STATUS_CONFIG_SAVE_ERROR,
     SMB_STATUS_NETWORK_ERROR,
+    SMB_STATUS_NETWORK_INIT_ERROR,
+    SMB_STATUS_NETWORK_CONFIG_ERROR,
     SMB_STATUS_DHCP_TIMEOUT,
     SMB_STATUS_DRIVER_ERROR,
     SMB_STATUS_CONNECTION_ERROR,
@@ -119,7 +122,8 @@ void SmbConfigDefaults(SmbConfigT *config)
     strcpy(config->serverIp, "192.168.0.2");
     config->serverPort = 445;
     strcpy(config->share, "ROMS");
-    strcpy(config->user, "GUEST");
+    /* AURORA_SMB_BLANK_GUEST_V1_20260827: usuário vazio é válido. */
+    config->user[0] = '\0';
     config->passwordType = NO_PASSWORD;
 }
 
@@ -245,8 +249,6 @@ static int SmbReadConfigFile(const char *path, SmbConfigT *config)
 
     fclose(file);
 
-    if (!config->user[0])
-        strcpy(config->user, "GUEST");
     if (!config->password[0])
         config->passwordType = NO_PASSWORD;
     else if (!passwordTypeSeen)
@@ -448,7 +450,7 @@ static int SmbWriteConfigFile(const char *path, const SmbConfigT *config)
                  "PASSWORD=%s\n"
                  "PASSWORD_TYPE=%d\n",
                  config->serverIp, config->serverPort, config->share,
-                 config->user[0] ? config->user : "GUEST",
+                 config->user,
                  config->password, config->passwordType) >= 0;
     if (fclose(file) != 0)
         ok = 0;
@@ -478,8 +480,6 @@ int SmbSaveConfig(const SmbConfigT *source)
     config.share[sizeof(config.share) - 1] = '\0';
     config.user[sizeof(config.user) - 1] = '\0';
     config.password[sizeof(config.password) - 1] = '\0';
-    if (!config.user[0])
-        strcpy(config.user, "GUEST");
     config.passwordType = config.password[0] ? HASHED_PASSWORD : NO_PASSWORD;
     if (!SmbValidateConfig(&config))
         return -2;
@@ -591,11 +591,18 @@ int SmbEnsureMounted(void)
         return -1;
     }
 
-    if (!_MainLoopInitNetwork(_MainLoop_NetConfigPaths) ||
-        !_MainLoopConfigureNetwork(_MainLoop_NetConfigPaths,
+    /* AURORA_SMB_EE_PS2IP_FIX_V2_20260827:
+       keep init/config failures distinct so real-hardware testing is visible
+       directly in the SMB status line. */
+    if (!_MainLoopInitNetwork(_MainLoop_NetConfigPaths))
+    {
+        SmbSetFailure(SMB_STATUS_NETWORK_INIT_ERROR, -31);
+        return -1;
+    }
+    if (!_MainLoopConfigureNetwork(_MainLoop_NetConfigPaths,
                                    (char *)"ipconfig.dat"))
     {
-        SmbSetFailure(SMB_STATUS_NETWORK_ERROR, -3);
+        SmbSetFailure(SMB_STATUS_NETWORK_CONFIG_ERROR, -32);
         return -1;
     }
     if (!_MainLoopWaitForNetwork(15000))
@@ -729,7 +736,9 @@ const char *SmbGetStatusText(void)
         case SMB_STATUS_CONFIG_MISSING:   return "No SMB.CNF";
         case SMB_STATUS_CONFIG_INVALID:   return "Bad SMB.CNF";
         case SMB_STATUS_CONFIG_SAVE_ERROR:return "Save Error";
-        case SMB_STATUS_NETWORK_ERROR:    return "Network Error";
+        case SMB_STATUS_NETWORK_ERROR:       return "Network Error";
+        case SMB_STATUS_NETWORK_INIT_ERROR:  return "Net Init Error";
+        case SMB_STATUS_NETWORK_CONFIG_ERROR:return AuroraNetGetConfigDiag();
         case SMB_STATUS_DHCP_TIMEOUT:     return "DHCP Timeout";
         case SMB_STATUS_DRIVER_ERROR:     return "Driver Error";
         case SMB_STATUS_CONNECTION_ERROR: return "Connect Error";

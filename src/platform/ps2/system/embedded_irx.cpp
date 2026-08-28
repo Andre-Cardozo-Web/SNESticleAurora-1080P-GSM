@@ -36,6 +36,7 @@ extern "C" {
 #include "netman_irx.h"
 #include "smap_irx.h"
 #include "ps2ip_irx.h"
+#include "ps2ips_irx.h"
 #include "smbman_irx.h"
 #include "cdfs_stream_irx.h"
 
@@ -809,7 +810,8 @@ extern "C" int NetIfLoadEmbeddedIrx(void)
 {
     int ret;
 
-    if (s_netif_loaded_result != 1) return s_netif_loaded_result;
+    if (s_netif_loaded_result != 1)
+        return s_netif_loaded_result;
 
     ret = Dev9LoadEmbeddedIrxOnce();
     if (ret < 0)
@@ -827,19 +829,40 @@ extern "C" int NetIfLoadEmbeddedIrx(void)
         return s_netif_loaded_result;
     }
 
-    ret = EmbeddedIrxLoad(smap_irx, sizeof(smap_irx), 0, NULL);
-    if (ret < 0)
-    {
-        printf("NetIfLoadEmbeddedIrx: smap.irx failed (%d)\n", ret);
-        s_netif_loaded_result = -3;
-        return s_netif_loaded_result;
-    }
-
+    /* AURORA_SMB_IOP_STACK_V3_20260827
+     * SMBMAN runs on the IOP and imports lwip_socket/lwip_connect/etc from
+     * the IOP-side ps2ip module. Match OPL's architecture:
+     * DEV9 -> NETMAN -> NetManInit -> SMAP -> ps2ip-nm -> ps2ips.
+     */
     ret = NetManInit();
     if (ret < 0)
     {
         printf("NetIfLoadEmbeddedIrx: NetManInit failed (%d)\n", ret);
+        s_netif_loaded_result = -3;
+        return s_netif_loaded_result;
+    }
+
+    ret = EmbeddedIrxLoad(smap_irx, sizeof(smap_irx), 0, NULL);
+    if (ret < 0)
+    {
+        printf("NetIfLoadEmbeddedIrx: smap.irx failed (%d)\n", ret);
         s_netif_loaded_result = -4;
+        return s_netif_loaded_result;
+    }
+
+    ret = EmbeddedIrxLoad(ps2ip_irx, sizeof(ps2ip_irx), 0, NULL);
+    if (ret < 0)
+    {
+        printf("NetIfLoadEmbeddedIrx: ps2ip-nm.irx failed (%d)\n", ret);
+        s_netif_loaded_result = -5;
+        return s_netif_loaded_result;
+    }
+
+    ret = EmbeddedIrxLoad(ps2ips_irx, sizeof(ps2ips_irx), 0, NULL);
+    if (ret < 0)
+    {
+        printf("NetIfLoadEmbeddedIrx: ps2ips.irx failed (%d)\n", ret);
+        s_netif_loaded_result = -6;
         return s_netif_loaded_result;
     }
 

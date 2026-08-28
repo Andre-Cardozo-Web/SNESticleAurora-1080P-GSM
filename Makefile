@@ -41,7 +41,7 @@ LOAD_LIMIT ?= $(JOBS)
 # Continuous sets this to 2 to avoid memory spikes on GitHub runners.
 LTO_LINK_JOBS ?= 8
 LTO_LINK_FLAGS := $(if $(strip $(LTO_LINK_JOBS)),-flto=$(LTO_LINK_JOBS))
-OUTPUT_SYNC ?= --output-sync=target
+OUTPUT_SYNC ?= --output-sync=line
 .DEFAULT_GOAL := fast
 
 PS2DEV ?= $(shell if [ -n "$$PREFIX" ]; then printf "%s/opt/ps2dev" "$$PREFIX"; else printf "%s/.local/ps2dev" "$$HOME"; fi)
@@ -549,7 +549,7 @@ LIBS := \
 	-lgskit -ldmakit -lgskit_toolkit \
 	-lps2_drivers \
 	-lpoweroff -lfileXio -lcdvd \
-	-lmc -lpad -lnetman -lps2ip \
+	-lmc -lpad -lnetman -lps2ips \
 	-laudsrv \
 	-lelf-loader \
 	-lpatches \
@@ -790,7 +790,7 @@ SDK_EXTRA_IRX := ioptrap.irx poweroff.irx
 # The legacy iaddis CDVD.IRX is also no longer needed. The in-tree
 # cdfs_stream.irx registers cdfs: and streams directories instead of using
 # PS2SDK cdfs.irx's fixed 256-entry table.
-EMBED_IRX_NAMES := audsrv freesd sio2man mcman mcserv padman mtapman ps2dev9 netman smap ps2ip smbman cdfs_stream usbd ps2mouse bdm bdmfs_fatfs usbmass_bd ps2atad ps2hdd mmceman mx4sio_bd
+EMBED_IRX_NAMES := audsrv freesd sio2man mcman mcserv padman mtapman ps2dev9 netman smap ps2ip ps2ips smbman cdfs_stream usbd ps2mouse bdm bdmfs_fatfs usbmass_bd ps2atad ps2hdd mmceman mx4sio_bd
 
 # Pin the complete SIO2 storage/input group to one verified PS2SDK revision.
 # This prevents a future SDK update from mixing an incompatible sio2man with
@@ -825,7 +825,8 @@ FREESD_IRX_PATH  ?= $(PS2SDK)/iop/irx/freesd.irx
 PS2DEV9_IRX_PATH ?= $(PS2SDK)/iop/irx/ps2dev9.irx
 NETMAN_IRX_PATH  ?= $(PS2SDK)/iop/irx/netman.irx
 SMAP_IRX_PATH    ?= $(PS2SDK)/iop/irx/smap.irx
-PS2IP_IRX_PATH   ?= $(PS2SDK)/iop/irx/ps2ip.irx
+PS2IP_IRX_PATH   ?= $(PS2SDK)/iop/irx/ps2ip-nm.irx
+PS2IPS_IRX_PATH  ?= $(PS2SDK)/iop/irx/ps2ips.irx
 
 # Stack BDM moderna (USB + FAT/exFAT/GPT).  Mantenha os quatro modulos
 # FIXADOS juntos: depender do $(PS2SDK) de quem compilava misturava revisoes
@@ -919,6 +920,8 @@ $(EMBED_DIR)/smap_irx.h: $(SMAP_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,smap_irx)
 $(EMBED_DIR)/ps2ip_irx.h: $(PS2IP_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,ps2ip_irx)
+$(EMBED_DIR)/ps2ips_irx.h: $(PS2IPS_IRX_PATH) | $(EMBED_DIR)
+	$(call RUN_BIN2C,$<,$@,ps2ips_irx)
 $(EMBED_DIR)/smbman_irx.h: $(SMBMAN_IRX_PATH) | $(EMBED_DIR)
 	$(call RUN_BIN2C,$<,$@,smbman_irx)
 $(EMBED_DIR)/cdfs_stream_irx.h: $(CDFS_STREAM_IRX_PATH) | $(EMBED_DIR)
@@ -993,7 +996,11 @@ define RUN_LINK
 	@log="$(OBJ_DIR)/.logs/link_$(notdir $(1)).log"; \
 	name=$$(basename "$(1)"); \
 	start=$$(date +%s%N); \
-	if $(2) > "$$log" 2>&1; then rc=0; else rc=$$?; fi; \
+	printf "[ LD    ] %-23s [ linking/LTO ... ]\n" "$$name"; \
+	$(2) -v > "$$log" 2>&1 & pid=$$!; \
+	tail -n +1 -f --pid=$$pid "$$log" & tailpid=$$!; \
+	if wait $$pid; then rc=0; else rc=$$?; fi; \
+	wait $$tailpid 2>/dev/null || true; \
 	end=$$(date +%s%N); \
 	elapsed=$$(awk "BEGIN { printf \"%.2f\", ($$end - $$start) / 1000000000 }"); \
 	reset=""; green=""; yellow=""; red=""; \
@@ -1966,3 +1973,5 @@ ensure-local-ps2-packer:
 	$(MAKE) -C "$(PS2_PACKER_SRC_DIR)" all CC="$$host_cc" BIN2C="$(BIN2C)" PS2DEV="$(PS2DEV)" PS2SDK="$(PS2SDK)" >/dev/null; \
 	test -x "$(PS2_PACKER_LOCAL)" || (echo "ERROR: local ps2-packer was not built"; exit 1); \
 	test -f "$(PS2_PACKER_SRC_DIR)/stub/lzma-1d00-stub" || (echo "ERROR: ps2-packer stub was not built"; exit 1)
+
+# AURORA_SMB_IOP_STACK_V3_20260827

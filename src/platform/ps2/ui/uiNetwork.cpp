@@ -243,8 +243,6 @@ void CNetworkScreen::InputText(Uint32 trigger)
     {
         if (m_iEditField == 2 && !m_Config.share[0])
             strcpy(m_Config.share, "ROMS");
-        if (m_iEditField == 3 && !m_Config.user[0])
-            strcpy(m_Config.user, "GUEST");
         m_iEditField = -1;
     }
 }
@@ -299,7 +297,7 @@ void CNetworkScreen::Input(Uint32 buttons, Uint32 trigger)
         }
         else if (m_iSelect == 1) m_Config.serverPort = 445;
         else if (m_iSelect == 2) strcpy(m_Config.share, "ROMS");
-        else if (m_iSelect == 3) strcpy(m_Config.user, "GUEST");
+        else if (m_iSelect == 3) m_Config.user[0] = 0;
         else if (m_iSelect == 4) m_Config.password[0] = '\0';
     }
 
@@ -392,7 +390,6 @@ void CNetworkScreen::BuildDisplayText(char *output, int outputSize,
         output[out++] = ']';
     }
     output[out] = '\0';
-    if (!output[0]) strcpy(output, password ? "Guest" : "(empty)");
 }
 
 void CNetworkScreen::Draw()

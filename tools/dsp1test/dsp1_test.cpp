@@ -25,8 +25,17 @@ static int16_t readWord(SNDSP1 &d) {
     return (int16_t)(((uint16_t)hi << 8) | lo);
 }
 
+static int16_t runDistance(SNDSP1 &d, int16_t x, int16_t y, int16_t z) {
+    sendByte(d, 0x28);
+    sendWord(d, x);
+    sendWord(d, y);
+    sendWord(d, z);
+    return readWord(d);
+}
+
 int main() {
     SNDSP1 dsp;
+    int failures = 0;
 
     // ---------- sanity: Multiply (op 0x00), 2 in, 1 out ----------
     // Esperado: (a * b) >> 15.  0x4000 * 0x4000 >> 15 = 0x2000.
@@ -220,5 +229,54 @@ int main() {
                (abs(px-0x2000)<=8 && abs(py-0x1000)<=8 && abs(pz-0x0800)<=8) ? "OK (~entrada)" : "<-- DIVERGE");
     }
 
-    return 0;
+    // ========== Target-Y: keep Aurora's hardware sign globally ==========
+    // The Revive safety gate is deliberately NOT imported: Aurora already
+    // follows the documented DSP-1 Target equation for every DSP-1 title.
+    {
+        SNDSP1 target;
+        sendByte(target, 0x02);
+        sendWord(target, 0x0000); sendWord(target, 0x0000); sendWord(target, 0x0000);
+        sendWord(target, 0x0600); sendWord(target, 0x0200);
+        sendWord(target, 0x2000); sendWord(target, 0x1000);
+        (void)readWord(target); (void)readWord(target);
+        (void)readWord(target); (void)readWord(target);
+
+        sendByte(target, 0x0E);
+        sendWord(target, 32); sendWord(target, 48);
+        const int16_t x = readWord(target);
+        const int16_t y = readWord(target);
+        const bool ok = (x == -43 && y == 41);
+        printf("\n[Target-Y hardware sign] (%d,%d)  %s\n",
+               x, y, ok ? "OK" : "FALHOU");
+        if (!ok) failures++;
+    }
+
+    // ========== DSP-1/1A original x DSP-1B op28 ==========
+    // Known differential vector from the original-vs-1B microcode behavior.
+    {
+        SNDSP1 revision;
+        const int16_t x = 29127, y = 18313, z = -24113;
+
+        const int16_t dsp1b = runDistance(revision, x, y, z);
+        revision.SetOriginalDistanceBug(TRUE);
+        const int16_t dsp1 = runDistance(revision, x, y, z);
+
+        // A console reset must preserve the revision selected by the cart.
+        revision.Reset();
+        const int16_t dsp1AfterReset = runDistance(revision, x, y, z);
+
+        revision.SetOriginalDistanceBug(FALSE);
+        const int16_t restored = runDistance(revision, x, y, z);
+
+        const bool ok = dsp1b == 19310 && dsp1 == 19399 &&
+                        dsp1AfterReset == dsp1 && restored == dsp1b &&
+                        !revision.GetOriginalDistanceBug();
+        printf("\n[DSP revision op28] DSP1B=%d DSP1=%d after-reset=%d "
+               "restored=%d  %s\n",
+               dsp1b, dsp1, dsp1AfterReset, restored,
+               ok ? "OK" : "FALHOU");
+        if (!ok) failures++;
+    }
+
+    return failures == 0 ? 0 : 1;
 }

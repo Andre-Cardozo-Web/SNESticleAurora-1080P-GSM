@@ -15,7 +15,19 @@
 #include "embedded_irx.h"
 
 extern "C" {
-#include "ps2ip.h"
+#include <ps2ips.h>
+extern "C" int ps2ipc_ps2ip_setconfig(const t_ip_info *ip_info);
+extern "C" int ps2ipc_ps2ip_getconfig(char *netif_name, t_ip_info *ip_info);
+
+static char s_netdiag[48] = "?";
+
+extern "C" const char *AuroraNetGetConfigDiag(void)
+{
+    return s_netdiag;
+}
+
+
+
 #include "netplay_ee.h"
 }
 
@@ -238,9 +250,13 @@ static Bool _MainLoopLoadNetConfig(t_ip_info *pConfig, const char *pConfigPath)
     return FALSE;
 }
 
+
 Bool _MainLoopConfigureNetwork(char **ppSearchPaths, char *pConfigFileName)
 {
     t_ip_info config;
+    t_ip_info verify;
+    int setResult;
+    int getResult;
 
     (void)ppSearchPaths;
     (void)pConfigFileName;
@@ -248,26 +264,51 @@ Bool _MainLoopConfigureNetwork(char **ppSearchPaths, char *pConfigFileName)
     memset(&config, 0, sizeof(config));
     strcpy(config.netif_name, "sm0");
 
-    /* Test configuration for a direct PC <-> PS2 Ethernet link. */
     config.dhcp_enabled = 0;
+    config.dhcp_status = DHCP_STATE_OFF;
     IP4_ADDR((ip4_addr_t *)&config.ipaddr, 192, 168, 0, 10);
     IP4_ADDR((ip4_addr_t *)&config.netmask, 255, 255, 255, 0);
     IP4_ADDR((ip4_addr_t *)&config.gw, 192, 168, 0, 1);
 
-    if (ps2ip_setconfig(&config) <= 0)
+    /*
+     * Bypass libcglue here so we can distinguish an EE socket-op problem
+     * from an IOP ps2ip/sm0 problem.
+     */
+    setResult = ps2ipc_ps2ip_setconfig(&config);
+
+    memset(&verify, 0, sizeof(verify));
+    getResult = ps2ipc_ps2ip_getconfig((char *)"sm0", &verify);
+
+    {
+        const unsigned char *b = (const unsigned char *)&verify.ipaddr.s_addr;
+        snprintf(s_netdiag, sizeof(s_netdiag),
+                 "%X/%X/%.3s/%02X%02X%02X%02X",
+                 setResult, getResult, verify.netif_name,
+                 b[0], b[1], b[2], b[3]);
+    }
+
+    printf("SMB direct RPC: set=%d get=%d if='%s' ip=%08X mask=%08X gw=%08X dhcp=%u\n",
+           setResult, getResult, verify.netif_name,
+           verify.ipaddr.s_addr,
+           verify.netmask.s_addr,
+           verify.gw.s_addr,
+           verify.dhcp_enabled);
+if (setResult < 0 || getResult < 0)
         return FALSE;
 
-    if (ps2ip_getconfig(config.netif_name, &config) > 0)
-    {
-        printf("%08X %08X %08X %d\n",
-               config.ipaddr.s_addr,
-               config.netmask.s_addr,
-               config.gw.s_addr,
-               config.dhcp_enabled);
-    }
+    /*
+     * ps2ips GETCONFIG itself returns success when the RPC completed.
+     * Validate the actual contents to prove sm0 exists and accepted the IP.
+     */
+    if (strcmp(verify.netif_name, "sm0") != 0 ||
+        verify.ipaddr.s_addr != config.ipaddr.s_addr ||
+        verify.netmask.s_addr != config.netmask.s_addr ||
+        verify.gw.s_addr != config.gw.s_addr)
+        return FALSE;
 
     return TRUE;
 }
+
 
 /* Modern netman + ps2ip + lwIP bring-up, mirroring
  * hugorsgarcia/PS2SNESticle/SNESticle/Source/ps2/mainloop.cpp::
@@ -298,7 +339,6 @@ static int s_network_init_result = 1; /* 1=not attempted, 0=ready, -1=failed */
 
 Bool _MainLoopInitNetwork(Char **ppSearchPaths)
 {
-    struct ip4_addr IP, NM, GW;
     int ret;
 
     (void)ppSearchPaths;
@@ -309,25 +349,16 @@ Bool _MainLoopInitNetwork(Char **ppSearchPaths)
     ret = NetIfLoadEmbeddedIrx();
     if (ret < 0)
     {
-        // printf("[boot] NetIfLoadEmbeddedIrx failed (%d) - no network\n", ret);
+        printf("_MainLoopInitNetwork: IOP network stack failed (%d)\n", ret);
         s_network_init_result = -1;
         return FALSE;
     }
 
-    /* Bring up lwIP with a no-address netif so the caller can
-       drive DHCP / static IP through ps2ip_setconfig() in
-       _MainLoopConfigureNetwork below. */
-    ip4_addr_set_zero(&IP);
-    ip4_addr_set_zero(&NM);
-    ip4_addr_set_zero(&GW);
-
-    // printf("[boot] ps2ipInit\n");
-    ret = ps2ipInit(&IP, &NM, &GW);
-    // printf("[boot] ps2ipInit done\n");
-
+    /* AURORA_SMB_IOP_STACK_V3_20260827 */
+    ret = ps2ip_init();
     if (ret < 0)
     {
-        printf("_MainLoopInitNetwork: ps2ipInit failed (%d)\n", ret);
+        printf("_MainLoopInitNetwork: ps2ip_init failed (%d)\n", ret);
         s_network_init_result = -1;
         return FALSE;
     }
@@ -350,7 +381,7 @@ Bool _MainLoopWaitForNetwork(Int32 timeoutMs)
     while (elapsed <= timeoutMs)
     {
         memset(&config, 0, sizeof(config));
-        if (ps2ip_getconfig((char *)"sm0", &config) > 0 &&
+        if (ps2ipc_ps2ip_getconfig((char *)"sm0", &config) > 0 &&
             config.ipaddr.s_addr != 0 &&
             (!config.dhcp_enabled ||
              config.dhcp_status == DHCP_STATE_BOUND ||

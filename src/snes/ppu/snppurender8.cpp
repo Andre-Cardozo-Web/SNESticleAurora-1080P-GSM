@@ -2216,12 +2216,17 @@ static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPrio
 
 	screenY = (m7sel & 0x02) ? (255 - iLine) : iLine;
 
-	originX = (m7a * clippedH & ~63) +
-	          (m7b * clippedV & ~63) +
-	          (m7b * screenY & ~63) + (cx << 8);
-	originY = (m7c * clippedH & ~63) +
-	          (m7d * clippedV & ~63) +
-	          (m7d * screenY & ~63) + (cy << 8);
+	/* AURORA_UPSTREAM_20260827_MODE7_SIGNED_CENTER_V1
+	 * Keep Aurora's already-correct per-product truncation/flip/repeat path,
+	 * but do not left-shift a negative signed centre coordinate: that is
+	 * undefined behavior in C++.  The hardware-equivalent *256 is bounded
+	 * by the signed 13-bit centre range and is well inside Int32. */
+	originX = ((m7a * clippedH) & ~63) +
+	          ((m7b * clippedV) & ~63) +
+	          ((m7b * screenY) & ~63) + cx * 256;
+	originY = ((m7c * clippedH) & ~63) +
+	          ((m7d * clippedV) & ~63) +
+	          ((m7d * screenY) & ~63) + cy * 256;
 
 	screenX = (m7sel & 0x01) ? 255 : 0;
 	x = originX + m7a * screenX;

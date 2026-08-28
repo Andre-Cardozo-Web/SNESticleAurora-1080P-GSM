@@ -39,6 +39,16 @@ public:
     Uint8 ReadData (Uint32 uAddr);
     Uint8 ReadStatus(Uint32 uAddr);
 
+    /* AURORA_UPSTREAM_20260827_DSP1_OP28_REVISION_V1
+     * Pilotwings revisions using DSP-1/1A need the original op28
+     * interpolation quirk.  Reset() deliberately does not clear this
+     * cartridge/revision property. */
+    void SetOriginalDistanceBug(Bool bEnable)
+    {
+        m_bOriginalDistanceBug = bEnable ? TRUE : FALSE;
+    }
+    Bool GetOriginalDistanceBug() const { return m_bOriginalDistanceBug; }
+
     static SNDSP1 *GetInstance();
 
     /* AURORA_SPECIAL_CHIP_STATE_V1: SnesSystem owns the packed special-chip snapshot. */
@@ -93,6 +103,9 @@ private:
     Int16   m_Gx, m_Gy, m_Gz;
     Int16   m_Hx, m_Hy;
     Int16   m_Vx, m_Vy, m_Vz;
+
+    /* Propriedade fisica da revisao do cartucho; nao pertence ao estado interno serializado do DSP. */
+    Bool    m_bOriginalDistanceBug;
 
     // ------------------------------------------------------------------
     // FSM

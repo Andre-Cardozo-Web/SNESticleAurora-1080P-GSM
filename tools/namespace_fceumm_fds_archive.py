@@ -56,6 +56,7 @@ def main():
     if not args.raw.is_file():
         raise SystemExit(f"raw archive missing: {args.raw}")
 
+    print("[FCEUmm FDS namespace] scanning raw symbols...", flush=True)
     raw_symbols = defined_symbols(args.nm, args.raw)
     rename = set(raw_symbols) | FORCED
     rename = {
@@ -75,14 +76,17 @@ def main():
             f.write(f"{sym} FDS_{sym}\n")
 
     if rename:
+        print(f"[FCEUmm FDS namespace] objcopy: renaming {len(rename)} symbols...", flush=True)
         subprocess.check_call([
             args.objcopy,
             f"--redefine-syms={map_path}",
             str(args.output),
         ])
 
+    print("[FCEUmm FDS namespace] ranlib...", flush=True)
     subprocess.check_call([args.ranlib, str(args.output)])
 
+    print("[FCEUmm FDS namespace] verifying final symbols...", flush=True)
     final_symbols = defined_symbols(args.nm, args.output)
     required = {
         "FDS_retro_init",

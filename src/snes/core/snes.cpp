@@ -1351,12 +1351,18 @@ void SnesSystem::SetSnesRom(SnesRom *pRom)
 	}
 #ifdef SNES_DSP1
 	m_pDsp = NULL;
+	/* AURORA_UPSTREAM_20260827_DSP1_OP28_REVISION_V1 */
+	m_DSP1.SetOriginalDistanceBug(FALSE);
 #endif 
 	// set rom
 	m_pRom = pRom;
 
 	if (m_pRom)
 	{
+#ifdef SNES_DSP1
+		m_DSP1.SetOriginalDistanceBug(
+			(m_pRom->m_Flags & SNROM_FLAG_DSP1_ORIGINAL_OP28) ? TRUE : FALSE);
+#endif
 		// setup memory mapping for this rom
 		MapMem(m_pRom->m_eMapping, m_pRom->m_Flags);
 
