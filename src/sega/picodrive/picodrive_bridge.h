@@ -67,6 +67,11 @@ void PicoDriveBridge_InvalidateGsResources(void);
 
 /* AURORA_PD_NATIVE320_DIRECT_T8_V1 */
 bool PicoDriveBridge_IsMegaDrive(void);
+/* AURORA_SEGA_CD_32X_MD_SCALING_V2R1_20260828
+ * Video geometry only: Sega/Mega CD and 32X use the same VDP H32/H40
+ * presentation policy as cartridge Mega Drive, without reclassifying them
+ * for SRAM/input/core behavior. */
+bool PicoDriveBridge_IsMegaDriveVideo(void);
 bool PicoDriveBridge_CanDirectGsVideo(void);
 bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity);
 

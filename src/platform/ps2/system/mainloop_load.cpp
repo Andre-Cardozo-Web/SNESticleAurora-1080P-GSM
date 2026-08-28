@@ -213,13 +213,15 @@ static Bool _MainLoopSegaWantsNative320(
         _MainLoopSegaExtEquals(pName, "gg")  ||
         _MainLoopSegaExtEquals(pName, "sg")  ||
         _MainLoopSegaExtEquals(pName, "sc")  ||
-        _MainLoopSegaExtEquals(pName, "32x") ||
         _MainLoopSegaExtEquals(pName, "pco"))
         return FALSE;
 
+    /* AURORA_SEGA_CD_32X_MD_SCALING_V2R1_20260828
+     * 32X uses the same H32/H40 physical presentation as Mega Drive. */
     if (_MainLoopSegaExtEquals(pName, "md")  ||
         _MainLoopSegaExtEquals(pName, "gen") ||
-        _MainLoopSegaExtEquals(pName, "smd"))
+        _MainLoopSegaExtEquals(pName, "smd") ||
+        _MainLoopSegaExtEquals(pName, "32x"))
         return TRUE;
 
     if (!pData || nBytes <= 0)
@@ -669,13 +671,6 @@ static Bool _MainLoopExecuteDisc(const char *pMappedPath,
         !pOriginalPath || !pBasePath)
         return FALSE;
 
-    if (!MainLoopEnsureGameplayRasterWidth(256))
-    {
-        MainLoopModalPrintf(60 * 3,
-            "ERROR: cannot configure CD video raster");
-        return FALSE;
-    }
-
     if (!MainLoopEnsureSystemDirectory(
             SystemDirectory, (Int32)sizeof(SystemDirectory)))
     {
@@ -689,6 +684,16 @@ static Bool _MainLoopExecuteDisc(const char *pMappedPath,
     {
         MainLoopModalPrintf(60 * 4,
             "ERROR: CUE or its first track is unreadable");
+        return FALSE;
+    }
+
+    /* AURORA_SEGA_CD_32X_MD_SCALING_V2R1_20260828
+     * Sega CD uses the same Genesis/MD H32/H40 output. Choose the native
+     * 320-wide raster before PicoDrive allocates MCD; PCE CD stays 256. */
+    if (!MainLoopEnsureGameplayRasterWidth(eDisc > 0 ? 320 : 256))
+    {
+        MainLoopModalPrintf(60 * 3,
+            "ERROR: cannot configure CD video raster");
         return FALSE;
     }
 

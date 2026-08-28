@@ -76,7 +76,7 @@ static Uint32 _uVblankCycle;
  * MainLoopRender consumes the one-shot below and does not present or wait for
  * VBlank, which is what makes real catch-up possible.
  *
- * Menu value: 0=Off, 1=max_skip. Aurora default=1.
+ * Menu value: 0=Off, 1..9=max_skip. Aurora default=1.
  * AURORA_FAMICOM_MIC_CFG41_20260828
  */
 static Int32  s_SafeFrameskipLevel = 1;
@@ -153,7 +153,7 @@ Int32 MainLoopSafeFrameskipGetLevel(void)
 void MainLoopSafeFrameskipSetLevel(Int32 level)
 {
     if (level < 0) level = 0;
-    if (level > 1) level = 1;
+    if (level > 9) level = 9;
     s_SafeFrameskipLevel = level;
     _MainLoopSafeFrameskipResetTiming();
 }
@@ -303,20 +303,19 @@ void MainLoopRender()
          */
         {
             Int32 wantedRaster = 256;
-            const Bool bPlainMd =
+            const Bool bMdVideo =
                 (_pSystem == _pSega &&
-                 PicoDriveBridge_IsMegaDrive()) ? TRUE : FALSE;
+                 PicoDriveBridge_IsMegaDriveVideo()) ? TRUE : FALSE;
 
-            /* AURORA_MD_UI256_320FB_V1_20260823
-             * Keep 320 for the whole active MD cartridge lifetime to avoid
-             * rebuilding gsKit under large-ROM memory pressure. */
-            if (bPlainMd)
+            /* AURORA_SEGA_CD_32X_MD_SCALING_V2R1_20260828
+             * Cartridge MD, Sega CD and 32X share H32/H40 presentation. */
+            if (bMdVideo)
                 wantedRaster = 320;
 
             /* Menu/prompts use exact 256-source integer presentation on the
              * still-alive 320 framebuffer, not 256->320 resampling. */
             GSK_SetUi256On320Framebuffer(
-                (_bMenu && bPlainMd) ? 1 : 0);
+                (_bMenu && bMdVideo) ? 1 : 0);
 
             if (_bMenu)
                 GSK_SetNative240pPar(0);
@@ -344,7 +343,7 @@ void MainLoopRender()
               _pSystem == _pSnes ||
               _pSystem == _pSnes9x2010 ||
               (_pSystem == _pSega &&
-               (PicoDriveBridge_IsMegaDrive() ||
+               (PicoDriveBridge_IsMegaDriveVideo() ||
                 PicoDriveBridge_IsMasterSystem()))) &&
              !_bMenu) ? 1 : 0;
 
@@ -408,7 +407,7 @@ void MainLoopRender()
         (!_bMenu && !_MainLoop_BlackScreen &&
          (((_pSystem == _pSega) &&
            PicoDriveBridge_CanDirectGsVideo() &&
-           (PicoDriveBridge_IsMegaDrive() ||
+           (PicoDriveBridge_IsMegaDriveVideo() ||
             g_GskVideoMode == GSK_VIDMODE_240P)) ||
           ((_pSystem == _pPce) &&
            PceBridge_CanDirectGsVideo()))) ? TRUE : FALSE);

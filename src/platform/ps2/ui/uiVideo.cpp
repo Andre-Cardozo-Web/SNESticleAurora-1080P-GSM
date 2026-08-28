@@ -122,7 +122,7 @@ typedef struct
 	Int32  smsfm;          /* 0=off, 1=Master System YM2413/OPLL */
 	Int32  pcevol;         /* v37: Beetle PCE Fast gain 0..400; UI /2 */
 	Int32  snescore;       /* v38: persisted SNES core selector */
-	Int32  safeframeskip;  /* v41: 0=Off, 1=max auto skip; legacy/default 1 */
+	Int32  safeframeskip;  /* v41: 0=Off, 1..9=max auto skips; default 1 */
 	Int32  ggzoom;         /* v39: GG 160x144 -> 240x216, uniform 3:2 */
 } VideoCfgT;
 #define VIDEOCFG_V38_BYTES (sizeof(VideoCfgT) - 2 * sizeof(Int32))
@@ -788,7 +788,7 @@ void VideoSettingsLoad(void)
 		if (cfg.smscolorborder == 0 || cfg.smscolorborder == 1)
 			PicoDriveBridge_SetSmsColorBorder(cfg.smscolorborder != 0);
 		if (header.version >= 39 && header.version <= VIDEOCFG_VERSION &&
-		    cfg.safeframeskip >= 0 && cfg.safeframeskip <= 1)
+		    cfg.safeframeskip >= 0 && cfg.safeframeskip <= 9)
 			MainLoopSafeFrameskipSetLevel(cfg.safeframeskip);
 		if (cfg.ggzoom == 0 || cfg.ggzoom == 1)
 			PicoDriveBridge_SetGgZoom(cfg.ggzoom != 0);
@@ -947,7 +947,7 @@ static const char *_VideoSafeFrameskipStatus()
     static const char *const names[10] =
         { "Off", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
     Int32 level = MainLoopSafeFrameskipGetLevel();
-    if (level < 0 || level > 1) level = 1;
+    if (level < 0 || level > 9) level = 1;
     return names[level];
 }
 
@@ -1410,8 +1410,8 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		{
 			Int32 level = MainLoopSafeFrameskipGetLevel();
 			level += (dir > 0) ? 1 : -1;
-			if (level > 1) level = 0;
-			if (level < 0) level = 1;
+			if (level > 9) level = 0;
+			if (level < 0) level = 9;
 			MainLoopSafeFrameskipSetLevel(level);
 			break;
 		}

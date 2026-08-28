@@ -1704,6 +1704,17 @@ bool PicoDriveBridge_IsMegaDrive(void)
             (PAHW_8BIT | PAHW_PICO | PAHW_MCD | PAHW_32X)) == 0;
 }
 
+/* AURORA_SEGA_CD_32X_MD_SCALING_V2R1_20260828
+ * MCD and 32X still use the Mega Drive VDP H32/H40 display geometry.
+ * Presentation only: keep IsMegaDrive() strict for non-video policy. */
+bool PicoDriveBridge_IsMegaDriveVideo(void)
+{
+    if (!s_GameLoaded)
+        return false;
+
+    return (PicoIn.AHW & (PAHW_8BIT | PAHW_PICO)) == 0;
+}
+
 static void pdRefreshDirectVideoInfo()
 {
     int texW, texH;
@@ -1717,15 +1728,13 @@ static void pdRefreshDirectVideoInfo()
     s_DirectInfoIsMd = false;
 
     if (!s_GameLoaded ||
-        (PicoIn.AHW & (PAHW_PICO | PAHW_MCD)) != 0)
+        (PicoIn.AHW & PAHW_PICO) != 0)
         return;
 
-    /* AURORA_PD_TRYAGAIN_V1_32X_DIRECT_CT16
-     * 32X is not reclassified globally as plain MD. Only presentation
-     * treats its mandatory RGB555 framebuffer as MD-style geometry so
-     * the existing CT16 EE->GS path can bypass RGBA32 conversion. */
-    isMd = PicoDriveBridge_IsMegaDrive() ||
-           ((PicoIn.AHW & PAHW_32X) != 0);
+    /* AURORA_SEGA_CD_32X_MD_SCALING_V2R1_20260828
+     * MCD and 32X are MD-style VIDEO geometry. Their native T8/CT16
+     * framebuffers use the same direct H32/H40 GS path as cartridge MD. */
+    isMd = PicoDriveBridge_IsMegaDriveVideo();
     is8bit = pdIs8Bit();
     if (!isMd && !is8bit)
         return;
