@@ -3068,6 +3068,72 @@ static INLINE void AuroraFDSXorStateSide(uint8 *dst, const uint8 *src) {
     return text
 
 
+
+# AURORA_FCEUMM_FDS_V14_SAFE_20260827
+#
+# V14 deliberately does NOT touch the V10 RenderSound implementation,
+# PPU/CPU timing, the 32050 Hz clock, or the number/order of FDSDoSound calls.
+#
+# The important audio correction is structural: V8 replaced FDS_ESI() with
+# a rate-only body and accidentally discarded the stock FDS sound-register
+# handlers. V10 restored GameExpSound.Fill but those CPU address handlers were
+# still missing, so writes to the FDS wavetable/register block could not reach
+# the expansion APU.
+def patch_v14_fds(text: str) -> str:
+    marker = "AURORA_FCEUMM_FDS_V14_SAFE_20260827"
+    if marker in text:
+        return text
+
+    old = """static void FDS_ESI(void) {
+\tif (FSettings.SndRate) {
+\t\tfdso.cycles = ((int64)1 << 40) * FDSClock;
+\t\tfdso.cycles /= FSettings.SndRate * 16;
+\t}
+}"""
+
+    new = """static void FDS_ESI(void) {
+\t/* AURORA_FCEUMM_FDS_V14_SAFE_20260827
+\t * Keep V8's fixed NTSC/LQ clock calculation, but restore the four
+\t * stock FCEUmm FDS audio address handlers that V8 accidentally removed. */
+\tif (FSettings.SndRate) {
+\t\tfdso.cycles = ((int64)1 << 40) * FDSClock;
+\t\tfdso.cycles /= FSettings.SndRate * 16;
+\t}
+
+\tSetReadHandler(0x4040, 0x407f, FDSWaveRead);
+\tSetWriteHandler(0x4040, 0x407f, FDSWaveWrite);
+\tSetWriteHandler(0x4080, 0x408A, FDSSWrite);
+\tSetReadHandler(0x4090, 0x4092, FDSSRead);
+}"""
+
+    if old not in text:
+        fail("V14 FDS: FDS_ESI V8 rate-only não encontrado")
+    return text.replace(old, new, 1)
+
+
+def patch_v14_libretro(text: str) -> str:
+    marker = "AURORA_FCEUMM_FDS_V14_SAFE_MASTER_20260827"
+    if marker in text:
+        return text
+
+    old = """\temulator_set_custom_palette();
+
+\tFCEUD_SoundToggle();
+"""
+    new = """\temulator_set_custom_palette();
+
+\t/* AURORA_FCEUMM_FDS_V14_SAFE_MASTER_20260827
+\t * The pinned frontend's late SoundToggle forces the core from its
+\t * pre-load 256 down to an old hard-coded 100. Use a conservative
+\t * master of 150 here; Aurora's shared NES 0..200 control remains
+\t * the user-facing gain stage for QuickNES and FDS. */
+\tFCEUI_SetSoundVolume(150);
+"""
+
+    if old not in text:
+        fail("V14 libretro: FCEUD_SoundToggle pós-load não encontrado")
+    return text.replace(old, new, 1)
+
 def audit_generated(files: dict[str, str]) -> None:
     # AURORA_FCEUMM_FDS_V0_6_15_PRUNED_LINK_STUBS_AUDIT
     fceu_fds = files["fceu_fds.c"]
@@ -3151,14 +3217,14 @@ def main() -> None:
 
     generated = {
         "fceu_fds.c": patch_v8_fceu(patch_v6_fceu(patch_fceu(originals["fceu"]))),
-        "libretro_fds.c": patch_v11_libretro(patch_v7_libretro(patch_v6_libretro(patch_v4_generated_libretro(patch_libretro(originals["libretro"]))))),
+        "libretro_fds.c": patch_v14_libretro(patch_v11_libretro(patch_v7_libretro(patch_v6_libretro(patch_v4_generated_libretro(patch_libretro(originals["libretro"])))))),
         "input_fds.c": INPUT_FDS_C,
         "pads_fds.c": patch_v6_pads(PADS_FDS_C),
         "state_fds.c": patch_v11_state(patch_state(originals["state"])),
         "general_fds.c": patch_general(originals["general"]),
         "video_fds.c": patch_v4_generated_video(patch_video(originals["video"])),
         "file_fds.c": patch_file(originals["file"]),
-        "fds_fds.c": patch_v11_fds(patch_v10_fds(patch_v8_fds(patch_v7_fds(patch_v6_fds(patch_fds(originals["fds"])))))),
+        "fds_fds.c": patch_v14_fds(patch_v11_fds(patch_v10_fds(patch_v8_fds(patch_v7_fds(patch_v6_fds(patch_fds(originals["fds"]))))))),
         "ppu_fds.c": patch_v9_ppu(patch_v8_ppu(patch_v7_ppu(patch_v6_ppu(patch_v5_ppu(originals["ppu"]))))),
         "pputile_fds.h": patch_v5_pputile(originals["pputile"]),
         "sound_fds.c": patch_v10_sound(patch_v8_sound(patch_v6_sound(patch_v5_sound(originals["sound"])))),

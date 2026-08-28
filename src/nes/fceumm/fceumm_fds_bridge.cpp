@@ -729,15 +729,25 @@ static void fdsOutputNativeMono(void)
 {
     const int32_t *src;
     int frames, pos = 0;
+
     if (!s_pMix) return;
     src = FDS_aurora_fds_get_audio_mono();
     frames = FDS_aurora_fds_get_audio_frames();
     if (!src || frames <= 0) return;
+
+    /* AURORA_FCEUMM_FDS_V14_INT32_MONO_FASTPATH_20260827
+     * Fuse the temporary Int16 conversion with the existing FDS resampler.
+     * If mixer state/rate differs from the proven case, retain the old path. */
+    if (_AudMix && s_pMix == _AudMix &&
+        _AudMix->OutputFceummMonoInt32((const Int32 *)src, frames))
+        return;
+
     while (pos < frames)
     {
         int n = frames - pos;
         if (n > FDS_AUDIO_CHUNK) n = FDS_AUDIO_CHUNK;
-        for (int i = 0; i < n; ++i) s_AudioL[i] = (Int16)src[pos + i];
+        for (int i = 0; i < n; ++i)
+            s_AudioL[i] = (Int16)src[pos + i];
         s_pMix->OutputSamplesMono(s_AudioL, n);
         pos += n;
     }

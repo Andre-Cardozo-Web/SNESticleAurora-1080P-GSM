@@ -959,6 +959,66 @@ void AudMixBuffer::Flush()
 
 
 
+
+/* AURORA_FCEUMM_FDS_V14_INT32_MONO_FASTPATH_20260827
+ *
+ * Bit-equivalent to:
+ *   int32 core PCM -> (Int16) temporary -> OutputSamplesMono()
+ *
+ * Narrowing happens before interpolation exactly as before. Same 32050 Hz
+ * rate, Q15 linear phase, truncation, carried previous sample and overflow
+ * behaviour. No other core/rate uses this function.
+ */
+Bool AudMixBuffer::OutputFceummMonoInt32(const Int32 *pSamples, Int32 nSamples)
+{
+    Int32 i = 0;
+
+    if (!pSamples || nSamples <= 0)
+        return TRUE;
+
+    if (m_uSampleRate != 32050)
+        return FALSE;
+
+    if (m_bLinearHavePrev && m_iLinearPrev[0] != m_iLinearPrev[1])
+        return FALSE;
+
+    if (!m_bLinearHavePrev)
+    {
+        const Int32 first = (Int16)pSamples[0];
+        m_iLinearPrev[0] = m_iLinearPrev[1] = first;
+        m_uLinearResamplePhase = 0;
+        m_bLinearHavePrev = TRUE;
+        i = 1;
+    }
+
+    for (; i < nSamples; ++i)
+    {
+        const Int32 s0 = m_iLinearPrev[0];
+        const Int32 s1 = (Int16)pSamples[i];
+
+        while (m_uLinearResamplePhase < 48000U &&
+               m_nOutSamples < AUDMIXBUFFER_MAXENQUEUE)
+        {
+            const Int32 frac = (Int32)(
+                (m_uLinearResamplePhase * 32768U) / 48000U);
+            const Int16 v = (Int16)(
+                s0 + (((s1 - s0) * frac) >> 15));
+
+            m_OutData[0][m_nOutSamples] = v;
+            m_OutData[1][m_nOutSamples] = v;
+            ++m_nOutSamples;
+            m_uLinearResamplePhase += m_uSampleRate;
+        }
+
+        if (m_uLinearResamplePhase >= 48000U)
+            m_uLinearResamplePhase -= 48000U;
+
+        m_iLinearPrev[0] = m_iLinearPrev[1] = s1;
+    }
+
+    return TRUE;
+}
+
 void AudMixBuffer::OutputSamplesMono(Int16 *pSamples, Int32 nSamples)
 {
     /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824

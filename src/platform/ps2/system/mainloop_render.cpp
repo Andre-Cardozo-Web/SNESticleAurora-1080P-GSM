@@ -247,16 +247,24 @@ static void _MainLoopSafeFrameskipAfterFlip(void)
     const Bool gameplay =
         (!_bMenu && _pSystem && !_MainLoop_BlackScreen) ? TRUE : FALSE;
 
-    if (s_SafeFrameskipLastFlip != 0)
+    /* AURORA_FCEUMM_FDS_V14_FRAMESKIP_STABILITY_20260827
+     * Menu/prompt/storage frames never retrain gameplay timing. Preserve the
+     * learned gameplay VBlank period, but break the last-flip edge outside
+     * gameplay so closing UI cannot alter the next skip cadence. */
+    if (gameplay)
     {
-        const Uint32 delta = now - s_SafeFrameskipLastFlip;
-        _MainLoopSafeFrameskipLearn(delta, gameplay);
+        if (s_SafeFrameskipLastFlip != 0)
+        {
+            const Uint32 delta = now - s_SafeFrameskipLastFlip;
+            _MainLoopSafeFrameskipLearn(delta, TRUE);
+        }
+        s_SafeFrameskipLastFlip = now;
+    }
+    else
+    {
+        s_SafeFrameskipLastFlip = 0;
     }
 
-    s_SafeFrameskipLastFlip = now;
-
-    /* Menus/boot are PicoDrive reset_timing equivalents for Aurora. Keep the
-     * learned VBlank period, but discard presentation debt/counters. */
     if (s_SafeFrameskipLevel <= 0 || !gameplay)
         _MainLoopSafeFrameskipResetTiming();
 }

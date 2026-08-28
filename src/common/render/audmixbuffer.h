@@ -68,6 +68,11 @@ public:
     Bool OutputPicoDriveInterleaved32000(
         const Int16 *pPrefixLeft, const Int16 *pPrefixRight,
         Int32 nPrefixFrames, const Int16 *pStereo, Int32 nStereoFrames);
+    /* AURORA_FCEUMM_FDS_V14_INT32_MONO_FASTPATH_20260827
+     * FCEUmm exposes native mono as int32_t even though Aurora consumes it
+     * as Int16. Fuse that narrowing with the existing 32050->48k mono path.
+     * FALSE means: use the historical bridge fallback unchanged. */
+    Bool OutputFceummMonoInt32(const Int32 *pSamples, Int32 nSamples);
     virtual void OutputSamplesStereo(Int16 *pLeftSamples, Int16 *pRightSamples, Int32 nSamples);
     virtual void OutputSamplesMono(Int16 *pSamples, Int32 nSamples);
     virtual void Flush();
