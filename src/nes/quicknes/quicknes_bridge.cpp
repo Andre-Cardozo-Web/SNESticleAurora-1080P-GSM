@@ -47,6 +47,7 @@ extern "C" void quicknes_snesticle_set_microphone(int enable); /* AURORA_FAMICOM
 
 /* AURORA_QN_EXT_HOST_V2_20260828 */
 extern "C" void quicknes_snesticle_ext_set_arkanoid(int enable);
+extern "C" void quicknes_snesticle_ext_set_turbofile(int enable); /* AURORA_CD_AUDIO_STREAM_V3_NES_HOST_API_20260829 */
 extern "C" void quicknes_snesticle_ext_set_arkanoid_state(unsigned int paddle, int fire);
 extern "C" void quicknes_snesticle_ext_reset_bus(void);
 extern "C" unsigned char *quicknes_snesticle_ext_turbofile_data(void);
@@ -59,6 +60,7 @@ static bool s_DutySwap    = false;
 static bool s_TurboPhase  = false;
 static bool s_SkipVideoNext = false; /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 static bool s_ArkanoidVaus = false; /* AURORA_QN_EXT_HOST_V2_20260828 */
+static bool s_TurboFileEnabled = false; /* AURORA_CD_AUDIO_STREAM_V3_NES_HOST_FLAG_20260829 */
 /* AURORA_CONTROLLER_OPTIONS_V2: Max/Half/Quarter cadence. */
 static unsigned s_TurboSpeedShift = 0;
 static uint32_t s_TurboFrame = 0;
@@ -146,12 +148,23 @@ static int   s_PendingCount = 0;
  */
 static Uint32 qCrc32(const Uint8 *pData, size_t nBytes)
 {
+    /* AURORA_CD_AUDIO_STREAM_V3_NES_CRC_NIBBLE_20260829
+     * Same reflected CRC-32, but two 4-bit table steps per byte instead of
+     * eight bit-at-a-time branches. This runs only at legacy-iNES load. */
+    static const Uint32 table[16] =
+    {
+        0x00000000U, 0x1DB71064U, 0x3B6E20C8U, 0x26D930ACU,
+        0x76DC4190U, 0x6B6B51F4U, 0x4DB26158U, 0x5005713CU,
+        0xEDB88320U, 0xF00F9344U, 0xD6D6A3E8U, 0xCB61B38CU,
+        0x9B64C2B0U, 0x86D3D2D4U, 0xA00AE278U, 0xBDBDF21CU
+    };
     Uint32 crc = 0xFFFFFFFFU;
+
     while (nBytes--)
     {
         crc ^= *pData++;
-        for (int bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ ((crc & 1U) ? 0xEDB88320U : 0U);
+        crc = (crc >> 4) ^ table[crc & 0x0FU];
+        crc = (crc >> 4) ^ table[crc & 0x0FU];
     }
     return crc ^ 0xFFFFFFFFU;
 }
@@ -173,6 +186,49 @@ static Uint32 qNesPayloadCrc32(const void *pData, size_t nBytes)
         return 0;
 
     return qCrc32(rom + offset, payload);
+}
+
+/* AURORA_CD_AUDIO_STREAM_V3_NES_DETECT_20260829 */
+static int qNes2DefaultExpansionDevice(const void *pData, size_t nBytes)
+{
+    const Uint8 *rom = (const Uint8 *)pData;
+
+    if (!rom || nBytes < 16 ||
+        rom[0] != 'N' || rom[1] != 'E' ||
+        rom[2] != 'S' || rom[3] != 0x1A)
+        return -1;
+
+    /* NES 2.0 signature: header byte 7 bits 2..3 == 2. */
+    if ((rom[7] & 0x0CU) != 0x08U)
+        return -1;
+
+    return (int)(rom[15] & 0x3FU);
+}
+
+static bool qLegacyTurboFileCrc(Uint32 crc)
+{
+    /* Mesen/NesCartDB entries whose GameInputType == TurboFile (0x21).
+     * CRC is PRG+CHR, matching qNesPayloadCrc32(). */
+    switch (crc)
+    {
+        case 0x012E12E3U: case 0x0719E982U: case 0x149C0EC3U:
+        case 0x1A5CE587U: case 0x21DD2174U: case 0x2A3CA509U:
+        case 0x30D00EF7U: case 0x3469B714U: case 0x392E268CU:
+        case 0x39A18397U: case 0x3BBFF3A6U: case 0x47C0935BU:
+        case 0x48C66CEBU: case 0x498187B6U: case 0x55397DB3U:
+        case 0x58600A77U: case 0x5C123EF7U: case 0x5CC1E2C6U:
+        case 0x65AA77CEU: case 0x6AF3DEF8U: case 0x7FA2CC55U:
+        case 0x83EAF3B1U: case 0x8507A4F9U: case 0x8C4D59D6U:
+        case 0x96BE8381U: case 0x974E8840U: case 0xA1A33B85U:
+        case 0xAEF00A33U: case 0xB811C054U: case 0xB8747ABFU:
+        case 0xB9AB06AAU: case 0xC2EF3422U: case 0xC3DE7C69U:
+        case 0xCA503F32U: case 0xCDC69231U: case 0xCEE5857BU:
+        case 0xD68A6F33U: case 0xDC33AED8U: case 0xE19293A2U:
+        case 0xE46C7D6BU: case 0xE5620994U: case 0xEEC7995AU:
+            return true;
+        default:
+            return false;
+    }
 }
 
 static void qUpdateArkanoidVaus(Emu::SysInputT *pInput)
@@ -549,18 +605,46 @@ bool QuicknesBridge_LoadGame(const void *pData, size_t nBytes, const char *pName
 
     quicknes_snesticle_set_duty_swap(s_DutySwap ? 1 : 0);
 
-    /* AURORA_QN_EXT_HOST_V2_20260828: Japanese Arkanoid only.
-     * US Arkanoid (32FB0583) and Arkanoid II (0F141525) intentionally do
-     * not trigger this automatic EXT exception. */
+    /* AURORA_CD_AUDIO_STREAM_V3_NES_SELECT_20260829
+     * No expansion device is attached by default. NES 2.0 explicitly wins;
+     * legacy iNES falls back to the known PRG+CHR CRC database. */
     {
-        const Uint32 payloadCrc = qNesPayloadCrc32(pData, nBytes);
-        s_ArkanoidVaus = (payloadCrc == 0xD89E5A67U ||
-                      payloadCrc == 0x0F141525U);
-        quicknes_snesticle_ext_set_arkanoid(s_ArkanoidVaus ? 1 : 0);
+        const int nes2Ext = qNes2DefaultExpansionDevice(pData, nBytes);
+        Uint32 payloadCrc = 0;
+
+        s_ArkanoidVaus = false;
+        s_TurboFileEnabled = false;
+
+        if (nes2Ext == 0x10)
+        {
+            s_ArkanoidVaus = true;
+        }
+        else if (nes2Ext == 0x21)
+        {
+            s_TurboFileEnabled = true;
+        }
+        else if (nes2Ext <= 0)
+        {
+            payloadCrc = qNesPayloadCrc32(pData, nBytes);
+            s_ArkanoidVaus = (payloadCrc == 0xD89E5A67U);
+            if (!s_ArkanoidVaus)
+                s_TurboFileEnabled = qLegacyTurboFileCrc(payloadCrc);
+        }
+
+        quicknes_snesticle_ext_set_turbofile(
+            s_TurboFileEnabled ? 1 : 0);
+        quicknes_snesticle_ext_set_arkanoid(
+            s_ArkanoidVaus ? 1 : 0);
         quicknes_snesticle_ext_reset_bus();
+
         if (s_ArkanoidVaus)
-            printf("[QuickNES/EXT] Arkanoid (Japan) Vaus enabled; CRC=%08X\n",
-                   (unsigned)payloadCrc);
+            printf("[QuickNES/EXT] Famicom Vaus enabled%s%08X\n",
+                   payloadCrc ? "; CRC=" : "; NES2 device=",
+                   (unsigned)(payloadCrc ? payloadCrc : (Uint32)nes2Ext));
+        else if (s_TurboFileEnabled)
+            printf("[QuickNES/EXT] ASCII Turbo File enabled%s%08X\n",
+                   payloadCrc ? "; CRC=" : "; NES2 device=",
+                   (unsigned)(payloadCrc ? payloadCrc : (Uint32)nes2Ext));
     }
 
     s_GameLoaded = true;
@@ -577,6 +661,8 @@ void QuicknesBridge_UnloadGame(void)
         s_pEmu->close();
     s_GameLoaded = false;
     s_ArkanoidVaus = false;
+    s_TurboFileEnabled = false; /* AURORA_CD_AUDIO_STREAM_V3_NES_UNLOAD_20260829 */
+    quicknes_snesticle_ext_set_turbofile(0);
     quicknes_snesticle_ext_set_arkanoid(0);
     qResetTransient();
 }
@@ -714,8 +800,12 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
      * Cross belongs to the paddle Fire line for Arkanoid J; do not mirror
      * that same press onto the ordinary controller's NES-A bit. */
     if (s_ArkanoidVaus)
+    {
+        /* AURORA_CD_AUDIO_STREAM_V3_NES_VAUS_FRAME_20260829:
+         * zero analog/peripheral calls on ordinary NES frames. */
         p1 &= (Uint8)~0x01U;
-    qUpdateArkanoidVaus(pInput);
+        qUpdateArkanoidVaus(pInput);
+    }
 
     const char *err = skipVideo
         ? s_pEmu->emulate_skip_frame((int)p1, (int)p2)
@@ -834,6 +924,11 @@ uint8_t *QuicknesBridge_GetSRAMData(void)
 bool QuicknesBridge_IsArkanoidVaus(void)
 {
     return s_ArkanoidVaus;
+}
+
+bool QuicknesBridge_TurboFileEnabled(void)
+{
+    return s_TurboFileEnabled; /* AURORA_CD_AUDIO_STREAM_V3_NES_TF_QUERY_20260829 */
 }
 
 /* AURORA_QN_EXT_HOST_V2_20260828: 8 KiB ASCII Turbo File battery RAM. */

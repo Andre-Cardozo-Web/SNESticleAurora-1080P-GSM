@@ -45,6 +45,7 @@ int QuicknesBridge_GetSRAMBytes(void);
 uint8_t *QuicknesBridge_GetSRAMData(void);
 /* AURORA_QN_EXT_HOST_V2_20260828 */
 bool QuicknesBridge_IsArkanoidVaus(void);
+bool QuicknesBridge_TurboFileEnabled(void); /* AURORA_CD_AUDIO_STREAM_V3_NES_HEADER_20260829 */
 int QuicknesBridge_GetTurboFileBytes(void);
 uint8_t *QuicknesBridge_GetTurboFileData(void);
 bool QuicknesBridge_TurboFileDirty(void);

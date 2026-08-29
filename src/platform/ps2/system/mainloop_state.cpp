@@ -541,7 +541,10 @@ static Bool _MainLoopLoadTurboFileFrom(MainLoopSramDeviceE eDevice)
 
 static void _MainLoopLoadTurboFile(void)
 {
-    if (_pSystem != _pNes || QuicknesBridge_TurboFileDirty())
+    /* AURORA_CD_AUDIO_STREAM_V3_NES_SAVE_GATE_20260829 */
+    if (_pSystem != _pNes ||
+        !QuicknesBridge_TurboFileEnabled() ||
+        QuicknesBridge_TurboFileDirty())
         return;
 
     if (_MainLoop_SramDevice == MAINLOOP_SRAMDEVICE_USB)
@@ -573,7 +576,9 @@ static Bool _MainLoopSaveTurboFileTo(MainLoopSramDeviceE eDevice)
     Int32 nBytes;
     Char Path[1024];
 
-    if (_pSystem != _pNes || !QuicknesBridge_TurboFileDirty())
+    if (_pSystem != _pNes ||
+        !QuicknesBridge_TurboFileEnabled() ||
+        !QuicknesBridge_TurboFileDirty())
         return TRUE;
 
     nBytes = QuicknesBridge_GetTurboFileBytes();
@@ -613,7 +618,9 @@ Bool _MainLoopHasSRAM()
         return TRUE;
     /* AURORA_QN_TURBOFILE_SAVE_V2_20260828: only advertise external
      * persistence after the Turbo File has actually been written. */
-    return (_pSystem == _pNes && QuicknesBridge_TurboFileDirty())
+    return (_pSystem == _pNes &&
+            QuicknesBridge_TurboFileEnabled() &&
+            QuicknesBridge_TurboFileDirty())
         ? TRUE : FALSE;
 }
 
@@ -659,7 +666,9 @@ static Bool _MainLoopSaveSRAMTo(MainLoopSramDeviceE eDevice, Bool bSync)
     }
 
     /* AURORA_QN_TURBOFILE_SAVE_V2_20260828 */
-    if (_pSystem == _pNes && QuicknesBridge_TurboFileDirty())
+    if (_pSystem == _pNes &&
+        QuicknesBridge_TurboFileEnabled() &&
+        QuicknesBridge_TurboFileDirty())
     {
         bAny = TRUE;
         if (!_MainLoopSaveTurboFileTo(eDevice))
@@ -854,7 +863,9 @@ Bool _MainLoopForceCheckSRAM()
 
     /* AURORA_QN_TURBOFILE_SAVE_V2_20260828: protocol writes set their
      * dirty bit immediately, so no 8 KiB checksum polling is required. */
-    if (_pSystem == _pNes && QuicknesBridge_TurboFileDirty())
+    if (_pSystem == _pNes &&
+        QuicknesBridge_TurboFileEnabled() &&
+        QuicknesBridge_TurboFileDirty())
         _MainLoop_SRAMUpdated = TRUE;
 
     return TRUE;

@@ -212,7 +212,16 @@ Bool MainLoopSafeFrameskipTake(Bool allowed)
         }
         else
         {
+            /* AURORA_CD_AUDIO_STREAM_V2_FRAMESKIP_REBASE_20260829
+             *
+             * We have already spent max_skip consecutive catch-up frames and
+             * are forcing a presentation now. Do not preserve stale host debt
+             * from an old I/O stall into the next burst: re-anchor to `now`.
+             * Persistent real overload can still trigger a new skip later,
+             * but a one-off CD read spike cannot leave Auto apparently stuck. */
             s_SafeFrameskipConsecutive = 0;
+            s_SafeFrameskipAim = now;
+            diff = 0;
         }
     }
     else
@@ -280,7 +289,15 @@ void MainLoopRender()
         if (MainLoopSafeFrameskipConsumePresentationSkip())
         {
             if (!_bMenu && _pSystem && !_MainLoop_BlackScreen)
+            {
+                /* AURORA_CD_AUDIO_STREAM_V2_SKIP_AUDIO_CATCHUP_20260829
+                 * The presentation/VBlank wait is already being skipped, so
+                 * spend that recovered host time on at most one EXTRA
+                 * nonblocking async-audio drain. No wait_audio(), no PCM drop.
+                 * With no backlog the second call returns immediately. */
                 Aud_BufferedAsyncStart();
+                Aud_BufferedAsyncStart();
+            }
             ++_iFrame;
             return;
         }
