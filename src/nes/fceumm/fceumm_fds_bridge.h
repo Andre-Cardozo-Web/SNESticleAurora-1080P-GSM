@@ -52,3 +52,4 @@ bool FceummFdsBridge_SetDriveState(unsigned selectedSide,
 unsigned FceummFdsBridge_GetSampleRate(void);
 
 #endif
+

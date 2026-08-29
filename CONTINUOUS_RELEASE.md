@@ -11,3 +11,4 @@ The only file you need to play is **SNESticle.elf**.
 * Por favor, **NO DISTRIBUYAS ESTE ELF:** todavía se encuentra en un estado altamente experimental y **se actualiza casi a diario**. Por favor, no subas ni difundas versiones con errores en sitios web. **Comparte el enlace abajo de esta página de GitHub si lo necesitas.**
 
 https://github.com/itsveenee/SNESticleAurora/releases/tag/continuous
+

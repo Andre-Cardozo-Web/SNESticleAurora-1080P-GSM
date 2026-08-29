@@ -2080,3 +2080,4 @@ unsigned PicoDriveBridge_GetSampleRate(void)
 {
     return (unsigned)s_AudioRate;
 }
+

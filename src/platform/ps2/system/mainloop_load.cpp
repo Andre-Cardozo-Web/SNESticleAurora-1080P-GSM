@@ -1467,3 +1467,4 @@ void _MainLoopSetSampleRate(Uint32 uSampleRate)
 {
     _AudMix->SetSampleRate(uSampleRate);
 }
+

@@ -165,3 +165,4 @@ $(OBJ_DIR)/generated/%.o: $(GEN_DIR)/%.c
 
 clean:
 	rm -rf "$(BUILD_DIR)"
+

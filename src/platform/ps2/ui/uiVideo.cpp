@@ -1700,3 +1700,4 @@ if (trigger & (PAD_CROSS | PAD_START))
         VideoSettingsSave();
 }
 }
+

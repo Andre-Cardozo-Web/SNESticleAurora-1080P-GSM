@@ -901,3 +901,4 @@ unsigned FceummFdsBridge_GetSampleRate(void)
 {
     return s_SampleRate;
 }
+

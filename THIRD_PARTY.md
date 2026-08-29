@@ -58,3 +58,4 @@ Aurora also contains or integrates InfoNES, miniz, libxmp-lite, PS2SDK-related l
 ### m5x7 font
 
 `assets/font/m5x7.ttf` is the **m5x7** font by **Daniel Linssen**, released under **CC0 1.0 Universal**. Attribution is not required by CC0, but is appreciated by the author.
+

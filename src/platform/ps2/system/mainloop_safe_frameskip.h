@@ -11,3 +11,4 @@ void MainLoopSafeFrameskipSetEnabled(Bool enabled);
 /* AURORA_SAFE_FRAMESKIP_PICODRIVE_AUTO_V1: PicoDrive-style Auto decision once per host tick. */
 Bool MainLoopSafeFrameskipTake(Bool allowed);
 Bool MainLoopSafeFrameskipConsumePresentationSkip(void);
+

@@ -368,3 +368,4 @@ Uint32 FdsSystem::GetSampleRate()
 {
     return FceummFdsBridge_GetSampleRate();
 }
+

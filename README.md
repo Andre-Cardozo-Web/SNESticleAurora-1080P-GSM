@@ -58,6 +58,7 @@ Emulation:
 * Turbo button toggle (hold R2+ANY BUTTON) for SNES and MD games
 * In-game soft reset (L2+SELECT)
 * SNES and MD mouse emulation
+* Famicom ASCII Turbofile
 * Region selector
 
 User interface:
@@ -87,17 +88,19 @@ CD firmware and images **(experimental)**
 
 **FIXED:**
 * Pilotwings (SNES) mode 7 rendering, also fixes other games that rely on it
+* Speedy Gonzales in Los Gatos Banditos (SNES) performance *(with special safe frameskip)*
+* Top Gear (SNES) performance *(with special safe frameskip)*
 * Many other graphical glitches and inaccuracies on many NES, SNES, PCE and SEGA games
 
 
 **TO BE FIXED:**
 
+* PC Engine CD and Sega CD audio playback performance fix
 * SMB (ethernet crossover cable) connection fix
 * Super Mario World 2 (SNES) performance
-* Speedy Gonzales in Los Gatos Banditos (SNES) performance
-* Top Gear (SNES) performance
 * The Lost Vikings 1 and 2 (SNES) black screen
 * Addams Family (SNES) graphical glitches and timing issues
+* Sunset Riders (SNES) graphical glitches
 * Sonic Blast Man (SNES) wrong colors
 * Any other games with performance or graphical issues
 
@@ -105,5 +108,6 @@ CD firmware and images **(experimental)**
 **TO BE ADDED:**
 
 * SA-1 Emulation
-* Improve Mode 7, FX1 and FX2 emulation
+* Improve FX1 and FX2 emulation
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!
+

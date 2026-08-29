@@ -715,3 +715,4 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 
     return TRUE;
 }
+
