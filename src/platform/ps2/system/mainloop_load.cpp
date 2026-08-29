@@ -370,6 +370,23 @@ static int _MainLoopZipNameIsRom(const char *pName)
 #define MAINLOOP_FDS_ZIP_MIN_BYTES    MAINLOOP_FDS_SIDE_BYTES
 #define MAINLOOP_FDS_ZIP_MAX_BYTES    (16U + MAINLOOP_FDS_MAX_SIDES * MAINLOOP_FDS_SIDE_BYTES)
 
+
+/* AURORA_FDS_ZIP_FULLPATH_TMP_V2_20260828
+ * This pinned FCEUmm advertises need_fullpath=true and retro_load_game()
+ * calls FCEUI_LoadGame(game->path), ignoring game->data. ZIP therefore has
+ * to become a real temporary .fds path for the lifetime of the loaded disk.
+ */
+static Char s_FdsZipTempPath[1024] = {0};
+
+static void _MainLoopRemoveFdsZipTemp(void)
+{
+    if (s_FdsZipTempPath[0])
+    {
+        remove(s_FdsZipTempPath);
+        s_FdsZipTempPath[0] = 0;
+    }
+}
+
 static void _MainLoopFreeRomBuffer(void)
 {
     if (_RomData)
@@ -616,6 +633,9 @@ void _MainLoopUnloadRom()
 	   wrapper itself exists and owns memory. */
 	_pNes->SetRom(NULL);
 	if (_pFds) _pFds->SetRom(NULL); /* AURORA_FCEUMM_FDS_V0_5_UNLOAD */
+    /* AURORA_FDS_ZIP_FULLPATH_TMP_V2_20260828: FCEUmm has closed the
+     * disk now, so the extracted full-path backing file is no longer needed. */
+    _MainLoopRemoveFdsZipTemp();
 	_pNesRom->Unload();
 	_pNesFDSDisk->Unload();
 	/* AURORA_PICODRIVE_STAGE2_UNLOAD: SetRom(NULL) fully deinitializes PicoDrive. */
@@ -844,6 +864,7 @@ static Bool _MainLoopExecuteFdsPath(const char *pMappedPath,
 
 
 /* AURORA_FDS_V4_ZIP_LOADER_20260828 */
+/* AURORA_FDS_ZIP_FULLPATH_TMP_V2_20260828 */
 static Bool _MainLoopExecuteFdsZip(const char *pZipPath,
                                    const char *pOriginalZipPath,
                                    const char *pMemberName,
@@ -853,12 +874,15 @@ static Bool _MainLoopExecuteFdsZip(const char *pZipPath,
 {
     Char SystemDirectory[512];
     Char BiosPath[1024];
+    Char TempPath[1024];
     char LoadedName[512];
-    const char *pCoreName;
     FILE *pBios;
+    FILE *pTemp;
     long nBiosBytes;
     Uint8 *pData;
     Int32 nRead;
+    size_t nWritten;
+    Bool bWriteOK;
     Bool bLoaded;
 
     if (!pZipPath || !*pZipPath ||
@@ -923,29 +947,53 @@ static Bool _MainLoopExecuteFdsZip(const char *pZipPath,
         return FALSE;
     }
 
-    pCoreName = strrchr(pMemberName, '/');
-    if (!pCoreName)
-        pCoreName = strrchr(pMemberName, '\\');
-    pCoreName = pCoreName ? pCoreName + 1 : pMemberName;
-    if (!*pCoreName)
+    if (snprintf(TempPath, sizeof(TempPath), "%s/__AURORA_FDS_TMP__.fds",
+                 SystemDirectory) >= (int)sizeof(TempPath))
     {
         free(pData);
         return FALSE;
     }
 
-    _MainLoop_fOutputIntensity = 0.8f;
-    bLoaded = _pFds->LoadDiskMemory(
-        pData, (Uint32)nRead, pCoreName, SystemDirectory);
+    /* A previous crash may have left the temp file behind. It is never a
+     * user's source image, so replacing this fixed private name is safe. */
+    remove(TempPath);
+    pTemp = fopen(TempPath, "wb");
+    if (!pTemp)
+    {
+        free(pData);
+        MainLoopModalPrintf(60 * 4,
+            "ERROR: SYSTEM must be writable for FDS ZIP");
+        return FALSE;
+    }
 
+    nWritten = fwrite(pData, 1, (size_t)nRead, pTemp);
+    bWriteOK = (nWritten == (size_t)nRead && fflush(pTemp) == 0)
+        ? TRUE : FALSE;
+    if (fclose(pTemp) != 0)
+        bWriteOK = FALSE;
     free(pData);
+
+    if (!bWriteOK)
+    {
+        remove(TempPath);
+        MainLoopModalPrintf(60 * 4,
+            "ERROR: cannot write temporary FDS image");
+        return FALSE;
+    }
+
+    _MainLoop_fOutputIntensity = 0.8f;
+    bLoaded = _pFds->LoadDisk(TempPath, SystemDirectory);
 
     if (!bLoaded || !_pFds->IsRomReady())
     {
         _MainLoopUnloadRom();
+        remove(TempPath);
         MainLoopModalPrintf(60 * 5,
             "ERROR: FCEUmm could not boot FDS from ZIP");
         return FALSE;
     }
+
+    snprintf(s_FdsZipTempPath, sizeof(s_FdsZipTempPath), "%s", TempPath);
 
     _pSystem = _pFds;
     _pFds->Reset();
@@ -963,7 +1011,7 @@ static Bool _MainLoopExecuteFdsZip(const char *pZipPath,
 
     _MainLoop_iDisk = 0;
     _MainLoop_bDiskInserted = TRUE;
-    ConPrint("FDS Loaded from ZIP: %s -> %s (%d bytes)\n",
+    ConPrint("FDS Loaded from ZIP/fullpath: %s -> %s (%d bytes)\n",
              pZipPath, pMemberName, nRead);
     return TRUE;
 }

@@ -268,7 +268,13 @@ void SnesPPURender::RenderLine16(Int32 iLine)
 
 void SnesPPURender::UpdateCGRAM(Uint32 uAddr, Uint16 uData)
 {
-	if (m_pRenderInfo && m_pBlend)
+	/* AURORA_SNES_SAFE_FRAMESKIP_HOST_ELIDE_V1_20260828
+	 * Safe Frameskip still updates emulated CGRAM in SnesPPU::WriteCGDATA().
+	 * With no render target, updating the host/GS palette is wasted work.
+	 * BeginRender() marks SNESPPURENDER_UPDATE_ALL on the next frame, so the
+	 * next visible frame rebuilds the complete host palette from emulated CGRAM.
+	 */
+	if (m_pTarget && m_pRenderInfo && m_pBlend)
 	{
 		m_pBlend->UpdatePaletteEntry(&m_pRenderInfo->BlendInfo, uAddr, uData, m_pPPU->GetIntensity());
 	}
@@ -560,7 +566,11 @@ void SnesPPURender::BeginRender(CRenderSurface *pTarget)
 void SnesPPURender::EndRender()
 {
     #if CODE_PLATFORM == CODE_PS2
-    DmaSyncSprToRam();
+    /* AURORA_SNES_SAFE_FRAMESKIP_HOST_ELIDE_V1_20260828
+     * A NULL render target produces no visible-frame SPR->RAM work here.
+     * Avoid polling DMA8 on frames intentionally hidden by Safe Frameskip. */
+    if (m_pTarget)
+        DmaSyncSprToRam();
     #endif
 
 	if (m_pTarget)

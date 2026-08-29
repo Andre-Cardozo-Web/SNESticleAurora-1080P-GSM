@@ -22,6 +22,7 @@ extern "C" {
 
 #include "mainloop_shared.h"
 #include "mainloop_state.h"
+#include "nes/quicknes/quicknes_bridge.h" /* AURORA_QN_TURBOFILE_SAVE_V2_20260828 */
 
 /* AURORA_PCE_EXPERIMENTAL_V1 */
 
@@ -507,6 +508,89 @@ static Bool _MainLoopSramWriteFile(const Char *pPath, Uint8 *pData, Uint32 nByte
     return nWritten == nBytes && bOK ? TRUE : FALSE;
 }
 
+
+/* AURORA_QN_TURBOFILE_SAVE_V2_20260828
+ * The original ASCII Turbo File is one 8 KiB expansion-port memory unit,
+ * shared by compatible Famicom software. Keep one physical-style file in
+ * the NES save directory rather than pretending it is cartridge SRAM.
+ */
+static void _MainLoopTurboFileBuildPath(Char *pPath, Int32 nPathBytes,
+                                        const Char *pRoot)
+{
+    snprintf(pPath, nPathBytes, "%s/NES/TurboFile.sav", pRoot);
+}
+
+static Bool _MainLoopLoadTurboFileFrom(MainLoopSramDeviceE eDevice)
+{
+    const Char *pRoot = _MainLoopSramRoot(eDevice);
+    Uint8 *pData = QuicknesBridge_GetTurboFileData();
+    const Int32 nBytes = QuicknesBridge_GetTurboFileBytes();
+    Char Path[1024];
+
+    if (!pData || nBytes != 0x2000)
+        return FALSE;
+
+    _MainLoopTurboFileBuildPath(Path, sizeof(Path), pRoot);
+    if (!_MainLoopSramReadFile(Path, pData, (Uint32)nBytes))
+        return FALSE;
+
+    QuicknesBridge_ClearTurboFileDirty();
+    ConPrint("Turbo File loaded: %s\n", Path);
+    return TRUE;
+}
+
+static void _MainLoopLoadTurboFile(void)
+{
+    if (_pSystem != _pNes || QuicknesBridge_TurboFileDirty())
+        return;
+
+    if (_MainLoop_SramDevice == MAINLOOP_SRAMDEVICE_USB)
+    {
+        if (_MainLoopSramUsbReady())
+            (void)_MainLoopLoadTurboFileFrom(MAINLOOP_SRAMDEVICE_USB);
+        return;
+    }
+
+    if (_MainLoop_SramDevice == MAINLOOP_SRAMDEVICE_MEMCARD)
+    {
+        (void)_MainLoopLoadTurboFileFrom(MAINLOOP_SRAMDEVICE_MEMCARD);
+        return;
+    }
+
+    if (_MainLoopSramUsbReady() &&
+        _MainLoopLoadTurboFileFrom(MAINLOOP_SRAMDEVICE_USB))
+        return;
+
+    (void)_MainLoopLoadTurboFileFrom(MAINLOOP_SRAMDEVICE_MEMCARD);
+}
+
+static Bool _MainLoopSaveTurboFileTo(MainLoopSramDeviceE eDevice)
+{
+    const Char *pRoot = _MainLoopSramRoot(eDevice);
+    const Bool bMemCard =
+        eDevice == MAINLOOP_SRAMDEVICE_MEMCARD ? TRUE : FALSE;
+    Uint8 *pData;
+    Int32 nBytes;
+    Char Path[1024];
+
+    if (_pSystem != _pNes || !QuicknesBridge_TurboFileDirty())
+        return TRUE;
+
+    nBytes = QuicknesBridge_GetTurboFileBytes();
+    pData = QuicknesBridge_GetTurboFileData();
+    if (!pData || nBytes != 0x2000 ||
+        !_MainLoopSramEnsureSystemDirectory(pRoot, bMemCard))
+        return FALSE;
+
+    _MainLoopTurboFileBuildPath(Path, sizeof(Path), pRoot);
+    if (!_MainLoopSramWriteFile(Path, pData, (Uint32)nBytes))
+        return FALSE;
+
+    QuicknesBridge_ClearTurboFileDirty();
+    ConPrint("Turbo File saved: %s\n", Path);
+    return TRUE;
+}
+
 static Uint32 _CalcChecksum(Uint32 *pData, Uint32 nWords)
 {
     Uint32 uSum = 0;
@@ -523,7 +607,14 @@ static Uint32 _CalcChecksum(Uint32 *pData, Uint32 nWords)
 
 Bool _MainLoopHasSRAM()
 {
-    return _pSystem ? (_pSystem->GetSRAMBytes() > 0) : FALSE;
+    if (!_pSystem)
+        return FALSE;
+    if (_pSystem->GetSRAMBytes() > 0)
+        return TRUE;
+    /* AURORA_QN_TURBOFILE_SAVE_V2_20260828: only advertise external
+     * persistence after the Turbo File has actually been written. */
+    return (_pSystem == _pNes && QuicknesBridge_TurboFileDirty())
+        ? TRUE : FALSE;
 }
 
 static Bool _MainLoopSaveSRAMTo(MainLoopSramDeviceE eDevice, Bool bSync)
@@ -532,36 +623,50 @@ static Bool _MainLoopSaveSRAMTo(MainLoopSramDeviceE eDevice, Bool bSync)
     Bool bMemCard = eDevice == MAINLOOP_SRAMDEVICE_MEMCARD ? TRUE : FALSE;
     Int32 nSramBytes = _pSystem ? _pSystem->GetSRAMBytes() : 0;
     Char Path[1024];
-    Uint8 *pSRAM;
+    Uint8 *pSRAM = NULL;
+    Bool bAny = FALSE;
+    Bool bOK = TRUE;
 
     /* AURORA_RUNTIME_LEAN_V1_MCSAVE_20260824: bSync only selected behavior in the retired async path. */
     (void)bSync;
 
-    if (nSramBytes <= 0)
-        return FALSE;
-    pSRAM = _pSystem->GetSRAMData();
-    if (!pSRAM || !_MainLoopSramEnsureSystemDirectory(pRoot, bMemCard))
-        return FALSE;
-
-    _MainLoopSramBuildPath(Path, sizeof(Path), pRoot, FALSE);
-
-    if (_pSystem == _pSnes && g_FakeSRAMSize)
+    if (nSramBytes > 0)
     {
-        struct stat Status;
-        if (stat(Path, &Status) == 0 &&
-            (Uint32)Status.st_size != (Uint32)nSramBytes)
+        bAny = TRUE;
+        pSRAM = _pSystem->GetSRAMData();
+        if (!pSRAM || !_MainLoopSramEnsureSystemDirectory(pRoot, bMemCard))
+            bOK = FALSE;
+        else
         {
-            printf("[SRAM] Force SRAM size mismatch: file=%ld expected=%d\n",
-                   (long)Status.st_size, (int)nSramBytes);
-            memset(pSRAM, 0, nSramBytes);
+            _MainLoopSramBuildPath(Path, sizeof(Path), pRoot, FALSE);
+
+            if (_pSystem == _pSnes && g_FakeSRAMSize)
+            {
+                struct stat Status;
+                if (stat(Path, &Status) == 0 &&
+                    (Uint32)Status.st_size != (Uint32)nSramBytes)
+                {
+                    printf("[SRAM] Force SRAM size mismatch: file=%ld expected=%d\n",
+                           (long)Status.st_size, (int)nSramBytes);
+                    memset(pSRAM, 0, nSramBytes);
+                }
+            }
+
+            ML_TRACE("SRAM save path: %s", Path);
+            if (!_MainLoopSramWriteFile(Path, pSRAM, (Uint32)nSramBytes))
+                bOK = FALSE;
         }
     }
 
-    ML_TRACE("SRAM save path: %s", Path);
+    /* AURORA_QN_TURBOFILE_SAVE_V2_20260828 */
+    if (_pSystem == _pNes && QuicknesBridge_TurboFileDirty())
+    {
+        bAny = TRUE;
+        if (!_MainLoopSaveTurboFileTo(eDevice))
+            bOK = FALSE;
+    }
 
-    /* AURORA_RUNTIME_LEAN_V1_MCSAVE_20260824: unreachable legacy async-MC branch removed. */
-
-    if (_MainLoopSramWriteFile(Path, pSRAM, (Uint32)nSramBytes))
+    if (bAny && bOK)
     {
         _MainLoop_SRAMUpdated = FALSE;
         return TRUE;
@@ -703,6 +808,11 @@ void _MainLoopLoadSRAM()
             (bLegacy || (bMcFallback && _MainLoopSramUsbReady()));
     }
 
+    /* AURORA_QN_TURBOFILE_SAVE_V2_20260828: loading an existing
+     * TurboFile.sav never creates one and never marks it dirty. */
+    if (_pSystem == _pNes)
+        _MainLoopLoadTurboFile();
+
     _MainLoop_SaveCounter = 0;
     _bStateSaved = FALSE;
 }
@@ -741,6 +851,11 @@ Bool _MainLoopForceCheckSRAM()
             _MainLoop_SRAMChecksum = uChecksum;
         }
     }
+
+    /* AURORA_QN_TURBOFILE_SAVE_V2_20260828: protocol writes set their
+     * dirty bit immediately, so no 8 KiB checksum polling is required. */
+    if (_pSystem == _pNes && QuicknesBridge_TurboFileDirty())
+        _MainLoop_SRAMUpdated = TRUE;
 
     return TRUE;
 }

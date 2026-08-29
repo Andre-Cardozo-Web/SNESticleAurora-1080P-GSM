@@ -43,6 +43,12 @@ int QuicknesBridge_SaveState(void *pData, int nBytes);
 bool QuicknesBridge_LoadState(const void *pData, int nBytes);
 int QuicknesBridge_GetSRAMBytes(void);
 uint8_t *QuicknesBridge_GetSRAMData(void);
+/* AURORA_QN_EXT_HOST_V2_20260828 */
+bool QuicknesBridge_IsArkanoidVaus(void);
+int QuicknesBridge_GetTurboFileBytes(void);
+uint8_t *QuicknesBridge_GetTurboFileData(void);
+bool QuicknesBridge_TurboFileDirty(void);
+void QuicknesBridge_ClearTurboFileDirty(void);
 unsigned QuicknesBridge_GetSampleRate(void);
 
 #endif

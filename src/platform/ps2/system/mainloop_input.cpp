@@ -26,7 +26,10 @@ extern "C" {
 #define MENU_REPEAT (16)
 
 //#define MENU_REPEATBUTTONS (PAD_UP|PAD_DOWN|PAD_SQUARE|PAD_CIRCLE)
-#define MENU_REPEATBUTTONS (PAD_UP|PAD_DOWN|PAD_SQUARE|PAD_CIRCLE|PAD_CROSS|PAD_TRIANGLE|PAD_LEFT|PAD_RIGHT)
+/* AURORA_MENU_NO_REPEAT_X_TRIANGLE_V2_20260828
+ * Keep repeat for navigation and Square/Circle, but Cross/X and Triangle
+ * are edge-triggered only so holding them cannot queue/execute actions. */
+#define MENU_REPEATBUTTONS (PAD_UP|PAD_DOWN|PAD_SQUARE|PAD_CIRCLE|PAD_LEFT|PAD_RIGHT)
 
 /* AURORA_SNES_R2_TURBO_NO_DPAD_V1_4_4
  * D-pad is explicitly NOT turboable. While R2 is held, directions remain

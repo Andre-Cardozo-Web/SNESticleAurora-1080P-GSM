@@ -466,6 +466,15 @@ Uint32 InputGetPadData(Uint32 uPad)
     return _Input_PadData[uPad];
 }
 
+/* AURORA_QN_ARKANOID_ANALOG_V2_20260828 */
+Uint32 InputGetPadAnalog(Uint32 uPad)
+{
+    if (!InputIsPadConnected(uPad))
+        return 0x80808080U;
+
+    return _Input_PadAnalog[uPad];
+}
+
 Bool InputIsMouseConnected(void)
 {
     return _Input_bMouseConnected;

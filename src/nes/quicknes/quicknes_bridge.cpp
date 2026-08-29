@@ -22,6 +22,7 @@
 #include "mixbuffer.h"
 #include "snio.h"
 #include "snppurender.h"
+#include "input.h" /* AURORA_QN_ARKANOID_ANALOG_V2_20260828 */
 
 /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
 extern "C" {
@@ -44,11 +45,20 @@ extern "C" {
 extern "C" void quicknes_snesticle_set_duty_swap(int enable);
 extern "C" void quicknes_snesticle_set_microphone(int enable); /* AURORA_FAMICOM_MIC_CFG41_20260828 */
 
+/* AURORA_QN_EXT_HOST_V2_20260828 */
+extern "C" void quicknes_snesticle_ext_set_arkanoid(int enable);
+extern "C" void quicknes_snesticle_ext_set_arkanoid_state(unsigned int paddle, int fire);
+extern "C" void quicknes_snesticle_ext_reset_bus(void);
+extern "C" unsigned char *quicknes_snesticle_ext_turbofile_data(void);
+extern "C" int quicknes_snesticle_ext_turbofile_dirty(void);
+extern "C" void quicknes_snesticle_ext_turbofile_clear_dirty(void);
+
 static bool s_Initialized = false;
 static bool s_GameLoaded  = false;
 static bool s_DutySwap    = false;
 static bool s_TurboPhase  = false;
 static bool s_SkipVideoNext = false; /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
+static bool s_ArkanoidVaus = false; /* AURORA_QN_EXT_HOST_V2_20260828 */
 /* AURORA_CONTROLLER_OPTIONS_V2: Max/Half/Quarter cadence. */
 static unsigned s_TurboSpeedShift = 0;
 static uint32_t s_TurboFrame = 0;
@@ -127,6 +137,68 @@ static Int16 s_AudioOut[QN_AUDIO_MAX + 4];
 static Int16 s_Pending[4];
 static int   s_PendingCount = 0;
 
+
+
+/* AURORA_QN_EXT_HOST_V2_20260828
+ * Mednafen/NesCartDB identify the Japanese Famicom Arkanoid payload as
+ * CRC32 D89E5A67. Compute the CRC over PRG+CHR (not the 16-byte iNES header),
+ * matching the combined cartridge-ROM CRC convention used by that database.
+ */
+static Uint32 qCrc32(const Uint8 *pData, size_t nBytes)
+{
+    Uint32 crc = 0xFFFFFFFFU;
+    while (nBytes--)
+    {
+        crc ^= *pData++;
+        for (int bit = 0; bit < 8; ++bit)
+            crc = (crc >> 1) ^ ((crc & 1U) ? 0xEDB88320U : 0U);
+    }
+    return crc ^ 0xFFFFFFFFU;
+}
+
+static Uint32 qNesPayloadCrc32(const void *pData, size_t nBytes)
+{
+    const Uint8 *rom = (const Uint8 *)pData;
+    size_t offset, payload;
+
+    if (!rom || nBytes < 16 ||
+        rom[0] != 'N' || rom[1] != 'E' ||
+        rom[2] != 'S' || rom[3] != 0x1A)
+        return 0;
+
+    offset = 16U + ((rom[6] & 0x04U) ? 512U : 0U);
+    payload = (size_t)rom[4] * 16384U +
+              (size_t)rom[5] * 8192U;
+    if (payload == 0 || offset > nBytes || payload > nBytes - offset)
+        return 0;
+
+    return qCrc32(rom + offset, payload);
+}
+
+static void qUpdateArkanoidVaus(Emu::SysInputT *pInput)
+{
+    unsigned axis = 0x80U;
+    unsigned paddle;
+    int fire = 0;
+
+    if (!s_ArkanoidVaus)
+        return;
+
+    /* Absolute left-stick X -> authentic Vaus working range 0x54..0xF4. */
+    if (InputIsPadConnected(0))
+        axis = (InputGetPadAnalog(0) >> 16) & 0xFFU;
+
+    paddle = 0x54U +
+        (axis * (0xF4U - 0x54U) + 127U) / 255U;
+
+    /* PS2 X/Cross is sampled directly as Vaus Fire. RunFrame removes its
+     * ordinary NES-A mirror while Arkanoid J is active. */
+    if (pInput && pInput->uPad[0] != EMUSYS_DEVICE_DISCONNECTED &&
+        (pInput->uPad[0] & SNESIO_JOY_B))
+        fire = 1;
+
+    quicknes_snesticle_ext_set_arkanoid_state(paddle, fire);
+}
 
 static void qResetDirectVideo(void)
 {
@@ -476,6 +548,21 @@ bool QuicknesBridge_LoadGame(const void *pData, size_t nBytes, const char *pName
     }
 
     quicknes_snesticle_set_duty_swap(s_DutySwap ? 1 : 0);
+
+    /* AURORA_QN_EXT_HOST_V2_20260828: Japanese Arkanoid only.
+     * US Arkanoid (32FB0583) and Arkanoid II (0F141525) intentionally do
+     * not trigger this automatic EXT exception. */
+    {
+        const Uint32 payloadCrc = qNesPayloadCrc32(pData, nBytes);
+        s_ArkanoidVaus = (payloadCrc == 0xD89E5A67U ||
+                      payloadCrc == 0x0F141525U);
+        quicknes_snesticle_ext_set_arkanoid(s_ArkanoidVaus ? 1 : 0);
+        quicknes_snesticle_ext_reset_bus();
+        if (s_ArkanoidVaus)
+            printf("[QuickNES/EXT] Arkanoid (Japan) Vaus enabled; CRC=%08X\n",
+                   (unsigned)payloadCrc);
+    }
+
     s_GameLoaded = true;
 
     /* Do not serialize merely to discover state size during ROM load. */
@@ -489,6 +576,8 @@ void QuicknesBridge_UnloadGame(void)
     if (s_Initialized && s_pEmu)
         s_pEmu->close();
     s_GameLoaded = false;
+    s_ArkanoidVaus = false;
+    quicknes_snesticle_ext_set_arkanoid(0);
     qResetTransient();
 }
 
@@ -503,6 +592,7 @@ void QuicknesBridge_Reset(void)
     s_TurboFrame = 0;
     s_LastSpriteScanlineLimit = -1;
     s_LastSpriteScreenLimit = -1;
+    quicknes_snesticle_ext_reset_bus();
 }
 
 void QuicknesBridge_SoftReset(void)
@@ -516,6 +606,7 @@ void QuicknesBridge_SoftReset(void)
     s_TurboFrame = 0;
     s_LastSpriteScanlineLimit = -1;
     s_LastSpriteScreenLimit = -1;
+    quicknes_snesticle_ext_reset_bus();
 }
 
 void QuicknesBridge_SetDutySwap(bool enabled)
@@ -619,6 +710,13 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
         p2 = qMapPad(pInput->uPad[1]);
     }
 
+    /* AURORA_QN_EXT_HOST_V2_20260828: Vaus is an absolute analog device.
+     * Cross belongs to the paddle Fire line for Arkanoid J; do not mirror
+     * that same press onto the ordinary controller's NES-A bit. */
+    if (s_ArkanoidVaus)
+        p1 &= (Uint8)~0x01U;
+    qUpdateArkanoidVaus(pInput);
+
     const char *err = skipVideo
         ? s_pEmu->emulate_skip_frame((int)p1, (int)p2)
         : s_pEmu->emulate_frame((int)p1, (int)p2);
@@ -713,6 +811,9 @@ bool QuicknesBridge_LoadState(const void *pData, int nBytes)
     s_PendingCount = 0;
     s_PaletteValid = false;
     qResetDirectVideo();
+    /* EXT serial position is host peripheral state, not part of the legacy
+     * QuickNES snapshot. Restart the transfer bus deterministically. */
+    quicknes_snesticle_ext_reset_bus();
     return true;
 }
 
@@ -728,6 +829,32 @@ uint8_t *QuicknesBridge_GetSRAMData(void)
     if (QuicknesBridge_GetSRAMBytes() <= 0)
         return NULL;
     return s_pEmu->high_mem();
+}
+
+bool QuicknesBridge_IsArkanoidVaus(void)
+{
+    return s_ArkanoidVaus;
+}
+
+/* AURORA_QN_EXT_HOST_V2_20260828: 8 KiB ASCII Turbo File battery RAM. */
+int QuicknesBridge_GetTurboFileBytes(void)
+{
+    return 0x2000;
+}
+
+uint8_t *QuicknesBridge_GetTurboFileData(void)
+{
+    return quicknes_snesticle_ext_turbofile_data();
+}
+
+bool QuicknesBridge_TurboFileDirty(void)
+{
+    return quicknes_snesticle_ext_turbofile_dirty() != 0;
+}
+
+void QuicknesBridge_ClearTurboFileDirty(void)
+{
+    quicknes_snesticle_ext_turbofile_clear_dirty();
 }
 
 unsigned QuicknesBridge_GetSampleRate(void)

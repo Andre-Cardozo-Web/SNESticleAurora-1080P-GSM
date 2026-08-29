@@ -63,6 +63,10 @@ Bool        InputSnesMouseShouldUse(void);
    in-game SNES d-pad. */
 Uint32 InputGetPadDpadFromAnalog(Uint32 uPad);
 
+/* AURORA_QN_ARKANOID_ANALOG_V2_20260828
+ * Raw packed axes: rjoy_h, rjoy_v, ljoy_h, ljoy_v from LSB to MSB. */
+Uint32 InputGetPadAnalog(Uint32 uPad);
+
 #ifdef __cplusplus
 }
 #endif

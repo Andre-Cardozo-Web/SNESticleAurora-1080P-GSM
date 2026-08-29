@@ -199,8 +199,17 @@ Bool MainLoopProcess()
 				   inputs are merged: if both press the same direction the
 				   result is identical to a single press, so users can use
 				   whichever they prefer (or both). */
-				const Uint32 uHostPad = InputGetPadData(iPad)
-				                          | InputGetPadDpadFromAnalog(iPad);
+				Uint32 uAnalogDpad = InputGetPadDpadFromAnalog(iPad);
+
+				/* AURORA_QN_ARKANOID_ANALOG_ONLY_V2_20260828
+				 * Arkanoid (Japan) owns P1 left-stick X as an absolute Vaus
+				 * paddle. Do not also synthesize LEFT/RIGHT from that stick;
+				 * the physical D-pad from InputGetPadData() remains available. */
+				if (iPad == 0 && _pSystem == _pNes &&
+				    QuicknesBridge_IsArkanoidVaus())
+				    uAnalogDpad = 0;
+
+				const Uint32 uHostPad = InputGetPadData(iPad) | uAnalogDpad;
 				Input.uPad[iPad] = _MainLoopInput(uHostPad);
 
 				/* AURORA_FAMICOM_MIC_CFG41_20260828
