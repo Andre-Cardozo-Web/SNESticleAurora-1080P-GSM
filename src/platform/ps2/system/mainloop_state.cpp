@@ -596,6 +596,177 @@ static Bool _MainLoopSaveTurboFileTo(MainLoopSramDeviceE eDevice)
     return TRUE;
 }
 
+/* AURORA_SNES_TURBOFILE_V4_20260829
+ * One physical Twin image, separate from cartridge SRAM:
+ *   SNES/TurboFileTwin.sav = 160 KiB
+ * Layout matches the emulated hardware backing:
+ *   first 32 KiB = four TFII banks, next 128 KiB = STF.
+ */
+static void _MainLoopSnesTurboFileBuildPath(
+    Char *pPath, Int32 nPathBytes, const Char *pRoot)
+{
+    snprintf(pPath, nPathBytes, "%s/SNES/TurboFileTwin.sav", pRoot);
+}
+
+static Bool _MainLoopLoadSnesTurboFileFrom(MainLoopSramDeviceE eDevice)
+{
+    const Char *pRoot = _MainLoopSramRoot(eDevice);
+    Uint8 *pData = SnesTurboFileGetData();
+    const Int32 nBytes = SnesTurboFileGetBytes();
+    Char Path[1024];
+
+    if (!pData || nBytes != 160 * 1024)
+        return FALSE;
+
+    _MainLoopSnesTurboFileBuildPath(Path, sizeof(Path), pRoot);
+    if (!_MainLoopSramReadFile(Path, pData, (Uint32)nBytes))
+        return FALSE;
+
+    SnesTurboFileClearDirty();
+    ConPrint("SNES Turbo File Twin loaded: %s\n", Path);
+    return TRUE;
+}
+
+static void _MainLoopLoadSnesTurboFile(void)
+{
+    if (_pSystem != _pSnes ||
+        !SnesTurboFileEnabled() ||
+        SnesTurboFileDirty())
+        return;
+
+    if (_MainLoop_SramDevice == MAINLOOP_SRAMDEVICE_USB)
+    {
+        if (_MainLoopSramUsbReady())
+            (void)_MainLoopLoadSnesTurboFileFrom(MAINLOOP_SRAMDEVICE_USB);
+        return;
+    }
+
+    if (_MainLoop_SramDevice == MAINLOOP_SRAMDEVICE_MEMCARD)
+    {
+        (void)_MainLoopLoadSnesTurboFileFrom(MAINLOOP_SRAMDEVICE_MEMCARD);
+        return;
+    }
+
+    if (_MainLoopSramUsbReady() &&
+        _MainLoopLoadSnesTurboFileFrom(MAINLOOP_SRAMDEVICE_USB))
+        return;
+
+    (void)_MainLoopLoadSnesTurboFileFrom(MAINLOOP_SRAMDEVICE_MEMCARD);
+}
+
+static Bool _MainLoopSaveSnesTurboFileTo(MainLoopSramDeviceE eDevice)
+{
+    const Char *pRoot = _MainLoopSramRoot(eDevice);
+    const Bool bMemCard =
+        eDevice == MAINLOOP_SRAMDEVICE_MEMCARD ? TRUE : FALSE;
+    Uint8 *pData;
+    Int32 nBytes;
+    Char Path[1024];
+
+    if (_pSystem != _pSnes ||
+        !SnesTurboFileEnabled() ||
+        !SnesTurboFileDirty())
+        return TRUE;
+
+    nBytes = SnesTurboFileGetBytes();
+    pData = SnesTurboFileGetData();
+    if (!pData || nBytes != 160 * 1024 ||
+        !_MainLoopSramEnsureSystemDirectory(pRoot, bMemCard))
+        return FALSE;
+
+    _MainLoopSnesTurboFileBuildPath(Path, sizeof(Path), pRoot);
+    if (!_MainLoopSramWriteFile(Path, pData, (Uint32)nBytes))
+        return FALSE;
+
+    SnesTurboFileClearDirty();
+    ConPrint("SNES Turbo File Twin saved: %s\n", Path);
+    return TRUE;
+}
+
+/* AURORA_QN_BATTLEBOX_V5_20260829
+ * One physical 512-byte Battle Box shared by compatible Famicom games.
+ */
+static void _MainLoopBattleBoxBuildPath(
+    Char *pPath, Int32 nPathBytes, const Char *pRoot)
+{
+    snprintf(pPath, nPathBytes, "%s/NES/BattleBox.sav", pRoot);
+}
+
+static Bool _MainLoopLoadBattleBoxFrom(MainLoopSramDeviceE eDevice)
+{
+    const Char *pRoot = _MainLoopSramRoot(eDevice);
+    Uint8 *pData = QuicknesBridge_GetBattleBoxData();
+    const Int32 nBytes = QuicknesBridge_GetBattleBoxBytes();
+    Char Path[1024];
+
+    if (!pData || nBytes != 0x0200)
+        return FALSE;
+
+    _MainLoopBattleBoxBuildPath(Path, sizeof(Path), pRoot);
+    if (!_MainLoopSramReadFile(Path, pData, (Uint32)nBytes))
+        return FALSE;
+
+    QuicknesBridge_ClearBattleBoxDirty();
+    ConPrint("Battle Box loaded: %s\n", Path);
+    return TRUE;
+}
+
+static void _MainLoopLoadBattleBox(void)
+{
+    if (_pSystem != _pNes ||
+        !QuicknesBridge_BattleBoxEnabled() ||
+        QuicknesBridge_BattleBoxDirty())
+        return;
+
+    if (_MainLoop_SramDevice == MAINLOOP_SRAMDEVICE_USB)
+    {
+        if (_MainLoopSramUsbReady())
+            (void)_MainLoopLoadBattleBoxFrom(MAINLOOP_SRAMDEVICE_USB);
+        return;
+    }
+
+    if (_MainLoop_SramDevice == MAINLOOP_SRAMDEVICE_MEMCARD)
+    {
+        (void)_MainLoopLoadBattleBoxFrom(MAINLOOP_SRAMDEVICE_MEMCARD);
+        return;
+    }
+
+    if (_MainLoopSramUsbReady() &&
+        _MainLoopLoadBattleBoxFrom(MAINLOOP_SRAMDEVICE_USB))
+        return;
+
+    (void)_MainLoopLoadBattleBoxFrom(MAINLOOP_SRAMDEVICE_MEMCARD);
+}
+
+static Bool _MainLoopSaveBattleBoxTo(MainLoopSramDeviceE eDevice)
+{
+    const Char *pRoot = _MainLoopSramRoot(eDevice);
+    const Bool bMemCard =
+        eDevice == MAINLOOP_SRAMDEVICE_MEMCARD ? TRUE : FALSE;
+    Uint8 *pData;
+    Int32 nBytes;
+    Char Path[1024];
+
+    if (_pSystem != _pNes ||
+        !QuicknesBridge_BattleBoxEnabled() ||
+        !QuicknesBridge_BattleBoxDirty())
+        return TRUE;
+
+    nBytes = QuicknesBridge_GetBattleBoxBytes();
+    pData = QuicknesBridge_GetBattleBoxData();
+    if (!pData || nBytes != 0x0200 ||
+        !_MainLoopSramEnsureSystemDirectory(pRoot, bMemCard))
+        return FALSE;
+
+    _MainLoopBattleBoxBuildPath(Path, sizeof(Path), pRoot);
+    if (!_MainLoopSramWriteFile(Path, pData, (Uint32)nBytes))
+        return FALSE;
+
+    QuicknesBridge_ClearBattleBoxDirty();
+    ConPrint("Battle Box saved: %s\n", Path);
+    return TRUE;
+}
+
 static Uint32 _CalcChecksum(Uint32 *pData, Uint32 nWords)
 {
     Uint32 uSum = 0;
@@ -618,10 +789,19 @@ Bool _MainLoopHasSRAM()
         return TRUE;
     /* AURORA_QN_TURBOFILE_SAVE_V2_20260828: only advertise external
      * persistence after the Turbo File has actually been written. */
-    return (_pSystem == _pNes &&
-            QuicknesBridge_TurboFileEnabled() &&
-            QuicknesBridge_TurboFileDirty())
-        ? TRUE : FALSE;
+    if (_pSystem == _pNes &&
+        QuicknesBridge_TurboFileEnabled() &&
+        QuicknesBridge_TurboFileDirty())
+        return TRUE;
+    if (_pSystem == _pNes &&
+        QuicknesBridge_BattleBoxEnabled() &&
+        QuicknesBridge_BattleBoxDirty())
+        return TRUE;
+    if (_pSystem == _pSnes &&
+        SnesTurboFileEnabled() &&
+        SnesTurboFileDirty())
+        return TRUE;
+    return FALSE;
 }
 
 static Bool _MainLoopSaveSRAMTo(MainLoopSramDeviceE eDevice, Bool bSync)
@@ -672,6 +852,24 @@ static Bool _MainLoopSaveSRAMTo(MainLoopSramDeviceE eDevice, Bool bSync)
     {
         bAny = TRUE;
         if (!_MainLoopSaveTurboFileTo(eDevice))
+            bOK = FALSE;
+    }
+
+    if (_pSystem == _pNes &&
+        QuicknesBridge_BattleBoxEnabled() &&
+        QuicknesBridge_BattleBoxDirty())
+    {
+        bAny = TRUE;
+        if (!_MainLoopSaveBattleBoxTo(eDevice))
+            bOK = FALSE;
+    }
+
+    if (_pSystem == _pSnes &&
+        SnesTurboFileEnabled() &&
+        SnesTurboFileDirty())
+    {
+        bAny = TRUE;
+        if (!_MainLoopSaveSnesTurboFileTo(eDevice))
             bOK = FALSE;
     }
 
@@ -820,7 +1018,13 @@ void _MainLoopLoadSRAM()
     /* AURORA_QN_TURBOFILE_SAVE_V2_20260828: loading an existing
      * TurboFile.sav never creates one and never marks it dirty. */
     if (_pSystem == _pNes)
+    {
         _MainLoopLoadTurboFile();
+        _MainLoopLoadBattleBox();
+    }
+
+    if (_pSystem == _pSnes)
+        _MainLoopLoadSnesTurboFile();
 
     _MainLoop_SaveCounter = 0;
     _bStateSaved = FALSE;
@@ -868,6 +1072,16 @@ Bool _MainLoopForceCheckSRAM()
         QuicknesBridge_TurboFileDirty())
         _MainLoop_SRAMUpdated = TRUE;
 
+    if (_pSystem == _pNes &&
+        QuicknesBridge_BattleBoxEnabled() &&
+        QuicknesBridge_BattleBoxDirty())
+        _MainLoop_SRAMUpdated = TRUE;
+
+    if (_pSystem == _pSnes &&
+        SnesTurboFileEnabled() &&
+        SnesTurboFileDirty())
+        _MainLoop_SRAMUpdated = TRUE;
+
     return TRUE;
 }
 
@@ -881,7 +1095,15 @@ Bool _MainLoopCheckSRAM()
        memory sweep during gameplay is redundant and can create a
        small periodic EE workload spike on large SRAM carts. */
     if (_pSystem == _pSnes)
+    {
+        /* AURORA_SNES_TURBOFILE_V4_20260829
+         * External protocol writes already maintain a dirty boolean.
+         * Keep the normal no-checksum SNES path, but expose that O(1)
+         * dirty state to the existing deterministic menu-save flow. */
+        if (SnesTurboFileEnabled() && SnesTurboFileDirty())
+            _MainLoop_SRAMUpdated = TRUE;
         return TRUE;
+    }
 
     if (nSramBytes > 0)
     {

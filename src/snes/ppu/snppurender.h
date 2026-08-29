@@ -164,6 +164,33 @@ _INLINE Bool _SnesPPUOBJTileCountedX(Uint16 uObjectX, Int32 iTileX)
 	       (iTileX > -8 && iTileX < 256);
 }
 
+/* AURORA_REVIVE_A06DD_OBJ_HOTPATH_20260829
+ * Equivalente à checagem _SnesPPUOBJTileCountedX para cada tile, mas calcula
+ * uma única faixa contígua. O X especial $100 continua contando o OBJ inteiro. */
+_INLINE void _SnesPPUOBJCountedTileRange(Uint16 uObjectX,
+	Int32 iObjectX, Uint8 uWidth, Int32 *pFirstTile, Int32 *pTileCount)
+{
+	Int32 nTiles = uWidth >> 3;
+	Int32 iFirst = 0;
+	Int32 iEnd = nTiles;
+
+	if ((uObjectX & 0x1FF) != 0x100)
+	{
+		if (iObjectX <= -8)
+			iFirst = (-iObjectX) >> 3;
+		if (iObjectX + ((nTiles - 1) << 3) >= 256)
+			iEnd = (263 - iObjectX) >> 3;
+
+		if (iFirst < 0) iFirst = 0;
+		if (iFirst > nTiles) iFirst = nTiles;
+		if (iEnd < iFirst) iEnd = iFirst;
+		if (iEnd > nTiles) iEnd = nTiles;
+	}
+
+	*pFirstTile = iFirst;
+	*pTileCount = iEnd - iFirst;
+}
+
 _INLINE Uint32 _SnesPPUOBJNameSelect(Uint8 uOBSEL)
 {
 	/* OBSEL bits 3-4 encode offsets $1000, $2000, $3000 and $4000

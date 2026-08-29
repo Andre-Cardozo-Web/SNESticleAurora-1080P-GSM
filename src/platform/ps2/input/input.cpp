@@ -212,7 +212,10 @@ void InputMousePollPostFrame(Bool bCaptureMotion)
     {
         _Input_MouseDeltaX = (Int32)data.x;
         _Input_MouseDeltaY = (Int32)data.y;
-        _Input_MouseButtons = (Uint32)data.buttons & 0x03U;
+        /* AURORA_IRIXXXX_922543_MOUSE_BUTTONS_20260829
+         * Preserve the four low HID button bits for PicoDrive's Mega Mouse.
+         * Native SNES mouse still masks its own input back to the real 2 buttons. */
+        _Input_MouseButtons = (Uint32)data.buttons & 0x0FU;
     }
 }
 

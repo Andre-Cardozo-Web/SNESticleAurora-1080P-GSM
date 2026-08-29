@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <libpad.h> /* AURORA_QN_LIGHTGUN_TIMING_V7_2_20260829 */
 
 #include "quicknes_bridge.h"
 #include "types.h"
@@ -48,11 +49,17 @@ extern "C" void quicknes_snesticle_set_microphone(int enable); /* AURORA_FAMICOM
 /* AURORA_QN_EXT_HOST_V2_20260828 */
 extern "C" void quicknes_snesticle_ext_set_arkanoid(int enable);
 extern "C" void quicknes_snesticle_ext_set_turbofile(int enable); /* AURORA_CD_AUDIO_STREAM_V3_NES_HOST_API_20260829 */
+extern "C" void quicknes_snesticle_ext_set_battlebox(int enable); /* AURORA_QN_BATTLEBOX_V5_20260829 */
+extern "C" void quicknes_snesticle_ext_set_lightgun(int mode); /* AURORA_QN_LIGHTGUN_CURSOR_V7_20260829 */
+extern "C" void quicknes_snesticle_ext_set_lightgun_state(int x, int y, int trigger, int offscreen);
 extern "C" void quicknes_snesticle_ext_set_arkanoid_state(unsigned int paddle, int fire);
 extern "C" void quicknes_snesticle_ext_reset_bus(void);
 extern "C" unsigned char *quicknes_snesticle_ext_turbofile_data(void);
 extern "C" int quicknes_snesticle_ext_turbofile_dirty(void);
 extern "C" void quicknes_snesticle_ext_turbofile_clear_dirty(void);
+extern "C" unsigned char *quicknes_snesticle_ext_battlebox_data(void);
+extern "C" int quicknes_snesticle_ext_battlebox_dirty(void);
+extern "C" void quicknes_snesticle_ext_battlebox_clear_dirty(void);
 
 static bool s_Initialized = false;
 static bool s_GameLoaded  = false;
@@ -61,6 +68,21 @@ static bool s_TurboPhase  = false;
 static bool s_SkipVideoNext = false; /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 static bool s_ArkanoidVaus = false; /* AURORA_QN_EXT_HOST_V2_20260828 */
 static bool s_TurboFileEnabled = false; /* AURORA_CD_AUDIO_STREAM_V3_NES_HOST_FLAG_20260829 */
+static bool s_BattleBoxEnabled = false; /* AURORA_QN_BATTLEBOX_V5_20260829 */
+
+/* AURORA_QN_LIGHTGUN_CURSOR_V7_20260829 */
+enum
+{
+    QN_GUN_NONE = 0,
+    QN_GUN_NES_PORT2 = 1,
+    QN_GUN_FAMICOM_EXT = 2,
+    QN_GUN_TWO_NES = 3
+};
+static int s_LightGunMode = QN_GUN_NONE;
+static Int32 s_GunX = 128 << 8;
+static Int32 s_GunY = 120 << 8;
+static Int32 s_GunVX = 0;
+static Int32 s_GunVY = 0;
 /* AURORA_CONTROLLER_OPTIONS_V2: Max/Half/Quarter cadence. */
 static unsigned s_TurboSpeedShift = 0;
 static uint32_t s_TurboFrame = 0;
@@ -229,6 +251,217 @@ static bool qLegacyTurboFileCrc(Uint32 crc)
         default:
             return false;
     }
+}
+
+/* AURORA_QN_BATTLEBOX_V5_20260829
+ * Mesen/NesCartDB GameInputType == BattleBox (0x22), PRG+CHR CRC32.
+ *
+ * Clean retail identities:
+ * 61A852EA Battle Stadium - Senbatsu Pro Yakyuu
+ * 78B657AC Armadillo
+ * 803B9979 J-League Fighting Soccer - The King of Ace Strikers
+ * C22BC87B Seiryaku Simulation - Inbou no Wakusei - Shancara
+ */
+static bool qBattleBoxCrc(Uint32 crc)
+{
+    switch (crc)
+    {
+        case 0x58B2FE44U:
+        case 0x5B3B5BC1U:
+        case 0x61A852EAU:
+        case 0x78B657ACU:
+        case 0x803B9979U:
+        case 0xB3D92E78U:
+        case 0xC22BC87BU:
+        case 0xC4F9251AU:
+        case 0xD8015A7AU:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* Mesen2 GameInputType::Zapper/TwoZappers PRG+CHR CRC32.
+ * Vs. System, PlayChoice and Dendy rows are intentionally excluded. */
+static bool qFamicomLightGunCrc(Uint32 crc)
+{
+    switch (crc)
+    {
+        case 0x0AFB395EU: case 0x24598791U: case 0x2A6559A1U:
+        case 0x4FBBFA74U: case 0x5112DC21U: case 0x61061352U:
+        case 0x73FB55ACU: case 0x74BEA652U: case 0xAA9F9765U:
+        case 0xDDCBDA16U: case 0xDF31B364U: case 0xDF3E45D2U:
+        case 0xFF24D794U:
+            return true;
+        default: return false;
+    }
+}
+
+static bool qTwoNesZapperCrc(Uint32 crc)
+{
+    switch (crc)
+    {
+        case 0x231BC76EU: case 0xB79F2651U: case 0xD15009CCU:
+        case 0xE85B4D3DU: case 0xFD9E5DD6U:
+            return true;
+        default: return false;
+    }
+}
+
+static bool qNesZapperCrc(Uint32 crc)
+{
+    switch (crc)
+    {
+        case 0x01B87025U: case 0x04A6B46DU: case 0x051E60C6U:
+        case 0x090568DFU: case 0x0E9428FBU: case 0x0F263E59U:
+        case 0x143DF524U: case 0x19B0A9F1U: case 0x1BFE42ABU:
+        case 0x1CA9C322U: case 0x1CAE8DEFU: case 0x1DA88F85U:
+        case 0x1E6C3344U: case 0x1EC1DFEBU: case 0x1F6660E6U:
+        case 0x23D17F5EU: case 0x27ACE333U: case 0x283D7727U:
+        case 0x2CE31186U: case 0x2F72A0BEU: case 0x327DDDECU:
+        case 0x3488A174U: case 0x3C04E8EFU: case 0x3E58A87EU:
+        case 0x3E85BA0FU: case 0x3F8BB92DU: case 0x407449DAU:
+        case 0x4318A2F8U: case 0x431A5F59U: case 0x44340DA6U:
+        case 0x44BEB4B0U: case 0x497C6A69U: case 0x4A3D4790U:
+        case 0x4B143FB6U: case 0x4D3982BCU: case 0x4D68CFB1U:
+        case 0x4E959173U: case 0x522EE20FU: case 0x524BC479U:
+        case 0x5529431FU: case 0x5D4574E0U: case 0x5E8C77DBU:
+        case 0x5EE6008EU: case 0x62AF1BC4U: case 0x6332E4CAU:
+        case 0x63506FB4U: case 0x64594DA3U: case 0x6519CB3BU:
+        case 0x67751094U: case 0x70DF0D3DU: case 0x73CCDAE0U:
+        case 0x790B295BU: case 0x7A018E1FU: case 0x7BAF8142U:
+        case 0x7C4EBDACU: case 0x7C899CFAU: case 0x7CDF51D5U:
+        case 0x7D01D4E0U: case 0x7FC220F7U: case 0x82908FF7U:
+        case 0x8373021EU: case 0x851EB9BEU: case 0x8A7D9467U:
+        case 0x8B7DA8B8U: case 0x91467F41U: case 0x93216279U:
+        case 0xA0FBF02EU: case 0xA1430EEBU: case 0xA39A8063U:
+        case 0xA671DA25U: case 0xA7C6C842U: case 0xA7F8BBC8U:
+        case 0xAA65ADBFU: case 0xB037246DU: case 0xB0480AE9U:
+        case 0xB133CFA7U: case 0xB8B9ACA3U: case 0xBBE40DC4U:
+        case 0xBC9BFFCBU: case 0xBCFDD7DEU: case 0xBEB8AB01U:
+        case 0xC0F0D838U: case 0xC267D861U: case 0xC3C9D852U:
+        case 0xC49F6407U: case 0xC616BAD5U: case 0xCA2C23E2U:
+        case 0xCFD8D4A5U: case 0xD0FBE052U: case 0xD5BCF1E5U:
+        case 0xD7CD7E8EU: case 0xDE8FD935U: case 0xE145B441U:
+        case 0xE18CD9AAU: case 0xE615C8DFU: case 0xEDC3662BU:
+        case 0xF24C0B66U: case 0xF27F9E88U: case 0xF4E7A58CU:
+        case 0xF5E62944U: case 0xFA08CCBFU:
+            return true;
+        default: return false;
+    }
+}
+
+static int qLightGunModeForCrc(Uint32 crc)
+{
+    if (qFamicomLightGunCrc(crc)) return QN_GUN_FAMICOM_EXT;
+    if (qTwoNesZapperCrc(crc)) return QN_GUN_TWO_NES;
+    if (qNesZapperCrc(crc)) return QN_GUN_NES_PORT2;
+    return QN_GUN_NONE;
+}
+
+static void qResetLightGunAim(void)
+{
+    s_GunX = 128 << 8;
+    s_GunY = 120 << 8;
+    s_GunVX = s_GunVY = 0;
+}
+
+/* AURORA_QN_LIGHTGUN_TIMING_V7_2_20260829
+ * 8.8 fixed point. V7 was 0.5..4.0 px/frame with 0.5 px/frame^2 braking.
+ * V7.2 is deliberately only a little faster (0.625..4.75), but braking is
+ * much stronger so the reticle stops instead of skating past the target. */
+static Int32 qGunTargetVelocity(unsigned axis)
+{
+    const Int32 dead = 20;
+    const Int32 minSpeed = 160;  /* 0.625 px/frame */
+    const Int32 maxSpeed = 1216; /* 4.75 px/frame */
+    Int32 d = (Int32)axis - 128;
+    Int32 sign = d < 0 ? -1 : 1;
+    Int32 mag = d < 0 ? -d : d;
+    if (mag <= dead) return 0;
+
+    mag -= dead;
+    Int32 speed = minSpeed +
+        (mag * (maxSpeed - minSpeed) + 53) / 107;
+    if (speed > maxSpeed) speed = maxSpeed;
+    return sign * speed;
+}
+
+static Int32 qGunApproach(Int32 value, Int32 target, Int32 step)
+{
+    if (value < target)
+    {
+        value += step;
+        if (value > target) value = target;
+    }
+    else if (value > target)
+    {
+        value -= step;
+        if (value < target) value = target;
+    }
+    return value;
+}
+
+static Int32 qGunVelocityStep(Int32 current, Int32 target)
+{
+    if (!target)
+        return 320; /* 1.25 px/frame^2: stop quickly at stick center. */
+
+    if ((current < 0 && target > 0) ||
+        (current > 0 && target < 0))
+        return 256; /* 1.00 px/frame^2 when reversing direction. */
+
+    return 80;      /* 0.3125 px/frame^2 ordinary acceleration. */
+}
+
+static void qUpdateLightGunAim(Emu::SysInputT *pInput)
+{
+    unsigned ax = 0x80U, ay = 0x80U;
+    bool trigger = false;
+    bool offscreen = false;
+    Uint32 rawPad = 0;
+
+    if (InputIsPadConnected(0))
+    {
+        const Uint32 packed = InputGetPadAnalog(0);
+        ax = (packed >> 16) & 0xFFU;
+        ay = (packed >> 24) & 0xFFU;
+        rawPad = InputGetPadData(0);
+
+        /* L2 is frontend-only and therefore never appears in SysInputT.
+         * Read the raw PS2 pad only here, while a Zapper/Light Gun is active.
+         * L2+Square is otherwise unassigned in Aurora's runtime hotkeys. */
+        offscreen =
+            (rawPad & (PAD_L2 | PAD_SQUARE)) == (PAD_L2 | PAD_SQUARE);
+    }
+
+    if (pInput && pInput->uPad[0] != EMUSYS_DEVICE_DISCONNECTED)
+        trigger = (pInput->uPad[0] & SNESIO_JOY_B) != 0; /* Cross / X */
+
+    /* Off-screen shot is itself a trigger action; no Cross is required. */
+    if (offscreen)
+        trigger = true;
+
+    const Int32 tx = qGunTargetVelocity(ax);
+    const Int32 ty = qGunTargetVelocity(ay);
+    s_GunVX = qGunApproach(
+        s_GunVX, tx, qGunVelocityStep(s_GunVX, tx));
+    s_GunVY = qGunApproach(
+        s_GunVY, ty, qGunVelocityStep(s_GunVY, ty));
+
+    s_GunX += s_GunVX;
+    s_GunY += s_GunVY;
+
+    const Int32 xmin = 6 << 8, xmax = 249 << 8;
+    const Int32 ymin = 6 << 8, ymax = 233 << 8;
+    if (s_GunX < xmin) { s_GunX = xmin; s_GunVX = 0; }
+    if (s_GunX > xmax) { s_GunX = xmax; s_GunVX = 0; }
+    if (s_GunY < ymin) { s_GunY = ymin; s_GunVY = 0; }
+    if (s_GunY > ymax) { s_GunY = ymax; s_GunVY = 0; }
+
+    quicknes_snesticle_ext_set_lightgun_state(
+        (int)(s_GunX >> 8), (int)(s_GunY >> 8),
+        trigger ? 1 : 0, offscreen ? 1 : 0);
 }
 
 static void qUpdateArkanoidVaus(Emu::SysInputT *pInput)
@@ -610,34 +843,61 @@ bool QuicknesBridge_LoadGame(const void *pData, size_t nBytes, const char *pName
      * legacy iNES falls back to the known PRG+CHR CRC database. */
     {
         const int nes2Ext = qNes2DefaultExpansionDevice(pData, nBytes);
-        Uint32 payloadCrc = 0;
+        const Uint32 payloadCrc = qNesPayloadCrc32(pData, nBytes);
+        int gunMode = qLightGunModeForCrc(payloadCrc);
 
+        if (gunMode == QN_GUN_NONE && nes2Ext == 0x08)
+            gunMode = QN_GUN_NES_PORT2;
+        else if (gunMode == QN_GUN_NONE && nes2Ext == 0x09)
+            gunMode = QN_GUN_TWO_NES;
+
+        s_LightGunMode = gunMode;
         s_ArkanoidVaus = false;
         s_TurboFileEnabled = false;
+        s_BattleBoxEnabled = false;
 
-        if (nes2Ext == 0x10)
+        if (s_LightGunMode == QN_GUN_NONE)
         {
-            s_ArkanoidVaus = true;
-        }
-        else if (nes2Ext == 0x21)
-        {
-            s_TurboFileEnabled = true;
-        }
-        else if (nes2Ext <= 0)
-        {
-            payloadCrc = qNesPayloadCrc32(pData, nBytes);
-            s_ArkanoidVaus = (payloadCrc == 0xD89E5A67U);
-            if (!s_ArkanoidVaus)
-                s_TurboFileEnabled = qLegacyTurboFileCrc(payloadCrc);
+            s_BattleBoxEnabled = qBattleBoxCrc(payloadCrc);
+            if (!s_BattleBoxEnabled)
+            {
+                if (nes2Ext == 0x10)
+                    s_ArkanoidVaus = true;
+                else if (nes2Ext == 0x21)
+                    s_TurboFileEnabled = true;
+                else if (nes2Ext <= 0)
+                {
+                    s_ArkanoidVaus = (payloadCrc == 0xD89E5A67U);
+                    if (!s_ArkanoidVaus)
+                        s_TurboFileEnabled = qLegacyTurboFileCrc(payloadCrc);
+                }
+            }
         }
 
         quicknes_snesticle_ext_set_turbofile(
             s_TurboFileEnabled ? 1 : 0);
         quicknes_snesticle_ext_set_arkanoid(
             s_ArkanoidVaus ? 1 : 0);
+        quicknes_snesticle_ext_set_battlebox(
+            s_BattleBoxEnabled ? 1 : 0);
+        quicknes_snesticle_ext_set_lightgun(s_LightGunMode);
         quicknes_snesticle_ext_reset_bus();
 
-        if (s_ArkanoidVaus)
+        if (s_LightGunMode != QN_GUN_NONE)
+        {
+            qResetLightGunAim();
+            const char *where =
+                s_LightGunMode == QN_GUN_FAMICOM_EXT ? "Famicom EXT" :
+                s_LightGunMode == QN_GUN_TWO_NES ? "NES ports 1+2" :
+                "NES port 2";
+            printf("[QuickNES/GUN] enabled: %s; CRC=%08X%s\n",
+                   where, (unsigned)payloadCrc,
+                   (nes2Ext == 0x08 || nes2Ext == 0x09) ? "; NES2" : "");
+        }
+        else if (s_BattleBoxEnabled)
+            printf("[QuickNES/EXT] IGS Battle Box enabled; CRC=%08X\n",
+                   (unsigned)payloadCrc);
+        else if (s_ArkanoidVaus)
             printf("[QuickNES/EXT] Famicom Vaus enabled%s%08X\n",
                    payloadCrc ? "; CRC=" : "; NES2 device=",
                    (unsigned)(payloadCrc ? payloadCrc : (Uint32)nes2Ext));
@@ -662,8 +922,13 @@ void QuicknesBridge_UnloadGame(void)
     s_GameLoaded = false;
     s_ArkanoidVaus = false;
     s_TurboFileEnabled = false; /* AURORA_CD_AUDIO_STREAM_V3_NES_UNLOAD_20260829 */
+    s_BattleBoxEnabled = false; /* AURORA_QN_BATTLEBOX_V5_20260829 */
+    s_LightGunMode = QN_GUN_NONE; /* AURORA_QN_LIGHTGUN_CURSOR_V7_20260829 */
     quicknes_snesticle_ext_set_turbofile(0);
     quicknes_snesticle_ext_set_arkanoid(0);
+    quicknes_snesticle_ext_set_battlebox(0);
+    quicknes_snesticle_ext_set_lightgun(QN_GUN_NONE);
+    qResetLightGunAim();
     qResetTransient();
 }
 
@@ -740,7 +1005,8 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
                              CRenderSurface *pTarget,
                              CMixBuffer *pMixBuf)
 {
-    const bool skipVideo = s_SkipVideoNext;
+    const bool skipVideo =
+        (s_LightGunMode == QN_GUN_NONE) ? s_SkipVideoNext : false;
     s_SkipVideoNext = false;
 
     if (!s_GameLoaded || !s_pEmu)
@@ -794,6 +1060,16 @@ void QuicknesBridge_RunFrame(Emu::SysInputT *pInput,
     {
         p1 = qMapPad(pInput->uPad[0]);
         p2 = qMapPad(pInput->uPad[1]);
+    }
+
+    if (s_LightGunMode != QN_GUN_NONE)
+    {
+        qUpdateLightGunAim(pInput);
+
+        if (s_LightGunMode == QN_GUN_NES_PORT2)
+            p2 = 0;
+        else if (s_LightGunMode == QN_GUN_TWO_NES)
+            p1 = p2 = 0;
     }
 
     /* AURORA_QN_EXT_HOST_V2_20260828: Vaus is an absolute analog device.
@@ -950,6 +1226,64 @@ bool QuicknesBridge_TurboFileDirty(void)
 void QuicknesBridge_ClearTurboFileDirty(void)
 {
     quicknes_snesticle_ext_turbofile_clear_dirty();
+}
+
+/* AURORA_QN_BATTLEBOX_V5_20260829 */
+bool QuicknesBridge_LightGunActive(void)
+{
+    return s_GameLoaded && s_LightGunMode != QN_GUN_NONE;
+}
+
+void QuicknesBridge_GetLightGunCursor(Int32 *x, Int32 *y)
+{
+    if (x) *x = s_GunX >> 8;
+    if (y) *y = s_GunY >> 8;
+}
+
+void QuicknesBridge_DrawLightGunCursor(Int32 logicalY)
+{
+    if (!QuicknesBridge_LightGunActive())
+        return;
+
+    Int32 x = s_GunX >> 8;
+    Int32 y = (s_GunY >> 8) + logicalY;
+    const Uint32 black = 0x80000000u;
+    const Uint32 white = 0x80FFFFFFu;
+    const Uint32 z = 9u << 4;
+
+    GPPrimRect((Uint32)(x - 6) << 4, (Uint32)y << 4, black,
+               (Uint32)(x + 7) << 4, (Uint32)(y + 1) << 4, black, z, 0);
+    GPPrimRect((Uint32)x << 4, (Uint32)(y - 6) << 4, black,
+               (Uint32)(x + 1) << 4, (Uint32)(y + 7) << 4, black, z, 0);
+    GPPrimRect((Uint32)(x - 5) << 4, (Uint32)y << 4, white,
+               (Uint32)(x + 6) << 4, (Uint32)(y + 1) << 4, white, z, 0);
+    GPPrimRect((Uint32)x << 4, (Uint32)(y - 5) << 4, white,
+               (Uint32)(x + 1) << 4, (Uint32)(y + 6) << 4, white, z, 0);
+}
+
+bool QuicknesBridge_BattleBoxEnabled(void)
+{
+    return s_BattleBoxEnabled;
+}
+
+int QuicknesBridge_GetBattleBoxBytes(void)
+{
+    return 0x0200;
+}
+
+uint8_t *QuicknesBridge_GetBattleBoxData(void)
+{
+    return quicknes_snesticle_ext_battlebox_data();
+}
+
+bool QuicknesBridge_BattleBoxDirty(void)
+{
+    return quicknes_snesticle_ext_battlebox_dirty() != 0;
+}
+
+void QuicknesBridge_ClearBattleBoxDirty(void)
+{
+    quicknes_snesticle_ext_battlebox_clear_dirty();
 }
 
 unsigned QuicknesBridge_GetSampleRate(void)

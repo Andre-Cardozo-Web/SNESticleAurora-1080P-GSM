@@ -537,6 +537,18 @@ void _MainLoopInputProcess(Uint32 buttons)
 		}
 	}
 
+	/* AURORA_QN_LIGHTGUN_TIMING_V7_2_20260829
+	 * Light-gun-only false/off-screen shot. L2+Square has no normal release
+	 * hotkey, but consume it here so generic L2 menu/debug handling cannot
+	 * piggyback on the same press. QuickNES reads the raw PS2 snapshot itself. */
+	if (!_bMenu && QuicknesBridge_LightGunActive() &&
+	    (buttons & (PAD_L2 | PAD_SQUARE)) == (PAD_L2 | PAD_SQUARE))
+	{
+		_MenuTriggerTimeout[0] = 0;
+		_MenuTriggerTimeout[1] = 0;
+		return;
+	}
+
 	/* AURORA_FCEUMM_FDS_V0_6_SIDE_SWAP
 	 * FDS-only frontend hotkey. Eject immediately; the bridge counts 60
 	 * emulated FDS frames without blocking the EE thread, flips A<->B on the

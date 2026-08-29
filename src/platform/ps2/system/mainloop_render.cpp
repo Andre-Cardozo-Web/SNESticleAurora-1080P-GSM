@@ -564,6 +564,13 @@ void MainLoopRender()
     
             PolyBlend(TRUE);
         }
+
+        /* AURORA_QN_LIGHTGUN_OVERLAY_V7_20260829
+         * Post-frame overlay: never enters the QuickNES sensor framebuffer. */
+        if (_pSystem == _pNes && QuicknesBridge_LightGunActive())
+            QuicknesBridge_DrawLightGunCursor(
+                g_GskVideoMode == GSK_VIDMODE_240P ? 2 : 4);
+
         //PolyTexture(NULL);
         //PolyRect(dx,dy,128,120);
     }

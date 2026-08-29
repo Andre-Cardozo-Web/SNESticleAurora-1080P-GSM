@@ -3,7 +3,6 @@
 **SNESticle Aurora** is a PlayStation 2 emulator fork maintained by **@itsveenee**, focused on 240p CRT output, real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
 
 SNESticle Aurora is based on **SNESticle Revive by @ReyFxck (Thomas R.)**, whose work brought SNESticle back into active development, and ultimately on the original **SNESticle by Icer Addis**.
-
 **Huge thanks to @ReyFxck** for his work on SNESticle Revive and for providing the foundation from which Aurora was created. **Huge thanks to Icer Addis** for creating the original SNESticle and its codebase.
 
 <!-- AURORA_CORE_NOTICES_V6_20260824 -->
@@ -58,7 +57,9 @@ Emulation:
 * Turbo button toggle (hold R2+ANY BUTTON) for SNES and MD games
 * In-game soft reset (L2+SELECT)
 * SNES and MD mouse emulation
-* Famicom ASCII Turbofile
+* ASCII Turbofile for Famicom and Super Famicom (accessory for many ASCII games)
+* Battle Box for Famicom (accessory for Armadillo)
+* Arkanoid Pad for Famicom (accessory for Arkanoid and Arkanoid II)
 * Region selector
 
 User interface:
@@ -95,8 +96,8 @@ CD firmware and images **(experimental)**
 
 **TO BE FIXED:**
 
-* PC Engine CD and Sega CD audio playback performance fix
-* SMB (ethernet crossover cable) connection fix
+* PC Engine CD and Sega CD audio playback performance
+* SMB (ethernet crossover cable) connection
 * Super Mario World 2 (SNES) performance
 * The Lost Vikings 1 and 2 (SNES) black screen
 * Addams Family (SNES) graphical glitches and timing issues
@@ -107,7 +108,8 @@ CD firmware and images **(experimental)**
 
 **TO BE ADDED:**
 
-* SA-1 Emulation
+* NES Zapper / Famicom Light Gun
+* SNES SA-1 Emulation
 * Improve FX1 and FX2 emulation
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!
 

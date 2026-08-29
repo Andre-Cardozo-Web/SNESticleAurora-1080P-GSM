@@ -3,7 +3,13 @@
 #define _SNQUEUE_H
 
 #define SNQUEUE_SIZE (512)
+#define SNPPU_QUEUE_SIZE (4096)
 
+/* AURORA_REVIVE_005CEE_PPU_RING_20260829
+ * Revive 005cee6d6731: mantém as filas SPC com 512 entradas, mas dá ao PPU
+ * uma fila circular dedicada de 4096. Jogos raster/HDMA pesados podem emitir
+ * milhares de writes por frame; evitar o "full" elimina SyncPPU forçado sem
+ * mudar ordem, ciclo ou conteúdo de nenhum write. */
 struct SNQueueElementT
 {
 	Uint32	uCycle;
@@ -12,86 +18,77 @@ struct SNQueueElementT
 	Uint8	uPad;
 };
 
-class SNQueue
+template <Int32 t_nSize>
+class SNQueueT
 {
 public:
-    SNQueue() 
+    SNQueueT()
     {
         Reset();
     }
 
 	inline void Reset()
 	{
-		m_iHead = m_iTail = 0;
+		m_iHead = m_iTail = m_nCount = 0;
 	}
 
 	inline Bool IsEmpty()
 	{
-		return m_iHead == m_iTail;
+		return m_nCount == 0;
 	}
 
 	inline Bool Enqueue(Uint32 uCycle, Uint32 uAddr, Uint8 uData)
 	{
-		if (IsEmpty())
+		if (m_nCount < t_nSize)
 		{
-			Reset();
-		}
+			SNQueueElementT *pElement = &m_Elements[m_iTail];
+			if (++m_iTail == t_nSize)
+				m_iTail = 0;
+			m_nCount++;
 
-		/* AURORA_QUEUE_COMPACT_V1
-		 * m_iHead advances as writes are consumed, but the original linear
-		 * queue could still report "full" when m_iTail reached 512 even if
-		 * many slots at the front were already free. Compact only at that
-		 * boundary. FIFO order and the maximum number of pending writes
-		 * remain unchanged; this merely avoids a needless forced sync. */
-		if (m_iTail >= SNQUEUE_SIZE && m_iHead > 0)
-		{
-			Int32 nRemain = m_iTail - m_iHead;
-			for (Int32 i = 0; i < nRemain; ++i)
-				m_Elements[i] = m_Elements[m_iHead + i];
-			m_iHead = 0;
-			m_iTail = nRemain;
-		}
-
-		if (m_iTail < SNQUEUE_SIZE)
-		{
-			SNQueueElementT *pElement = &m_Elements[m_iTail++];
-
-			// enqueue write
 			pElement->uCycle = uCycle;
 			pElement->uAddr  = uAddr;
 			pElement->uData = uData;
 			return TRUE;
-		} else
-		{
-			// write cannot be enqueued, buffer genuinely full
-			return FALSE;
 		}
+
+		return FALSE;
 	}
 
-	inline SNQueueElementT	*Dequeue(Uint32 uCycle)
+	inline SNQueueElementT *Dequeue(Uint32 uCycle)
 	{
-		// dequeue element only if it is earlier than cycle time given
-		if (m_iHead < m_iTail && (uCycle > m_Elements[m_iHead].uCycle))
+		if (m_nCount > 0 && (uCycle > m_Elements[m_iHead].uCycle))
 		{
-			return &m_Elements[m_iHead++];
+			SNQueueElementT *pElement = &m_Elements[m_iHead];
+			if (++m_iHead == t_nSize)
+				m_iHead = 0;
+			m_nCount--;
+			return pElement;
 		}
 		return NULL;
  	}
 
-	inline SNQueueElementT	*Dequeue()
+	inline SNQueueElementT *Dequeue()
 	{
-		if (m_iHead < m_iTail)
+		if (m_nCount > 0)
 		{
-			return &m_Elements[m_iHead++];
+			SNQueueElementT *pElement = &m_Elements[m_iHead];
+			if (++m_iHead == t_nSize)
+				m_iHead = 0;
+			m_nCount--;
+			return pElement;
 		}
 		return NULL;
 	}
 
 private:
-    Int32			m_iHead;	// current read position within write queue
-    Int32			m_iTail;	// current write position within write queue
-    SNQueueElementT	m_Elements[SNQUEUE_SIZE];
-
+    Int32			m_iHead;
+    Int32			m_iTail;
+	Int32			m_nCount;
+	SNQueueElementT	m_Elements[t_nSize];
 };
+
+typedef SNQueueT<SNQUEUE_SIZE> SNQueue;
+typedef SNQueueT<SNPPU_QUEUE_SIZE> SNPPUQueue;
 
 #endif

@@ -3146,9 +3146,9 @@ def patch_v14_libretro(text: str) -> str:
 \t/* AURORA_FCEUMM_FDS_V14_SAFE_MASTER_20260827
 \t * The pinned frontend's late SoundToggle forces the core from its
 \t * pre-load 256 down to an old hard-coded 100. Use a conservative
-\t * master of 150 here; Aurora's shared NES 0..200 control remains
+\t * master of 114 here; Aurora's shared NES 0..200 control remains
 \t * the user-facing gain stage for QuickNES and FDS. */
-\tFCEUI_SetSoundVolume(150);
+\tFCEUI_SetSoundVolume(114);
 """
 
     if old not in text:
@@ -3602,7 +3602,7 @@ def patch_v4_zip_libretro(text: str) -> str:
 \tif (GameInfo) {
 \t\temulator_set_input();
 \t\temulator_set_custom_palette();
-\t\tFCEUI_SetSoundVolume(150);
+\t\tFCEUI_SetSoundVolume(114);
 \t}
 }
 

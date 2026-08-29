@@ -50,6 +50,17 @@ int QuicknesBridge_GetTurboFileBytes(void);
 uint8_t *QuicknesBridge_GetTurboFileData(void);
 bool QuicknesBridge_TurboFileDirty(void);
 void QuicknesBridge_ClearTurboFileDirty(void);
+/* AURORA_QN_BATTLEBOX_V5_20260829 */
+/* AURORA_QN_LIGHTGUN_CURSOR_V7_20260829 */
+bool QuicknesBridge_LightGunActive(void);
+void QuicknesBridge_GetLightGunCursor(Int32 *x, Int32 *y);
+void QuicknesBridge_DrawLightGunCursor(Int32 logicalY);
+
+bool QuicknesBridge_BattleBoxEnabled(void);
+int QuicknesBridge_GetBattleBoxBytes(void);
+uint8_t *QuicknesBridge_GetBattleBoxData(void);
+bool QuicknesBridge_BattleBoxDirty(void);
+void QuicknesBridge_ClearBattleBoxDirty(void);
 unsigned QuicknesBridge_GetSampleRate(void);
 
 #endif

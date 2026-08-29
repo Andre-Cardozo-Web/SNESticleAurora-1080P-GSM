@@ -61,6 +61,7 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 	SNMaskT *pAddSubMask, Bool bAddSubMask)
 {
 	SNMaskT ObjMask;
+	SNMaskT PriorityMask[4];
 	Int32 iWord;
 
 	if (nObjLine <= 0)
@@ -77,13 +78,22 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 	   (o caso quente). Somente os dois recortes de borda usam o caminho por
 	   pixel, evitando tanto o acesso fora do buffer quanto uma regressao de
 	   desempenho para todos os OBJ da scanline. */
-	for (iWord = 0; iWord < 8; iWord++)
-	{
-		Uint32 uMask = pWindow ? pWindow->uMask32[iWord] : 0;
-		if (pMask)
-			uMask |= pMask->uMask32[iWord];
-		ObjMask.uMask32[iWord] = uMask;
-	}
+	/* AURORA_REVIVE_A06DD_OBJ_HOTPATH_20260829
+	 * Revive a06dd0719853: usa as operações SNMask/MMI já inline no EE e
+	 * calcula as combinações de prioridade uma única vez por scanline. */
+	if (pWindow)
+		SNMaskCopy(&ObjMask, pWindow);
+	else
+		SNMaskClear(&ObjMask);
+	if (pMask)
+		SNMaskOR(&ObjMask, &ObjMask, pMask);
+
+	SNMaskOR(&PriorityMask[0], &pLine[SNPPU_BGPLANE_LAYER0],
+		&pLine[SNPPU_BGPLANE_LAYER1]);
+	SNMaskCopy(&PriorityMask[1], &pLine[SNPPU_BGPLANE_LAYER1]);
+	SNMaskAND(&PriorityMask[2], &pLine[SNPPU_BGPLANE_LAYER0],
+		&pLine[SNPPU_BGPLANE_LAYER1]);
+	SNMaskClear(&PriorityMask[3]);
 
 	while (--nObjLine >= 0)
 	{
@@ -98,6 +108,8 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 
 		if (!uOpaque || iPosX <= -8 || iPosX >= 256)
 			continue;
+
+		const SNMaskT *pPriorityMask = &PriorityMask[uPri];
 
 #if SNDBG_DEEP
 		g_DbgObjCandidatePixels += _ObjCountBits8(uOpaque);
@@ -124,30 +136,9 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 			if (uMask1)
 				ObjMask.uMask32[iWord + 1] |= uMask1;
 
-			switch (uPri)
-			{
-			case 0:
-				uBlocked0 |= pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord] |
-				             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord];
-				if (uMask1)
-					uBlocked1 |= pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord + 1] |
-					             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord + 1];
-				break;
-			case 1:
-				uBlocked0 |= pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord];
-				if (uMask1)
-					uBlocked1 |= pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord + 1];
-				break;
-			case 2:
-				uBlocked0 |= pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord] &
-				             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord];
-				if (uMask1)
-					uBlocked1 |= pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord + 1] &
-					             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord + 1];
-				break;
-			case 3:
-				break;
-			}
+			uBlocked0 |= pPriorityMask->uMask32[iWord];
+			if (uMask1)
+				uBlocked1 |= pPriorityMask->uMask32[iWord + 1];
 
 			uMask0 &= ~uBlocked0;
 			uMask1 &= ~uBlocked1;
@@ -221,22 +212,7 @@ void _SnesPPURenderOBJ8(Uint8 *pLine8, SNMaskT *pLine,
 				uBlocked = ObjMask.uMask32[iWord] & uBit;
 				ObjMask.uMask32[iWord] |= uBit;
 
-				switch (uPri)
-				{
-				case 0:
-					uBlocked |= (pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord] |
-					             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord]) & uBit;
-					break;
-				case 1:
-					uBlocked |= pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord] & uBit;
-					break;
-				case 2:
-					uBlocked |= (pLine[SNPPU_BGPLANE_LAYER0].uMask32[iWord] &
-					             pLine[SNPPU_BGPLANE_LAYER1].uMask32[iWord]) & uBit;
-					break;
-				case 3:
-					break;
-				}
+				uBlocked |= pPriorityMask->uMask32[iWord] & uBit;
 
 				if (uBlocked)
 					continue;

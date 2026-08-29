@@ -4,6 +4,7 @@
 #include <string.h>
 #include "types.h"
 #include "snrom.h"
+#include "snio.h"
 #include "dataio.h"
 #include "sndbglog.h"
 Uint32 g_FakeSRAMSize = 0;
@@ -1079,6 +1080,12 @@ Emu::Rom::LoadErrorE SnesRom::LoadRom(CDataIO *pFileIO, Uint8 *pBuffer, Uint32 n
 			pHiCartInfo = GetCartInfo(65472);
 		}
 	}
+
+	/* AURORA_SNES_TURBOFILE_V4_20260829
+	 * Exact normalized/headerless CRC, before compatibility patching. */
+	SnesTurboFileSelectForCRC(
+		(m_pRomData && m_uRomBytes)
+			? _SNRomRuntimeCRC32(m_pRomData, m_uRomBytes) : 0);
 
 	/* AURORA_UPSTREAM_20260827_DSP1_OP28_REVISION_V1
 	 * Identify the untouched normalized/headerless image before any Aurora

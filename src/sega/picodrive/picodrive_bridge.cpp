@@ -601,12 +601,23 @@ static int16_t pdJoyMask(unsigned port)
 
     if (port == 0 && s_MouseActive)
     {
-        /* AURORA_PD_HOST_JOYMASK_BITWISE_V1_20260826
-         * Exact branchless form of:
-         *   mouse bit 0 -> libretro B bit 0
-         *   mouse bit 1 -> libretro A bit 8 */
+        /* AURORA_IRIXXXX_922543_MOUSE_BUTTONS_20260829
+         * irixxxx 922543cd, adapted to Aurora's native two-pad fast path:
+         *   bit 0 / left   -> libretro B     -> Mega Mouse B
+         *   bit 1 / right  -> libretro A     -> Mega Mouse C
+         *   bit 2 / middle -> libretro Start -> Mega Mouse Start
+         *   bit 3 / btn4   -> libretro Y     -> Mega Mouse A
+         *
+         * Sega Pico is deliberately left on its existing glue semantics.
+         * That hardware needs the separate pen-device model from the upstream
+         * commit, not an accidental Mega Mouse button reinterpretation. */
         m = (s_MouseButtons & 1u) |
             ((s_MouseButtons & 2u) << 7);
+        if (!(PicoIn.AHW & PAHW_PICO))
+        {
+            m |= ((s_MouseButtons & 4u) << 1);
+            m |= ((s_MouseButtons & 8u) >> 2);
+        }
         return (int16_t)m;
     }
 
@@ -1558,7 +1569,7 @@ void PicoDriveBridge_SetRegion(int auroraRegion)
 void PicoDriveBridge_SetMouseInput(bool active, int dx, int dy, unsigned buttons)
 {
     s_MouseActive = active;
-    s_MouseButtons = buttons & 3u;
+    s_MouseButtons = buttons & 0x0fu;
 
     if (!active)
         return;

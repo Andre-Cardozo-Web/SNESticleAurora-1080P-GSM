@@ -21,6 +21,25 @@
 
 #define SNESIO_DEVICE_NUM 5
 
+/* AURORA_SNES_TURBOFILE_V4_20260829
+ * One physical ASCII Turbo File Twin on controller port 2.
+ * The Twin can be switched between STF and backward-compatible TFII mode. */
+typedef enum SnesTurboFileModeE
+{
+	SNES_TURBOFILE_NONE = 0,
+	SNES_TURBOFILE_TWIN_TFII,
+	SNES_TURBOFILE_TWIN_STF
+} SnesTurboFileModeE;
+
+void SnesTurboFileSelectForCRC(Uint32 crc);
+void SnesTurboFileResetBus(void);
+Bool SnesTurboFileEnabled(void);
+SnesTurboFileModeE SnesTurboFileGetMode(void);
+Int32 SnesTurboFileGetBytes(void);
+Uint8 *SnesTurboFileGetData(void);
+Bool SnesTurboFileDirty(void);
+void SnesTurboFileClearDirty(void);
+
 struct SnesIORegsT
 {
 	SnesReg16T  	wrdiv;

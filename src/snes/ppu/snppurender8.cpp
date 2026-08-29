@@ -1336,7 +1336,10 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 		Uint32 uRow  = ((pObj->uTile >> 4) + (ObjY >> 3)) & 0x0F;
 		Uint32 uCol0 = pObj->uTile & 0x0F;
 		Uint32 uYoff = ObjY & 7;
-		Int32  iTileX = 0;
+		Int32 iTileX;
+		Int32 nTileCount;
+		Int32 iCol;
+		Int32 iColStep;
 		/* AURORA_OBJ_PALETTE_HOIST_V1 */
 		Uint32 uPalette = _SnesPPU_Obj4PalLookup[pObj->uPal];
 
@@ -1382,13 +1385,26 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 		}
 #endif
 
+		/* AURORA_REVIVE_A06DD_OBJ_HOTPATH_20260829
+		 * Recorta a faixa uma vez e elimina teste/source-column por tile. */
+		_SnesPPUOBJCountedTileRange(pObj->uPosX, ObjX, pObj->uWidth,
+			&iTileX, &nTileCount);
+		ObjX += iTileX << 3;
+		uSize = (Uint32)nTileCount << 3;
+		if (pObj->bHFlip)
+		{
+			iCol = (pObj->uWidth >> 3) - 1 - iTileX;
+			iColStep = -1;
+		}
+		else
+		{
+			iCol = iTileX;
+			iColStep = 1;
+		}
+
 		while (uSize > 0)
 		{
-			if (_SnesPPUOBJTileCountedX(pObj->uPosX, ObjX))
 			{
-				Int32 iCol = _SnesPPUOBJSourceColumn(iTileX,
-				                                           pObj->uWidth,
-				                                           pObj->bHFlip);
 				uTile = (uRow << 4) | ((uCol0 + iCol) & 0x0F);
 				uTileAddr = uBaseAddr + uTile * 16;
 				if (bSecondTable)
@@ -1472,7 +1488,7 @@ static Int32 _FetchOBJ(SnesRenderObjT *pObjBase, Uint8 *pObjList, Int32 nObjList
 			   hardware stops at the 34-tile scanline limit. */
 			ObjX += 8;
 			uSize -= 8;
-			iTileX++;
+			iCol += iColStep;
 		}
 		}
 

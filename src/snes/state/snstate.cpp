@@ -625,6 +625,8 @@ void SnesIO::RestoreState(struct SNStateIOT *pState)
 {
 	m_Input = pState->Input;
 	m_Regs = pState->Regs;
+	/* External battery memory is not part of the legacy state payload. */
+	SnesTurboFileResetBus();
 }
 
 void SNSpcIO::SaveState(struct SNStateSPCIOT *pState)
@@ -675,6 +677,14 @@ void SnesPPU::RestoreState(struct SNStatePPUT *pState)
 	memcpy(m_VRAM,    pState->m_VRAM,  sizeof(m_VRAM));
 	m_OAM = pState->m_OAM;
 	m_OAMLatch = 0;
+#if SNPPU_WRITEQUEUE
+	/* AURORA_PPU_STATE_QUEUE_RESET_V6_2_20260829
+	 * m_Queue is transient scheduler state and is intentionally absent from
+	 * SNStatePPUT. Never let pending writes from the timeline being replaced
+	 * survive a state load. Keep the legacy state payload byte-for-byte
+	 * unchanged, matching the existing policy for transient DMAC phases. */
+	m_Queue.Reset();
+#endif
 	m_pRender->UpdateVRAMRange(0, SNESPPU_VRAM_NUMWORDS);
 	UpdateOAMPriority();
 }

@@ -149,7 +149,7 @@ static _INLINE Bool SnesHDMATryQueuePPUWrite(
     if (uPortB < 0x40)
     {
         return pPPU->EnqueueWrite(
-            uLine, 0x2100u | (Uint32)uPortB, uData);
+            uLine, 0x2100u | (Uint32)uPortB, uData, FALSE);
     }
 
     return FALSE;
