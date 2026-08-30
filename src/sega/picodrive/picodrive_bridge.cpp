@@ -55,6 +55,8 @@ void PicoDriveAurora_SetCdAudioSafeWindow(int allowed);
 int PicoDriveAurora_ConsumeCdAudioRefillRequest(void);
 /* AURORA_EXTREME_CD_VIDEO_FIRST_V2_20260830 */
 int PicoDriveAurora_PrefetchCdAudio(void);
+/* AURORA_V4_17_SAFE_CD_GAME_SWITCH_QUIESCE_20260830 */
+int PicoDriveAurora_PrepareGameSwitch(void);
 /* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
 void PicoDriveAurora_SetCdMusicEnabled(int enabled);
 int PicoDriveAurora_CdMusicEnabled(void);
@@ -1776,6 +1778,19 @@ bool PicoDriveBridge_Is32X(void)
 bool PicoDriveBridge_IsSegaCD(void)
 {
     return s_GameLoaded && ((PicoIn.AHW & PAHW_MCD) != 0);
+}
+
+/* AURORA_V4_17_SAFE_CD_GAME_SWITCH_QUIESCE_20260830
+ * Non-CD systems have no private CDDA transport to retire.  For Sega CD,
+ * native code performs a bounded poll/close barrier and returns false rather
+ * than allowing teardown to block on an in-flight fileXio READ. */
+bool PicoDriveBridge_PrepareGameSwitch(void)
+{
+    if (!s_Initialized || !s_GameLoaded ||
+        ((PicoIn.AHW & PAHW_MCD) == 0))
+        return true;
+
+    return PicoDriveAurora_PrepareGameSwitch() != 0;
 }
 
 bool PicoDriveBridge_IsMegaDrive(void)

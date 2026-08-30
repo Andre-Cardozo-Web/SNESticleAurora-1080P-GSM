@@ -1620,6 +1620,15 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     if (MainLoopSramSaveBusy())
         return FALSE;
 
+    /* AURORA_V4_17_SAFE_CD_GAME_SWITCH_QUIESCE_20260830
+     * Browser launches normally already passed this barrier.  Keep the same
+     * safety property for any other caller of _MainLoopExecuteFile(). */
+    if (!PicoDriveBridge_PrepareGameSwitch())
+    {
+        MainLoopStatusPrintf(120, "Sega CD I/O busy; try again.");
+        return FALSE;
+    }
+
     _MainLoopUnloadRom();
 
 #if MAINLOOP_HISTORY

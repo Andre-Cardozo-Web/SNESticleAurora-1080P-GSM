@@ -91,17 +91,16 @@ CD firmware and images **(experimental)**
 **FIXED:**
 
 * PC Engine video modes (Ninja Spirits, Aoi Blink, Toumaden, more)
-* Krazy Creatures (NES) minor graphical glitches
 * Pilotwings (SNES) mode 7 rendering, also fixes other games that rely on it
 * Speedy Gonzales in Los Gatos Banditos (SNES) performance *(with special safe frameskip)*
 * Top Gear (SNES) performance *(with special safe frameskip)*
 * Many other graphical glitches and inaccuracies on many NES, SNES, PCE and SEGA games
 
-
 **TO BE FIXED:**
 
-* PC Engine CD and Sega CD audio playback performance
+* PC Engine CD and Sega CD audio playback performance *(a lot has been improved, though)*
 * SMB (ethernet crossover cable) connection
+* Krazy Creatures (NES) minor graphical glitches
 * Super Mario World 2 (SNES) performance
 * The Lost Vikings 1 and 2 (SNES) black screen
 * Addams Family (SNES) graphical glitches and timing issues
@@ -109,10 +108,14 @@ CD firmware and images **(experimental)**
 * Sonic Blast Man (SNES) wrong colors
 * Any other games with performance or graphical issues
 
-
 **TO BE ADDED:**
 
 * SNES SA-1 Emulation
 * Improve FX1 and FX2 emulation
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!
 
+
+## Special thanks
+
+* Pavel (@eXo12): invaluable beta testing, feedbacks and motivation which helped me immensely. Thanks!
+* Aurora: it's a secret to everybody.

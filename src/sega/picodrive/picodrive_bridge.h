@@ -53,6 +53,9 @@ void PicoDriveBridge_Set32xAudioSacrifice(bool sacrifice);
 bool PicoDriveBridge_Is32X(void);
 /* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */
 bool PicoDriveBridge_IsSegaCD(void);
+/* AURORA_V4_17_SAFE_CD_GAME_SWITCH_QUIESCE_20260830
+ * Bounded preflight before destroying a live Sega CD core. */
+bool PicoDriveBridge_PrepareGameSwitch(void);
 /* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830
  * Separate from SetSkipVideo(): cadence discard is NOT an I/O window. */
 void PicoDriveBridge_SetCdAudioSafeWindow(bool allowed);

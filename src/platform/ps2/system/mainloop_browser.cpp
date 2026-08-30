@@ -10,6 +10,7 @@
 #include "mainloop_ui.h"
 #include "mainloop_bgm.h"
 #include "mainloop_menu.h" /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */
+#include "sega/picodrive/picodrive_bridge.h" /* AURORA_V4_17_SAFE_CD_GAME_SWITCH_QUIESCE_20260830 */
 
 extern "C" {
 #include "audio.h"
@@ -35,6 +36,19 @@ int _MainLoopBrowserEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
                                  * Ignore silently before BGM/audio/core teardown. */
                                 if (MainLoopSramSaveBusy())
                                         return 1;
+
+                                /* AURORA_V4_17_SAFE_CD_GAME_SWITCH_QUIESCE_20260830
+                                 * Do not mute BGM/audio or destroy any core until
+                                 * Sega CD's private CDDA RPC transport is idle.
+                                 * The helper is bounded; a pathological read
+                                 * becomes a harmless retry instead of a freeze. */
+                                if (!PicoDriveBridge_PrepareGameSwitch())
+                                {
+                                        MainLoopStatusPrintf(
+                                                120,
+                                                "Sega CD I/O busy; try again.");
+                                        return 1;
+                                }
 
                                 /* Antes do load (que bloqueia a EE por mais
                                    tempo que o ring de ~107ms do audsrv): para
