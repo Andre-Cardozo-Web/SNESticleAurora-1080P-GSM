@@ -558,6 +558,7 @@ LIBS := \
 
 SRCS := \
     src/platform/ps2/ps2sdk_stubs.c \
+    src/platform/ps2/system/cdda_async_filexio.c \
 	src/common/media/bmpfile.cpp \
 	src/platform/ps2/cdvd/cd.c \
 	src/modules/cdvd/cdvd_rpc.c \
@@ -1976,3 +1977,5 @@ ensure-local-ps2-packer:
 
 # AURORA_SMB_IOP_STACK_V3_20260827
 
+
+# AURORA_V4_12_PRIVATE_FILEXIO_CDDA_PCE_TOC2CUE_20260830

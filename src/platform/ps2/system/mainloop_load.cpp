@@ -200,6 +200,117 @@ static Bool _MainLoopLooksLikeMegaDriveVectors(
     return TRUE;
 }
 
+/* AURORA_PCE_CDRDAO_TOC_SUPPORT_V4_8_20260830
+ *
+ * Load-time-only syntax sniff. cdrdao TOC and MMC CUE are different
+ * grammars even when somebody has accidentally named the TOC ".cue".
+ *
+ * Strong TOC-only signatures:
+ *   CD_ROM / CD_DA / CD_ROM_XA
+ *   DATAFILE / AUDIOFILE / ZERO
+ *   TRACK <format>        (cdrdao)
+ * versus CUE:
+ *   TRACK <number> <format>
+ *
+ * No frame-time checks and no HuCard path changes.
+ */
+static Bool _MainLoopLooksLikeCdrdaoToc(const char *pPath)
+{
+    FILE *fp;
+    char line[1024];
+    int lines = 0;
+
+    if (!pPath || !*pPath)
+        return FALSE;
+
+    if (_MainLoopSegaExtEquals(pPath, "toc"))
+        return TRUE;
+
+    fp = fopen(pPath, "rb");
+    if (!fp)
+        return FALSE;
+
+    while (lines++ < 48 && fgets(line, sizeof(line), fp))
+    {
+        char *p = line;
+        char token[64];
+        char *comment;
+
+        if (lines == 1 &&
+            (unsigned char)p[0] == 0xEF &&
+            (unsigned char)p[1] == 0xBB &&
+            (unsigned char)p[2] == 0xBF)
+            p += 3;
+
+        while (*p == ' ' || *p == '\t' ||
+               *p == '\r' || *p == '\n')
+            ++p;
+
+        comment = strstr(p, "//");
+        if (comment)
+            *comment = '\0';
+
+        if (!*p)
+            continue;
+
+        if (!strncasecmp(p, "CD_ROM", 6) &&
+            (p[6] == '\0' || p[6] == ' ' || p[6] == '\t' ||
+             p[6] == '\r' || p[6] == '\n'))
+        {
+            fclose(fp);
+            return TRUE;
+        }
+        if (!strncasecmp(p, "CD_DA", 5) &&
+            (p[5] == '\0' || p[5] == ' ' || p[5] == '\t' ||
+             p[5] == '\r' || p[5] == '\n'))
+        {
+            fclose(fp);
+            return TRUE;
+        }
+        if (!strncasecmp(p, "CD_ROM_XA", 9) &&
+            (p[9] == '\0' || p[9] == ' ' || p[9] == '\t' ||
+             p[9] == '\r' || p[9] == '\n'))
+        {
+            fclose(fp);
+            return TRUE;
+        }
+
+        if (!strncasecmp(p, "DATAFILE", 8) &&
+            (p[8] == ' ' || p[8] == '\t'))
+        {
+            fclose(fp);
+            return TRUE;
+        }
+        if (!strncasecmp(p, "AUDIOFILE", 9) &&
+            (p[9] == ' ' || p[9] == '\t'))
+        {
+            fclose(fp);
+            return TRUE;
+        }
+        if (!strncasecmp(p, "ZERO", 4) &&
+            (p[4] == ' ' || p[4] == '\t'))
+        {
+            fclose(fp);
+            return TRUE;
+        }
+
+        if (!strncasecmp(p, "TRACK", 5) &&
+            (p[5] == ' ' || p[5] == '\t'))
+        {
+            token[0] = '\0';
+            if (sscanf(p + 5, "%63s", token) == 1 &&
+                (token[0] < '0' || token[0] > '9'))
+            {
+                fclose(fp);
+                return TRUE;
+            }
+        }
+    }
+
+    fclose(fp);
+    return FALSE;
+}
+
 static Bool _MainLoopSegaWantsNative320(
     const Uint8 *pData, Int32 nBytes, const char *pName)
 {
@@ -599,6 +710,9 @@ Bool _MainLoopLoadSnesPalette(const char *pFileName)
 }
 
 
+/* AURORA_V4_12_PRIVATE_FILEXIO_CDDA_PCE_TOC2CUE_20260830 */
+static char s_PceCdrdaoTempCue[1024];
+
 void _MainLoopUnloadRom()
 {
     /* AURORA_AUDIO_HARDCUT_ROM_UNLOAD_V1 */
@@ -644,6 +758,12 @@ void _MainLoopUnloadRom()
 	if (_pPce) _pPce->SetRom(NULL);
 	if (_pPceRom) _pPceRom->Unload();
 
+    if (s_PceCdrdaoTempCue[0])
+    {
+        remove(s_PceCdrdaoTempCue);
+        s_PceCdrdaoTempCue[0] = 0;
+    }
+
     /* The cores are detached now; release ROM RAM before gsKit reallocates. */
     _MainLoopFreeRomBuffer();
 
@@ -673,6 +793,410 @@ void _MainLoopUnloadRom()
 
 }
 
+/* AURORA_V4_12_PRIVATE_FILEXIO_CDDA_PCE_TOC2CUE_20260830 */
+typedef struct AuroraPceTocTrack
+{
+    char cueType[16];
+    char dataFile[768];
+    long fileOffsetBytes;
+    long dataSectors;
+    int hasOffset;
+    int generatedPregap;
+    int startSectors;
+    int hasStart;
+    int haveData;
+} AuroraPceTocTrack;
+
+static int _MainLoopPceParseMsf(const char *s)
+{
+    unsigned m, sec, f;
+    if (!s || sscanf(s, "%u:%u:%u", &m, &sec, &f) != 3 ||
+        sec > 59 || f > 74)
+        return -1;
+    return (int)((m * 60u + sec) * 75u + f);
+}
+
+static void _MainLoopPceFormatMsf(long sectors,
+                                  char *out, size_t outBytes)
+{
+    long m, sec, f;
+    if (sectors < 0) sectors = 0;
+    m = sectors / (60 * 75);
+    sectors %= 60 * 75;
+    sec = sectors / 75;
+    f = sectors % 75;
+    snprintf(out, outBytes, "%02ld:%02ld:%02ld", m, sec, f);
+}
+
+static const char *_MainLoopPceTocToken(const char *p,
+                                        char *out, size_t outBytes)
+{
+    size_t n = 0;
+    if (!p || !out || !outBytes)
+        return NULL;
+
+    while (*p == ' ' || *p == '\t')
+        ++p;
+
+    if (*p == '"')
+    {
+        ++p;
+        while (*p && *p != '"')
+        {
+            if (n + 1 < outBytes)
+                out[n++] = *p;
+            ++p;
+        }
+        if (*p == '"') ++p;
+    }
+    else
+    {
+        while (*p && *p != ' ' && *p != '\t' &&
+               *p != '\r' && *p != '\n')
+        {
+            if (n + 1 < outBytes)
+                out[n++] = *p;
+            ++p;
+        }
+    }
+
+    out[n] = 0;
+    return p;
+}
+
+static Bool _MainLoopBuildPceCueFromCdrdao(
+    const char *pTocPath,
+    const char *pSystemDirectory,
+    char *pOutCue,
+    size_t nOutCue)
+{
+    AuroraPceTocTrack tr[99];
+    FILE *in = NULL, *out = NULL;
+    char line[1536];
+    char commonFile[768];
+    char binPath[1024];
+    char tocDir[1024];
+    int trackCount = 0;
+    int active = -1;
+    long expectedOffset = 0;      /* cdrdao virtual byte cursor */
+    long generatedGapBytes = 0;
+    long physicalCueSectors = 0;
+    long actualBinBytes = -1;
+    Bool compactGeneratedGaps = FALSE;
+    const char *slash;
+    int i;
+    Bool ok = FALSE;
+
+    memset(tr, 0, sizeof(tr));
+    commonFile[0] = 0;
+
+    if (!pTocPath || !*pTocPath ||
+        !pSystemDirectory || !*pSystemDirectory ||
+        !pOutCue || nOutCue < 32)
+        return FALSE;
+
+    in = fopen(pTocPath, "rb");
+    if (!in)
+        return FALSE;
+
+    while (fgets(line, sizeof(line), in))
+    {
+        const char *p = line;
+        char *comment = strstr(line, "//");
+        char a0[768], a1[128], a2[128];
+
+        if (comment) *comment = 0;
+        while (*p == ' ' || *p == '\t') ++p;
+        if (!*p || *p == '\r' || *p == '\n')
+            continue;
+
+        if (!strncasecmp(p, "TRACK", 5) &&
+            (p[5] == ' ' || p[5] == '\t'))
+        {
+            char fmt[64];
+            p = _MainLoopPceTocToken(p + 5, fmt, sizeof(fmt));
+            if (!p || trackCount >= 99)
+                goto done;
+
+            active = trackCount++;
+            if (!strcasecmp(fmt, "AUDIO"))
+                strcpy(tr[active].cueType, "AUDIO");
+            else if (!strcasecmp(fmt, "MODE1_RAW"))
+                strcpy(tr[active].cueType, "MODE1/2352");
+            else if (!strcasecmp(fmt, "MODE2_RAW"))
+                strcpy(tr[active].cueType, "MODE2/2352");
+            else
+                goto done;
+            continue;
+        }
+
+        if (active < 0)
+            continue;
+
+        if ((!strncasecmp(p, "ZERO", 4) &&
+             (p[4] == ' ' || p[4] == '\t')) ||
+            (!strncasecmp(p, "SILENCE", 7) &&
+             (p[7] == ' ' || p[7] == '\t')))
+        {
+            const char *q = strchr(p, ' ');
+            int msf = -1;
+            if (!q) q = strchr(p, '\t');
+            if (!q) goto done;
+
+            q = _MainLoopPceTocToken(q, a0, sizeof(a0));
+            q = _MainLoopPceTocToken(q, a1, sizeof(a1));
+
+            if (a1[0] && strchr(a1, ':'))
+                msf = _MainLoopPceParseMsf(a1);
+            else if (a0[0] && strchr(a0, ':'))
+                msf = _MainLoopPceParseMsf(a0);
+
+            if (msf < 0)
+                goto done;
+            tr[active].generatedPregap += msf;
+            continue;
+        }
+
+        if (!strncasecmp(p, "START", 5) &&
+            (p[5] == ' ' || p[5] == '\t'))
+        {
+            int msf;
+            p = _MainLoopPceTocToken(p + 5, a0, sizeof(a0));
+            msf = _MainLoopPceParseMsf(a0);
+            if (msf < 0) goto done;
+            tr[active].startSectors = msf;
+            tr[active].hasStart = 1;
+            continue;
+        }
+
+        if (!strncasecmp(p, "DATAFILE", 8) &&
+            (p[8] == ' ' || p[8] == '\t'))
+        {
+            const char *q = _MainLoopPceTocToken(
+                p + 8, a0, sizeof(a0));
+            q = _MainLoopPceTocToken(q, a1, sizeof(a1));
+            q = _MainLoopPceTocToken(q, a2, sizeof(a2));
+
+            if (!a0[0])
+                goto done;
+
+            snprintf(tr[active].dataFile,
+                     sizeof(tr[active].dataFile), "%s", a0);
+
+            if (!commonFile[0])
+                snprintf(commonFile, sizeof(commonFile), "%s", a0);
+            else if (strcmp(commonFile, a0))
+                goto done;
+
+            if (a1[0] == '#')
+            {
+                char *endp = NULL;
+                tr[active].fileOffsetBytes =
+                    strtol(a1 + 1, &endp, 10);
+                if (!endp || *endp || tr[active].fileOffsetBytes < 0)
+                    goto done;
+                tr[active].hasOffset = 1;
+                tr[active].dataSectors = _MainLoopPceParseMsf(a2);
+            }
+            else
+            {
+                tr[active].fileOffsetBytes = expectedOffset;
+                tr[active].hasOffset = 0;
+                tr[active].dataSectors = _MainLoopPceParseMsf(a1);
+            }
+
+            if (tr[active].dataSectors <= 0)
+                goto done;
+
+            tr[active].haveData = 1;
+
+            if (tr[active].hasOffset &&
+                tr[active].fileOffsetBytes != expectedOffset)
+                goto done;
+
+            expectedOffset += tr[active].dataSectors * 2352L;
+            continue;
+        }
+
+        if (!strncasecmp(p, "INDEX", 5) &&
+            (p[5] == ' ' || p[5] == '\t'))
+            goto done;
+    }
+
+    if (trackCount < 2 || !commonFile[0])
+        goto done;
+
+    for (i = 0; i < trackCount; ++i)
+    {
+        if (!tr[i].haveData)
+            goto done;
+
+        if (tr[i].generatedPregap < 0 ||
+            tr[i].generatedPregap > tr[i].dataSectors)
+            goto done;
+
+        generatedGapBytes +=
+            (long)tr[i].generatedPregap * 2352L;
+    }
+
+    for (i = 0; i < trackCount; ++i)
+    {
+        if (tr[i].generatedPregap && tr[i].hasStart &&
+            tr[i].generatedPregap != tr[i].startSectors)
+            goto done;
+    }
+
+    slash = strrchr(pTocPath, '/');
+    if (strchr(commonFile, ':') || commonFile[0] == '/')
+    {
+        snprintf(binPath, sizeof(binPath), "%s", commonFile);
+    }
+    else
+    {
+        size_t dirLen;
+        if (!slash)
+            snprintf(tocDir, sizeof(tocDir), ".");
+        else
+        {
+            dirLen = (size_t)(slash - pTocPath);
+            if (dirLen >= sizeof(tocDir))
+                goto done;
+            memcpy(tocDir, pTocPath, dirLen);
+            tocDir[dirLen] = 0;
+        }
+
+        if (snprintf(binPath, sizeof(binPath), "%s/%s",
+                     tocDir, commonFile) >= (int)sizeof(binPath))
+            goto done;
+    }
+
+    /* Decide from the real BIN size whether generated ZERO/SILENCE
+     * sectors are physically stored or only exist in the logical TOC. */
+    {
+        FILE *bin = fopen(binPath, "rb");
+        const long virtualBytes = expectedOffset;
+        const long compactBytes = virtualBytes - generatedGapBytes;
+
+        if (!bin)
+            goto done;
+        if (fseek(bin, 0, SEEK_END) != 0)
+        {
+            fclose(bin);
+            goto done;
+        }
+
+        actualBinBytes = ftell(bin);
+        fclose(bin);
+
+        if (actualBinBytes == compactBytes)
+            compactGeneratedGaps = TRUE;
+        else if (actualBinBytes == virtualBytes)
+            compactGeneratedGaps = FALSE;
+        else
+        {
+            printf("[PCE/CD] cdrdao size mismatch: actual=%ld virtual=%ld compact=%ld\n",
+                   actualBinBytes, virtualBytes, compactBytes);
+            goto done;
+        }
+
+        printf("[PCE/CD] cdrdao geometry: actual=%ld virtual=%ld compact=%ld mode=%s\n",
+               actualBinBytes, virtualBytes, compactBytes,
+               compactGeneratedGaps ? "compact-gaps" : "stored-gaps");
+    }
+
+    if (snprintf(pOutCue, nOutCue,
+                 "%s/__AURORA_PCE_CDRDAO_TMP__.cue",
+                 pSystemDirectory) >= (int)nOutCue)
+        goto done;
+
+    remove(pOutCue);
+    out = fopen(pOutCue, "wb");
+    if (!out)
+        goto done;
+
+    fprintf(out, "FILE \"%s\" BINARY\n", binPath);
+
+    physicalCueSectors = 0;
+    for (i = 0; i < trackCount; ++i)
+    {
+        char msf0[32], msf1[32], pg[32];
+        long index0 = physicalCueSectors;
+        long index1 = index0;
+        long storedSectors = tr[i].dataSectors;
+
+        fprintf(out, "  TRACK %02d %s\n", i + 1, tr[i].cueType);
+
+        if (tr[i].generatedPregap > 0)
+        {
+            if (compactGeneratedGaps)
+            {
+                _MainLoopPceFormatMsf(
+                    tr[i].generatedPregap, pg, sizeof(pg));
+                fprintf(out, "    PREGAP %s\n", pg);
+                storedSectors -= tr[i].generatedPregap;
+            }
+            else
+            {
+                /* AURORA_V4_14_FILEXIO_OPENFLAG_PCE_STORED_PREGAPS_20260830
+                 * Gap sectors are physically stored in this single BIN.
+                 * Represent them as INDEX 00 -> INDEX 01. */
+                index1 += tr[i].generatedPregap;
+                _MainLoopPceFormatMsf(index0, msf0, sizeof(msf0));
+                fprintf(out, "    INDEX 00 %s\n", msf0);
+            }
+        }
+        else if (tr[i].hasStart && tr[i].startSectors > 0)
+        {
+            index1 += tr[i].startSectors;
+            _MainLoopPceFormatMsf(index0, msf0, sizeof(msf0));
+            fprintf(out, "    INDEX 00 %s\n", msf0);
+        }
+
+        if (storedSectors < 0)
+            goto done;
+
+        _MainLoopPceFormatMsf(index1, msf1, sizeof(msf1));
+        fprintf(out, "    INDEX 01 %s\n", msf1);
+
+        printf("[PCE/CD] cue track %02d: INDEX01=%s logical=%ld stored=%ld pregap=%d\n",
+               i + 1, msf1, tr[i].dataSectors,
+               storedSectors, tr[i].generatedPregap);
+
+        physicalCueSectors += storedSectors;
+    }
+
+    if (physicalCueSectors * 2352L != actualBinBytes)
+    {
+        printf("[PCE/CD] generated CUE geometry mismatch: sectors=%ld bytes=%ld actual=%ld\n",
+               physicalCueSectors,
+               physicalCueSectors * 2352L,
+               actualBinBytes);
+        goto done;
+    }
+
+    if (fflush(out) != 0 || fclose(out) != 0)
+    {
+        out = NULL;
+        remove(pOutCue);
+        goto done;
+    }
+    out = NULL;
+
+    printf("[PCE/CD] cdrdao single-BIN converted to CUE: %s -> %s\n",
+           pTocPath, pOutCue);
+    ok = TRUE;
+
+done:
+    if (out) fclose(out);
+    if (in) fclose(in);
+    if (!ok && pOutCue && *pOutCue)
+    {
+        remove(pOutCue);
+        pOutCue[0] = 0;
+    }
+    return ok;
+}
+
 /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824
  * A CUE and its BIN/audio tracks stay on storage. This path allocates no
  * frontend ROM buffer, which is essential inside the EE's 32 MiB budget. */
@@ -684,6 +1208,7 @@ static Bool _MainLoopExecuteDisc(const char *pMappedPath,
     Char SystemDirectory[512];
     Emu::System *pSystem = NULL;
     const char *pName;
+    const char *pPceLoadPath = pMappedPath;
     int eDisc;
     Bool bLoaded;
 
@@ -699,12 +1224,37 @@ static Bool _MainLoopExecuteDisc(const char *pMappedPath,
         return FALSE;
     }
 
-    eDisc = PicoDriveBridge_ProbeSegaCd(pMappedPath);
+    /* AURORA_PCE_CDRDAO_TOC_SUPPORT_V4_8_20260830
+     * PicoDrive's classifier is intentionally CUE-only. A cdrdao TOC is a
+     * PCE-supported image format and must reach Beetle without being parsed
+     * by PicoDrive first. Mislabeled TOC-as-.cue is accepted by syntax too. */
+    if (_MainLoopLooksLikeCdrdaoToc(pMappedPath))
+        eDisc = 0;
+    else
+        eDisc = PicoDriveBridge_ProbeSegaCd(pMappedPath);
+
     if (eDisc < 0)
     {
         MainLoopModalPrintf(60 * 4,
-            "ERROR: CUE or its first track is unreadable");
+            "ERROR: CUE/TOC or its first track is unreadable");
         return FALSE;
+    }
+
+    if (eDisc == 0 && _MainLoopLooksLikeCdrdaoToc(pMappedPath))
+    {
+        s_PceCdrdaoTempCue[0] = 0;
+        if (_MainLoopBuildPceCueFromCdrdao(
+                pMappedPath, SystemDirectory,
+                s_PceCdrdaoTempCue,
+                sizeof(s_PceCdrdaoTempCue)))
+        {
+            pPceLoadPath = s_PceCdrdaoTempCue;
+        }
+        else
+        {
+            pPceLoadPath = pMappedPath;
+            printf("[PCE/CD] cdrdao TOC not convertible; using native parser\n");
+        }
     }
 
     /* AURORA_SEGA_CD_32X_MD_SCALING_V2R1_20260828
@@ -732,7 +1282,7 @@ static Bool _MainLoopExecuteDisc(const char *pMappedPath,
     {
         pSystem = _pPce;
         bLoaded = _pPce && _pPce->LoadDisc(
-            pMappedPath, SystemDirectory);
+            pPceLoadPath, SystemDirectory);
     }
 
     if (!bLoaded || !pSystem ||
@@ -1481,3 +2031,13 @@ void _MainLoopSetSampleRate(Uint32 uSampleRate)
 
 
 /* AURORA_PCE_PRECORE512_V13_20260830 */
+
+/* AURORA_PCE_CDRDAO_TOC_SUPPORT_V4_8_20260830 */
+
+/* AURORA_V4_12_PRIVATE_FILEXIO_CDDA_PCE_TOC2CUE_20260830 */
+
+/* AURORA_V4_13_CDDA_STARVATION_PCE_TRACK_GEOMETRY_20260830 */
+
+/* AURORA_V4_14_FILEXIO_OPENFLAG_PCE_STORED_PREGAPS_20260830 */
+
+/* AURORA_V4_14_1_RESUME_COMPILEFIX_20260830 */

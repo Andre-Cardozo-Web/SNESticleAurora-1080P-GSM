@@ -621,6 +621,9 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 
 	/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: CUE is classified by first-track signature at launch. */
 	PathExtAdd(MAINLOOP_ENTRYTYPE_CDIMAGE, (char *)"cue");
+	/* AURORA_PCE_CDRDAO_TOC_SUPPORT_V4_8_20260830
+	 * Beetle PCE Fast natively supports cdrdao TOC. */
+	PathExtAdd(MAINLOOP_ENTRYTYPE_CDIMAGE, (char *)"toc");
 
 	_pNesFDSDisk = new NesDisk();
 	for (Uint32 iExt=0; iExt < _pNesFDSDisk->GetNumExts(); iExt++)
@@ -744,3 +747,5 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 
 
 /* AURORA_PCE_ACTIVEFB_RECONCILE_V14R2_20260830 */
+
+/* AURORA_PCE_CDRDAO_TOC_SUPPORT_V4_8_20260830 */

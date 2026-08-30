@@ -95,6 +95,9 @@ static Uint32 s_SafeFrameskipPeriod = 0;
 static Uint32 s_SafeFrameskipSamples[3] = { 0, 0, 0 };
 static Uint32 s_SafeFrameskipSampleCount = 0;
 static Uint32 s_SafeFrameskipSamplePos = 0;
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830
+ * One-shot request raised only by a CDDA cache/hunk miss. */
+static Bool s_SafeFrameskipCdAudioWindowRequested = FALSE;
 
 static Uint32 _MainLoopSafeFrameskipMedian3(Uint32 a, Uint32 b, Uint32 c)
 {
@@ -162,6 +165,8 @@ void MainLoopSafeFrameskipSetLevel(Int32 level)
     if (level < 0) level = 0;
     if (level > 9) level = 9;
     s_SafeFrameskipLevel = level;
+    /* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830 */
+    s_SafeFrameskipCdAudioWindowRequested = FALSE;
     _MainLoopSafeFrameskipResetTiming();
 }
 
@@ -178,6 +183,24 @@ void MainLoopSafeFrameskipSetEnabled(Bool enabled)
         MainLoopSafeFrameskipSetLevel(1);
 }
 
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830
+ *
+ * A CDDA miss is forbidden from synchronously touching storage on a frame
+ * that is going to be presented. The core returns silence for that span and
+ * asks for one Safe Frameskip window on the next host tick.
+ */
+void MainLoopSafeFrameskipRequestCdAudioWindow(void)
+{
+    if (s_SafeFrameskipLevel > 0)
+        s_SafeFrameskipCdAudioWindowRequested = TRUE;
+}
+
+/* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
+void MainLoopSafeFrameskipCancelCdAudioWindow(void)
+{
+    s_SafeFrameskipCdAudioWindowRequested = FALSE;
+}
+
 Bool MainLoopSafeFrameskipTake(Bool allowed)
 {
     Uint32 now;
@@ -188,8 +211,59 @@ Bool MainLoopSafeFrameskipTake(Bool allowed)
     /* Exactly one presentation one-shot is produced by each host decision. */
     s_SafeFrameskipSkipPresentation = FALSE;
 
-    if (!allowed || s_SafeFrameskipLevel <= 0 ||
-        s_SafeFrameskipSampleCount < 3u || target <= 0)
+    /* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830
+     * The presented frame that discovered the miss stays untouched.
+     * This NEXT tick is the only place where blocking CDDA refill may run. */
+    if (!allowed || s_SafeFrameskipLevel <= 0)
+    {
+        s_SafeFrameskipCdAudioWindowRequested = FALSE;
+        _MainLoopSafeFrameskipResetTiming();
+        return FALSE;
+    }
+
+    if (s_SafeFrameskipCdAudioWindowRequested)
+    {
+        s_SafeFrameskipCdAudioWindowRequested = FALSE;
+
+        /* AURORA_EXTREME_CD_VIDEO_FIRST_V2_20260830
+         * CDDA may spend Safe Frameskip, but never bypass max_skip. */
+        if (s_SafeFrameskipConsecutive >=
+            (Uint32)s_SafeFrameskipLevel)
+        {
+            s_SafeFrameskipConsecutive = 0;
+
+            if (s_SafeFrameskipSampleCount >= 3u && target > 0)
+            {
+                now = ProfCtrGetCycle();
+                s_SafeFrameskipAim = now + s_SafeFrameskipPeriod;
+            }
+            else
+            {
+                s_SafeFrameskipAim = 0;
+            }
+
+            return FALSE;
+        }
+
+        if (s_SafeFrameskipSampleCount >= 3u && target > 0)
+        {
+            now = ProfCtrGetCycle();
+            if (s_SafeFrameskipAim == 0)
+                s_SafeFrameskipAim = now;
+
+            ++s_SafeFrameskipConsecutive;
+            s_SafeFrameskipAim += s_SafeFrameskipPeriod;
+        }
+        else
+        {
+            ++s_SafeFrameskipConsecutive;
+        }
+
+        s_SafeFrameskipSkipPresentation = TRUE;
+        return TRUE;
+    }
+
+    if (s_SafeFrameskipSampleCount < 3u || target <= 0)
     {
         _MainLoopSafeFrameskipResetTiming();
         return FALSE;

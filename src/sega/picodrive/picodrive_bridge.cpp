@@ -48,6 +48,16 @@ void PicoDriveAurora_RunFrameNative(
     int skip_video,
     int refresh_variables);
 void PicoDriveAurora_SetSpriteLimiter(int level, int mode); /* AURORA_V15_MULTICORE_SPRITE_LIMIT_20260824 */
+/* AURORA_V4_4_BUILD_FIX_32X_VIDEO_FIRST_20260830 */
+void PicoDriveAurora_Set32xAudioSacrifice(int enabled);
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830 */
+void PicoDriveAurora_SetCdAudioSafeWindow(int allowed);
+int PicoDriveAurora_ConsumeCdAudioRefillRequest(void);
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V2_20260830 */
+int PicoDriveAurora_PrefetchCdAudio(void);
+/* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
+void PicoDriveAurora_SetCdMusicEnabled(int enabled);
+int PicoDriveAurora_CdMusicEnabled(void);
 /* AURORA_V6_SMS_PHYSICAL_PAUSE_NATIVE_DECL_20260828 */
 void PicoSmsInjectPauseNmi(int normal_pause_pressed);
 }
@@ -172,6 +182,8 @@ static Uint32 s_DirectVideoSerial = 0;
 static Uint32 s_DirectUploadedSerial = 0;
 static bool s_DirectPixelsValid = false;
 static bool s_SkipVideoNext = false;
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830 */
+static bool s_CdAudioSafeWindowNext = false;
 /* AURORA_PD_DIRECT_INFO_CACHE_V4_20260821 */
 static bool s_DirectInfoValid = false;
 static bool s_DirectInfoCanGs = false;
@@ -1591,12 +1603,51 @@ void PicoDriveBridge_SetSkipVideo(bool skip)
     s_SkipVideoNext = skip;
 }
 
+/* AURORA_V4_4_BUILD_FIX_32X_VIDEO_FIRST_20260830
+ * Hard hardware gate: no MCD/MD/SMS/GG/Pico behavior is changed. */
+void PicoDriveBridge_Set32xAudioSacrifice(bool sacrifice)
+{
+    const bool active =
+        sacrifice && s_GameLoaded && ((PicoIn.AHW & PAHW_32X) != 0);
+    PicoDriveAurora_Set32xAudioSacrifice(active ? 1 : 0);
+}
+
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830 */
+void PicoDriveBridge_SetCdAudioSafeWindow(bool allowed)
+{
+    s_CdAudioSafeWindowNext = allowed;
+}
+
+bool PicoDriveBridge_ConsumeCdAudioRefillRequest(void)
+{
+    return PicoDriveAurora_ConsumeCdAudioRefillRequest() != 0;
+}
+
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V2_20260830 */
+bool PicoDriveBridge_PrefetchCdAudio(void)
+{
+    return PicoDriveAurora_PrefetchCdAudio() != 0;
+}
+
+/* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
+void PicoDriveBridge_SetCdMusicEnabled(bool enabled)
+{
+    PicoDriveAurora_SetCdMusicEnabled(enabled ? 1 : 0);
+}
+
+bool PicoDriveBridge_GetCdMusicEnabled(void)
+{
+    return PicoDriveAurora_CdMusicEnabled() != 0;
+}
+
 void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
                               CRenderSurface *pTarget,
                               CMixBuffer *pMixBuf)
 {
     bool skipVideo = s_SkipVideoNext;
+    const bool cdAudioSafeWindow = s_CdAudioSafeWindowNext;
     s_SkipVideoNext = false;
+    s_CdAudioSafeWindowNext = false;
 
     {
         const int limiterLevel = (int)SNPPURenderGetObjLimitLevel();
@@ -1625,6 +1676,10 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
 
     /* AURORA_PD_FORCE_HW_SPRITE_LIMIT */
     PicoIn.opt &= ~POPT_DIS_SPRITE_LIM;
+
+    /* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830
+     * TRUE only for host Safe Frameskip; cadence discard cannot authorize I/O. */
+    PicoDriveAurora_SetCdAudioSafeWindow(cdAudioSafeWindow ? 1 : 0);
 
     /* AURORA_PD_NATIVE_FASTPATH_V1_BRIDGE_20260824
      * Sega Pico keeps retro_run() because that glue owns page/pen/overlay
@@ -1664,6 +1719,9 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
             inputMasks, 2, skipVideo ? 1 : 0, refreshVariables);
     }
 
+    /* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830 */
+    PicoDriveAurora_SetCdAudioSafeWindow(0);
+
     /* A skipped scheduler frame has advanced CPU/audio only. Its old GS
      * texture remains the image until the immediately-following drawn frame. */
     if (!skipVideo)
@@ -1687,6 +1745,10 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
         }
     }
 
+    /* One actual emulated frame only. Never leak sacrifice to a later
+     * frame, a 0-frame cadence tick, or subsequently loaded Sega hardware. */
+    PicoDriveAurora_Set32xAudioSacrifice(0);
+
     if (s_pMix)
         s_pMix->Flush();
     s_pMix = NULL;
@@ -1704,6 +1766,17 @@ enum
     PD_GS_CLUT_TBP_OFFSET = 0x580,
     PD_GS_T8_TBW          = 384
 };
+
+bool PicoDriveBridge_Is32X(void)
+{
+    return s_GameLoaded && ((PicoIn.AHW & PAHW_32X) != 0);
+}
+
+/* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */
+bool PicoDriveBridge_IsSegaCD(void)
+{
+    return s_GameLoaded && ((PicoIn.AHW & PAHW_MCD) != 0);
+}
 
 bool PicoDriveBridge_IsMegaDrive(void)
 {
@@ -2092,3 +2165,5 @@ unsigned PicoDriveBridge_GetSampleRate(void)
     return (unsigned)s_AudioRate;
 }
 
+
+/* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */

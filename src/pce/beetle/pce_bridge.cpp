@@ -50,10 +50,20 @@ void PCE_retro_get_system_av_info(struct retro_system_av_info *);
 /* AURORA_V15_MULTICORE_SPRITE_LIMIT_20260824: PS2-only renderer hook inside the Beetle fork. */
 void PCE_AuroraSetSpriteLimiter(int level, int mode);
 void PCE_AuroraSetSkipNextVideoFrame(int skip); /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830 */
+void PCE_AuroraSetCdAudioSafeWindow(int allowed);
+int PCE_AuroraConsumeCdAudioRefillRequest(void);
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V2_20260830 */
+int PCE_AuroraPrefetchCdAudio(void);
+/* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
+void PCE_AuroraSetCdMusicEnabled(int enabled);
+int PCE_AuroraCdMusicEnabled(void);
 }
 
 static bool s_Initialized = false;
 static bool s_GameLoaded = false;
+/* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */
+static bool s_DiscLoaded = false;
 static Emu::SysInputT *s_pInput = NULL;
 static CMixBuffer *s_pMix = NULL;
 static const void *s_VideoData = NULL;
@@ -62,6 +72,8 @@ static size_t s_VideoPitch = 0;
 static bool s_HaveVideo = false;
 static bool s_SkipVideoNext = false;
 static bool s_SkipVideoActive = false;
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830 */
+static bool s_CdAudioSafeWindowNext = false;
 static bool s_PceDirectPixelsValid = false; /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 static Uint8 *s_pSramData = NULL;
 static Int32 s_SramBytes = 0;
@@ -497,6 +509,7 @@ bool PceBridge_LoadGame(const void *data, size_t bytes, size_t capacity, const c
     if (!data || !bytes || bytes > (size_t)(4U*1024U*1024U+512U) || !PceBridge_Init()) return false;
     if (s_GameLoaded)
         PceBridge_UnloadGame();
+    s_DiscLoaded = false;
     pceBuildInfo(name,data,bytes);
     struct retro_game_info info; memset(&info,0,sizeof(info)); info.path=s_ContentName; info.data=data; info.size=bytes;
     if (!PCE_retro_load_game(&info)) { printf("[PCE] retro_load_game failed: %s (%u bytes)\n",s_ContentName,(unsigned)bytes); s_ContentData=NULL;s_ContentBytes=0;return false; }
@@ -522,6 +535,7 @@ bool PceBridge_LoadDisc(const char *path, const char *systemPath)
 
     if (s_GameLoaded)
         PceBridge_UnloadGame();
+    s_DiscLoaded = false;
 
     /* Beetle caches RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY in retro_init. */
     if (s_Initialized)
@@ -548,6 +562,7 @@ bool PceBridge_LoadDisc(const char *path, const char *systemPath)
     }
 
     s_GameLoaded = true;
+    s_DiscLoaded = true;
     sb = PCE_retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
     sp = PCE_retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
     s_pSramData = (sp && sb && sb <= 0x7fffffffU) ? (Uint8 *)sp : NULL;
@@ -567,9 +582,14 @@ bool PceBridge_LoadDisc(const char *path, const char *systemPath)
 void PceBridge_UnloadGame(void)
 {
     if (s_Initialized && s_GameLoaded) PCE_retro_unload_game();
-    s_GameLoaded=false;s_AuroraLimiterLevel=s_AuroraLimiterMode=-1;s_pInput=NULL;s_pMix=NULL;s_pSramData=NULL;s_SramBytes=0;s_VideoData=NULL;s_VideoW=s_VideoH=0;s_VideoPitch=0;s_HaveVideo=false;s_ContentData=NULL;s_ContentBytes=0;
+    s_GameLoaded=false;s_DiscLoaded=false;s_AuroraLimiterLevel=s_AuroraLimiterMode=-1;s_pInput=NULL;s_pMix=NULL;s_pSramData=NULL;s_SramBytes=0;s_VideoData=NULL;s_VideoW=s_VideoH=0;s_VideoPitch=0;s_HaveVideo=false;s_ContentData=NULL;s_ContentBytes=0;
     s_SkipVideoNext=false;s_SkipVideoActive=false;s_PceDirectPixelsValid=false;
 }
+bool PceBridge_IsDiscLoaded(void)
+{
+    return s_GameLoaded && s_DiscLoaded;
+}
+
 void PceBridge_Reset(void){if(s_GameLoaded)PCE_retro_reset();}
 void PceBridge_SoftReset(void){if(s_GameLoaded)PCE_retro_reset();}
 /* AURORA_PCE_EXPERIMENTAL_V10_DIRECT_GS
@@ -794,10 +814,33 @@ void PceBridge_SetSkipVideo(bool skip)
     s_SkipVideoNext = skip;
 }
 
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830 */
+void PceBridge_SetCdAudioSafeWindow(bool allowed)
+{
+    s_CdAudioSafeWindowNext = allowed;
+}
+
+bool PceBridge_ConsumeCdAudioRefillRequest(void)
+{
+    return PCE_AuroraConsumeCdAudioRefillRequest() != 0;
+}
+
+/* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
+void PceBridge_SetCdMusicEnabled(bool enabled)
+{
+    PCE_AuroraSetCdMusicEnabled(enabled ? 1 : 0);
+}
+
+bool PceBridge_GetCdMusicEnabled(void)
+{
+    return PCE_AuroraCdMusicEnabled() != 0;
+}
+
 void PceBridge_RunFrame(Emu::SysInputT *input, CRenderSurface *target, CMixBuffer *mix)
 {
     const bool requestedSkip = s_SkipVideoNext;
     s_SkipVideoNext = false;
+    s_CdAudioSafeWindowNext = false;
 
     if (!s_GameLoaded)
         return;
@@ -826,7 +869,11 @@ void PceBridge_RunFrame(Emu::SysInputT *input, CRenderSurface *target, CMixBuffe
         }
     }
 
+    /* AURORA_ASYNC_CDDA_VIDEO_ABSOLUTE_V4_20260830
+     * CDDA has no main-thread prefetch path anymore. */
+    PCE_AuroraSetCdAudioSafeWindow(0);
     PCE_retro_run();
+    PCE_AuroraSetCdAudioSafeWindow(0);
     s_SkipVideoActive = false;
 
     /* V10: ordinary Beetle RGB565 geometry bypasses the RGBA32 surface. */
@@ -845,3 +892,7 @@ bool PceBridge_LoadState(const void *data,int bytes){return data&&bytes>0&&PCE_r
 int PceBridge_GetSRAMBytes(void){return s_GameLoaded?s_SramBytes:0;}
 Uint8 *PceBridge_GetSRAMData(void){return s_GameLoaded?s_pSramData:NULL;}
 unsigned PceBridge_GetSampleRate(void){return s_SampleRate;}
+
+/* AURORA_V4_4_BUILD_FIX_32X_VIDEO_FIRST_20260830 */
+
+/* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */

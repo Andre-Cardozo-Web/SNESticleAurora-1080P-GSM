@@ -29,6 +29,7 @@ extern "C" {
 #include "snppurender.h"
 #include "nes/quicknes/quicknes_bridge.h" /* QUICKNES_FAMICLONE_HOOK */
 #include "sega/picodrive/picodrive_bridge.h"
+#include "pce/beetle/pce_bridge.h" /* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
 #include "mainloop_safe_frameskip.h" /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 
 /* mc0:/SNESticle (defined in mainloop_globals.cpp). */
@@ -51,7 +52,8 @@ void MainLoopSnesCoreSetPersisted(Int32 value);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 42
+#define VIDEOCFG_VERSION 43
+/* AURORA_CD_MUSIC_REDBOOK_V3_20260830: v43 appends shared SCD/PCE CD Red Book toggle; old configs default On. */
 /* AURORA_PCE_SCALING_LIGHTGUN_TOGGLE_V2_20260830: v42 appends Light Gun; old configs default On. */
 /* AURORA_FAMICOM_MIC_CFG41_20260828: v41 keeps the layout and migrates every older Safe Frameskip to 1 once. */
 /* AURORA_PCE_VOLUME_V37_20260823
@@ -126,8 +128,10 @@ typedef struct
 	Int32  safeframeskip;  /* v41: 0=Off, 1..9=max auto skips; default 1 */
 	Int32  ggzoom;         /* v39: GG 160x144 -> 240x216, uniform 3:2 */
 	Int32  lightgun;       /* v42: CRC-known NES/Famicom gun; 1=On */
+	Int32  cdmusic;        /* v43: SCD/PCE CD Red Book CDDA; 1=On */
 } VideoCfgT;
-#define VIDEOCFG_V38_BYTES (sizeof(VideoCfgT) - 3 * sizeof(Int32))
+#define VIDEOCFG_V42_BYTES (sizeof(VideoCfgT) - sizeof(Int32))
+#define VIDEOCFG_V38_BYTES (sizeof(VideoCfgT) - 4 * sizeof(Int32))
 #define VIDEOCFG_V37_BYTES (VIDEOCFG_V38_BYTES - sizeof(Int32))
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -359,6 +363,19 @@ static void _VideoCfgPath(char *pOut)
 
 static Bool g_FamicloneAudio = FALSE;
 
+/* AURORA_CD_MUSIC_REDBOOK_V3_20260830
+ * Shared by Sega CD and PCE CD; Red Book/CDDA only. */
+static Bool g_CdMusicEnabled = TRUE;
+
+static void _VideoSetCdMusicEnabled(Bool enabled)
+{
+	g_CdMusicEnabled = enabled ? TRUE : FALSE;
+	PicoDriveBridge_SetCdMusicEnabled(g_CdMusicEnabled ? true : false);
+	PceBridge_SetCdMusicEnabled(g_CdMusicEnabled ? true : false);
+	if (!g_CdMusicEnabled)
+		MainLoopSafeFrameskipCancelCdAudioWindow();
+}
+
 /* AURORA_COMPAT_PAGE_V21
  * Zero flags = exact V8.5 host behavior. */
 #define VIDEO_COMPAT_GS_FULL_CACHE   (1 << 0)
@@ -440,6 +457,7 @@ void VideoSettingsSave(void)
 	cfg.safeframeskip = MainLoopSafeFrameskipGetLevel();
 	cfg.ggzoom = PicoDriveBridge_GetGgZoom() ? 1 : 0;
 	cfg.lightgun = QuicknesBridge_GetLightGunEnabled() ? 1 : 0;
+	cfg.cdmusic = g_CdMusicEnabled ? 1 : 0; /* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -462,7 +480,9 @@ void VideoSettingsLoad(void)
 	PicoDriveBridge_SetGgZoom(false);
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.lightgun = 1; /* v42 default and all pre-v42 migrations: On */
+	cfg.cdmusic = 1;  /* AURORA_CD_MUSIC_REDBOOK_V3_20260830: pre-v43 default On */
 	QuicknesBridge_SetLightGunEnabled(true);
+	_VideoSetCdMusicEnabled(TRUE);
 	SNPPURenderSetSoftwareLayerMask(
 		SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
 		SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
@@ -484,12 +504,19 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
+		else if (header.version == 42)
+		{
+			/* AURORA_CD_MUSIC_REDBOOK_V3_20260830
+			 * v42 is the exact v43 prefix before cdmusic; default stays On. */
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg, VIDEOCFG_V42_BYTES);
+			if (loaded) cfg.version = VIDEOCFG_VERSION;
+		}
 		else if (header.version == 41 || header.version == 40 || header.version == 39)
 		{
 			/* v39/v40/v41 are the exact v42 prefix before lightgun.
-			 * cfg.lightgun was preinitialised to 1, so migration is On. */
+			 * lightgun and cdmusic were preinitialised On. */
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
-			                         sizeof(cfg) - sizeof(cfg.lightgun));
+			                         VIDEOCFG_V42_BYTES - sizeof(cfg.lightgun));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 38)
@@ -760,9 +787,9 @@ void VideoSettingsLoad(void)
 		cfg.sneshackflags &= ~SNPPU_HACK_FRAME_SKIP;
 
 	/* AURORA_FAMICOM_MIC_CFG41_20260828
-	 * Every config written before v41 gets Safe Frameskip=1 exactly once.
-	 * After the user saves v41, the selected 0..9 value persists normally. */
-	if (loaded && header.version < VIDEOCFG_VERSION)
+	 * Preserve v42 Safe Frameskip when v43 only adds CD music.
+	 * Older migrations retain the previous one-time conservative default. */
+	if (loaded && header.version < 42)
 		cfg.safeframeskip = 1;
 
 	/* New policy applies exactly once to every pre-v22 config. Once the
@@ -801,6 +828,8 @@ void VideoSettingsLoad(void)
 			PicoDriveBridge_SetGgZoom(cfg.ggzoom != 0);
 		if (cfg.lightgun == 0 || cfg.lightgun == 1)
 			QuicknesBridge_SetLightGunEnabled(cfg.lightgun != 0);
+		if (cfg.cdmusic == 0 || cfg.cdmusic == 1)
+			_VideoSetCdMusicEnabled(cfg.cdmusic ? TRUE : FALSE);
 		if (cfg.smsfm == 0 || cfg.smsfm == 1)
 			PicoDriveBridge_SetSmsFm(cfg.smsfm != 0);
 		if (cfg.bgmvol >= 0 && cfg.bgmvol <= 400) BgmSetVolume(cfg.bgmvol);
@@ -1216,6 +1245,8 @@ void CVideoScreen::Draw()
 		_VideoRow(vy, 56, m_iSelect, "SEGA audio", buf); vy += 12;
 		_VideoRow(vy, 57, m_iSelect, "SMS FM audio",
 		          PicoDriveBridge_GetSmsFm() ? "Enable" : "Disable"); vy += 12;
+		_VideoRow(vy, 58, m_iSelect, "CD music",
+		          g_CdMusicEnabled ? "ON" : "OFF"); vy += 12; /* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
 	}
 	else if (iPage == 5)
 	{
@@ -1347,7 +1378,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		else if (m_iSelect <= 30) { lo = 20; hi = 30; }
 		else if (m_iSelect < 40)  { lo = 31; hi = 37; }
 		else if (m_iSelect < 50)  { lo = 40; hi = 44; }
-		else                      { lo = 50; hi = 57; }
+		else                      { lo = 50; hi = 58; } /* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
 		if (trigger & PAD_UP)
 		{
 			m_iSelect--;
@@ -1454,6 +1485,9 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 			break;
 		case 57: /* Master System YM2413/OPLL */
 			PicoDriveBridge_SetSmsFm(!PicoDriveBridge_GetSmsFm());
+			break;
+		case 58: /* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
+			_VideoSetCdMusicEnabled(!g_CdMusicEnabled);
 			break;
 
 		case 10: /* Mass / USB on/off -- lista mass0:/mass1: (USB).  O USB core

@@ -11,10 +11,19 @@ void PceBridge_Shutdown(void);
 bool PceBridge_LoadGame(const void *pData, size_t nBytes, size_t nCapacity, const char *pName);
 /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 -- path-only PC Engine CD CUE. */
 bool PceBridge_LoadDisc(const char *pPath, const char *pSystemPath);
+/* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */
+bool PceBridge_IsDiscLoaded(void);
 void PceBridge_UnloadGame(void);
 void PceBridge_Reset(void);
 void PceBridge_SoftReset(void);
 void PceBridge_SetSkipVideo(bool skip); /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830 */
+void PceBridge_SetCdAudioSafeWindow(bool allowed);
+bool PceBridge_ConsumeCdAudioRefillRequest(void);
+/* AURORA_CD_MUSIC_REDBOOK_V3_20260830
+ * Red Book/CDDA only; PCE ADPCM/PSG are unaffected. */
+void PceBridge_SetCdMusicEnabled(bool enabled);
+bool PceBridge_GetCdMusicEnabled(void);
 void PceBridge_RunFrame(Emu::SysInputT *pInput, CRenderSurface *pTarget, CMixBuffer *pMixBuf);
 int PceBridge_GetStateSize(void);
 int PceBridge_SaveState(void *pData, int nBytes);
@@ -33,3 +42,5 @@ int PceBridge_GetNative240pRasterWidth(void);
 bool PceBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity);
 unsigned PceBridge_GetSampleRate(void);
 #endif
+
+/* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */

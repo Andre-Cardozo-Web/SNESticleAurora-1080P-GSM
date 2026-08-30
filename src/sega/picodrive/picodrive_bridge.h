@@ -48,6 +48,21 @@ void PicoDriveBridge_SetRegion(int auroraRegion);
 void PicoDriveBridge_SetMouseInput(bool active, int dx, int dy, unsigned buttons);
 /* AURORA_PD_SKIP_DISCARDED_VIDEO_V2_H_20260821 */
 void PicoDriveBridge_SetSkipVideo(bool skip);
+/* AURORA_V4_4_BUILD_FIX_32X_VIDEO_FIRST_20260830 */
+void PicoDriveBridge_Set32xAudioSacrifice(bool sacrifice);
+bool PicoDriveBridge_Is32X(void);
+/* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */
+bool PicoDriveBridge_IsSegaCD(void);
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830
+ * Separate from SetSkipVideo(): cadence discard is NOT an I/O window. */
+void PicoDriveBridge_SetCdAudioSafeWindow(bool allowed);
+bool PicoDriveBridge_ConsumeCdAudioRefillRequest(void);
+/* AURORA_EXTREME_CD_VIDEO_FIRST_V2_20260830 */
+bool PicoDriveBridge_PrefetchCdAudio(void);
+/* AURORA_CD_MUSIC_REDBOOK_V3_20260830
+ * Red Book/CDDA only. Does not alter Sega CD PCM, FM or PSG. */
+void PicoDriveBridge_SetCdMusicEnabled(bool enabled);
+bool PicoDriveBridge_GetCdMusicEnabled(void);
 
 void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
                               CRenderSurface *pTarget,
@@ -76,3 +91,5 @@ bool PicoDriveBridge_CanDirectGsVideo(void);
 bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity);
 
 #endif
+
+/* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */

@@ -308,10 +308,28 @@ Bool MainLoopProcess()
             /* Safe Frameskip is host-only. Never alter deterministic
              * movie/netplay execution; the Auto scheduler receives
              * allowed=FALSE and resets its host timing debt. */
+            /* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830
+             *
+             * Safe Frameskip catches up by skipping MainLoopRender()'s
+             * GSK_SyncFlip()/VBlank wait. That intentionally advances the
+             * emulated host clock faster than wall time. For streaming CDDA,
+             * doing so makes the logical playhead outrun the async USB worker.
+             *
+             * CD systems therefore keep real-time host pacing. Their video
+             * priority comes from failsoft asynchronous CDDA, not from running
+             * emulation faster than the display clock.
+             */
+            const Bool bStreamingCdNeedsRealtimePacing =
+                ((_pSystem == _pSega &&
+                  PicoDriveBridge_IsSegaCD()) ||
+                 (_pSystem == _pPce &&
+                  PceBridge_IsDiscLoaded())) ? TRUE : FALSE;
+
             const Bool bSafeFrameskipAllowed =
                 (NetInput.eGameState == NETPLAY_GAMESTATE_IDLE &&
                  !s_pMovieClip->IsPlaying() &&
-                 !s_pMovieClip->IsRecording()) ? TRUE : FALSE;
+                 !s_pMovieClip->IsRecording() &&
+                 !bStreamingCdNeedsRealtimePacing) ? TRUE : FALSE;
 
             if (s_pMovieClip->IsRecording())
             {
@@ -410,8 +428,13 @@ Bool MainLoopProcess()
                 /* AURORA_PD_NTSC_5994_CLOCK_V1_20260822
                  * Phase is rational; all products stay below ~61 million. */
                 static Uint32 sPdPhase = 0;
+                /* AURORA_V4_4_BUILD_FIX_32X_VIDEO_FIRST_20260830
+                 * Only 32X uses this recovery latch. */
+                static Int32 sPd32xAudioProtectFrames = 0;
 
                 Bool bDirectSega;
+                Bool bIs32x;
+                Bool b32xSacrificeAudio;
                 Int32 executeFrames = 1;
 
                 PicoDriveBridge_SetRegion((int)g_SnesForceRegion);
@@ -423,6 +446,21 @@ Bool MainLoopProcess()
 
                 bDirectSega =
                     PicoDriveBridge_CanDirectGsVideo() ? TRUE : FALSE;
+
+                bIs32x = PicoDriveBridge_Is32X() ? TRUE : FALSE;
+                if (!bIs32x)
+                    sPd32xAudioProtectFrames = 0;
+                else if (bSafeSkip)
+                    sPd32xAudioProtectFrames = 2;
+
+                b32xSacrificeAudio =
+                    (bIs32x &&
+                     (bSafeSkip || sPd32xAudioProtectFrames > 0))
+                    ? TRUE : FALSE;
+
+                if (bIs32x && !bSafeSkip &&
+                    sPd32xAudioProtectFrames > 0)
+                    --sPd32xAudioProtectFrames;
 
                 if (NetInput.eGameState == NETPLAY_GAMESTATE_IDLE &&
                     /* AURORA_PD_HOST_CADENCE_ALL_SEGA_V6_GATE_20260821 */
@@ -503,6 +541,8 @@ Bool MainLoopProcess()
                     sPdPhase = 0;
                 }
 
+                /* AURORA_ASYNC_CDDA_VIDEO_ABSOLUTE_V4_20260830
+                 * No CDDA storage work is permitted on this thread. */
                 PROF_ENTER("SegaExecuteFrame");
                 for (Int32 iPdFrame = 0;
                      iPdFrame < executeFrames;
@@ -515,6 +555,16 @@ Bool MainLoopProcess()
                     const Bool bCadenceDiscard =
                         (executeFrames > 1 &&
                          iPdFrame + 1 < executeFrames) ? TRUE : FALSE;
+                    /* AURORA_ASYNC_CDDA_VIDEO_ABSOLUTE_V4_20260830
+                     * Safe Frameskip is NEVER an I/O permission window now. */
+
+                    /* 32X ONLY: preserve game/PWM timing, drop only produced
+                     * audio when recovering video or on a hidden burst frame. */
+                    if (bIs32x)
+                        PicoDriveBridge_Set32xAudioSacrifice(
+                            (b32xSacrificeAudio || bCadenceDiscard)
+                            ? true : false);
+
                     PicoDriveBridge_SetSkipVideo(
                         (bCadenceDiscard || bSafeSkip) ? true : false);
 
@@ -525,6 +575,9 @@ Bool MainLoopProcess()
                         &Input, pSurface, pMixBuffer, eMode);
                 }
                 PROF_LEAVE("SegaExecuteFrame");
+
+                /* AURORA_ASYNC_CDDA_VIDEO_ABSOLUTE_V4_20260830
+                 * CDDA underrun is audio loss only; it never requests a skip. */
 
                 /* Releia depois de retro_run(): a geometria/PSM do core pode
                  * ter mudado durante o frame. */
@@ -540,10 +593,14 @@ Bool MainLoopProcess()
             }
             else if (_pSystem == _pPce)
             {
+                /* AURORA_ASYNC_CDDA_VIDEO_ABSOLUTE_V4_20260830 */
                 PceBridge_SetSkipVideo(bSafeSkip ? true : false);
                 PROF_ENTER("PceExecuteFrame");
                 _pPce->ExecuteFrame(&Input, pSurface, pMixBuffer, eMode);
                 PROF_LEAVE("PceExecuteFrame");
+                /* AURORA_ASYNC_CDDA_VIDEO_ABSOLUTE_V4_20260830
+                 * CDDA underrun cannot influence presentation timing. */
+
                 /* AURORA_PCE_V10_DIRECT_PROCESS */
                 if (!bSafeSkip && !PceBridge_CanDirectGsVideo())
                 {
@@ -661,3 +718,7 @@ Bool MainLoopProcess()
     return TRUE;
 }
 
+
+/* AURORA_V4_4_BUILD_FIX_32X_VIDEO_FIRST_20260830 */
+
+/* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */
