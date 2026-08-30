@@ -118,4 +118,3 @@ CD firmware and images **(experimental)**
 ## Special thanks
 
 * Pavel (@eXo12): invaluable beta testing, feedbacks and motivation which helped me immensely. Thanks!
-* Aurora: it's a secret to everybody.
