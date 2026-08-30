@@ -38,6 +38,10 @@ void BgmMenuEnter(void);
    mantem a faixa carregada para reabrir o menu sem reler do disco. */
 void BgmStop(void);
 
+/* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830
+ * Stronger than BgmStop only for a real ROM/disc transition. */
+void BgmReleaseDecoderForGameSwitch(void);
+
 /* Avanca explicitamente para a proxima faixa. So' troca se houver 2+
    faixas; a retomada normal do menu preserva o decoder e nao chama isto. */
 void BgmNext(void);
@@ -75,3 +79,5 @@ void BgmCycleRate(int dir);
 #endif
 
 #endif /* _MAINLOOP_BGM_H */
+
+/* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */

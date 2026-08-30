@@ -35,3 +35,8 @@ extern char *_MainLoop_pInstallFiles[];
 /* Hard audio transition helpers: clear EE mixer + audsrv/IOP queue. */
 void MainLoopAudioHardCut(void);
 void MainLoopAudioResumeGame(void);
+
+/* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */
+Bool MainLoopSramSaveBusy(void);
+
+/* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */

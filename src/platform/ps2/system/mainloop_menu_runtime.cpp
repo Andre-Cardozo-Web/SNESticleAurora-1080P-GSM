@@ -47,7 +47,14 @@ extern "C" {
    already-visible menu frames later; BgmIO keeps the tracker alive during the
    still-synchronous device operation. */
 static Bool s_sramSavePending = FALSE;
+static Bool s_sramSaveActive = FALSE;
 static Int32 s_sramSaveDelay = 0;
+
+/* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */
+Bool MainLoopSramSaveBusy(void)
+{
+    return (s_sramSavePending || s_sramSaveActive) ? TRUE : FALSE;
+}
 
 static void _MenuSavePendingSRAM(void)
 {
@@ -56,6 +63,7 @@ static void _MenuSavePendingSRAM(void)
 	if (!s_sramSavePending)
 		return;
 	s_sramSavePending = FALSE;
+	s_sramSaveActive = TRUE;
 
 	BgmIOBegin();
 	#if MAINLOOP_MEMCARD
@@ -63,6 +71,7 @@ static void _MenuSavePendingSRAM(void)
 	    MemCardGetStatus(0) == MEMCARD_STATUS_UNFORMATTED)
 	{
 		BgmIOEnd();
+		s_sramSaveActive = FALSE;
 		_MainLoopMemCardFormatPromptOpen(
 			0,
 			MAINLOOP_MEMCARDFORMAT_SRAM_SAVE
@@ -81,6 +90,7 @@ static void _MenuSavePendingSRAM(void)
 	    MemCardGetStatus(0) == MEMCARD_STATUS_UNFORMATTED)
 	{
 		BgmIOEnd();
+		s_sramSaveActive = FALSE;
 		_MainLoopMemCardFormatPromptOpen(
 			0, MAINLOOP_MEMCARDFORMAT_SRAM_SAVE);
 		return;
@@ -88,6 +98,7 @@ static void _MenuSavePendingSRAM(void)
 	#endif
 
 	BgmIOEnd();
+	s_sramSaveActive = FALSE;
 	MainLoopStatusPrintf(
 		bSaved ? 90 : 180,
 		bSaved ? "SRAM saved." : "Error saving SRAM!"
@@ -249,3 +260,5 @@ void _MenuDraw()
 
 	FontSelect(0);
 }
+
+/* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */

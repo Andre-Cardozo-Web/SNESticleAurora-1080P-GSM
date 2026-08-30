@@ -943,6 +943,16 @@ void BgmStop(void)
     _BgmUnlock();
 }
 
+/* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */
+void BgmReleaseDecoderForGameSwitch(void)
+{
+    _BgmLock();
+    s_menuActive = FALSE;
+    /* Free decoder/resampler heap; preserve settings, index and rate. */
+    _BgmFree();
+    _BgmUnlock();
+}
+
 void BgmMenuEnter(void)
 {
     /* This is intentionally lighter than BgmUpdate(): entering the menu must
@@ -1475,3 +1485,5 @@ void BgmIOEnd(void)
         s_ioDepth--;
     _BgmUnlock();
 }
+
+/* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */

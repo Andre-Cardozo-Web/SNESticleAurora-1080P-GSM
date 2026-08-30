@@ -9,6 +9,7 @@
 #include "mainloop_shared.h"
 #include "mainloop_ui.h"
 #include "mainloop_bgm.h"
+#include "mainloop_menu.h" /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */
 
 extern "C" {
 #include "audio.h"
@@ -30,6 +31,11 @@ int _MainLoopBrowserEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
                         }
                         else
                         {
+                                /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830
+                                 * Ignore silently before BGM/audio/core teardown. */
+                                if (MainLoopSramSaveBusy())
+                                        return 1;
+
                                 /* Antes do load (que bloqueia a EE por mais
                                    tempo que o ring de ~107ms do audsrv): para
                                    e MUTA a trilha de menu.  Senao a cauda da
@@ -73,3 +79,5 @@ int _MainLoopBrowserEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
         }
         return 0;
 }
+
+/* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */

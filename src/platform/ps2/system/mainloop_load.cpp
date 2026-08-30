@@ -26,6 +26,7 @@
 #include "snes/snes9x2010/snes9x2010_bridge.h"
 #include "mainloop_state.h"
 #include "mainloop_ui.h"
+#include "mainloop_bgm.h" /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */
 #include "snes.h"
 #include "rendersurface.h"
 #include "texture.h"
@@ -718,6 +719,10 @@ void _MainLoopUnloadRom()
     /* AURORA_AUDIO_HARDCUT_ROM_UNLOAD_V1 */
     MainLoopAudioHardCut();
 
+    /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830
+     * BgmStop intentionally retains libxmp for fast menu reopen.
+     * A real game switch prefers maximum free EE heap. */
+    BgmReleaseDecoderForGameSwitch();
 
     // stop recording if we are recording
     if (s_pMovieClip->IsRecording())
@@ -1115,6 +1120,11 @@ static Bool _MainLoopBuildPceCueFromCdrdao(
         goto done;
 
     fprintf(out, "FILE \"%s\" BINARY\n", binPath);
+
+    /* AURORA_V4_15_PCE_CDRDAO_AUDIO_ENDIAN_20260830
+     * Ordinary CUE has no flag for cdrdao raw AUDIO byte order.
+     * cdrdao raw PCM is MSB-first; preserve it explicitly. */
+    fprintf(out, "REM AURORA_CDRDAO_RAW_AUDIO_MSB_FIRST\n");
 
     physicalCueSectors = 0;
     for (i = 0; i < trackCount; ++i)
@@ -1605,6 +1615,11 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     if (eType == MAINLOOP_ENTRYTYPE_NESPALETTE)
         return _MainLoopLoadNesPalette(pFileName); /* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
 
+    /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830
+     * Defensive guard for non-browser launch paths. */
+    if (MainLoopSramSaveBusy())
+        return FALSE;
+
     _MainLoopUnloadRom();
 
 #if MAINLOOP_HISTORY
@@ -2041,3 +2056,7 @@ void _MainLoopSetSampleRate(Uint32 uSampleRate)
 /* AURORA_V4_14_FILEXIO_OPENFLAG_PCE_STORED_PREGAPS_20260830 */
 
 /* AURORA_V4_14_1_RESUME_COMPILEFIX_20260830 */
+
+/* AURORA_V4_15_PCE_CDRDAO_AUDIO_ENDIAN_20260830 */
+
+/* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */
