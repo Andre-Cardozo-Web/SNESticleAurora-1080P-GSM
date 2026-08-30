@@ -1,9 +1,8 @@
-# SNESticle Aurora 1.0.0 - In development
+# SNESticle Aurora — In development
 
 **SNESticle Aurora** is a PlayStation 2 emulator fork maintained by **@itsveenee**, focused on 240p CRT output, real PS2 hardware, accuracy and compatibility improvements, and other hardware-specific or experimental ideas.
 
-SNESticle Aurora is based on **SNESticle Revive by @ReyFxck (Thomas R.)**, whose work brought SNESticle back into active development, and ultimately on the original **SNESticle by Icer Addis**.
-**Huge thanks to @ReyFxck** for his work on SNESticle Revive and for providing the foundation from which Aurora was created. **Huge thanks to Icer Addis** for creating the original SNESticle and its codebase.
+SNESticle Aurora is based on **SNESticle Revive by @ReyFxck (Thomas R.)**, whose work brought SNESticle back into active development, and ultimately on the original **SNESticle by Icer Addis**. Huge thanks to @ReyFxck for his work on SNESticle Revive and for providing the foundation from which Aurora was created and Icer Addis for creating the original SNESticle and its codebase.
 
 <!-- AURORA_CORE_NOTICES_V6_20260824 -->
 NES emulation through **QuickNES** and **FCEUmm** (for Disk System only) is based on: the **QuickNES core originally by Shay Green**, with the libretro core maintained by **libretro contributors**, using `itsveenee/QuickNES_Core` as a pinned Git submodule for its PS2 integration (see [THIRD_PARTY.md](THIRD_PARTY.md) and `LICENSES/QuickNES-GPL-2.0.txt`); **FCEUmm**, using the pinned `itsveenee/Fceumm-PS2` Git submodule at `src/third_party/fceumm-fds` (FDS firmware is **not included**: users must provide `disksys.rom` in `SNESticle/SYSTEM`) (see [THIRD_PARTY.md](THIRD_PARTY.md) and `LICENSES/FCEUmm-GPL-2.0.txt`).
@@ -18,7 +17,7 @@ There is currently an **experimental, NON-WORKING build** of **Snes9x 2010**, ba
 <!-- AURORA_FCEUMM_FDS_DOCS_V8_1_20260827 -->
 
 
-SNESticle Aurora code covered by the GPL remains under GNU GPLv2; separately licensed third-party components remain under their own terms. **Code license and project branding are separate.** The applicable software licenses grant rights in the code; they do **not** grant permission to use the **SNESticle Aurora** name or the project-specific **Aurora** identity/branding for an unofficial fork, modified build, redistributed binary, or derivative project. Unless separately authorized by **@itsveenee**, use a distinct project/product name and distinct branding. Factual attribution such as **“based on SNESticle Aurora”** remains welcome. See [BRANDING.md](BRANDING.md).
+SNESticle Aurora code covered by the GPL remains under GNU GPLv2; separately licensed third-party components remain under their own terms. **Code license and project branding are separate.** The applicable software licenses grant rights in the code; they **do not grant permission to use the SNESticle Aurora name** or the project-specific **Aurora** identity/branding for an unofficial fork, modified build, redistributed binary, or derivative project. Unless separately authorized by **@itsveenee**, use a distinct project/product name and distinct branding. Factual attribution such as “based on SNESticle Aurora” remains welcome. See [BRANDING.md](BRANDING.md).
 
 Project lineage and attribution are documented in [CREDITS.md](CREDITS.md). See LICENSE, [BRANDING.md](BRANDING.md), and the third-party license files for licensing details.
 
@@ -90,6 +89,9 @@ CD firmware and images **(experimental)**
 * Only `.cue` is exposed by this PS2 build. Keep every BIN/audio track referenced by the CUE at the relative location named inside it. CHD is intentionally not exposed because libchdr plus its compression dependencies has not been validated inside the PS2's 32 MiB memory budget.
 
 **FIXED:**
+
+* PC Engine video modes (Ninja Spirits, Aoi Blink, Toumaden, more)
+* Krazy Creatures (NES) minor graphical glitches
 * Pilotwings (SNES) mode 7 rendering, also fixes other games that rely on it
 * Speedy Gonzales in Los Gatos Banditos (SNES) performance *(with special safe frameskip)*
 * Top Gear (SNES) performance *(with special safe frameskip)*

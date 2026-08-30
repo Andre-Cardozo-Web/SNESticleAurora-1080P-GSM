@@ -36,6 +36,13 @@
 #include "snppublend_gs.h"
 #include "common/debug/dbgterm.h"
 
+/* AURORA_PCE_RELEASE_CLEANUP_FINAL_V15_20260830
+ * Hidden release diagnostics. Keep the probes available for future
+ * PCE/QuickNES investigations without drawing anything by default. */
+#ifndef AURORA_RUNTIME_DIAG_OVERLAY
+#define AURORA_RUNTIME_DIAG_OVERLAY 0
+#endif
+
 #include "mainloop_iop.h"
 
 extern "C" {
@@ -329,6 +336,13 @@ void MainLoopRender()
             if (bMdVideo)
                 wantedRaster = 320;
 
+
+            if (_pSystem == _pPce && !_bMenu && !_MainLoop_BlackScreen)
+            {
+                /* AURORA_PCE_FIXED512_DBX0_CUMULATIVE_V8_20260830
+                 * One aligned PCE framebuffer for 256/342/512 dot clocks. */
+                wantedRaster = 512;
+            }
             /* Menu/prompts use exact 256-source integer presentation on the
              * still-alive 320 framebuffer, not 256->320 resampling. */
             GSK_SetUi256On320Framebuffer(
@@ -342,6 +356,14 @@ void MainLoopRender()
                 printf("[video] warning: could not switch to %d-wide presentation\n",
                        (int)wantedRaster);
             }
+
+            /* AURORA_PCE_ROOT512_KRAZY_LATCH_V12_20260830: clear window */
+            if (_pSystem != _pPce || _bMenu || _MainLoop_BlackScreen)
+                GSK_Clear240pVisibleWindow();
+
+            /* AURORA_PCE_FIXED512_DBX0_CUMULATIVE_V8_20260830: clear window */
+            if (_pSystem != _pPce || _bMenu || _MainLoop_BlackScreen)
+                GSK_Clear240pVisibleWindow();
         }
 
 
@@ -416,8 +438,10 @@ void MainLoopRender()
      */
     if (_pSystem == _pPce)
     {
-        GSK_SetNative240pPar(
-            (!_bMenu && !_MainLoop_BlackScreen) ? 1 : 0);
+        /* AURORA_PCE_CRT_OVERSCAN_352_V9_20260830
+         * PCE has explicit 256/352/512 PCRTC profiles in gskit_backend.
+         * Do not feed the fixed 512 framebuffer through NES/SNES PAR math. */
+        GSK_SetNative240pPar(0);
     }
 
     GSK_SetGameplaySkipClear(
@@ -576,6 +600,45 @@ void MainLoopRender()
     }
 
 
+    #if AURORA_RUNTIME_DIAG_OVERLAY
+    /* AURORA_PCE_KRAZY_RUNTIME_DIAG_V11R3_20260830
+     * Hidden diagnostics retained for future PCE/QuickNES investigations. */
+    if (!_bMenu && _pSystem == _pPce)
+    {
+        unsigned vw=0, vh=0, pp=0;
+        int pfb=0, nativeClass=0;
+        int gfb=0, win=0, dw=0, mh=0, sx=0, ovs=0, ws=0;
+
+        PceBridge_GetVideoDebug(&vw, &vh, &pp, &pfb, &nativeClass);
+        GSK_GetPceDebugState(&gfb, &win, &dw, &mh, &sx, &ovs, &ws);
+
+        FontSelect(2);
+        FontColor4f(1.0f, 1.0f, 0.0f, 1.0f);
+        FontPrintf(24, 20, "PCE W%u H%u P%u FB%d N%d", vw, vh, pp, pfb, nativeClass);
+        FontPrintf(24, 32, "GFB%d WIN%d DW%d M%d O%d W%d", gfb, win, dw, mh+1, ovs, ws);
+    }
+    else if (!_bMenu && _pSystem == _pNes)
+    {
+        Uint32 crc=0;
+        int mapper=-1, hm=-1, am=-1;
+        unsigned sc=0, s0=0, s1=0, vv=0, vt=0, fx=0;
+        long st0=0, st1=0;
+
+        QuicknesBridge_GetRuntimeDebug(&crc, &mapper, &hm,
+                                       &sc, &s0, &s1, &st0, &st1, &am,
+                                       &vv, &vt, &fx);
+
+        if (mapper == 79)
+        {
+            FontSelect(2);
+            FontColor4f(1.0f, 1.0f, 0.0f, 1.0f);
+            FontPrintf(24, 20, "QN79 CRC%08X HM%d AM%d", (unsigned)crc, hm, am);
+            FontPrintf(24, 32, "S%u %02X/%02X T%ld/%ld V%04X T%04X X%u",
+                       sc, s0, s1, st0, st1, vv, vt, fx);
+        }
+    }
+    #endif /* AURORA_RUNTIME_DIAG_OVERLAY */
+
     if (!_bMenu)
     {	
 	
@@ -733,3 +796,9 @@ void MainLoopRender()
     _iFrame++;
 }
 
+
+/* AURORA_PCE_KRAZY_RUNTIME_DIAG_V11R3_20260830 */
+
+/* AURORA_PCE_ROOT512_KRAZY_LATCH_V12_20260830 */
+
+/* AURORA_PCE_RELEASE_CLEANUP_FINAL_V15_20260830 */

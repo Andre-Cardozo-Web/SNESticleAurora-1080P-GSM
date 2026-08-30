@@ -23,6 +23,13 @@ int PceBridge_GetSRAMBytes(void);
 Uint8 *PceBridge_GetSRAMData(void);
 void PceBridge_InvalidateGsResources(void);
 bool PceBridge_CanDirectGsVideo(void);
+/* AURORA_PCE_KRAZY_RUNTIME_DIAG_V11R3_20260830 */
+void PceBridge_GetVideoDebug(unsigned *w, unsigned *h, unsigned *pitchPixels,
+                             int *fbw, int *nativeClass);
+/* AURORA_PCE_NATIVE_GS_RASTER_V5_20260830: native GS framebuffer width for the current PCE dot-clock mode. */
+/* AURORA_PCE_FIXED512_DBX0_CUMULATIVE_V8_20260830
+ * Returns current native PCE source width/class; framebuffer itself stays 512. */
+int PceBridge_GetNative240pRasterWidth(void);
 bool PceBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity);
 unsigned PceBridge_GetSampleRate(void);
 #endif

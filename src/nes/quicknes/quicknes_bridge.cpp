@@ -78,6 +78,11 @@ enum
     QN_GUN_FAMICOM_EXT = 2,
     QN_GUN_TWO_NES = 3
 };
+/* AURORA_PCE_SCALING_LIGHTGUN_TOGGLE_V2_20260830
+ * User preference is separate from CRC detection so Off/On works live.
+ * Default is On; only qLightGunModeForCrc() may detect a gun. */
+static bool s_LightGunEnabled = true;
+static int s_LightGunDetectedMode = QN_GUN_NONE;
 static int s_LightGunMode = QN_GUN_NONE;
 static Int32 s_GunX = 128 << 8;
 static Int32 s_GunY = 120 << 8;
@@ -844,19 +849,21 @@ bool QuicknesBridge_LoadGame(const void *pData, size_t nBytes, const char *pName
     {
         const int nes2Ext = qNes2DefaultExpansionDevice(pData, nBytes);
         const Uint32 payloadCrc = qNesPayloadCrc32(pData, nBytes);
-        int gunMode = qLightGunModeForCrc(payloadCrc);
 
-        if (gunMode == QN_GUN_NONE && nes2Ext == 0x08)
-            gunMode = QN_GUN_NES_PORT2;
-        else if (gunMode == QN_GUN_NONE && nes2Ext == 0x09)
-            gunMode = QN_GUN_TWO_NES;
+        /* AURORA_PCE_SCALING_LIGHTGUN_TOGGLE_V2_20260830
+         * Light Gun detection is deliberately CRC32-only. */
+        s_LightGunDetectedMode = qLightGunModeForCrc(payloadCrc);
+        s_LightGunMode = s_LightGunEnabled
+            ? s_LightGunDetectedMode
+            : QN_GUN_NONE;
 
-        s_LightGunMode = gunMode;
         s_ArkanoidVaus = false;
         s_TurboFileEnabled = false;
         s_BattleBoxEnabled = false;
 
-        if (s_LightGunMode == QN_GUN_NONE)
+        /* A CRC-known gun game does not fall through to another accessory
+         * when the user's Light Gun toggle is Off: Off means plain pads. */
+        if (s_LightGunDetectedMode == QN_GUN_NONE)
         {
             s_BattleBoxEnabled = qBattleBoxCrc(payloadCrc);
             if (!s_BattleBoxEnabled)
@@ -923,6 +930,7 @@ void QuicknesBridge_UnloadGame(void)
     s_ArkanoidVaus = false;
     s_TurboFileEnabled = false; /* AURORA_CD_AUDIO_STREAM_V3_NES_UNLOAD_20260829 */
     s_BattleBoxEnabled = false; /* AURORA_QN_BATTLEBOX_V5_20260829 */
+    s_LightGunDetectedMode = QN_GUN_NONE; /* preference survives ROM unload */
     s_LightGunMode = QN_GUN_NONE; /* AURORA_QN_LIGHTGUN_CURSOR_V7_20260829 */
     quicknes_snesticle_ext_set_turbofile(0);
     quicknes_snesticle_ext_set_arkanoid(0);
@@ -1229,6 +1237,80 @@ void QuicknesBridge_ClearTurboFileDirty(void)
 }
 
 /* AURORA_QN_BATTLEBOX_V5_20260829 */
+/* AURORA_PCE_SCALING_LIGHTGUN_TOGGLE_V2_20260830 */
+void QuicknesBridge_SetLightGunEnabled(bool enabled)
+{
+    const int newMode = enabled ? s_LightGunDetectedMode : QN_GUN_NONE;
+
+    s_LightGunEnabled = enabled;
+    if (newMode == s_LightGunMode)
+        return;
+
+    s_LightGunMode = newMode;
+    quicknes_snesticle_ext_set_lightgun(s_LightGunMode);
+    quicknes_snesticle_ext_reset_bus();
+
+    if (s_LightGunMode != QN_GUN_NONE)
+        qResetLightGunAim();
+}
+
+bool QuicknesBridge_GetLightGunEnabled(void)
+{
+    return s_LightGunEnabled;
+}
+
+/* AURORA_PCE_KRAZY_RUNTIME_DIAG_V11R3_20260830 */
+static Uint32 qDebugCartPayloadCrc(const Nes_Cart *cart)
+{
+    static const Uint32 table[16] =
+    {
+        0x00000000U, 0x1DB71064U, 0x3B6E20C8U, 0x26D930ACU,
+        0x76DC4190U, 0x6B6B51F4U, 0x4DB26158U, 0x5005713CU,
+        0xEDB88320U, 0xF00F9344U, 0xD6D6A3E8U, 0xCB61B38CU,
+        0x9B64C2B0U, 0x86D3D2D4U, 0xA00AE278U, 0xBDBDF21CU
+    };
+
+    if (!cart)
+        return 0;
+
+    Uint32 c = 0xFFFFFFFFU;
+    const Uint8 *parts[2] = { cart->prg(), cart->chr() };
+    const long sizes[2] = { cart->prg_size(), cart->chr_size() };
+
+    for (int part = 0; part < 2; ++part)
+    {
+        const Uint8 *p = parts[part];
+        long n = sizes[part];
+        while (p && n-- > 0)
+        {
+            c ^= *p++;
+            c = (c >> 4) ^ table[c & 0x0FU];
+            c = (c >> 4) ^ table[c & 0x0FU];
+        }
+    }
+
+    return c ^ 0xFFFFFFFFU;
+}
+
+void QuicknesBridge_GetRuntimeDebug(Uint32 *crc, int *mapper, int *headerMirror,
+                                    unsigned *scrollCount, unsigned *scroll0,
+                                    unsigned *scroll1, long *scrollT0,
+                                    long *scrollT1, int *actualMirror,
+                                    unsigned *vramV, unsigned *vramT,
+                                    unsigned *fineX)
+{
+    const Nes_Cart *cart = s_pEmu ? s_pEmu->cart() : NULL;
+
+    if (crc)          *crc = qDebugCartPayloadCrc(cart);
+    if (mapper)       *mapper = cart ? cart->mapper_code() : -1;
+    if (headerMirror) *headerMirror = cart ? cart->mirroring() : -1;
+
+    if (s_pEmu)
+        s_pEmu->debug_ppu_scroll(scrollCount, scroll0, scroll1,
+                                 scrollT0, scrollT1, actualMirror,
+                                 vramV, vramT, fineX);
+}
+
 bool QuicknesBridge_LightGunActive(void)
 {
     return s_GameLoaded && s_LightGunMode != QN_GUN_NONE;

@@ -710,7 +710,10 @@ static Bool _MainLoopExecuteDisc(const char *pMappedPath,
     /* AURORA_SEGA_CD_32X_MD_SCALING_V2R1_20260828
      * Sega CD uses the same Genesis/MD H32/H40 output. Choose the native
      * 320-wide raster before PicoDrive allocates MCD; PCE CD stays 256. */
-    if (!MainLoopEnsureGameplayRasterWidth(eDisc > 0 ? 320 : 256))
+    /* AURORA_PCE_PRECORE512_V13_20260830
+     * Sega CD keeps MD's 320 raster; PCE CD uses the same fixed 512 storage
+     * raster as HuCards before Beetle is initialized. */
+    if (!MainLoopEnsureGameplayRasterWidth(eDisc > 0 ? 320 : 512))
     {
         MainLoopModalPrintf(60 * 3,
             "ERROR: cannot configure CD video raster");
@@ -1162,6 +1165,14 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     {
         Int32 rasterWidth = 256;
 
+        /* AURORA_PCE_PRECORE512_V13_20260830
+         * PCE Fast host surface has a 512-pixel pitch and may expose
+         * 256/352/512 visible widths. Enter the core with the GS already on
+         * one aligned 512-wide storage raster; later presentation selects only
+         * the visible window, never rebuilds to a non-64-aligned width. */
+        if (eType == MAINLOOP_ENTRYTYPE_PCEROM)
+            rasterWidth = 512;
+
         if (eType == MAINLOOP_ENTRYTYPE_SEGAROM)
         {
             Bool native320 = FALSE;
@@ -1468,3 +1479,5 @@ void _MainLoopSetSampleRate(Uint32 uSampleRate)
     _AudMix->SetSampleRate(uSampleRate);
 }
 
+
+/* AURORA_PCE_PRECORE512_V13_20260830 */

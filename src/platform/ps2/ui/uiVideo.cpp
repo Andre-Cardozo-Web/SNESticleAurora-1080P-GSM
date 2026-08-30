@@ -51,7 +51,8 @@ void MainLoopSnesCoreSetPersisted(Int32 value);
 /* ------------------------------------------------------------------ */
 
 #define VIDEOCFG_MAGIC   0x53564944u   /* 'SVID' */
-#define VIDEOCFG_VERSION 41
+#define VIDEOCFG_VERSION 42
+/* AURORA_PCE_SCALING_LIGHTGUN_TOGGLE_V2_20260830: v42 appends Light Gun; old configs default On. */
 /* AURORA_FAMICOM_MIC_CFG41_20260828: v41 keeps the layout and migrates every older Safe Frameskip to 1 once. */
 /* AURORA_PCE_VOLUME_V37_20260823
  * v37 appends pcevol only; every v36 field keeps the same offset.
@@ -124,8 +125,9 @@ typedef struct
 	Int32  snescore;       /* v38: persisted SNES core selector */
 	Int32  safeframeskip;  /* v41: 0=Off, 1..9=max auto skips; default 1 */
 	Int32  ggzoom;         /* v39: GG 160x144 -> 240x216, uniform 3:2 */
+	Int32  lightgun;       /* v42: CRC-known NES/Famicom gun; 1=On */
 } VideoCfgT;
-#define VIDEOCFG_V38_BYTES (sizeof(VideoCfgT) - 2 * sizeof(Int32))
+#define VIDEOCFG_V38_BYTES (sizeof(VideoCfgT) - 3 * sizeof(Int32))
 #define VIDEOCFG_V37_BYTES (VIDEOCFG_V38_BYTES - sizeof(Int32))
 
 /* v16 is the exact prefix written by v1.0.4 and by the first video-fix
@@ -437,6 +439,7 @@ void VideoSettingsSave(void)
 	/* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2: v39 append-only fields. */
 	cfg.safeframeskip = MainLoopSafeFrameskipGetLevel();
 	cfg.ggzoom = PicoDriveBridge_GetGgZoom() ? 1 : 0;
+	cfg.lightgun = QuicknesBridge_GetLightGunEnabled() ? 1 : 0;
 	_VideoCfgPath(path);
 	BgmIOBegin();
 	MemCardWriteFile(path, (Uint8 *)&cfg, sizeof(cfg));
@@ -458,6 +461,8 @@ void VideoSettingsLoad(void)
 	MainLoopSafeFrameskipSetLevel(1);
 	PicoDriveBridge_SetGgZoom(false);
 	memset(&cfg, 0, sizeof(cfg));
+	cfg.lightgun = 1; /* v42 default and all pre-v42 migrations: On */
+	QuicknesBridge_SetLightGunEnabled(true);
 	SNPPURenderSetSoftwareLayerMask(
 		SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2 | SNESPPU_MASK_BG3 |
 		SNESPPU_MASK_BG4 | SNESPPU_MASK_OBJ);
@@ -479,10 +484,12 @@ void VideoSettingsLoad(void)
 		{
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
 		}
-		else if (header.version == 40 || header.version == 39)
+		else if (header.version == 41 || header.version == 40 || header.version == 39)
 		{
-			/* v39/v40 are byte-identical to v41; migration policy is below. */
-			loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(cfg));
+			/* v39/v40/v41 are the exact v42 prefix before lightgun.
+			 * cfg.lightgun was preinitialised to 1, so migration is On. */
+			loaded = MemCardReadFile(path, (Uint8 *)&cfg,
+			                         sizeof(cfg) - sizeof(cfg.lightgun));
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
 		else if (header.version == 38)
@@ -792,6 +799,8 @@ void VideoSettingsLoad(void)
 			MainLoopSafeFrameskipSetLevel(cfg.safeframeskip);
 		if (cfg.ggzoom == 0 || cfg.ggzoom == 1)
 			PicoDriveBridge_SetGgZoom(cfg.ggzoom != 0);
+		if (cfg.lightgun == 0 || cfg.lightgun == 1)
+			QuicknesBridge_SetLightGunEnabled(cfg.lightgun != 0);
 		if (cfg.smsfm == 0 || cfg.smsfm == 1)
 			PicoDriveBridge_SetSmsFm(cfg.smsfm != 0);
 		if (cfg.bgmvol >= 0 && cfg.bgmvol <= 400) BgmSetVolume(cfg.bgmvol);
@@ -1139,7 +1148,7 @@ void CVideoScreen::Draw()
 	const char *pMode = _VideoModes[m].name;
 	/* AURORA_V85_SOFTWARE_HACKS_PAGE
 	 * AURORA_MD_MENU_MAPPING_SRAM_FIX_V4: controller page dedicada.
-	 * Display order: 0..9, 30..36, 40..43, 20..29, 10..19. */
+	 * Display order: 0..9, 30..36, 40..44, 20..29, 10..19. */
 	int   iPage = (m_iSelect >= 50) ? 1 :
 	              ((m_iSelect >= 40) ? 3 :
 	              ((m_iSelect >= 31) ? 2 :
@@ -1294,6 +1303,8 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 			MainLoopMdPadGetLayoutName()); vy += 12;
 		_VideoRow(vy, 43, m_iSelect, "Turbo Speed",
 			MainLoopTurboGetSpeedName()); vy += 12;
+		_VideoRow(vy, 44, m_iSelect, "Light Gun",
+			QuicknesBridge_GetLightGunEnabled() ? "On" : "Off"); vy += 12;
 	}
 
 	/* controls / hints (clear of the vy=215 footer) */
@@ -1335,7 +1346,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		else if (m_iSelect < 20)  { lo = 10; hi = 19; }
 		else if (m_iSelect <= 30) { lo = 20; hi = 30; }
 		else if (m_iSelect < 40)  { lo = 31; hi = 37; }
-		else if (m_iSelect < 50)  { lo = 40; hi = 43; }
+		else if (m_iSelect < 50)  { lo = 40; hi = 44; }
 		else                      { lo = 50; hi = 57; }
 		if (trigger & PAD_UP)
 		{
@@ -1666,6 +1677,10 @@ case 17: /* Famiclone Audio */
 			break;
 		case 43:
 			MainLoopTurboCycleSpeedDir(dir);
+			break;
+		case 44:
+			QuicknesBridge_SetLightGunEnabled(
+				!QuicknesBridge_GetLightGunEnabled());
 			break;
 		}
 

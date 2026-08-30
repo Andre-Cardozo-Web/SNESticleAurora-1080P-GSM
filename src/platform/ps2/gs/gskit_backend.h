@@ -56,9 +56,25 @@ void GSK_SetGameplayYOffsetBias(int y);
  * Present logical 256-wide UI without fractional scaling while MD keeps
  * its physical 320-wide 240p framebuffer alive. */
 void GSK_SetUi256On320Framebuffer(int on);
-/* 240p physical sample raster: 256 (SNES/NES) or 320 (plain MD). */
+/* AURORA_PCE_NATIVE_GS_RASTER_V5_20260830
+ * 240p physical sample raster:
+ * 256 (SNES/NES/common PCE), 320 (MD), 342/512 (PCE dot-clock modes). */
 void GSK_Set240pFramebufferWidth(int width);
 int GSK_Get240pFramebufferWidth(void);
+
+/* AURORA_PCE_ACTIVEFB_RECONCILE_V14R2_20260830
+ * Largura física do framebuffer gsKit atualmente ativo. */
+int GSK_GetActiveFramebufferWidth(void);
+
+/* AURORA_PCE_KRAZY_RUNTIME_DIAG_V11R3_20260830: hidden runtime probe retained for future diagnostics. */
+void GSK_GetPceDebugState(int *fbw, int *winw, int *dw, int *magh,
+                          int *startx, int *overscan, int *wide);
+
+/* AURORA_PCE_FIXED512_DBX0_CUMULATIVE_V8_20260830
+ * Select a 1:1 visible window inside the current 240p framebuffer.
+ * Intended for PCE fixed-512 gameplay: source samples remain untouched. */
+void GSK_Set240pVisibleWindow(int x, int width);
+void GSK_Clear240pVisibleWindow(void);
 
 /* Apply overscan (0..100) live by re-emitting the GS DISPLAY register.
    0 reproduces gsKit's normal output exactly. */

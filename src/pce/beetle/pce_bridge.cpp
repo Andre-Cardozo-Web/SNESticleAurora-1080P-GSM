@@ -123,7 +123,17 @@ static const char *pceVariable(const char *key)
     if (!strcmp(key, "pce_fast_ocmultiplier")) return "1";
     if (!strcmp(key, "pce_fast_frameskip")) return "disabled";
     if (!strcmp(key, "pce_fast_frameskip_threshold")) return "33";
-    if (!strcmp(key, "pce_fast_hoverscan")) return "0";
+    /* AURORA_PCE_352_WIDTH_BLACKSCREEN_FIX_V3_20260830
+     * Beetle uses this numeric option directly as defined_width[1], i.e.
+     * the output width for VCE dot-clock mode 1. Zero is not "no overscan":
+     * it makes DisplayRect.w == 0, so Aurora rejects video_cb and games
+     * using the 352-class mode (e.g. Aoi Blink) render black.
+     * Keep Beetle PCE Fast's own documented/default width: 352 pixels. */
+    /* AURORA_PCE_DOTCLOCK_342_4TO3_V4_20260830
+     * 342 is the Beetle-family recommended 352-mode width when matching
+     * 256-mode geometry: it removes only horizontal overscan and leaves a
+     * width extremely close to the hardware 4:3 dot-clock relationship. */
+    if (!strcmp(key, "pce_fast_hoverscan")) return "352"; /* AURORA_PCE_CRT_OVERSCAN_352_V9_20260830 */
     if (!strcmp(key, "pce_fast_initial_scanline")) return "0";
     if (!strcmp(key, "pce_fast_last_scanline")) return "239";
     if (!strcmp(key, "pce_fast_cdimagecache")) return "disabled";
@@ -362,22 +372,41 @@ static void pceRender(CRenderSurface *target)
         }
         else
         {
-            /* Preserve V1's uniform fractional scaling for >256 modes. */
-            Uint32 step = (Uint32)(((uint64_t)sw << 16) / (unsigned)tw);
-            Uint32 pos = step / 2;
-            for (int x = 0; x < tw; ++x, pos += step)
+            /* AURORA_PCE_DOTCLOCK_342_4TO3_V4_20260830
+             *
+             * PC Engine dot-clock mode 1 is ~4/3 the sampling rate of the
+             * common 256-class mode. Once Beetle has cropped the nominal
+             * 352-wide line to its recommended 342-pixel visible window,
+             * map it with a fixed 4-source -> 3-destination cadence.
+             *
+             * This avoids the long-period column-width wobble produced by
+             * generic 342/256 nearest scaling. No RGB interpolation: source
+             * colours remain exact. The normal 256-wide fast path is intact.
+             */
+            if (sw == 342 && tw == 256)
             {
-                int sx = (int)(pos >> 16);
-                if (sx >= sw) sx = sw - 1;
-                int sx1 = sx + 1 < sw ? sx + 1 : sx;
-                Uint32 f = (pos >> 8) & 255u;
-                Uint32 r0,g0,b0,r1,g1,b1;
-                pce565parts(src[sx], &r0, &g0, &b0);
-                pce565parts(src[sx1], &r1, &g1, &b1);
-                Uint32 r = (r0 * (256 - f) + r1 * f + 128) >> 8;
-                Uint32 g = (g0 * (256 - f) + g1 * f + 128) >> 8;
-                Uint32 b = (b0 * (256 - f) + b1 * f + 128) >> 8;
-                dst[x] = 0xff000000u | (b << 16) | (g << 8) | r;
+                for (int x = 0; x < 256; ++x)
+                {
+                    /* Centre-sampled exact 4:3 dot-clock phase:
+                     * sx = floor((x + 0.5) * 4 / 3). */
+                    int sx = (x * 4 + 2) / 3;
+                    if (sx >= sw) sx = sw - 1;
+                    dst[x] = pce565(src[sx]);
+                }
+            }
+            else
+            {
+                /* Fallback for any other unusual width. */
+                for (int x = 0; x < tw; ++x)
+                {
+                    const uint64_t num =
+                        ((uint64_t)(unsigned)x * 2u + 1u) *
+                        (uint64_t)(unsigned)sw;
+                    int sx = (int)(num /
+                        ((uint64_t)(unsigned)tw * 2u));
+                    if (sx >= sw) sx = sw - 1;
+                    dst[x] = pce565(src[sx]);
+                }
             }
         }
     }
@@ -573,6 +602,38 @@ void PceBridge_InvalidateGsResources(void)
     s_PceDirectPixelsValid = false;
 }
 
+/* AURORA_PCE_NATIVE_GS_RASTER_V5_20260830
+ * Beetle V4 presents common PCE as 256, high dot-clock as 342, and may
+ * expose the 512-dot class. Return only GS framebuffer widths Aurora owns. */
+int PceBridge_GetNative240pRasterWidth(void)
+{
+    if (!s_HaveVideo || !s_VideoData || !s_VideoW)
+        return 256;
+    if (s_VideoW > 352u)
+        return 512;
+    if (s_VideoW > 256u)
+        return 352;
+    return 256;
+}
+
+/* AURORA_PCE_KRAZY_RUNTIME_DIAG_V11R3_20260830 */
+void PceBridge_GetVideoDebug(unsigned *w, unsigned *h, unsigned *pitchPixelsOut,
+                             int *fbw, int *nativeClass)
+{
+    const unsigned pp = (unsigned)(s_VideoPitch >> 1);
+    const int physicalW = (int)(256.0f * GPPrimGetScaleX() + 0.5f);
+    const int native =
+        (GSK_GetActiveVideoMode() == GSK_VIDMODE_240P &&
+         physicalW == 512 &&
+         (s_VideoW == 256u || s_VideoW == 352u || s_VideoW == 512u)) ? 1 : 0;
+
+    if (w)              *w = s_VideoW;
+    if (h)              *h = s_VideoH;
+    if (pitchPixelsOut) *pitchPixelsOut = pp;
+    if (fbw)            *fbw = physicalW;
+    if (nativeClass)    *nativeClass = native;
+}
+
 bool PceBridge_CanDirectGsVideo(void)
 {
     size_t pitchPixels;
@@ -646,27 +707,50 @@ bool PceBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     logicalH = (int)srcH;
     logicalY = (240 - logicalH) / 2;
 
-    if (srcW <= 256u)
-    {
-        logicalW = (int)srcW;
-        logicalX = (256 - logicalW) / 2;
-    }
-    else
-    {
-        /* PCE 352/512-dot modes represent a wider dot clock, not a request
-         * for a wider Aurora gameplay raster. Let GS perform the horizontal
-         * reduction instead of the EE. */
-        logicalW = 256;
-        logicalX = 0;
-    }
-
     fbW = (int)(256.0f * GPPrimGetScaleX() + 0.5f);
     fbH = (int)(240.0f * GPPrimGetScaleY() + 0.5f);
     if (fbW <= 0 || fbH <= 0)
         return false;
 
-    dstX = (fbW * logicalX + 128) / 256;
-    dstW = (fbW * logicalW + 128) / 256;
+    /* AURORA_PCE_FIXED512_DBX0_CUMULATIVE_V8_20260830
+     * PCE 240p lives in one 512-wide aligned GS framebuffer. Draw the source
+     * 1:1, centred, and crop scanout to exactly that source window.
+     *
+     * No column is duplicated, discarded or interpolated. A mode switch only
+     * changes dstX/DBX/DISPLAY geometry; VRAM/framebuffers stay intact.
+     */
+    if (GSK_GetActiveVideoMode() == GSK_VIDMODE_240P &&
+        fbW == 512 &&
+        (srcW == 256u || srcW == 352u || srcW == 512u))
+    {
+        logicalW = (int)srcW;
+        logicalX = 0;
+
+        /* AURORA_PCE_FIXED512_DBX0_CUMULATIVE_V8_20260830
+         * Keep native PCE samples at framebuffer X=0.  Physical centering
+         * belongs to PCRTC DISPLAY, not DISPFB panning.  Keeping DBX=0 also
+         * avoids the live right-edge echo observed with 256/342 windows. */
+        dstX = 0;
+        dstW = (int)srcW;
+
+        GSK_Set240pVisibleWindow(0, (int)srcW);
+    }
+    else
+    {
+        if (srcW <= 256u)
+        {
+            logicalW = (int)srcW;
+            logicalX = (256 - logicalW) / 2;
+        }
+        else
+        {
+            logicalW = 256;
+            logicalX = 0;
+        }
+
+        dstX = (fbW * logicalX + 128) / 256;
+        dstW = (fbW * logicalW + 128) / 256;
+    }
 
     /* V12 scaling fix: use the complete 240-line destination domain.
      * For a 240-line source this is exactly 1:1 at a 240p framebuffer,
@@ -690,12 +774,16 @@ bool PceBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
 
     modColor = 0x80000000u | (mod << 16) | (mod << 8) | mod;
 
+    /* AURORA_PCE_MODECLOCK_APERTURE_HALFTEXEL_V10_20260830
+     * Sample texel centres, matching Aurora's proven QuickNES direct-GS path.
+     * With NEAREST this removes boundary ambiguity without scaling/repacking:
+     * native 1:1 modes still map one source texel to one framebuffer pixel. */
     GPPrimTexRectAbs(
         (Uint32)(dstX << 4), (Uint32)(dstY << 4),
-        0, 0,
+        8u, 8u,
         (Uint32)((dstX + dstW) << 4),
         (Uint32)((dstY + dstH) << 4),
-        (Uint32)(srcW << 4), (Uint32)(srcH << 4),
+        (Uint32)(srcW << 4) + 8u, (Uint32)(srcH << 4) + 8u,
         0, modColor, 0);
 
     return true;

@@ -221,11 +221,25 @@ static Bool _MainLoopAllocVideoVram(void)
  * source sample maps to one physical framebuffer column in 240p. */
 Bool MainLoopEnsureGameplayRasterWidth(Int32 width)
 {
-    if (width != 256 && width != 320)
+        /* AURORA_PCE_ROOT512_KRAZY_LATCH_V12_20260830
+     * 512 is the fixed, GS-aligned storage raster used by PCE gameplay.
+     * Never silently collapse it to 256. */
+    if (width != 256 && width != 320 && width != 512)
         width = 256;
 
+
+    /* AURORA_PCE_ACTIVEFB_RECONCILE_V14R2_20260830
+     * Não confundir largura solicitada com framebuffer já ativo.
+     * REQ512 + ACTIVE256 precisa obrigatoriamente reconstruir o GS. */
     if (GSK_Get240pFramebufferWidth() == width)
-        return TRUE;
+    {
+        if (g_GskVideoMode != GSK_VIDMODE_240P)
+            return TRUE;
+
+        if (GSK_GetActiveVideoMode() == GSK_VIDMODE_240P &&
+            GSK_GetActiveFramebufferWidth() == width)
+            return TRUE;
+    }
 
     GSK_Set240pFramebufferWidth(width);
 
@@ -236,6 +250,18 @@ Bool MainLoopEnsureGameplayRasterWidth(Int32 width)
         GSK_SetGameplayYOffsetBias(0);
 
     GSK_ReinitVideo();
+
+    /* AURORA_PCE_ACTIVEFB_RECONCILE_V14R2_20260830 */
+    if (GSK_GetActiveVideoMode() != GSK_VIDMODE_240P ||
+        GSK_GetActiveFramebufferWidth() != width)
+    {
+        printf("[video] GS raster reconcile failed: requested=%d active=%d mode=%d\n",
+               (int)width,
+               (int)GSK_GetActiveFramebufferWidth(),
+               (int)GSK_GetActiveVideoMode());
+        return FALSE;
+    }
+
     if (!_MainLoopAllocVideoVram())
         return FALSE;
 
@@ -716,3 +742,5 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
     return TRUE;
 }
 
+
+/* AURORA_PCE_ACTIVEFB_RECONCILE_V14R2_20260830 */
