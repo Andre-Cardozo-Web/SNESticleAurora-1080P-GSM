@@ -57,9 +57,11 @@ Emulation:
 * Turbo button toggle (hold R2+ANY BUTTON) for SNES and MD games
 * In-game soft reset (L2+SELECT)
 * SNES and MD mouse emulation
-* ASCII Turbofile for Famicom and Super Famicom (accessory for many ASCII games)
+* ASCII Turbo File for Famicom and Super Famicom (accessory for many ASCII games)
 * Battle Box for Famicom (accessory for Armadillo)
 * Arkanoid Pad for Famicom (accessory for Arkanoid and Arkanoid II)
+* Famicom Microphone (L2+START)
+* NES Zapper / Famicom Light Gun (X to shoot, L2+SQUARE to simulate shooting away from the screen)
 * Region selector
 
 User interface:
@@ -108,7 +110,6 @@ CD firmware and images **(experimental)**
 
 **TO BE ADDED:**
 
-* NES Zapper / Famicom Light Gun
 * SNES SA-1 Emulation
 * Improve FX1 and FX2 emulation
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!
