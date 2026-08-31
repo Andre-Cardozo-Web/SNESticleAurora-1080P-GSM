@@ -576,6 +576,9 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"gd7");
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"dx2");
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"bsx");
+	/* AURORA_SWC_FLOPPY_V1_20260831: .img is a copier floppy, never a cartridge. */
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESWCDISK, (char *)"img");
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESWCBIOS, (char *)"rom"); /* AURORA_SWC_FLOPPY_V5_20260831 */
 
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESPALETTE, (char *)"snpal");
 

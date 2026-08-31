@@ -859,19 +859,8 @@ if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 	g_FamicloneAudio = cfg.famicloneaudio ? TRUE : FALSE;
 	QuicknesBridge_SetDutySwap(g_FamicloneAudio ? true : false);
 }
-		if (cfg.fakesramsize == 0 ||
-		    cfg.fakesramsize == 8 ||
-		    cfg.fakesramsize == 16 ||
-		    cfg.fakesramsize == 32 ||
-		    cfg.fakesramsize == 64 ||
-		    cfg.fakesramsize == 128 ||
-		    cfg.fakesramsize == 256 ||
-		    cfg.fakesramsize == 512 ||
-		    cfg.fakesramsize == 1024 ||
-		    cfg.fakesramsize == 2048)
-		{
-			g_FakeSRAMSize = cfg.fakesramsize;
-		}
+		/* AURORA_SWC_FLOPPY_V5_20260831: legacy field ignored. */
+		g_FakeSRAMSize = 0;
 		if (cfg.forceregion == SNES_FORCE_REGION_OFF ||
 		    cfg.forceregion == SNES_FORCE_REGION_NTSC_U ||
 		    cfg.forceregion == SNES_FORCE_REGION_NTSC_J ||
@@ -1265,8 +1254,7 @@ void CVideoScreen::Draw()
 
 _VideoHeader(vy, "Misc."); vy += 14;
 
-_VideoRow(vy, 15, m_iSelect, "SRAM Size",
-          _VideoFakeSRAMStatus()); vy += 12;
+/* AURORA_SWC_FLOPPY_V5_20260831: SRAM Size hidden; Auto forced. */
 
 _VideoRow(vy, 16, m_iSelect, "Force Region",
           _VideoForceRegionStatus()); vy += 12;
@@ -1385,12 +1373,14 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 			if (m_iSelect < lo) m_iSelect = hi;
 			/* Keep retired index 36 unreachable without renumbering 37. */
 			if (m_iSelect == 36) m_iSelect = 35;
+			if (m_iSelect == 15) m_iSelect = 14; /* AURORA_SWC_FLOPPY_V5_20260831 */
 		}
 		if (trigger & PAD_DOWN)
 		{
 			m_iSelect++;
 			if (m_iSelect > hi) m_iSelect = lo;
 			if (m_iSelect == 36) m_iSelect = 37;
+			if (m_iSelect == 15) m_iSelect = 16; /* AURORA_SWC_FLOPPY_V5_20260831 */
 		}
 	}
 
@@ -1536,50 +1526,8 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 			}
 			break;
 
-case 15: /* SRAM Size */
-    switch (g_FakeSRAMSize)
-    {
-        case 0:
-            g_FakeSRAMSize = (dir > 0) ? 8 : 2048;
-            break;
-
-        case 8:
-            g_FakeSRAMSize = (dir > 0) ? 16 : 0;
-            break;
-
-        case 16:
-            g_FakeSRAMSize = (dir > 0) ? 32 : 8;
-            break;
-
-        case 32:
-            g_FakeSRAMSize = (dir > 0) ? 64 : 16;
-            break;
-
-        case 64:
-            g_FakeSRAMSize = (dir > 0) ? 128 : 32;
-            break;
-
-        case 128:
-            g_FakeSRAMSize = (dir > 0) ? 256 : 64;
-            break;
-
-        case 256:
-            g_FakeSRAMSize = (dir > 0) ? 512 : 128;
-            break;
-
-        case 512:
-            g_FakeSRAMSize = (dir > 0) ? 1024 : 256;
-            break;
-
-        case 1024:
-            g_FakeSRAMSize = (dir > 0) ? 2048 : 512;
-            break;
-
-        case 2048:
-        default:
-            g_FakeSRAMSize = (dir > 0) ? 0 : 1024;
-            break;
-    }
+case 15: /* SRAM Size -- retired, kept for index compatibility */
+    g_FakeSRAMSize = 0; /* AURORA_SWC_FLOPPY_V5_20260831 */
     break;
 
 case 16: /* Force Region */

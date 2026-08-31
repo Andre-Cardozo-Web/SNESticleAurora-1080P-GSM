@@ -28,6 +28,7 @@ extern "C" {
 #include "sngsu.h"
 #include "snsdd1.h"
 #include "snsrtc.h"
+#include "snswc.h" /* AURORA_SWC_FLOPPY_V1_20260831 */
 
 #define SNES_RAMSIZE  0x20000
 #define SNES_SRAMSIZE (256 * 1024)
@@ -54,6 +55,18 @@ public:
 
     void 	SetRom(class Emu::Rom *pRom);
     void	SetSnesRom(SnesRom *pRom);
+    /* AURORA_SWC_FLOPPY_V1_20260831 -- isolated copier mode. */
+    Bool    LoadSuperWildCard(const Char *pFirmwarePath, const Char *pDiskPath);
+    Bool    SwapSuperWildCardDisk(const Char *pDiskPath);
+    void    ShutdownSuperWildCard();
+    Bool    IsSuperWildCard() const { return m_bSuperWildCard; }
+    const Char *GetSuperWildCardDiskPath() const { return m_SWC.GetDiskPath(); }
+    const Char *GetSuperWildCardError() const { return m_SWC.GetLastError(); }
+    /* AURORA_SWC_FLOPPY_V5_20260831 */
+    Bool    InsertSuperWildCardCartridge(SnesRom *pRom);
+    void    EjectSuperWildCardCartridge();
+    Bool    HasSuperWildCardCartridge() const { return m_SWC.HasExternalCartridge(); }
+    Bool    HasSuperWildCardDisk() const { return m_SWC.HasDisk(); }
     void	Reset();
 	void	SoftReset();
 	void	ExecuteFrame(Emu::SysInputT *pInput, class CRenderSurface *pTarget, class CMixBuffer *pSound, ModeE eMode);
@@ -70,6 +83,9 @@ public:
     void    SaveState(void *pState, Int32 nStateBytes);
     void    RestoreState(void *pState, Int32 nStateBytes);
     Int32   GetStateSize();
+    /* AURORA_SWC_FLOPPY_V4_20260831 */
+    Bool    SaveStateChecked(void *pState, Int32 nStateBytes);
+    Bool    RestoreStateChecked(void *pState, Int32 nStateBytes);
 
     /* AURORA_CX4_STATE_V7
      * CX4 data is packed into unused tail bytes of the legacy 256 KiB SRAM
@@ -121,6 +137,10 @@ private:
 	Bool		m_bSRTC;
 	Bool		m_bSuperFX;   // cartucho usa SuperFX/GSU -> rotear $3000-34FF
 
+	/* AURORA_SWC_FLOPPY_V1_20260831 */
+	SNSuperWildCard m_SWC;
+	Bool            m_bSuperWildCard;
+
 	SnesRom		*m_pRom;
 Bool            m_bRegionLocked;
 	SnesPPURender	m_PPURender;
@@ -158,6 +178,8 @@ private:
 	static void SNCPU_TRAPFUNC  WriteCX4(SNCpuT *pCpu, Uint32 uAddr, Uint8 uData);
 	static Uint8 SNCPU_TRAPFUNC ReadGSU(SNCpuT *pCpu, Uint32 uAddr);
 	static void SNCPU_TRAPFUNC  WriteGSU(SNCpuT *pCpu, Uint32 uAddr, Uint8 uData);
+	static Uint8 SNCPU_TRAPFUNC ReadSWC(SNCpuT *pCpu, Uint32 uAddr);
+	static void SNCPU_TRAPFUNC  WriteSWC(SNCpuT *pCpu, Uint32 uAddr, Uint8 uData);
 	static Uint8 CX4ReadMem(void *pCtx, Uint32 uAddr);
 
     static Uint8 SNCPU_TRAPFUNC Read2000Debug(SNCpuT *pCpu, Uint32 uAddr);
@@ -172,6 +194,7 @@ private:
 	void	MapMem(struct SnesMemMapT *pMemMap);
 	void	MapMem(SNRomMappingE eRomMapping, Uint32 uFlags);
 	void	MapMemExLoRom(void);
+	void	MapSuperWildCard(void); /* AURORA_SWC_FLOPPY_V1_20260831 */
 	void	RemapSDD1(void);   // (re)mapeia $C0-$FF conforme $4804-$4807
 	void	DumpMemMap();
 

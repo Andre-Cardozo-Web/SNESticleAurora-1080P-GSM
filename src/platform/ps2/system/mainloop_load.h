@@ -14,4 +14,6 @@ Bool _MainLoopLoadNesPalette(const char *pFileName); /* AURORA_FCEUMM_FDS_V4_TUR
 Bool _MainLoopLoadSnesPalette(const char *pFileName);
 void _MainLoopUnloadRom();
 Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM);
+Bool MainLoopSwcSwapNextDisk(void); /* AURORA_SWC_FLOPPY_V1_20260831 */
+Bool MainLoopSwcCreateNextDisk(void); /* AURORA_SWC_FLOPPY_V5_20260831 */
 void _MainLoopSetSampleRate(Uint32 uSampleRate);

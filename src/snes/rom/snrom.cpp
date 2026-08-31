@@ -39,6 +39,13 @@ Bool g_SnesCompatTopGearFastRom = FALSE;
  *   64EDFC5D = Sunset Riders (Europe) */
 Bool g_SnesCompatSunsetRidersObj128 = FALSE;
 
+/* AURORA_SWC_FLOPPY_V1_20260831
+ * Sunset Riders OBJ128 experiment did not fix the reported graphics.
+ * Preserve it for A/B work but keep release/default builds off. */
+#ifndef SNES_SUNSET_RIDERS_OBJ128_HACK
+#define SNES_SUNSET_RIDERS_OBJ128_HACK 0
+#endif
+
 static Uint32 _SNRomRuntimeCRC32(const Uint8 *pData, Uint32 nBytes)
 {
     Uint32 crc = 0xFFFFFFFFu;
@@ -1252,6 +1259,7 @@ if (m_pRomData && m_uRomBytes == 0x80000u)
  * Exact clean 1 MiB images only. This runs before any compatibility
  * byte-patching so altered dumps cannot match by title/header alone. */
 g_SnesCompatSunsetRidersObj128 = FALSE;
+#if SNES_SUNSET_RIDERS_OBJ128_HACK
 if (m_pRomData && m_uRomBytes == 0x100000u)
 {
     const Uint32 uSunsetRidersCRC =
@@ -1261,6 +1269,7 @@ if (m_pRomData && m_uRomBytes == 0x100000u)
         (uSunsetRidersCRC == 0x52ADA404u) || /* USA */
         (uSunsetRidersCRC == 0x64EDFC5Du);   /* Europe */
 }
+#endif
 
 /* AURORA_CRC_ZERO_INIT_DB_V8 + AURORA_TOP_GEAR_FASTROM_V1
  * Compute the untouched normalized/headerless CRC once, before V6 can mutate

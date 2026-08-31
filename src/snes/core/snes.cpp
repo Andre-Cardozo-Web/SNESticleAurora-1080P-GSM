@@ -1163,6 +1163,7 @@ SnesSystem::SnesSystem()
 	m_DMAC.SetSDD1(&m_SDD1);
 
 	m_bSDD1 = FALSE;
+	m_bSuperWildCard = FALSE; /* AURORA_SWC_FLOPPY_V1_20260831 */
 
 	// setup ppu
 	m_PPURender.SetPPU(&m_PPU);
@@ -1185,7 +1186,16 @@ SnesSystem::~SnesSystem()
 
 void SnesSystem::Reset()
 {
-	SetSlowRom();
+	/* AURORA_SWC_FLOPPY_V1_20260831 */
+	if (m_bSuperWildCard)
+	{
+		m_SWC.Reset();
+		MapSuperWildCard();
+	}
+	else
+	{
+		SetSlowRom();
+	}
 
 	m_PPU.Reset();
 	m_DMAC.Reset();
@@ -1344,6 +1354,12 @@ void SnesSystem::SetRom(class Emu::Rom *pRom)
 
 void SnesSystem::SetSnesRom(SnesRom *pRom)
 {
+	/* AURORA_SWC_FLOPPY_V1_20260831 */
+	if (m_bSuperWildCard)
+	{
+		m_SWC.Shutdown();
+		m_bSuperWildCard = FALSE;
+	}
 	if (m_pRom)
 	{
 		// disconnect from current rom
@@ -1412,6 +1428,69 @@ void SnesSystem::SetSnesRom(SnesRom *pRom)
 //////////////////////////////////////////////////////////////////////////
 
 
+
+
+/* AURORA_SWC_FLOPPY_V1_20260831 */
+Bool SnesSystem::LoadSuperWildCard(const Char *pFirmwarePath,
+                                   const Char *pDiskPath)
+{
+    SetSnesRom(NULL);
+
+    if (!m_SWC.Load(pFirmwarePath, pDiskPath))
+        return FALSE;
+
+    m_bSuperWildCard = TRUE;
+    m_bSDD1 = FALSE;
+    m_bSRTC = FALSE;
+    m_bSuperFX = FALSE;
+#if SNES_DSP1
+    m_pDsp = NULL;
+#endif
+
+    m_uSramSize = 0x8000;
+    memset(m_SRam, 0xFF, m_uSramSize);
+
+    MapSuperWildCard();
+    Reset();
+    return TRUE;
+}
+
+
+/* AURORA_SWC_FLOPPY_V5_20260831 */
+Bool SnesSystem::InsertSuperWildCardCartridge(SnesRom *pRom)
+{
+    if (!m_bSuperWildCard || !pRom || !pRom->IsLoaded())
+        return FALSE;
+
+    if (pRom->m_eMapping != SNROM_MAPPING_LOROM &&
+        pRom->m_eMapping != SNROM_MAPPING_HIROM)
+        return FALSE;
+
+    return m_SWC.SetExternalCartridge(
+        pRom->GetData(),
+        pRom->GetBytes(),
+        (Int32)pRom->m_eMapping);
+}
+
+void SnesSystem::EjectSuperWildCardCartridge()
+{
+    if (m_bSuperWildCard)
+        m_SWC.ClearExternalCartridge();
+}
+
+Bool SnesSystem::SwapSuperWildCardDisk(const Char *pDiskPath)
+{
+    if (!m_bSuperWildCard)
+        return FALSE;
+    return m_SWC.SwapDisk(pDiskPath);
+}
+
+void SnesSystem::ShutdownSuperWildCard()
+{
+    if (!m_bSuperWildCard)
+        return;
+    SetSnesRom(NULL);
+}
 
 #if SNES_HVIRQ_RESCHEDULE
 /* AURORA_HVIRQ_RESCHEDULE_V4
@@ -2473,6 +2552,9 @@ m_PPU.SetRegionPAL(bPAL);
 
 Int32 SnesSystem::GetSRAMBytes()
 {
+    /* AURORA_SWC_FLOPPY_V1_20260831 */
+    if (m_bSuperWildCard)
+        return 0x8000;
     if (m_pRom)
     {
         return m_pRom->GetSRAMBytes();
@@ -2484,6 +2566,9 @@ Int32 SnesSystem::GetSRAMBytes()
 
 Uint8 *SnesSystem::GetSRAMData()
 {
+    /* AURORA_SWC_FLOPPY_V1_20260831 */
+    if (m_bSuperWildCard)
+        return m_SRam;
     if (m_pRom && (m_pRom->GetSRAMBytes()>0))
     {
         return m_SRam;

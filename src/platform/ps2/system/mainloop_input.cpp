@@ -11,6 +11,7 @@
 #include "mainloop_ui.h"
 #include "mainloop_shared.h"
 #include "mainloop.h"
+#include "mainloop_load.h" /* AURORA_SWC_FLOPPY_V1_20260831 */
 #include "input.h"
 #include "nes/quicknes/quicknes_bridge.h"
 #include "nes/fceumm/fceumm_fds_bridge.h" /* AURORA_FCEUMM_FDS_V0_6_SIDE_SWAP */
@@ -486,6 +487,8 @@ void _MainLoopInputProcess(Uint32 buttons)
 	static int _MenuTriggerTimeout[2] = {0,0};
 	static Bool bStateHotkeyHeld = FALSE;
 	static Bool bFdsSwapHotkeyHeld = FALSE; /* AURORA_FCEUMM_FDS_V0_6_SIDE_SWAP */
+    static Bool bSwcSwapHotkeyHeld = FALSE; /* AURORA_SWC_FLOPPY_V1_20260831 */
+    static Bool bSwcCreateHotkeyHeld = FALSE; /* AURORA_SWC_FLOPPY_V5_20260831 */
 	Uint32 trigger;
 
 	/* AURORA_INPUT_SUPPRESS_ALL_GAMEPLAY_V1_4_3 */
@@ -519,6 +522,10 @@ void _MainLoopInputProcess(Uint32 buttons)
 
 	if (!(buttons & PAD_L2) || !(buttons & PAD_TRIANGLE))
 		bFdsSwapHotkeyHeld = FALSE;
+	if (!(buttons & PAD_L2) || !(buttons & PAD_TRIANGLE))
+		bSwcSwapHotkeyHeld = FALSE;
+	if (!(buttons & PAD_L2) || !(buttons & PAD_SQUARE))
+		bSwcCreateHotkeyHeld = FALSE;
 
 	/* AURORA_V6_PHYSICAL_CONSOLE_BUTTON_CONSUME_20260828 */
 	{
@@ -537,6 +544,23 @@ void _MainLoopInputProcess(Uint32 buttons)
 		}
 	}
 
+	/* AURORA_SWC_FLOPPY_V5_20260831
+	 * L2+Square creates and inserts the next cart-named floppy. */
+	if (!_bMenu && _pSystem == _pSnes &&
+	    _pSnes->IsSuperWildCard() &&
+	    _pSnes->HasSuperWildCardCartridge() &&
+	    !bSwcCreateHotkeyHeld &&
+	    (buttons & PAD_L2) && (buttons & PAD_SQUARE) &&
+	    !(buttons & PAD_R2) &&
+	    (trigger & (PAD_L2 | PAD_SQUARE)))
+	{
+		bSwcCreateHotkeyHeld = TRUE;
+		_MenuTriggerTimeout[0] = 0;
+		_MenuTriggerTimeout[1] = 0;
+		MainLoopSwcCreateNextDisk();
+		return;
+	}
+
 	/* AURORA_QN_LIGHTGUN_TIMING_V7_2_20260829
 	 * Light-gun-only false/off-screen shot. L2+Square has no normal release
 	 * hotkey, but consume it here so generic L2 menu/debug handling cannot
@@ -546,6 +570,21 @@ void _MainLoopInputProcess(Uint32 buttons)
 	{
 		_MenuTriggerTimeout[0] = 0;
 		_MenuTriggerTimeout[1] = 0;
+		return;
+	}
+
+	/* AURORA_SWC_FLOPPY_V1_20260831 */
+	if (!_bMenu && _pSystem == _pSnes &&
+	    _pSnes->IsSuperWildCard() &&
+	    !bSwcSwapHotkeyHeld &&
+	    (buttons & PAD_L2) && (buttons & PAD_TRIANGLE) &&
+	    !(buttons & PAD_R2) &&
+	    (trigger & (PAD_L2 | PAD_TRIANGLE)))
+	{
+		bSwcSwapHotkeyHeld = TRUE;
+		_MenuTriggerTimeout[0] = 0;
+		_MenuTriggerTimeout[1] = 0;
+		MainLoopSwcSwapNextDisk();
 		return;
 	}
 

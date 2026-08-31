@@ -827,7 +827,8 @@ static Bool _MainLoopSaveSRAMTo(MainLoopSramDeviceE eDevice, Bool bSync)
         {
             _MainLoopSramBuildPath(Path, sizeof(Path), pRoot, FALSE);
 
-            if (_pSystem == _pSnes && g_FakeSRAMSize)
+            if (_pSystem == _pSnes && g_FakeSRAMSize &&
+                !_pSnes->IsSuperWildCard()) /* AURORA_SWC_FLOPPY_V1_20260831 */
             {
                 struct stat Status;
                 if (stat(Path, &Status) == 0 &&
@@ -1205,6 +1206,7 @@ Bool _MainLoopCheckSRAM()
 #define MAINLOOP_STATE_SYSTEM_PCE       3
 #define MAINLOOP_STATE_SYSTEM_SNES9X2010 4 /* AURORA_SNES9X2010_V1 */
 #define MAINLOOP_STATE_SYSTEM_FDS       5 /* AURORA_FCEUMM_FDS_V0_6_STATE */
+#define MAINLOOP_STATE_SYSTEM_SWC       6 /* AURORA_SWC_FLOPPY_V4_20260831 */
 #define MAINLOOP_STATE_RAW_BYTES \
     (sizeof(SnesStateT) > sizeof(NesStateT) \
         ? sizeof(SnesStateT) \
@@ -1293,6 +1295,13 @@ static Uint32 _MainLoop_SegaStateCapacity = 0;
 static Uint8 *_MainLoop_SegaCompressed = NULL;
 static Uint32 _MainLoop_SegaCompressedCapacity = 0;
 
+static Bool _MainLoopStateIsSwc()
+{
+    return (_pSystem == _pSnes && _pSnes &&
+            _pSnes->IsSuperWildCard()) ? TRUE : FALSE;
+}
+/* AURORA_SWC_FLOPPY_V4_20260831 */
+
 static void _MainLoopStateReleaseSegaScratch()
 {
     if (_MainLoop_SegaStateData) free(_MainLoop_SegaStateData);
@@ -1316,7 +1325,8 @@ public:
     MainLoopSegaStateScratchGuard()
         : m_bActive((_pSystem == _pSega || _pSystem == _pPce ||
                      _pSystem == _pFds || /* AURORA_FCEUMM_FDS_V0_6_STATE */
-                     _pSystem == _pSnes9x2010) ? TRUE : FALSE)
+                     _pSystem == _pSnes9x2010 ||
+                     _MainLoopStateIsSwc()) ? TRUE : FALSE)
     {
     }
 
@@ -1354,7 +1364,7 @@ static Uint32 _MainLoopStateCompressedLimit(Uint32 nRawBytes)
 {
     if (_pSystem != _pSega && _pSystem != _pPce &&
         _pSystem != _pFds && /* AURORA_FCEUMM_FDS_V0_6_STATE */
-        _pSystem != _pSnes9x2010)
+        _pSystem != _pSnes9x2010 && !_MainLoopStateIsSwc())
         return (Uint32)sizeof(_MainLoop_StateCompressed);
 
     unsigned long long n =
@@ -1366,7 +1376,7 @@ static Uint8 *_MainLoopStateGetCompressedBuffer(Uint32 nNeed, Uint32 *pCapacity)
 {
     if (_pSystem != _pSega && _pSystem != _pPce &&
         _pSystem != _pFds && /* AURORA_FCEUMM_FDS_V0_6_STATE */
-        _pSystem != _pSnes9x2010)
+        _pSystem != _pSnes9x2010 && !_MainLoopStateIsSwc())
     {
         if (pCapacity) *pCapacity = (Uint32)sizeof(_MainLoop_StateCompressed);
         return _MainLoop_StateCompressed;
@@ -1399,11 +1409,17 @@ static Uint32 _MainLoopStateGetSystemId()
     if (_pSystem == _pPce)  return MAINLOOP_STATE_SYSTEM_PCE;
     if (_pSystem == _pFds)  return MAINLOOP_STATE_SYSTEM_FDS; /* AURORA_FCEUMM_FDS_V0_6_STATE */
     if (_pSystem == _pSnes9x2010) return MAINLOOP_STATE_SYSTEM_SNES9X2010;
+    if (_MainLoopStateIsSwc()) return MAINLOOP_STATE_SYSTEM_SWC;
     return MAINLOOP_STATE_SYSTEM_SNES;
 }
 
 static Uint32 _MainLoopStateGetPayloadBytes()
 {
+    if (_MainLoopStateIsSwc())
+    {
+        Int32 nBytes = _pSnes->GetStateSize();
+        return nBytes > 0 ? (Uint32)nBytes : 0;
+    }
     /* AURORA_PICODRIVE_STAGE2_STATE_SIZE */
     if (_pSystem == _pSega)
     {
@@ -1450,6 +1466,9 @@ static Uint32 _MainLoopStateGetPayloadBytes()
 
 static Uint8 *_MainLoopStateGetPayloadData()
 {
+    if (_MainLoopStateIsSwc())
+        return _MainLoopStateEnsureSegaStateData(
+            _MainLoopStateGetPayloadBytes());
     if (_pSystem == _pNes)
         return (Uint8 *)&_NesState;
     if (_pSystem == _pSega || _pSystem == _pPce ||
@@ -2172,13 +2191,32 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
             return FALSE;
         }
     }
+    else if (_MainLoopStateIsSwc())
+    {
+        /* AURORA_SWC_FLOPPY_V5_20260831
+         * External cartridge ROM is not embedded in V5 states. */
+        if (_pSnes->HasSuperWildCardCartridge())
+        {
+            snprintf(
+                pReason, nReasonBytes,
+                "SWC state with external cartridge is not serialized.");
+            return FALSE;
+        }
+
+        if (_pSnes->GetStateSize() <= (Int32)sizeof(SnesStateT))
+        {
+            snprintf(pReason, nReasonBytes,
+                     "Super Wild Card state extension unavailable.");
+            return FALSE;
+        }
+    }
     else if (!_pSnesRom || !_pSnesRom->IsLoaded())
     {
         snprintf(pReason, nReasonBytes, "No SNES ROM loaded.");
         return FALSE;
     }
 
-    pChip = _pSystem == _pSnes
+    pChip = (_pSystem == _pSnes && !_MainLoopStateIsSwc())
         ? _MainLoopStateGetUnsupportedChip(_pSnesRom->m_Flags)
         : NULL;
     if (pChip)
@@ -2203,7 +2241,9 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
         return FALSE;
     }
 
-    if (_pSystem == _pSega)
+    if (_MainLoopStateIsSwc())
+        snprintf(pReason, nReasonBytes, "Ready: Super Wild Card + DRAM/FDC state.");
+    else if (_pSystem == _pSega)
         snprintf(pReason, nReasonBytes, "Ready: PicoDrive cartridge state.");
     else if (_pSystem == _pPce)
         snprintf(pReason, nReasonBytes, "Ready: PC Engine HuCard state.");
@@ -2231,6 +2271,45 @@ const Char *MainLoopStateGetAvailability()
     return _MainLoop_StateAvailability;
 }
 
+/* AURORA_SWC_FLOPPY_V4_20260831
+ * NAME_1.img, NAME_2.img, ... share one state namespace: NAME. */
+static Bool _MainLoopStateGetSwcBaseName(Char *pOut, Int32 nOutBytes)
+{
+    const Char *pPath;
+    const Char *pName;
+    const Char *pExt;
+    size_t n;
+    size_t i;
+
+    if (!pOut || nOutBytes <= 1 || !_MainLoopStateIsSwc())
+        return FALSE;
+
+    pPath = _pSnes->GetSuperWildCardDiskPath();
+    if (!pPath || !*pPath)
+        return FALSE;
+
+    pName = pPath;
+    for (const Char *p = pPath; *p; ++p)
+        if (*p == '/' || *p == '\\')
+            pName = p + 1;
+
+    pExt = strrchr(pName, '.');
+    n = pExt ? (size_t)(pExt - pName) : strlen(pName);
+    if (!n || n >= (size_t)nOutBytes)
+        return FALSE;
+
+    memcpy(pOut, pName, n);
+    pOut[n] = 0;
+
+    i = n;
+    while (i > 0 && pOut[i - 1] >= '0' && pOut[i - 1] <= '9')
+        --i;
+    if (i > 0 && i < n && pOut[i - 1] == '_')
+        pOut[i - 1] = 0;
+
+    return pOut[0] ? TRUE : FALSE;
+}
+
 static Bool _MainLoopStateGetRomIdentity(
     Uint32 *puCRC,
     Uint32 *pnBytes,
@@ -2238,6 +2317,27 @@ static Bool _MainLoopStateGetRomIdentity(
 {
     Uint8 *pRomData = NULL; /* AURORA_FCEUMM_FDS_V0_6_STATE */
     Uint32 nRomBytes;
+    if (_MainLoopStateIsSwc())
+    {
+        Char BaseName[256];
+        Uint32 uIdentity;
+
+        if (!_MainLoopStateGetSwcBaseName(BaseName, sizeof(BaseName)))
+            return FALSE;
+
+        uIdentity = (Uint32)mz_crc32(
+            MZ_CRC32_INIT,
+            (const unsigned char *)BaseName,
+            strlen(BaseName));
+
+        _MainLoop_StateRomCRC = uIdentity;
+        _MainLoop_StateRomCRCValid = TRUE;
+        *puCRC = uIdentity;
+        *pnBytes = 0x4000u;
+        *puFlags = 0x53574304u;
+        return TRUE;
+    }
+
 
     if (_pSystem == _pNes)
     {
@@ -2665,7 +2765,17 @@ static void _MainLoopStateBuildBankPath(
     }
 
     nMaxName = PathGetMaxFileNameLength(Directory) - 4;
-    PathTruncFileName(SaveName, _RomName, nMaxName);
+    if (_MainLoopStateIsSwc())
+    {
+        Char SwcName[256];
+        if (!_MainLoopStateGetSwcBaseName(SwcName, sizeof(SwcName)))
+            snprintf(SwcName, sizeof(SwcName), "%s", "Super Wild Card");
+        PathTruncFileName(SaveName, SwcName, nMaxName);
+    }
+    else
+    {
+        PathTruncFileName(SaveName, _RomName, nMaxName);
+    }
     snprintf(
         pPath,
         nPathBytes,
@@ -2675,7 +2785,7 @@ static void _MainLoopStateBuildBankPath(
         _pSystem == _pNes ? 'n' :
             (_pSystem == _pFds ? 'f' : /* AURORA_FCEUMM_FDS_V0_6_STATE */
              (_pSystem == _pSega ? 'g' :
-              (_pSystem == _pSnes9x2010 ? 'x' : 's'))),
+              (_pSystem == _pSnes9x2010 ? 'x' : (_MainLoopStateIsSwc() ? 'w' : 's')))),
         iSlot + 1,
         iBank ? 'b' : 'a'
     );
@@ -3028,6 +3138,14 @@ Bool _MainLoopLoadState()
                     _pSnes9x2010->RestoreStateChecked(
                         pS9xStateData, (Int32)nS9xStateBytes);
             }
+            else if (_MainLoopStateIsSwc())
+            {
+                Uint8 *pSwcStateData = _MainLoopStateGetPayloadData();
+                Uint32 nSwcStateBytes = _MainLoopStateGetPayloadBytes();
+                bRestoreOK = pSwcStateData && nSwcStateBytes &&
+                    _pSnes->RestoreStateChecked(
+                        pSwcStateData, (Int32)nSwcStateBytes);
+            }
             else
                 bRestoreOK = _pSnes->RestoreState(&_SnesState);
         }
@@ -3223,6 +3341,15 @@ Bool _MainLoopSaveState()
         if (!_pSnes9x2010->SaveStateChecked(pStateData, (Int32)nStateBytes))
         {
             _MainLoopStateSetMessage("Could not snapshot the Snes9x 2010 state.");
+            return FALSE;
+        }
+    }
+    else if (_MainLoopStateIsSwc())
+    {
+        if (!_pSnes->SaveStateChecked(pStateData, (Int32)nStateBytes))
+        {
+            _MainLoopStateSetMessage(
+                "Could not snapshot the Super Wild Card state.");
             return FALSE;
         }
     }

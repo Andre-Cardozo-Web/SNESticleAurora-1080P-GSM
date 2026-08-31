@@ -196,24 +196,90 @@ Bool SnesSystem::CanSerializeSpecialChipState()
         ? TRUE : FALSE;
 }
 
+/* AURORA_SWC_FLOPPY_V4_20260831
+ * Normal SNES keeps sizeof(SnesStateT); SWC appends its private envelope. */
 void SnesSystem::SaveState(void *pState, Int32 nStateBytes)
 {
-    if (nStateBytes == sizeof(SnesStateT))
-    {
-        SaveState((SnesStateT *)pState);
-    }
+    (void)SaveStateChecked(pState, nStateBytes);
 }
 
 void SnesSystem::RestoreState(void *pState, Int32 nStateBytes)
 {
-    if (nStateBytes == sizeof(SnesStateT))
+    (void)RestoreStateChecked(pState, nStateBytes);
+}
+
+Bool SnesSystem::SaveStateChecked(void *pState, Int32 nStateBytes)
+{
+    if (!pState)
+        return FALSE;
+
+    if (!m_bSuperWildCard)
     {
-        RestoreState((SnesStateT *)pState);
+        if (nStateBytes != (Int32)sizeof(SnesStateT))
+            return FALSE;
+        SaveState((SnesStateT *)pState);
+        return TRUE;
+    }
+
+    {
+        Uint32 nSwcBytes = m_SWC.GetStateBytes();
+        Uint32 nExpected = (Uint32)sizeof(SnesStateT) + nSwcBytes;
+        Uint8 *pBytes = (Uint8 *)pState;
+
+        if (nStateBytes <= 0 || (Uint32)nStateBytes != nExpected)
+            return FALSE;
+
+        SaveState((SnesStateT *)pBytes);
+        if (!m_SWC.SaveState(pBytes + sizeof(SnesStateT), nSwcBytes))
+        {
+            memset(pBytes, 0, nExpected);
+            return FALSE;
+        }
+        return TRUE;
+    }
+}
+
+Bool SnesSystem::RestoreStateChecked(void *pState, Int32 nStateBytes)
+{
+    if (!pState)
+        return FALSE;
+
+    if (!m_bSuperWildCard)
+    {
+        if (nStateBytes != (Int32)sizeof(SnesStateT))
+            return FALSE;
+        return RestoreState((SnesStateT *)pState);
+    }
+
+    {
+        Uint32 nSwcBytes = m_SWC.GetStateBytes();
+        Uint32 nExpected = (Uint32)sizeof(SnesStateT) + nSwcBytes;
+        Uint8 *pBytes = (Uint8 *)pState;
+        SnesStateT *pBase = (SnesStateT *)pBytes;
+
+        if (nStateBytes <= 0 || (Uint32)nStateBytes != nExpected ||
+            memcmp(pBase->Tag, "SNS", 4) != 0)
+            return FALSE;
+
+        if (!m_SWC.RestoreState(
+                pBytes + sizeof(SnesStateT), nSwcBytes))
+            return FALSE;
+
+        if (!RestoreState(pBase))
+            return FALSE;
+
+        MapSuperWildCard();
+        return TRUE;
     }
 }
 
 Int32 SnesSystem::GetStateSize()
 {
+    if (m_bSuperWildCard)
+    {
+        Uint32 n = (Uint32)sizeof(SnesStateT) + m_SWC.GetStateBytes();
+        return n <= 0x7fffffffu ? (Int32)n : 0;
+    }
     return sizeof(SnesStateT);
 }
 

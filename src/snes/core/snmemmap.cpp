@@ -416,6 +416,69 @@ void SnesSystem::MapMem(SnesMemMapT *pMemMap)
 	}
 }
 
+
+/* AURORA_SWC_FLOPPY_V1_20260831 */
+Uint8 SNCPU_TRAPFUNC SnesSystem::ReadSWC(SNCpuT *pCpu, Uint32 uAddr)
+{
+    SnesSystem *pSnes = (SnesSystem *)pCpu->pUserData;
+    Uint8 uData = pCpu->uMDR;
+
+    if (pSnes->m_bSuperWildCard &&
+        pSnes->m_SWC.Read(uAddr, &uData, pSnes->m_SRam, 0x8000))
+        return uData;
+
+    return pCpu->uMDR;
+}
+
+void SNCPU_TRAPFUNC SnesSystem::WriteSWC(SNCpuT *pCpu,
+                                         Uint32 uAddr, Uint8 uData)
+{
+    SnesSystem *pSnes = (SnesSystem *)pCpu->pUserData;
+    if (pSnes->m_bSuperWildCard)
+        pSnes->m_SWC.Write(uAddr, uData, pSnes->m_SRam, 0x8000);
+}
+
+void SnesSystem::MapSuperWildCard(void)
+{
+    SNCpuT *pCpu = &m_Cpu;
+    Uint32 uBank;
+
+    SNCPUSetTrap(pCpu, 0, SNCPU_MEM_SIZE, ReadSWC, WriteSWC);
+    SNCPUSetMemSpeed(pCpu, 0, SNCPU_MEM_SIZE, SNCPU_CYCLE_SLOW);
+
+    SNCPUSetBank(pCpu, 0x7E0000, 0x20000, m_Ram, TRUE);
+
+    for (uBank = 0; uBank <= 0x3F; ++uBank)
+    {
+        Uint32 uBase = uBank << 16;
+        Uint32 uMirror = uBase | 0x800000;
+
+        SNCPUSetBank(pCpu, uBase, 0x2000, m_Ram, TRUE);
+        SNCPUSetBank(pCpu, uMirror, 0x2000, m_Ram, TRUE);
+
+#if SNES_DEBUG
+        SNCPUSetTrap(pCpu, uBase | 0x2000, 0x2000,
+                     Read2000Debug, Write2000Debug);
+        SNCPUSetTrap(pCpu, uMirror | 0x2000, 0x2000,
+                     Read2000Debug, Write2000Debug);
+        SNCPUSetTrap(pCpu, uBase | 0x4000, 0x2000,
+                     Read4000Debug, Write4000Debug);
+        SNCPUSetTrap(pCpu, uMirror | 0x4000, 0x2000,
+                     Read4000Debug, Write4000Debug);
+#else
+        SNCPUSetTrap(pCpu, uBase | 0x2000, 0x2000, Read2000, Write2000);
+        SNCPUSetTrap(pCpu, uMirror | 0x2000, 0x2000, Read2000, Write2000);
+        SNCPUSetTrap(pCpu, uBase | 0x4000, 0x2000, Read4000, Write4000);
+        SNCPUSetTrap(pCpu, uMirror | 0x4000, 0x2000, Read4000, Write4000);
+#endif
+        SNCPUSetMemSpeed(pCpu, uBase | 0x2000, 0x4000, SNCPU_CYCLE_FAST);
+        SNCPUSetMemSpeed(pCpu, uMirror | 0x2000, 0x4000, SNCPU_CYCLE_FAST);
+    }
+
+    SNCPUMirror24BitBus(pCpu);
+}
+
+
 #if CODE_DEBUG
 void SnesSystem::DumpMemMap()
 {

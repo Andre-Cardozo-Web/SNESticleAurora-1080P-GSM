@@ -556,6 +556,7 @@ LIBS := \
 	-lcglue \
 	-ldebug -lkernel -lc -lm -lstdc++ -lgcc
 
+# AURORA_SWC_FLOPPY_V1_20260831: isolated SWC source
 SRCS := \
     src/platform/ps2/ps2sdk_stubs.c \
     src/platform/ps2/system/cdda_async_filexio.c \
@@ -659,6 +660,7 @@ SRCS := \
 	src/snes/core/snio.cpp \
 	src/snes/core/snmask128.cpp \
 	src/snes/core/snmemmap.cpp \
+	src/snes/core/snswc.cpp \
 	src/snes/ppu/snppubg.cpp \
 	src/snes/ppu/snppublend_gs.cpp \
 	src/snes/ppu/snppucolor.cpp \
