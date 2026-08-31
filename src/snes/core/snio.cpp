@@ -140,7 +140,9 @@ static SnesTurboFileModeE _SnesTurboFileModeForCRC(Uint32 crc)
 		case 0xB17E95D4U: /* Mini Yonku Shining Scorpion */
 		case 0xC79C123FU: /* Ongaku Tsukuru Kanadeeru */
 		case 0xE20870EEU: /* RPG Tsukuru: Super Dante */
+		case 0xE0BD6C71U: /* RPG Tsukuru: Super Dante - translated */
 		case 0x675B6382U: /* RPG Tsukuru 2 */
+		case 0x916D9C92U: /* RPG Tsukuru 2 - translated */
 		case 0x5EBF7246U: /* Sound Novel Tsukuru */
 		case 0xDAF285A5U: /* Tactics Ogre v1.0 */
 		case 0x271E1D07U: /* Tactics Ogre v1.1 */
