@@ -691,26 +691,8 @@ void MainLoopRender()
         FontPrintf(24, 20, "PCE W%u H%u P%u FB%d N%d", vw, vh, pp, pfb, nativeClass);
         FontPrintf(24, 32, "GFB%d WIN%d DW%d M%d O%d W%d", gfb, win, dw, mh+1, ovs, ws);
     }
-    else if (!_bMenu && _pSystem == _pNes)
-    {
-        Uint32 crc=0;
-        int mapper=-1, hm=-1, am=-1;
-        unsigned sc=0, s0=0, s1=0, vv=0, vt=0, fx=0;
-        long st0=0, st1=0;
-
-        QuicknesBridge_GetRuntimeDebug(&crc, &mapper, &hm,
-                                       &sc, &s0, &s1, &st0, &st1, &am,
-                                       &vv, &vt, &fx);
-
-        if (mapper == 79)
-        {
-            FontSelect(2);
-            FontColor4f(1.0f, 1.0f, 0.0f, 1.0f);
-            FontPrintf(24, 20, "QN79 CRC%08X HM%d AM%d", (unsigned)crc, hm, am);
-            FontPrintf(24, 32, "S%u %02X/%02X T%ld/%ld V%04X T%04X X%u",
-                       sc, s0, s1, st0, st1, vv, vt, fx);
-        }
-    }
+    /* AURORA_V6_1G_QN_KRAZY_DEBUG_CONSUMER_CURE_20260831
+     * Retired obsolete QuickNES mapper-79 debug overlay; PCE diagnostics above remain. */
     #endif /* AURORA_RUNTIME_DIAG_OVERLAY */
 
     if (!_bMenu)

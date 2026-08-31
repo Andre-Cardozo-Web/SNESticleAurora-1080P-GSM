@@ -544,11 +544,11 @@ void _MainLoopInputProcess(Uint32 buttons)
 		}
 	}
 
-	/* AURORA_SWC_MEGA_V9_20260831
-	 * L2+Square creates the next cart-named floppy only; L2+Triangle owns insertion/swap. */
+	/* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
+	 * L2+Square creates the next numbered image for the active loader:
+	 * Dummy_N without a cartridge, or <cartridge>_N with one. */
 	if (!_bMenu && _pSystem == _pSnes &&
 	    _pSnes->IsSuperWildCard() &&
-	    _pSnes->HasSuperWildCardCartridge() &&
 	    !bSwcCreateHotkeyHeld &&
 	    (buttons & PAD_L2) && (buttons & PAD_SQUARE) &&
 	    !(buttons & PAD_R2) &&

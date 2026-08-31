@@ -121,6 +121,29 @@ static SnesMemMapT _SnesMemMap_LoRom_DSP1[]={
     {0xC0,0xCF,0xC000,0xFFFF,SNCPU_CYCLE_FAST,SNESMEM_TYPE_DSP1},
     {0,0,0,0,SNESMEM_TYPE_NONE}
 };
+
+/* AURORA_DSP4_REAL_LOROM_MAP_20260831
+ * DSP-4 (Top Gear 3000 / Planet's Champ TG3000) uses the SHVC-1B0N-01
+ * uPD77C25 decode, not Aurora's broad DSP-1 compatibility map:
+ *
+ *   $30-$3F/$B0-$BF:$8000-$BFFF = Data Register
+ *   $30-$3F/$B0-$BF:$C000-$FFFF = Status Register
+ *
+ * Keep the ranges split into 8 KiB pages because this core's generic
+ * MapMem() represents trapped devices at SNCPU_BANK_SIZE granularity.
+ * This changes address decoding only; the existing DSP-4 HLE is untouched.
+ */
+static SnesMemMapT _SnesMemMap_LoRom_DSP4[]={
+    {0x30,0x3F,0x8000,0x9FFF,SNCPU_CYCLE_FAST,SNESMEM_TYPE_DSP1},
+    {0x30,0x3F,0xA000,0xBFFF,SNCPU_CYCLE_FAST,SNESMEM_TYPE_DSP1},
+    {0x30,0x3F,0xC000,0xDFFF,SNCPU_CYCLE_FAST,SNESMEM_TYPE_DSP1},
+    {0x30,0x3F,0xE000,0xFFFF,SNCPU_CYCLE_FAST,SNESMEM_TYPE_DSP1},
+    {0xB0,0xBF,0x8000,0x9FFF,SNCPU_CYCLE_FAST,SNESMEM_TYPE_DSP1},
+    {0xB0,0xBF,0xA000,0xBFFF,SNCPU_CYCLE_FAST,SNESMEM_TYPE_DSP1},
+    {0xB0,0xBF,0xC000,0xDFFF,SNCPU_CYCLE_FAST,SNESMEM_TYPE_DSP1},
+    {0xB0,0xBF,0xE000,0xFFFF,SNCPU_CYCLE_FAST,SNESMEM_TYPE_DSP1},
+    {0,0,0,0,SNESMEM_TYPE_NONE}
+};
 #endif
 
 
@@ -440,12 +463,41 @@ void SNCPU_TRAPFUNC SnesSystem::WriteSWC(SNCpuT *pCpu,
             pSnes->m_SWC.Write(uAddr, uData, pSnes->m_SRam, 0x8000);
         Uint16 addr = (Uint16)(uAddr & 0xFFFF);
 
-        /* AURORA_SWC_MEGA_V9_20260831: page/mode/parallel/cart-map writes can change which
-         * 8 KiB banks are safely direct-mapped. */
-        if (handled &&
-            (addr == 0xC008 || (addr >= 0xE004 && addr <= 0xE00D)))
+        /* AURORA_SWC_V11_MENU_FASTPATH_20260831
+         * E000-E003 select the 8 KiB BIOS-mode DRAM page: update only that
+         * direct window instead of rebuilding the complete 16 MiB map.
+         *
+         * E004-E007 really change System Mode and still require a full map.
+         * C008 and E008-E00D do not change any direct Mode-0 window currently
+         * installed by Aurora, so remapping the whole address space there was
+         * pure host overhead.
+         */
+        if (handled && addr >= 0xE000 && addr <= 0xE003)
+            pSnes->RemapSuperWildCardMode0Dram();
+        else if (handled && addr >= 0xE004 && addr <= 0xE007)
             pSnes->MapSuperWildCard();
     }
+}
+
+void SnesSystem::RemapSuperWildCardMode0Dram(void)
+{
+    SNCpuT *pCpu = &m_Cpu;
+    Uint8 *pDram = NULL;
+    Uint32 uBank;
+
+    if (!m_bSuperWildCard ||
+        !m_SWC.ResolveDirectDram(0x00, 0x8000, &pDram))
+        return;
+
+    for (uBank = 0x00; uBank <= 0x7D; ++uBank)
+        SNCPUSetBank(pCpu, (uBank << 16) | 0x8000,
+                     0x2000, pDram, TRUE);
+
+    for (uBank = 0x80; uBank <= 0xFF; ++uBank)
+        SNCPUSetBank(pCpu, (uBank << 16) | 0x8000,
+                     0x2000, pDram, TRUE);
+
+    SNCPUMirror24BitBus(pCpu);
 }
 
 void SnesSystem::MapSuperWildCard(void)
@@ -457,6 +509,7 @@ void SnesSystem::MapSuperWildCard(void)
     /* AURORA_SWC_MEGA_V9_20260831
      * Fail-closed trap baseline, then stable direct 8 KiB windows.
      * AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831: mode-0 BIOS ROM reads are direct; FDC/control stays trapped.
+     * AURORA_SWC_V11_MENU_FASTPATH_20260831: mode-0 selected DRAM page is direct; page changes use a surgical remap.
      * Modes 2/3 retain the existing direct game/DRAM path.
      */
     SNCPUSetTrap(pCpu, 0, SNCPU_MEM_SIZE, ReadSWC, WriteSWC);
@@ -658,7 +711,8 @@ void SnesSystem::MapMem(SNRomMappingE eRomMapping, Uint32 uFlags)
 			// DSP e' sempre mapeada e m_pDsp aponta para o HLE.
 			if (uFlags & SNROM_FLAG_DSP4)
 			{
-				MapMem(_SnesMemMap_LoRom_DSP1);
+				/* AURORA_DSP4_REAL_LOROM_MAP_20260831 */
+				MapMem(_SnesMemMap_LoRom_DSP4);
 				m_pDsp = &m_DSP4;
 			}
 #endif

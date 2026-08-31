@@ -47,7 +47,7 @@ public:
 
     Bool Read(Uint32 uAddr, Uint8 *pData, Uint8 *pSRAM, Uint32 nSRAMBytes);
     Bool Write(Uint32 uAddr, Uint8 uData, Uint8 *pSRAM, Uint32 nSRAMBytes);
-    Bool ResolveDirectDram(Uint8 bank, Uint16 addr, Uint8 **ppMem); /* AURORA_SWC_MEGA_V9_20260831 */
+    Bool ResolveDirectDram(Uint8 bank, Uint16 addr, Uint8 **ppMem); /* AURORA_SWC_MEGA_V9_20260831; AURORA_SWC_V11_MENU_FASTPATH_20260831 */
     Bool ResolveDirectCartridge(Uint8 bank, Uint16 addr,
                                 const Uint8 **ppMem) const;
     Bool ResolveDirectFirmware(Uint8 bank, Uint16 addr,

@@ -390,10 +390,10 @@ Bool MainLoopEnsureSystemDirectory(Char *pOut, Int32 nOutBytes)
     return TRUE;
 }
 
-/* AURORA_SWC_MEGA_V9_20260831
+/* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
  * Keep copier media out of ROM directories and out of SYSTEM firmware.
- * Reuse the exact writable SNESticle root selected by SYSTEM, then create a
- * sibling SNESticle/SWC directory.
+ * DSK is copier-neutral so other hardware loaders can share the same media
+ * root later without pretending their disks belong to the SWC.
  */
 Bool MainLoopEnsureSwcDirectory(Char *pOut, Int32 nOutBytes)
 {
@@ -418,7 +418,7 @@ Bool MainLoopEnsureSwcDirectory(Char *pOut, Int32 nOutBytes)
     memcpy(Root, SystemDirectory, n - 7);
     Root[n - 7] = 0;
 
-    nChars = snprintf(pOut, (size_t)nOutBytes, "%s/SWC", Root);
+    nChars = snprintf(pOut, (size_t)nOutBytes, "%s/DSK", Root);
     if (nChars < 0 || nChars >= nOutBytes)
     {
         pOut[0] = 0;
@@ -431,7 +431,7 @@ Bool MainLoopEnsureSwcDirectory(Char *pOut, Int32 nOutBytes)
         return FALSE;
     }
 
-    printf("[SWC] directory: %s\n", pOut);
+    printf("[DSK] directory: %s\n", pOut);
     return TRUE;
 }
 

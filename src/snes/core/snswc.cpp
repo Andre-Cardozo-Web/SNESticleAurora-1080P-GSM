@@ -1215,6 +1215,11 @@ Bool SNSuperWildCard::ResolveDirectFirmware(
 /* AURORA_SWC_MEGA_V9_20260831
  * Resolve stable 8 KiB windows so the 65816 hot path can use direct memory
  * rather than calling ReadSWC/WriteSWC for every opcode/data byte.
+ *
+ * AURORA_SWC_V11_MENU_FASTPATH_20260831:
+ * In BIOS/System Mode 0, bb:8000-9FFF is one selected 8 KiB DRAM page.
+ * It is ordinary RAM, so direct read/write mapping is semantically identical
+ * to ReadMode0/WriteMode0 but avoids a C++ trap for every menu data byte.
  */
 Bool SNSuperWildCard::ResolveDirectDram(Uint8 bank, Uint16 addr,
                                         Uint8 **ppMem)
@@ -1223,9 +1228,24 @@ Bool SNSuperWildCard::ResolveDirectDram(Uint8 bank, Uint16 addr,
     Uint8 maxHiBank;
     Bool inBankRange;
 
-    if (!ppMem || !m_bActive || !m_pDRAM ||
-        (m_uSystemMode != 2 && m_uSystemMode != 3) ||
-        (addr & 0x1FFF))
+    if (!ppMem || !m_bActive || !m_pDRAM || (addr & 0x1FFF))
+        return FALSE;
+
+    if (m_uSystemMode == 0)
+    {
+        /* Hardware Mode 0 DRAM page window:
+         * bb:8000-9FFF, bb=00-7D,80-FF. 7E/7F remain SNES WRAM. */
+        if (addr != 0x8000 ||
+            !((bank <= 0x7D) || (bank >= 0x80)))
+            return FALSE;
+
+        *ppMem = m_pDRAM +
+            ((m_uSelectedDRAMPage * 0x2000u) &
+             (SWC_DRAM_BYTES - 1));
+        return TRUE;
+    }
+
+    if (m_uSystemMode != 2 && m_uSystemMode != 3)
         return FALSE;
 
     /* Keep the actual mode/control register block trapped. */

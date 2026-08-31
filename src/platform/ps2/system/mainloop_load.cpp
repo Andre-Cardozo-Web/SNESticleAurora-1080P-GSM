@@ -1706,9 +1706,14 @@ static Bool _MainLoopFindSwcFirmware(char *pOut, Int32 nOutBytes)
 {
     static const char *kNames[] =
     {
-        "swc.rom",
+        /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
+         * Canonical direct-.img fallback first; aliases remain accepted. */
+        "SWC.SFC",
+        "SWC.SMC",
+        "SWC.ROM",
         "swc.sfc",
         "swc.smc",
+        "swc.rom",
         "Super Wild Card V2.8CC 06-08-94 BIOS [!].smc",
         "Super Wild Card V2.8CC 06-08-94 BIOS.smc",
         "Super Wild Card V2.8CC 06-28-94 BIOS [!].smc",
@@ -1800,8 +1805,6 @@ static Bool _MainLoopExecuteSwcFirmware(const char *pFirmwarePath,
     return TRUE;
 }
 
-static Bool _MainLoopSwcEnsureInitialDisk(void);
-
 static Bool _MainLoopSwcInsertCartridge(const char *pPath)
 {
     CFileIO romfile;
@@ -1855,13 +1858,13 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
         "%s", pPath);
     MainLoopStateOnRomChanged();
 
-    if (!_MainLoopSwcEnsureInitialDisk())
-        MainLoopStatusPrintf(
-            210, "SWC cartridge inserted; could not create first floppy");
-    else
-        MainLoopStatusPrintf(
-            180, "SWC cartridge inserted: %s",
-            _MainLoopSwcBaseName(pPath));
+    /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
+     * Cartridge insertion keeps the hardware reset performed by
+     * SnesSystem::InsertSuperWildCardCartridge(), but never auto-creates
+     * floppy media. */
+    MainLoopStatusPrintf(
+        180, "SWC cartridge inserted: %s",
+        _MainLoopSwcBaseName(pPath));
     return TRUE;
 }
 
@@ -1872,8 +1875,15 @@ static Bool _MainLoopSwcCartStem(char *pOut, Int32 nOutBytes)
     const char *pExt;
     size_t n;
 
-    if (!pOut || nOutBytes <= 1 || !s_SwcExternalCartPath[0])
+    if (!pOut || nOutBytes <= 1)
         return FALSE;
+
+    /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831: bare loader media is Dummy_N.img. */
+    if (!s_SwcExternalCartPath[0])
+    {
+        int nChars = snprintf(pOut, (size_t)nOutBytes, "%s", "Dummy");
+        return nChars >= 0 && nChars < nOutBytes ? TRUE : FALSE;
+    }
 
     pName = _MainLoopSwcBaseName(s_SwcExternalCartPath);
     if (!pName || !*pName)
@@ -2084,36 +2094,7 @@ static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
     return TRUE;
 }
 
-static Bool _MainLoopSwcEnsureInitialDisk(void)
-{
-    Char Existing[1024];
-    Char FirstPath[1024];
-
-    if (!_pSnes || !_pSnes->IsSuperWildCard() ||
-        !_pSnes->HasSuperWildCardCartridge() ||
-        !s_SwcExternalCartPath[0])
-        return FALSE;
-
-    if (_MainLoopSwcFindFirstExistingCartDisk(
-            Existing, sizeof(Existing)))
-    {
-        MainLoopStatusPrintf(
-            120, "SWC: existing floppy ready; L2+Triangle to insert");
-        return TRUE;
-    }
-
-    if (!_MainLoopSwcBuildCartDiskPath(
-            FirstPath, sizeof(FirstPath), 1) ||
-        !_MainLoopSwcCreateFat12Image(FirstPath))
-        return FALSE;
-
-    MainLoopStatusPrintf(
-        180, "SWC: created %s; L2+Triangle to insert",
-        _MainLoopSwcBaseName(FirstPath));
-    return TRUE;
-}
-
-/* AURORA_SWC_MEGA_V9_20260831: cartridge insertion auto-provisions disk 1, never auto-mounts it. */
+/* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831: no automatic floppy provisioning. */
 
 Bool MainLoopSwcCreateNextDisk(void)
 {
@@ -2121,9 +2102,7 @@ Bool MainLoopSwcCreateNextDisk(void)
     struct stat st;
     unsigned nDisk;
 
-    if (!_pSnes || !_pSnes->IsSuperWildCard() ||
-        !_pSnes->HasSuperWildCardCartridge() ||
-        !s_SwcExternalCartPath[0])
+    if (!_pSnes || !_pSnes->IsSuperWildCard())
         return FALSE;
 
     /* L2+Square always creates the first free numbered image. */
@@ -2155,6 +2134,38 @@ Bool MainLoopSwcCreateNextDisk(void)
         _MainLoopSwcBaseName(Path));
     return TRUE;
 }
+
+static Bool _MainLoopSwcInsertDisk(const char *pPath)
+{
+    if (!_pSnes || !_pSnes->IsSuperWildCard() ||
+        !pPath || !*pPath)
+        return FALSE;
+
+    if (!_MainLoopSwcDiskFileLooksValid(pPath))
+    {
+        MainLoopStatusPrintf(
+            180, "SWC: unsupported or invalid raw floppy image");
+        return FALSE;
+    }
+
+    /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
+     * With a loader already running, browser-selected .img media is a
+     * hot insert/swap. Do not unload or reset the copier or cartridge. */
+    if (!_pSnes->SwapSuperWildCardDisk(pPath))
+    {
+        MainLoopStatusPrintf(
+            180, "SWC disk insert failed: %s",
+            _pSnes->GetSuperWildCardError());
+        return FALSE;
+    }
+
+    MainLoopStateOnRomChanged();
+    MainLoopStatusPrintf(
+        120, "SWC floppy inserted: %s",
+        _MainLoopSwcBaseName(pPath));
+    return TRUE;
+}
+
 
 static Bool _MainLoopExecuteSwcDisk(const char *pMappedPath,
                                     const char *pOriginalPath,
@@ -2230,8 +2241,7 @@ Bool MainLoopSwcSwapNextDisk(void)
         Char FirstPath[1024];
         struct stat FirstStatus;
 
-        if (!_pSnes->HasSuperWildCardCartridge() ||
-            !_MainLoopSwcFindFirstExistingCartDisk(
+        if (!_MainLoopSwcFindFirstExistingCartDisk(
                 FirstPath, sizeof(FirstPath)) ||
             stat(FirstPath, &FirstStatus) != 0 ||
             S_ISDIR(FirstStatus.st_mode))
@@ -2393,20 +2403,27 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     }
     else if (eType == MAINLOOP_ENTRYTYPE_SNESWCDISK)
     {
-        Char FirmwarePath[1024];
         if (!_MainLoopSwcDiskFileLooksValid(pFileName))
         {
             MainLoopModalPrintf(
                 60 * 4, "SWC: unsupported or invalid raw floppy image");
             return FALSE;
         }
-        if (!_MainLoopFindSwcFirmware(
-                FirmwarePath, sizeof(FirmwarePath)))
+
+        /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
+         * Direct .img launch still needs the default loader. An active
+         * copier already owns its firmware and can accept media directly. */
+        if (!(_pSnes && _pSnes->IsSuperWildCard()))
         {
-            MainLoopModalPrintf(
-                60 * 5,
-                "SWC BIOS missing/invalid in SNESticle/SYSTEM");
-            return FALSE;
+            Char FirmwarePath[1024];
+            if (!_MainLoopFindSwcFirmware(
+                    FirmwarePath, sizeof(FirmwarePath)))
+            {
+                MainLoopModalPrintf(
+                    60 * 5,
+                    "SWC BIOS missing/invalid in SNESticle/SYSTEM");
+                return FALSE;
+            }
         }
     }
 
@@ -2424,7 +2441,17 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         return FALSE;
     }
 
-    /* AURORA_SWC_MEGA_V9_20260831: first cart attaches to SWC; a second cart is a normal SNES launch. */
+    /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
+     * Loader-first workflow. Browser-selected .img is media when SWC is
+     * already active. The first normal SNES ROM is an external cartridge;
+     * SnesSystem resets the copier on that insertion. A second cartridge
+     * retains the established behaviour and launches as a normal SNES game. */
+    if (_pSnes && _pSnes->IsSuperWildCard() &&
+        eType == MAINLOOP_ENTRYTYPE_SNESWCDISK)
+    {
+        return _MainLoopSwcInsertDisk(pFileName);
+    }
+
     if (_pSnes && _pSnes->IsSuperWildCard() &&
         !_pSnes->HasSuperWildCardCartridge() &&
         eType == MAINLOOP_ENTRYTYPE_SNESROM &&

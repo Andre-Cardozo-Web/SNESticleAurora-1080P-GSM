@@ -1259,57 +1259,8 @@ bool QuicknesBridge_GetLightGunEnabled(void)
     return s_LightGunEnabled;
 }
 
-/* AURORA_PCE_KRAZY_RUNTIME_DIAG_V11R3_20260830 */
-static Uint32 qDebugCartPayloadCrc(const Nes_Cart *cart)
-{
-    static const Uint32 table[16] =
-    {
-        0x00000000U, 0x1DB71064U, 0x3B6E20C8U, 0x26D930ACU,
-        0x76DC4190U, 0x6B6B51F4U, 0x4DB26158U, 0x5005713CU,
-        0xEDB88320U, 0xF00F9344U, 0xD6D6A3E8U, 0xCB61B38CU,
-        0x9B64C2B0U, 0x86D3D2D4U, 0xA00AE278U, 0xBDBDF21CU
-    };
-
-    if (!cart)
-        return 0;
-
-    Uint32 c = 0xFFFFFFFFU;
-    const Uint8 *parts[2] = { cart->prg(), cart->chr() };
-    const long sizes[2] = { cart->prg_size(), cart->chr_size() };
-
-    for (int part = 0; part < 2; ++part)
-    {
-        const Uint8 *p = parts[part];
-        long n = sizes[part];
-        while (p && n-- > 0)
-        {
-            c ^= *p++;
-            c = (c >> 4) ^ table[c & 0x0FU];
-            c = (c >> 4) ^ table[c & 0x0FU];
-        }
-    }
-
-    return c ^ 0xFFFFFFFFU;
-}
-
-void QuicknesBridge_GetRuntimeDebug(Uint32 *crc, int *mapper, int *headerMirror,
-                                    unsigned *scrollCount, unsigned *scroll0,
-                                    unsigned *scroll1, long *scrollT0,
-                                    long *scrollT1, int *actualMirror,
-                                    unsigned *vramV, unsigned *vramT,
-                                    unsigned *fineX)
-{
-    const Nes_Cart *cart = s_pEmu ? s_pEmu->cart() : NULL;
-
-    if (crc)          *crc = qDebugCartPayloadCrc(cart);
-    if (mapper)       *mapper = cart ? cart->mapper_code() : -1;
-    if (headerMirror) *headerMirror = cart ? cart->mirroring() : -1;
-
-    if (s_pEmu)
-        s_pEmu->debug_ppu_scroll(scrollCount, scroll0, scroll1,
-                                 scrollT0, scrollT1, actualMirror,
-                                 vramV, vramT, fineX);
-}
+/* AURORA_V6_1G_QN_KRAZY_DEBUG_CONSUMER_CURE_20260831
+ * Dead QN79/Krazy runtime-debug bridge retired; gameplay path unchanged. */
 
 bool QuicknesBridge_LightGunActive(void)
 {

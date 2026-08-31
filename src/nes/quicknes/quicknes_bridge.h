@@ -55,13 +55,7 @@ void QuicknesBridge_ClearTurboFileDirty(void);
 /* AURORA_PCE_SCALING_LIGHTGUN_TOGGLE_V2_20260830 */
 void QuicknesBridge_SetLightGunEnabled(bool enabled);
 bool QuicknesBridge_GetLightGunEnabled(void);
-/* AURORA_PCE_KRAZY_RUNTIME_DIAG_V11R3_20260830 */
-void QuicknesBridge_GetRuntimeDebug(Uint32 *crc, int *mapper, int *headerMirror,
-                                    unsigned *scrollCount, unsigned *scroll0,
-                                    unsigned *scroll1, long *scrollT0,
-                                    long *scrollT1, int *actualMirror,
-                                    unsigned *vramV, unsigned *vramT,
-                                    unsigned *fineX);
+/* AURORA_V6_1G_QN_KRAZY_DEBUG_CONSUMER_CURE_20260831: QN79 debug API retired. */
 bool QuicknesBridge_LightGunActive(void);
 void QuicknesBridge_GetLightGunCursor(Int32 *x, Int32 *y);
 void QuicknesBridge_DrawLightGunCursor(Int32 logicalY);

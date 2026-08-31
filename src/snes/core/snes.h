@@ -195,6 +195,7 @@ private:
 	void	MapMem(SNRomMappingE eRomMapping, Uint32 uFlags);
 	void	MapMemExLoRom(void);
 	void	MapSuperWildCard(void); /* AURORA_SWC_FLOPPY_V1_20260831 */
+	void	RemapSuperWildCardMode0Dram(void); /* AURORA_SWC_V11_MENU_FASTPATH_20260831 */
 	void	RemapSDD1(void);   // (re)mapeia $C0-$FF conforme $4804-$4807
 	void	DumpMemMap();
 
