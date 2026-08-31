@@ -50,6 +50,8 @@ public:
     Bool ResolveDirectDram(Uint8 bank, Uint16 addr, Uint8 **ppMem); /* AURORA_SWC_MEGA_V9_20260831 */
     Bool ResolveDirectCartridge(Uint8 bank, Uint16 addr,
                                 const Uint8 **ppMem) const;
+    Bool ResolveDirectFirmware(Uint8 bank, Uint16 addr,
+                               const Uint8 **ppMem) const; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831 */
 
 private:
     enum
@@ -86,6 +88,7 @@ private:
     Bool m_bDiskWritable;
     Bool m_bDiskDirty; /* AURORA_SWC_MEGA_V9_20260831: flush once per FDC command */
     Bool m_bDiskChanged;
+    Uint32 m_uIndexPollCounter; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831: synthetic rotating INDEX pulse */
     Char m_DiskPath[1024];
     Char m_LastError[192];
 

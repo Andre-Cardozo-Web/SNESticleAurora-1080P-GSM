@@ -1473,16 +1473,26 @@ Bool SnesSystem::InsertSuperWildCardCartridge(SnesRom *pRom)
         pRom->GetBytes(),
         (Int32)pRom->m_eMapping);
     if (ok)
-        MapSuperWildCard(); /* AURORA_SWC_MEGA_V9_20260831: direct cart windows */
+    {
+        /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831
+         * Cartridge topology changed: restart SWC/SNES so the BIOS sees the
+         * newly attached cartridge from a clean mode-0 boot. Mounted floppy
+         * media is preserved by SNSuperWildCard::Reset(). */
+        Reset();
+    }
     return ok;
 }
 
 void SnesSystem::EjectSuperWildCardCartridge()
 {
-    if (m_bSuperWildCard)
+    if (m_bSuperWildCard && m_SWC.HasExternalCartridge())
     {
         m_SWC.ClearExternalCartridge();
-        MapSuperWildCard(); /* AURORA_SWC_MEGA_V9_20260831 */
+
+        /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831
+         * Cartridge removal resets the copier too. Disk insertion/swap is
+         * deliberately separate and remains hot-swappable. */
+        Reset();
     }
 }
 

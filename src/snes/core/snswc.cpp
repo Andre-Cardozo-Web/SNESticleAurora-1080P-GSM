@@ -22,6 +22,7 @@ SNSuperWildCard::SNSuperWildCard()
     m_bDiskWritable = FALSE;
     m_bDiskDirty = FALSE; /* AURORA_SWC_MEGA_V9_20260831 */
     m_bDiskChanged = FALSE;
+    m_uIndexPollCounter = 0; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831 */
     m_nTracks = m_nHeads = m_nSectorsPerTrack = 0;
     Reset();
 }
@@ -197,6 +198,7 @@ Bool SNSuperWildCard::MountDisk(const Char *pDiskPath)
     m_bDiskWritable = bWritable;
     m_bDiskDirty = FALSE; /* AURORA_SWC_MEGA_V9_20260831 */
     m_bDiskChanged = TRUE;
+    m_uIndexPollCounter = 0; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831: new medium starts at an INDEX pulse */
     snprintf(m_DiskPath, sizeof(m_DiskPath), "%s", pDiskPath);
 
     FdcReset(FALSE);
@@ -293,6 +295,7 @@ void SNSuperWildCard::Shutdown()
     m_bDiskWritable = FALSE;
     m_bDiskDirty = FALSE;
     m_bDiskChanged = FALSE;
+    m_uIndexPollCounter = 0; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831 */
     m_DiskPath[0] = 0;
     m_nTracks = m_nHeads = m_nSectorsPerTrack = 0;
 }
@@ -307,6 +310,7 @@ void SNSuperWildCard::Reset()
     m_bCartridgeMap = FALSE;
     m_uDOR = 0;
     m_uDCR = 0;
+    m_uIndexPollCounter = 0; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831 */
     FdcReset(FALSE);
 }
 
@@ -868,7 +872,29 @@ Bool SNSuperWildCard::ReadMode0(Uint8 bank, Uint16 addr, Uint8 *pData,
 {
     if (addr == 0xC000)
     {
-        *pData = (m_bIRQ ? 0x80 : 0) | (m_pDisk ? 0x40 : 0);
+        Uint8 value = m_bIRQ ? 0x80 : 0;
+
+        /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831
+         * C000 bit 6 is the floppy INDEX signal used by the SWC BIOS as a
+         * disk-insert check. A permanently-high "disk present" bit never
+         * produces an edge, so the real BIOS can keep asking Insert disk...
+         * even with a mounted IMG.
+         *
+         * Expose a short repeating pulse in the BIOS polling domain. No
+         * wall-clock wait or host I/O is introduced in this hot register.
+         */
+        if (m_pDisk)
+        {
+            m_uIndexPollCounter = (m_uIndexPollCounter + 1u) & 0xFFu;
+            if (m_uIndexPollCounter < 8u)
+                value |= 0x40;
+        }
+        else
+        {
+            m_uIndexPollCounter = 0;
+        }
+
+        *pData = value;
         return TRUE;
     }
     if (addr == 0xC004)
@@ -1162,6 +1188,28 @@ Bool SNSuperWildCard::WriteEmulation(Uint8 bank, Uint16 addr, Uint8 uData,
     }
 
     return FALSE;
+}
+
+/* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831
+ * Mode-0 BIOS ROM is a fixed 16 KiB read window at 00-01:E000-FFFF.
+ * Direct reads remove the per-opcode C++ trap from the SWC menu.
+ * Writes remain trapped because MapSuperWildCard installs this as ROM.
+ */
+Bool SNSuperWildCard::ResolveDirectFirmware(
+    Uint8 bank, Uint16 addr, const Uint8 **ppMem) const
+{
+    Uint32 off;
+
+    if (!ppMem || !m_bActive || m_uSystemMode != 0 ||
+        !m_pFirmware || bank > 1 || addr != 0xE000)
+        return FALSE;
+
+    off = (Uint32)bank << 13;
+    if (off + 0x2000u > m_nFirmwareBytes)
+        return FALSE;
+
+    *ppMem = m_pFirmware + off;
+    return TRUE;
 }
 
 /* AURORA_SWC_MEGA_V9_20260831

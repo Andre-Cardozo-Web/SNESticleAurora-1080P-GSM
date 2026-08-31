@@ -456,7 +456,8 @@ void SnesSystem::MapSuperWildCard(void)
 
     /* AURORA_SWC_MEGA_V9_20260831
      * Fail-closed trap baseline, then stable direct 8 KiB windows.
-     * Mode 0 BIOS/FDC stays trapped; modes 2/3 no longer call C++ per ROM byte.
+     * AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831: mode-0 BIOS ROM reads are direct; FDC/control stays trapped.
+     * Modes 2/3 retain the existing direct game/DRAM path.
      */
     SNCPUSetTrap(pCpu, 0, SNCPU_MEM_SIZE, ReadSWC, WriteSWC);
     SNCPUSetMemSpeed(pCpu, 0, SNCPU_MEM_SIZE, SNCPU_CYCLE_SLOW);
@@ -469,8 +470,16 @@ void SnesSystem::MapSuperWildCard(void)
             Uint32 bus = (uBank << 16) | (Uint32)addr;
             Uint8 *pDram = NULL;
             const Uint8 *pCart = NULL;
+            const Uint8 *pFirmware = NULL; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831 */
 
-            if (m_SWC.ResolveDirectDram((Uint8)uBank, addr, &pDram))
+            if (m_SWC.ResolveDirectFirmware(
+                    (Uint8)uBank, addr, &pFirmware))
+            {
+                /* Reads direct; writes still use the installed SWC trap. */
+                SNCPUSetBank(
+                    pCpu, bus, 0x2000, (Uint8 *)pFirmware, FALSE);
+            }
+            else if (m_SWC.ResolveDirectDram((Uint8)uBank, addr, &pDram))
             {
                 SNCPUSetBank(pCpu, bus, 0x2000, pDram, TRUE);
             }
