@@ -57,9 +57,13 @@ public:
     void	SetSnesRom(SnesRom *pRom);
     /* AURORA_SWC_FLOPPY_V1_20260831 -- isolated copier mode. */
     Bool    LoadSuperWildCard(const Char *pFirmwarePath, const Char *pDiskPath);
+    Bool    LoadSuperMagicom(const Char *pFirmwarePath, const Char *pDiskPath); /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831 */
     Bool    SwapSuperWildCardDisk(const Char *pDiskPath);
     void    ShutdownSuperWildCard();
+    /* Legacy predicate intentionally means active classic Front copier. */
     Bool    IsSuperWildCard() const { return m_bSuperWildCard; }
+    Bool    IsSuperMagicom() const { return m_bSuperWildCard && m_SWC.IsSuperMagicom(); }
+    const Char *GetFrontCopierName() const { return m_SWC.GetModelName(); }
     const Char *GetSuperWildCardDiskPath() const { return m_SWC.GetDiskPath(); }
     const Char *GetSuperWildCardError() const { return m_SWC.GetLastError(); }
     /* AURORA_SWC_FLOPPY_V5_20260831 */

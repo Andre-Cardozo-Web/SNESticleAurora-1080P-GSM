@@ -18,10 +18,23 @@
 class SNSuperWildCard
 {
 public:
+    /* AURORA_V6_1_MAGICOM_QUICK_CURE_20260831
+     * AURORA_V6_1C_MAGICOM_PREREQ_CURE_20260831
+     * AURORA_V6_1D_MAGICOM_V11_MASK_CURE_20260831
+     * AURORA_V6_1E_MAGICOM_SKIP_REDUNDANT_V5_20260831
+     * AURORA_V6_MAGICOM_FRONT_FAREAST_20260831:
+     * classic Front Fareast copier family. */
+    enum ModelE
+    {
+        MODEL_SWC = 0,
+        MODEL_MAGICOM = 1
+    };
+
     SNSuperWildCard();
     ~SNSuperWildCard();
 
-    Bool Load(const Char *pFirmwarePath, const Char *pDiskPath);
+    Bool Load(const Char *pFirmwarePath, const Char *pDiskPath,
+              ModelE eModel = MODEL_SWC);
     void Shutdown();
     void Reset();
 
@@ -36,6 +49,11 @@ public:
     Bool HasDisk() const { return m_pDisk != NULL; }
 
     Bool IsActive() const { return m_bActive; }
+    Bool IsSuperMagicom() const
+        { return m_bActive && m_eModel == MODEL_MAGICOM; }
+    ModelE GetModel() const { return m_eModel; }
+    const Char *GetModelName() const
+        { return m_eModel == MODEL_MAGICOM ? "Super Magicom" : "Super Wild Card"; }
     const Char *GetDiskPath() const { return m_DiskPath; }
     const Char *GetLastError() const { return m_LastError; }
 
@@ -57,7 +75,9 @@ private:
     enum
     {
         SWC_DRAM_BYTES = 4 * 1024 * 1024,
+        MAGICOM_DRAM_BYTES = 2 * 1024 * 1024,
         SWC_FIRMWARE_BYTES = 16 * 1024,
+        MAGICOM_FIRMWARE_BYTES = 8 * 1024,
         SWC_SECTOR_BYTES = 512,
         SWC_MAX_FORMAT_IDS = 36 * 4,
 
@@ -69,7 +89,9 @@ private:
     };
 
     Bool m_bActive;
+    ModelE m_eModel;
     Uint8 *m_pDRAM;
+    Uint32 m_nDRAMBytes;
     Uint8 *m_pFirmware;
     Uint32 m_nFirmwareBytes;
 

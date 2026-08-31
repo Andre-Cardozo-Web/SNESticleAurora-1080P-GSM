@@ -10,7 +10,9 @@
 SNSuperWildCard::SNSuperWildCard()
 {
     m_bActive = FALSE;
+    m_eModel = MODEL_SWC; /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831 */
     m_pDRAM = NULL;
+    m_nDRAMBytes = 0;
     m_pFirmware = NULL;
     m_nFirmwareBytes = 0;
     m_pCartRom = NULL; /* AURORA_SWC_FLOPPY_V5_20260831 */
@@ -40,6 +42,15 @@ void SNSuperWildCard::SetError(const Char *pText)
 
 Bool SNSuperWildCard::DetectGeometry(long nBytes)
 {
+    /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: classic Magicom documented media set only. */
+    if (m_eModel == MODEL_MAGICOM &&
+        nBytes != 737280L && nBytes != 819200L &&
+        nBytes != 1474560L && nBytes != 1638400L)
+    {
+        SetError("Super Magicom supports raw 720K/800K/1.44M/1.6M media");
+        return FALSE;
+    }
+
     struct GeometryT { long bytes; Int32 tracks, heads, spt; };
     static const GeometryT kGeometry[] =
     {
@@ -71,74 +82,64 @@ Bool SNSuperWildCard::DetectGeometry(long nBytes)
 Bool SNSuperWildCard::LoadFirmware(const Char *pPath)
 {
     FILE *pFile;
-    long nBytes;
-    long nSkip = 0;
+    long nBytes, sourceOffset = 0;
+    Uint32 want;
 
-    pFile = fopen(pPath, "rb");
-    if (!pFile)
+    if (!pPath || !*pPath) { SetError("empty copier firmware path"); return FALSE; }
+    pFile=fopen(pPath,"rb");
+    if (!pFile) { SetError("cannot open copier firmware"); return FALSE; }
+    if (fseek(pFile,0,SEEK_END)!=0)
+    { fclose(pFile); SetError("cannot size copier firmware"); return FALSE; }
+    nBytes=ftell(pFile);
+
+    if (m_eModel == MODEL_MAGICOM)
     {
-        SetError("cannot open SWC firmware");
-        return FALSE;
-    }
-
-    if (fseek(pFile, 0, SEEK_END) != 0)
-    {
-        fclose(pFile);
-        SetError("cannot size SWC firmware");
-        return FALSE;
-    }
-    nBytes = ftell(pFile);
-
-    if (nBytes == SWC_FIRMWARE_BYTES + 512)
-    {
-        nSkip = 512;
-        nBytes -= 512;
-    }
-
-    if (nBytes != SWC_FIRMWARE_BYTES)
-    {
-        fclose(pFile);
-        SetError("Requires classic 16 KiB Super Wild Card BIOS");
-        return FALSE;
-    }
-
-    m_pFirmware = (Uint8 *)malloc(SWC_FIRMWARE_BYTES);
-    if (!m_pFirmware)
-    {
-        fclose(pFile);
-        SetError("not enough EE memory for SWC firmware");
-        return FALSE;
-    }
-
-    if (fseek(pFile, nSkip, SEEK_SET) != 0 ||
-        fread(m_pFirmware, 1, SWC_FIRMWARE_BYTES, pFile) != SWC_FIRMWARE_BYTES)
-    {
-        fclose(pFile);
-        free(m_pFirmware);
-        m_pFirmware = NULL;
-        SetError("short read while loading SWC firmware");
-        return FALSE;
-    }
-
-    fclose(pFile);
-
-    /* AURORA_SWC_FLOPPY_V3_20260831
-     * Fail closed on an obviously wrong 16 KiB file accidentally named as
-     * firmware. The cold reset vector is at $00:FFFC => firmware + $1FFC. */
-    {
-        Uint16 resetVector =
-            (Uint16)m_pFirmware[0x1ffc] |
-            ((Uint16)m_pFirmware[0x1ffd] << 8);
-        if (resetVector == 0x0000 || resetVector == 0xffff)
+        /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: V1H/V31 = one 8-KiB bank; common 32-KiB dump has
+         * 24 KiB padding before that bank. 32.5 KiB V3H is not accepted. */
+        want=MAGICOM_FIRMWARE_BYTES;
+        if (nBytes==(long)MAGICOM_FIRMWARE_BYTES) sourceOffset=0;
+        else if (nBytes==(long)MAGICOM_FIRMWARE_BYTES+512L) sourceOffset=512L;
+        else if (nBytes==32768L) sourceOffset=32768L-MAGICOM_FIRMWARE_BYTES;
+        else
         {
-            free(m_pFirmware);
-            m_pFirmware = NULL;
-            SetError("invalid SWC firmware reset vector");
+            fclose(pFile);
+            SetError("Requires classic 8 KiB Super Magicom V1H/V31 BIOS (32 KiB overdump accepted)");
             return FALSE;
         }
     }
+    else
+    {
+        want=SWC_FIRMWARE_BYTES;
+        if (nBytes==(long)SWC_FIRMWARE_BYTES+512L) sourceOffset=512L;
+        else if (nBytes!=(long)SWC_FIRMWARE_BYTES)
+        {
+            fclose(pFile); SetError("Requires classic 16 KiB Super Wild Card BIOS"); return FALSE;
+        }
+    }
 
-    m_nFirmwareBytes = SWC_FIRMWARE_BYTES;
+    m_pFirmware=(Uint8 *)malloc(want);
+    if (!m_pFirmware)
+    { fclose(pFile); SetError("not enough EE memory for copier firmware"); return FALSE; }
+    if (fseek(pFile,sourceOffset,SEEK_SET)!=0 ||
+        fread(m_pFirmware,1,want,pFile)!=want)
+    {
+        fclose(pFile); free(m_pFirmware); m_pFirmware=NULL;
+        SetError("short read while loading copier firmware"); return FALSE;
+    }
+    fclose(pFile);
+
+    {
+        Uint16 rv=(Uint16)m_pFirmware[0x1ffc] | ((Uint16)m_pFirmware[0x1ffd]<<8);
+        Bool bad=(m_eModel==MODEL_MAGICOM)
+            ? (rv<0xE000 || rv==0xFFFF)
+            : (rv==0x0000 || rv==0xFFFF);
+        if (bad)
+        {
+            free(m_pFirmware); m_pFirmware=NULL;
+            SetError("invalid classic copier firmware reset vector"); return FALSE;
+        }
+    }
+    m_nFirmwareBytes=want;
     return TRUE;
 }
 
@@ -230,42 +231,34 @@ Bool SNSuperWildCard::SwapDisk(const Char *pDiskPath)
     return TRUE;
 }
 
-Bool SNSuperWildCard::Load(const Char *pFirmwarePath, const Char *pDiskPath)
+Bool SNSuperWildCard::Load(const Char *pFirmwarePath,
+                             const Char *pDiskPath,
+                             ModelE eModel)
 {
     Shutdown();
-    m_LastError[0] = 0;
+    m_LastError[0]=0;
+    if (eModel!=MODEL_SWC && eModel!=MODEL_MAGICOM)
+    { SetError("unsupported Front Fareast copier model"); return FALSE; }
 
-    m_pDRAM = (Uint8 *)malloc(SWC_DRAM_BYTES);
+    m_eModel=eModel;
+    m_nDRAMBytes=(m_eModel==MODEL_MAGICOM)?MAGICOM_DRAM_BYTES:SWC_DRAM_BYTES;
+    /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: allocate only the physical model capacity. */
+    m_pDRAM=(Uint8 *)malloc(m_nDRAMBytes);
     if (!m_pDRAM)
-    {
-        SetError("not enough EE memory for 4 MiB SWC DRAM");
-        return FALSE;
-    }
-    memset(m_pDRAM, 0, SWC_DRAM_BYTES);
+    { SetError("not enough EE memory for copier DRAM"); m_nDRAMBytes=0; return FALSE; }
+    memset(m_pDRAM,0,m_nDRAMBytes);
 
     if (!LoadFirmware(pFirmwarePath))
     {
-        Char ErrorCopy[sizeof(m_LastError)];
-        snprintf(ErrorCopy, sizeof(ErrorCopy), "%s", m_LastError);
-        Shutdown();
-        SetError(ErrorCopy);
-        return FALSE;
+        Char e[sizeof(m_LastError)]; snprintf(e,sizeof(e),"%s",m_LastError);
+        Shutdown(); SetError(e); return FALSE;
     }
-
-    /* AURORA_SWC_FLOPPY_V5_20260831: allow empty drive at boot. */
-    if (pDiskPath && *pDiskPath)
+    if (pDiskPath && *pDiskPath && !MountDisk(pDiskPath))
     {
-        if (!MountDisk(pDiskPath))
-        {
-            Char ErrorCopy[sizeof(m_LastError)];
-            snprintf(ErrorCopy, sizeof(ErrorCopy), "%s", m_LastError);
-            Shutdown();
-            SetError(ErrorCopy);
-            return FALSE;
-        }
+        Char e[sizeof(m_LastError)]; snprintf(e,sizeof(e),"%s",m_LastError);
+        Shutdown(); SetError(e); return FALSE;
     }
-
-    m_bActive = TRUE;
+    m_bActive=TRUE;
     Reset();
     return TRUE;
 }
@@ -291,7 +284,9 @@ void SNSuperWildCard::Shutdown()
     }
 
     m_bActive = FALSE;
+    m_nDRAMBytes = 0;
     m_nFirmwareBytes = 0;
+    m_eModel = MODEL_SWC;
     m_bDiskWritable = FALSE;
     m_bDiskDirty = FALSE;
     m_bDiskChanged = FALSE;
@@ -793,7 +788,7 @@ Uint32 SNSuperWildCard::DramOffsetMode2(Uint8 bank, Uint16 addr) const
     else
         off = b * 0x8000u + (Uint32)(addr - 0x8000);
 
-    return off & (SWC_DRAM_BYTES - 1);
+    return off & (m_nDRAMBytes - 1);
 }
 
 
@@ -845,7 +840,12 @@ Bool SNSuperWildCard::ReadExternalCartridge(Uint8 bank,
 
     if (m_iCartMapping == 0) /* LoROM */
     {
-        if (addr < 0x8000)
+        /* AURORA_V7_FRONT_COPIER_MEDIA_CART_RESET_20260831
+         * Front Fareast System Mode 1 exposes cartridge $0000-$7FFF in
+         * banks 40-7D/C0-FF (Mode 21). LoROM A15 is not decoded, so those
+         * lower halves mirror the same 32-KiB chunk as $8000-$FFFF. */
+        if (addr < 0x8000 &&
+            !((bank >= 0x40 && bank <= 0x7D) || bank >= 0xC0))
             return FALSE;
 
         off = ((Uint32)(bank & 0x7F) << 15) |
@@ -883,15 +883,20 @@ Bool SNSuperWildCard::ReadMode0(Uint8 bank, Uint16 addr, Uint8 *pData,
          * Expose a short repeating pulse in the BIOS polling domain. No
          * wall-clock wait or host I/O is introduced in this hot register.
          */
+        /* AURORA_V7_FRONT_COPIER_MEDIA_CART_RESET_20260831
+         * C000 bit 6 follows the drive INDEX line: idle high, short low pulse.
+         * Use a small polling-domain revolution so loader loops see an edge
+         * promptly without wall-clock timing, per-frame work, or host I/O. */
         if (m_pDisk)
         {
-            m_uIndexPollCounter = (m_uIndexPollCounter + 1u) & 0xFFu;
-            if (m_uIndexPollCounter < 8u)
+            m_uIndexPollCounter = (m_uIndexPollCounter + 1u) & 0x1Fu;
+            if (m_uIndexPollCounter >= 2u)
                 value |= 0x40;
         }
         else
         {
             m_uIndexPollCounter = 0;
+            value |= 0x40;
         }
 
         *pData = value;
@@ -923,21 +928,24 @@ Bool SNSuperWildCard::ReadMode0(Uint8 bank, Uint16 addr, Uint8 *pData,
         return TRUE;
     }
 
-    if (addr >= 0xE000 && bank <= 1 && m_pFirmware)
+    if (addr >= 0xE000 && m_pFirmware)
     {
-        Uint32 off = ((Uint32)bank << 13) | (Uint32)(addr - 0xE000);
-        if (off < m_nFirmwareBytes)
-        {
-            *pData = m_pFirmware[off];
-            return TRUE;
-        }
+        Uint32 off=0; Bool mapped=FALSE;
+        /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: 8-KiB Magicom BIOS mirrors through 00-01:E000;
+         * SWC retains its two 8-KiB banks. */
+        if (m_eModel==MODEL_MAGICOM && bank<=1)
+        { off=(Uint32)(addr-0xE000); mapped=TRUE; }
+        else if (m_eModel==MODEL_SWC && bank<=1)
+        { off=((Uint32)bank<<13)|(Uint32)(addr-0xE000); mapped=TRUE; }
+        if (mapped && off<m_nFirmwareBytes)
+        { *pData=m_pFirmware[off]; return TRUE; }
     }
 
     if (addr >= 0x8000 && addr <= 0x9FFF && m_pDRAM)
     {
         Uint32 off = (m_uSelectedDRAMPage * 0x2000u +
                       (Uint32)(addr - 0x8000)) &
-                     (SWC_DRAM_BYTES - 1);
+                     (m_nDRAMBytes - 1);
         *pData = m_pDRAM[off];
         return TRUE;
     }
@@ -998,7 +1006,7 @@ Bool SNSuperWildCard::WriteMode0(Uint8 bank, Uint16 addr, Uint8 uData,
     {
         m_uSelectedDRAMPage = (((Uint32)bank << 2) |
                                (Uint32)(addr & 3)) &
-                              ((SWC_DRAM_BYTES / 0x2000u) - 1);
+                              ((m_nDRAMBytes / 0x2000u) - 1);
         m_uSelectedSRAMPage = addr & 3;
         return TRUE;
     }
@@ -1033,7 +1041,7 @@ Bool SNSuperWildCard::WriteMode0(Uint8 bank, Uint16 addr, Uint8 uData,
     {
         Uint32 off = (m_uSelectedDRAMPage * 0x2000u +
                       (Uint32)(addr - 0x8000)) &
-                     (SWC_DRAM_BYTES - 1);
+                     (m_nDRAMBytes - 1);
         m_pDRAM[off] = uData;
         return TRUE;
     }
@@ -1199,28 +1207,24 @@ Bool SNSuperWildCard::ResolveDirectFirmware(
     Uint8 bank, Uint16 addr, const Uint8 **ppMem) const
 {
     Uint32 off;
-
-    if (!ppMem || !m_bActive || m_uSystemMode != 0 ||
-        !m_pFirmware || bank > 1 || addr != 0xE000)
+    if (!ppMem || !m_bActive || m_uSystemMode!=0 || !m_pFirmware || addr!=0xE000)
         return FALSE;
-
-    off = (Uint32)bank << 13;
-    if (off + 0x2000u > m_nFirmwareBytes)
-        return FALSE;
-
-    *ppMem = m_pFirmware + off;
+    if (m_eModel==MODEL_MAGICOM)
+    {
+        /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: one physical 8-KiB ROM, mirrored in Front firmware banks 00-01. */
+        if (bank>1 || m_nFirmwareBytes!=MAGICOM_FIRMWARE_BYTES) return FALSE;
+        off=0;
+    }
+    else
+    {
+        if (bank>1 || m_nFirmwareBytes!=SWC_FIRMWARE_BYTES) return FALSE;
+        off=(Uint32)bank<<13;
+    }
+    if (off+0x2000u>m_nFirmwareBytes) return FALSE;
+    *ppMem=m_pFirmware+off;
     return TRUE;
 }
 
-/* AURORA_SWC_MEGA_V9_20260831
- * Resolve stable 8 KiB windows so the 65816 hot path can use direct memory
- * rather than calling ReadSWC/WriteSWC for every opcode/data byte.
- *
- * AURORA_SWC_V11_MENU_FASTPATH_20260831:
- * In BIOS/System Mode 0, bb:8000-9FFF is one selected 8 KiB DRAM page.
- * It is ordinary RAM, so direct read/write mapping is semantically identical
- * to ReadMode0/WriteMode0 but avoids a C++ trap for every menu data byte.
- */
 Bool SNSuperWildCard::ResolveDirectDram(Uint8 bank, Uint16 addr,
                                         Uint8 **ppMem)
 {
@@ -1241,7 +1245,7 @@ Bool SNSuperWildCard::ResolveDirectDram(Uint8 bank, Uint16 addr,
 
         *ppMem = m_pDRAM +
             ((m_uSelectedDRAMPage * 0x2000u) &
-             (SWC_DRAM_BYTES - 1));
+             (m_nDRAMBytes - 1));
         return TRUE;
     }
 
@@ -1310,7 +1314,9 @@ Bool SNSuperWildCard::ResolveDirectCartridge(
 
     if (m_iCartMapping == 0)
     {
-        if (addr < 0x8000)
+        /* AURORA_V7_FRONT_COPIER_MEDIA_CART_RESET_20260831: same Mode-21 LoROM mirror in the direct 8-KiB fastpath. */
+        if (addr < 0x8000 &&
+            !((bank >= 0x40 && bank <= 0x7D) || bank >= 0xC0))
             return FALSE;
         off = ((Uint32)(bank & 0x7F) << 15) |
               (Uint32)(addr & 0x7FFF);
@@ -1399,7 +1405,8 @@ static Uint32 _AuroraSwcStateHash32(const Uint8 *pData, Uint32 nBytes)
 
 Uint32 SNSuperWildCard::GetStateBytes() const
 {
-    return (Uint32)AURORA_SWC_STATE_META_BYTES + (Uint32)SWC_DRAM_BYTES;
+    return (Uint32)AURORA_SWC_STATE_META_BYTES +
+           (m_nDRAMBytes ? m_nDRAMBytes : (Uint32)SWC_DRAM_BYTES);
 }
 
 Bool SNSuperWildCard::SaveState(void *pState, Uint32 nStateBytes) const
@@ -1421,7 +1428,7 @@ Bool SNSuperWildCard::SaveState(void *pState, Uint32 nStateBytes) const
     _AuroraSwcStatePut32(p, AURORA_SWC_STATE_VERSION);
     _AuroraSwcStatePut32(p, AURORA_SWC_STATE_META_BYTES);
     _AuroraSwcStatePut32(p, GetStateBytes());
-    _AuroraSwcStatePut32(p, SWC_DRAM_BYTES);
+    _AuroraSwcStatePut32(p, m_nDRAMBytes);
     _AuroraSwcStatePut32(
         p, _AuroraSwcStateHash32(m_pFirmware, m_nFirmwareBytes));
 
@@ -1478,7 +1485,7 @@ Bool SNSuperWildCard::SaveState(void *pState, Uint32 nStateBytes) const
         return FALSE;
 
     memcpy(pBase + AURORA_SWC_STATE_META_BYTES,
-           m_pDRAM, SWC_DRAM_BYTES);
+           m_pDRAM, m_nDRAMBytes);
     return TRUE;
 }
 
@@ -1525,8 +1532,8 @@ Bool SNSuperWildCard::RestoreState(const void *pState, Uint32 nStateBytes)
     if (version != AURORA_SWC_STATE_VERSION ||
         metaBytes != AURORA_SWC_STATE_META_BYTES ||
         totalBytes != GetStateBytes() ||
-        dramBytes != SWC_DRAM_BYTES ||
-        !m_pFirmware || m_nFirmwareBytes != SWC_FIRMWARE_BYTES ||
+        !m_nDRAMBytes || dramBytes != m_nDRAMBytes ||
+        !m_pFirmware ||
         firmwareHash != _AuroraSwcStateHash32(
             m_pFirmware, m_nFirmwareBytes))
         return FALSE;
@@ -1581,7 +1588,7 @@ Bool SNSuperWildCard::RestoreState(const void *pState, Uint32 nStateBytes)
     if (p > pBase + AURORA_SWC_STATE_META_BYTES ||
         !memchr(SavedPath, 0, sizeof(SavedPath)) ||
         SavedPath[0] == 0 ||
-        selectedDRAMPage >= (SWC_DRAM_BYTES / 0x2000u) ||
+        selectedDRAMPage >= (m_nDRAMBytes / 0x2000u) ||
         selectedSRAMPage >= 4 ||
         systemMode > 3 ||
         parallel > 3 ||
@@ -1618,7 +1625,7 @@ Bool SNSuperWildCard::RestoreState(const void *pState, Uint32 nStateBytes)
 
     memcpy(m_pDRAM,
            pBase + AURORA_SWC_STATE_META_BYTES,
-           SWC_DRAM_BYTES);
+           m_nDRAMBytes);
 
     m_uSelectedDRAMPage = selectedDRAMPage;
     m_uSelectedSRAMPage = selectedSRAMPage;

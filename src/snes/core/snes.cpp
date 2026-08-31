@@ -1186,10 +1186,12 @@ SnesSystem::~SnesSystem()
 
 void SnesSystem::Reset()
 {
-	/* AURORA_SWC_FLOPPY_V1_20260831 */
+	/* AURORA_V7_FRONT_COPIER_MEDIA_CART_RESET_20260831
+	 * SNES RESET is a warm console reset, not copier power-on. Preserve the
+	 * Front copier's current System Mode (1=cart, 2/3=DRAM) and merely rebuild
+	 * the map before the S-CPU takes the current reset vector. */
 	if (m_bSuperWildCard)
 	{
-		m_SWC.Reset();
 		MapSuperWildCard();
 	}
 	else
@@ -1305,7 +1307,11 @@ void SnesSystem::SoftReset()
      * VRAM, CGRAM or OAM.
      */
 
-    SetSlowRom();
+    /* AURORA_V7_FRONT_COPIER_MEDIA_CART_RESET_20260831: soft reset preserves active copier System Mode too. */
+    if (m_bSuperWildCard)
+        MapSuperWildCard();
+    else
+        SetSlowRom();
 
     m_PPU.SoftReset();
     m_DMAC.Reset();
@@ -1436,7 +1442,7 @@ Bool SnesSystem::LoadSuperWildCard(const Char *pFirmwarePath,
 {
     SetSnesRom(NULL);
 
-    if (!m_SWC.Load(pFirmwarePath, pDiskPath))
+    if (!m_SWC.Load(pFirmwarePath, pDiskPath, SNSuperWildCard::MODEL_SWC))
         return FALSE;
 
     m_bSuperWildCard = TRUE;
@@ -1450,6 +1456,25 @@ Bool SnesSystem::LoadSuperWildCard(const Char *pFirmwarePath,
     m_uSramSize = 0x8000;
     memset(m_SRam, 0xFF, m_uSramSize);
 
+    MapSuperWildCard();
+    Reset();
+    return TRUE;
+}
+
+/* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: classic common 16-Mbit Super Magicom MS-3201. */
+Bool SnesSystem::LoadSuperMagicom(const Char *pFirmwarePath,
+                                  const Char *pDiskPath)
+{
+    SetSnesRom(NULL);
+    if (!m_SWC.Load(pFirmwarePath,pDiskPath,SNSuperWildCard::MODEL_MAGICOM))
+        return FALSE;
+    m_bSuperWildCard=TRUE; /* shared Front-copier-active flag */
+    m_bSDD1=FALSE; m_bSRTC=FALSE; m_bSuperFX=FALSE;
+#if SNES_DSP1
+    m_pDsp=NULL;
+#endif
+    m_uSramSize=0x8000;
+    memset(m_SRam,0xFF,m_uSramSize);
     MapSuperWildCard();
     Reset();
     return TRUE;
@@ -1478,6 +1503,8 @@ Bool SnesSystem::InsertSuperWildCardCartridge(SnesRom *pRom)
          * Cartridge topology changed: restart SWC/SNES so the BIOS sees the
          * newly attached cartridge from a clean mode-0 boot. Mounted floppy
          * media is preserved by SNSuperWildCard::Reset(). */
+        /* AURORA_V7_FRONT_COPIER_MEDIA_CART_RESET_20260831: physical cartridge topology changed -> copier BIOS. */
+        m_SWC.Reset();
         Reset();
     }
     return ok;
@@ -1492,6 +1519,8 @@ void SnesSystem::EjectSuperWildCardCartridge()
         /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831
          * Cartridge removal resets the copier too. Disk insertion/swap is
          * deliberately separate and remains hot-swappable. */
+        /* AURORA_V7_FRONT_COPIER_MEDIA_CART_RESET_20260831: physical cartridge removal -> copier BIOS. */
+        m_SWC.Reset();
         Reset();
     }
 }

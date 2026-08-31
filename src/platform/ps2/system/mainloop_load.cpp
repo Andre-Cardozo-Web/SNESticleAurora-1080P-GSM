@@ -1642,6 +1642,52 @@ static Bool _MainLoopSwcIsFirmwareName(const char *pName)
             !strcasecmp(pExt, ".smc")) ? TRUE : FALSE;
 }
 
+/* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: classic Super Magicom V1H/V31 frontend recognition. */
+static Bool _MainLoopMagicomNameIsV3H(const char *pName)
+{
+    if (!pName) return FALSE;
+    for (const char *p=pName; p[0] && p[1] && p[2]; ++p)
+        if (!strncasecmp(p,"V3H",3)) return TRUE;
+    return FALSE;
+}
+
+static Bool _MainLoopMagicomPathIsFirmware(const char *pPath)
+{
+    const char *pName=_MainLoopSwcBaseName(pPath);
+    const char *pExt;
+    if (!pName) return FALSE;
+    if (!strcasecmp(pName,"magicom.rom") ||
+        !strcasecmp(pName,"magicom.sfc") ||
+        !strcasecmp(pName,"magicom.smc")) return TRUE;
+    if (strncasecmp(pName,"Super Magicom",13)!=0) return FALSE;
+    pExt=strrchr(pName,'.');
+    if (!pExt) return FALSE;
+    return (!strcasecmp(pExt,".rom") || !strcasecmp(pExt,".sfc") ||
+            !strcasecmp(pExt,".smc")) ? TRUE : FALSE;
+}
+
+static Bool _MainLoopMagicomFirmwareFileLooksValid(const char *pPath)
+{
+    FILE *fp; long nBytes,nBase; Uint8 v[2];
+    const char *pName=_MainLoopSwcBaseName(pPath);
+    if (!pPath || !*pPath || !pName || !_MainLoopMagicomPathIsFirmware(pPath) ||
+        _MainLoopMagicomNameIsV3H(pName)) return FALSE;
+    fp=fopen(pPath,"rb"); if (!fp) return FALSE;
+    if (fseek(fp,0,SEEK_END)!=0) { fclose(fp); return FALSE; }
+    nBytes=ftell(fp);
+    if (nBytes==0x2000L) nBase=0;
+    else if (nBytes==0x2200L) nBase=0x200L;
+    else if (nBytes==0x8000L) nBase=0x6000L;
+    else { fclose(fp); return FALSE; }
+    if (fseek(fp,nBase+0x1FFCL,SEEK_SET)!=0 || fread(v,1,2,fp)!=2)
+    { fclose(fp); return FALSE; }
+    fclose(fp);
+    {
+        Uint16 rv=(Uint16)v[0]|((Uint16)v[1]<<8);
+        return (rv>=0xE000 && rv!=0xFFFF) ? TRUE : FALSE;
+    }
+}
+
 /* AURORA_SWC_MEGA_V9_20260831: validate SWC media before destructive unload. */
 static Bool _MainLoopSwcFirmwareFileLooksValid(const char *pPath)
 {
@@ -1804,6 +1850,32 @@ static Bool _MainLoopExecuteSwcFirmware(const char *pFirmwarePath,
     MainLoopStatusPrintf(150, "Super Wild Card: no disk inserted");
     return TRUE;
 }
+
+static Bool _MainLoopExecuteMagicomFirmware(
+    const char *pFirmwarePath, const char *pOriginalPath, Bool bLoadSRAM)
+{
+    if (!pFirmwarePath || !*pFirmwarePath ||
+        !_MainLoopMagicomPathIsFirmware(pFirmwarePath) ||
+        !_MainLoopMagicomFirmwareFileLooksValid(pFirmwarePath) || !_pSnes)
+        return FALSE;
+    if (!MainLoopEnsureGameplayRasterWidth(256)) return FALSE;
+    if (!_pSnes->LoadSuperMagicom(pFirmwarePath,NULL))
+    {
+        MainLoopModalPrintf(60*5,"Magicom boot failed: %s",_pSnes->GetSuperWildCardError());
+        return FALSE;
+    }
+    _pSystem=_pSnes;
+    s_SwcExternalCartPath[0]=0;
+    snprintf(_RomName,sizeof(_RomName),"%s","Super Magicom");
+    snprintf(_RomPath,sizeof(_RomPath),"%s",
+        (pOriginalPath && *pOriginalPath) ? pOriginalPath : pFirmwarePath);
+    MainLoopStateOnRomChanged();
+    _MainLoopSetSampleRate(_pSnes->GetSampleRate());
+    if (bLoadSRAM) _MainLoopLoadSRAM();
+    MainLoopStatusPrintf(150,"Super Magicom: no disk inserted");
+    return TRUE;
+}
+
 
 static Bool _MainLoopSwcInsertCartridge(const char *pPath)
 {
@@ -2305,12 +2377,30 @@ Bool MainLoopSwcSwapNextDisk(void)
 
     if (stat(NextPath, &Status) != 0 || S_ISDIR(Status.st_mode))
     {
-        if (snprintf(NextPath, sizeof(NextPath), "%s_%0*u%s",
-                     Prefix, (int)nDigits, 1u, pExt) >= (int)sizeof(NextPath) ||
-            stat(NextPath, &Status) != 0 || S_ISDIR(Status.st_mode) ||
-            nDisk == 1u)
+        unsigned nFirst;
+        Bool bFoundFirst = FALSE;
+
+        /* AURORA_V7_FRONT_COPIER_MEDIA_CART_RESET_20260831
+         * Numbered media is circular. Search from _1 upward using the same
+         * prefix/extension; when only _1 exists it is a valid wrap target too. */
+        for (nFirst = 1; nFirst < 10000; ++nFirst)
         {
-            MainLoopStatusPrintf(120, "SWC: no next floppy image found");
+            if (snprintf(NextPath, sizeof(NextPath), "%s_%0*u%s",
+                         Prefix, (int)nDigits, nFirst, pExt) >=
+                (int)sizeof(NextPath))
+                return FALSE;
+
+            if (stat(NextPath, &Status) == 0 &&
+                !S_ISDIR(Status.st_mode))
+            {
+                bFoundFirst = TRUE;
+                break;
+            }
+        }
+
+        if (!bFoundFirst)
+        {
+            MainLoopStatusPrintf(120, "Copier: no numbered floppy image found");
             return FALSE;
         }
     }
@@ -2375,19 +2465,39 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     if (eType == MAINLOOP_ENTRYTYPE_NESPALETTE)
         return _MainLoopLoadNesPalette(pFileName); /* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
 
-    /* AURORA_SWC_MEGA_V9_20260831: reject bad copier BIOS/media before _MainLoopUnloadRom(). */
+    /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: identify copier before destructive unload. */
     if (eType == MAINLOOP_ENTRYTYPE_SNESWCBIOS)
     {
-        if (!_MainLoopSwcPathIsFirmware(pFileName))
+        if (_MainLoopMagicomPathIsFirmware(pFileName))
         {
-            MainLoopModalPrintf(
-                60 * 4, "SWC: unrelated .rom file is not a copier BIOS");
+            if (!_MainLoopMagicomFirmwareFileLooksValid(pFileName))
+            {
+                MainLoopModalPrintf(60*5,
+                    "Requires classic Super Magicom V1H/V31 BIOS (V3H soft-upgrade unsupported)");
+                return FALSE;
+            }
+        }
+        else if (_MainLoopSwcPathIsFirmware(pFileName))
+        {
+            if (!_MainLoopSwcFirmwareFileLooksValid(pFileName))
+            {
+                MainLoopModalPrintf(60*5,"Requires classic 16 KiB Super Wild Card BIOS");
+                return FALSE;
+            }
+        }
+        else
+        {
+            MainLoopModalPrintf(60*4,"Unrecognized classic copier .rom");
             return FALSE;
         }
-        if (!_MainLoopSwcFirmwareFileLooksValid(pFileName))
+    }
+    else if (eType == MAINLOOP_ENTRYTYPE_SNESROM &&
+             _MainLoopMagicomPathIsFirmware(pFileName))
+    {
+        if (!_MainLoopMagicomFirmwareFileLooksValid(pFileName))
         {
-            MainLoopModalPrintf(
-                60 * 5, "Requires classic 16 KiB Super Wild Card BIOS");
+            MainLoopModalPrintf(60*5,
+                "Requires classic Super Magicom V1H/V31 BIOS (V3H soft-upgrade unsupported)");
             return FALSE;
         }
     }
@@ -2396,8 +2506,7 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     {
         if (!_MainLoopSwcFirmwareFileLooksValid(pFileName))
         {
-            MainLoopModalPrintf(
-                60 * 5, "Requires classic 16 KiB Super Wild Card BIOS");
+            MainLoopModalPrintf(60*5,"Requires classic 16 KiB Super Wild Card BIOS");
             return FALSE;
         }
     }
@@ -2405,23 +2514,16 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     {
         if (!_MainLoopSwcDiskFileLooksValid(pFileName))
         {
-            MainLoopModalPrintf(
-                60 * 4, "SWC: unsupported or invalid raw floppy image");
+            MainLoopModalPrintf(60*4,"Copier: unsupported or invalid raw floppy image");
             return FALSE;
         }
-
-        /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
-         * Direct .img launch still needs the default loader. An active
-         * copier already owns its firmware and can accept media directly. */
+        /* Bare IMG deliberately retains SWC.SFC fallback from V5. */
         if (!(_pSnes && _pSnes->IsSuperWildCard()))
         {
             Char FirmwarePath[1024];
-            if (!_MainLoopFindSwcFirmware(
-                    FirmwarePath, sizeof(FirmwarePath)))
+            if (!_MainLoopFindSwcFirmware(FirmwarePath,sizeof(FirmwarePath)))
             {
-                MainLoopModalPrintf(
-                    60 * 5,
-                    "SWC BIOS missing/invalid in SNESticle/SYSTEM");
+                MainLoopModalPrintf(60*5,"SWC BIOS missing/invalid in SNESticle/SYSTEM");
                 return FALSE;
             }
         }
@@ -2441,21 +2543,17 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         return FALSE;
     }
 
-    /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
-     * Loader-first workflow. Browser-selected .img is media when SWC is
-     * already active. The first normal SNES ROM is an external cartridge;
-     * SnesSystem resets the copier on that insertion. A second cartridge
-     * retains the established behaviour and launches as a normal SNES game. */
+    /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: shared loader/cart/disk workflow. */
     if (_pSnes && _pSnes->IsSuperWildCard() &&
         eType == MAINLOOP_ENTRYTYPE_SNESWCDISK)
     {
         return _MainLoopSwcInsertDisk(pFileName);
     }
-
     if (_pSnes && _pSnes->IsSuperWildCard() &&
         !_pSnes->HasSuperWildCardCartridge() &&
         eType == MAINLOOP_ENTRYTYPE_SNESROM &&
-        !_MainLoopSwcPathIsFirmware(pFileName))
+        !_MainLoopSwcPathIsFirmware(pFileName) &&
+        !_MainLoopMagicomPathIsFirmware(pFileName))
     {
         return _MainLoopSwcInsertCartridge(pFileName);
     }
@@ -2468,7 +2566,13 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     _MainLoopResetInputChecksums();
 
     /* AURORA_FCEUMM_FDS_V0_5_PATH_BOOT: only a plain .fds full path enters FCEUmm. */
-    /* AURORA_SWC_FLOPPY_V5_20260831 */
+    /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: explicit loader ROM selects its hardware model. */
+    if ((eType == MAINLOOP_ENTRYTYPE_SNESWCBIOS ||
+         eType == MAINLOOP_ENTRYTYPE_SNESROM) &&
+        _MainLoopMagicomPathIsFirmware(pFileName))
+        return _MainLoopExecuteMagicomFirmware(
+            pFileName, OriginalPath, bLoadSRAM);
+
     if (eType == MAINLOOP_ENTRYTYPE_SNESWCBIOS ||
         (eType == MAINLOOP_ENTRYTYPE_SNESROM &&
          _MainLoopSwcPathIsFirmware(pFileName)))
