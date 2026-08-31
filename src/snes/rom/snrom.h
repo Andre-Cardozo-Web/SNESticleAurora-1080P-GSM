@@ -62,6 +62,7 @@ enum SNRomMappingE
 #define SNROM_FLAG_DSP1_ORIGINAL_OP28 0x2000
 
 extern Uint32 g_FakeSRAMSize;
+void SnesRomResetRuntimeCompatForExternalDevice(void); /* AURORA_SWC_MEGA_V9_20260831 */
 
 struct SNRomInfoT
 {

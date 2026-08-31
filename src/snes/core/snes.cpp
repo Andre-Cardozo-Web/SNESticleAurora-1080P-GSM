@@ -1459,6 +1459,8 @@ Bool SnesSystem::LoadSuperWildCard(const Char *pFirmwarePath,
 /* AURORA_SWC_FLOPPY_V5_20260831 */
 Bool SnesSystem::InsertSuperWildCardCartridge(SnesRom *pRom)
 {
+    Bool ok;
+
     if (!m_bSuperWildCard || !pRom || !pRom->IsLoaded())
         return FALSE;
 
@@ -1466,16 +1468,22 @@ Bool SnesSystem::InsertSuperWildCardCartridge(SnesRom *pRom)
         pRom->m_eMapping != SNROM_MAPPING_HIROM)
         return FALSE;
 
-    return m_SWC.SetExternalCartridge(
+    ok = m_SWC.SetExternalCartridge(
         pRom->GetData(),
         pRom->GetBytes(),
         (Int32)pRom->m_eMapping);
+    if (ok)
+        MapSuperWildCard(); /* AURORA_SWC_MEGA_V9_20260831: direct cart windows */
+    return ok;
 }
 
 void SnesSystem::EjectSuperWildCardCartridge()
 {
     if (m_bSuperWildCard)
+    {
         m_SWC.ClearExternalCartridge();
+        MapSuperWildCard(); /* AURORA_SWC_MEGA_V9_20260831 */
+    }
 }
 
 Bool SnesSystem::SwapSuperWildCardDisk(const Char *pDiskPath)

@@ -46,6 +46,21 @@ Bool g_SnesCompatSunsetRidersObj128 = FALSE;
 #define SNES_SUNSET_RIDERS_OBJ128_HACK 0
 #endif
 
+/* AURORA_SWC_MEGA_V9_20260831
+ * SnesRom::LoadRom() selects exact-CRC compatibility/accessory globals for a
+ * normal cartridge boot. A ROM merely exposed behind the SWC is not the
+ * running SNES cartridge, so clear those parser-global selections again.
+ */
+void SnesRomResetRuntimeCompatForExternalDevice(void)
+{
+    SnesTurboFileSelectForCRC(0);
+    g_SnesCompatSonicBlastManColorMath = FALSE;
+    g_SnesCompatZeroInit = FALSE;
+    g_SnesCompatHongKong97SPCBoot = FALSE;
+    g_SnesCompatTopGearFastRom = FALSE;
+    g_SnesCompatSunsetRidersObj128 = FALSE;
+}
+
 static Uint32 _SNRomRuntimeCRC32(const Uint8 *pData, Uint32 nBytes)
 {
     Uint32 crc = 0xFFFFFFFFu;

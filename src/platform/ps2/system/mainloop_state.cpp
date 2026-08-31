@@ -390,6 +390,51 @@ Bool MainLoopEnsureSystemDirectory(Char *pOut, Int32 nOutBytes)
     return TRUE;
 }
 
+/* AURORA_SWC_MEGA_V9_20260831
+ * Keep copier media out of ROM directories and out of SYSTEM firmware.
+ * Reuse the exact writable SNESticle root selected by SYSTEM, then create a
+ * sibling SNESticle/SWC directory.
+ */
+Bool MainLoopEnsureSwcDirectory(Char *pOut, Int32 nOutBytes)
+{
+    Char SystemDirectory[512];
+    Char Root[512];
+    size_t n;
+    int nChars;
+
+    if (!pOut || nOutBytes <= 0)
+        return FALSE;
+    pOut[0] = 0;
+
+    if (!MainLoopEnsureSystemDirectory(
+            SystemDirectory, (Int32)sizeof(SystemDirectory)))
+        return FALSE;
+
+    n = strlen(SystemDirectory);
+    if (n < 7 || strcmp(SystemDirectory + n - 7, "/SYSTEM") != 0 ||
+        n - 7 >= sizeof(Root))
+        return FALSE;
+
+    memcpy(Root, SystemDirectory, n - 7);
+    Root[n - 7] = 0;
+
+    nChars = snprintf(pOut, (size_t)nOutBytes, "%s/SWC", Root);
+    if (nChars < 0 || nChars >= nOutBytes)
+    {
+        pOut[0] = 0;
+        return FALSE;
+    }
+
+    if (!_MainLoopSramEnsureOneDir(pOut))
+    {
+        pOut[0] = 0;
+        return FALSE;
+    }
+
+    printf("[SWC] directory: %s\n", pOut);
+    return TRUE;
+}
+
 static void _MainLoopSramBuildPath(Char *pPath, Int32 nPathBytes,
                                    const Char *pRoot, Bool bLegacyRoot)
 {
@@ -2200,6 +2245,17 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
             snprintf(
                 pReason, nReasonBytes,
                 "SWC state with external cartridge is not serialized.");
+            return FALSE;
+        }
+
+        /* AURORA_SWC_MEGA_V9_20260831: V5 allowed BIOS-only boot, but a SWC state identifies
+         * and remounts a concrete floppy image. Do not advertise a state that
+         * cannot be restored consistently. */
+        if (!_pSnes->HasSuperWildCardDisk())
+        {
+            snprintf(
+                pReason, nReasonBytes,
+                "Insert a Super Wild Card disk before using save states.");
             return FALSE;
         }
 

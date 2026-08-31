@@ -544,8 +544,8 @@ void _MainLoopInputProcess(Uint32 buttons)
 		}
 	}
 
-	/* AURORA_SWC_FLOPPY_V5_20260831
-	 * L2+Square creates and inserts the next cart-named floppy. */
+	/* AURORA_SWC_MEGA_V9_20260831
+	 * L2+Square creates the next cart-named floppy only; L2+Triangle owns insertion/swap. */
 	if (!_bMenu && _pSystem == _pSnes &&
 	    _pSnes->IsSuperWildCard() &&
 	    _pSnes->HasSuperWildCardCartridge() &&

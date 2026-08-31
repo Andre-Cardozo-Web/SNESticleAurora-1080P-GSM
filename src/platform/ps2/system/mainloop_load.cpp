@@ -748,6 +748,7 @@ void _MainLoopUnloadRom()
 
 	// unload old rom
 	_pSnes->SetRom(NULL);
+    s_SwcExternalCartPath[0] = 0; /* AURORA_SWC_MEGA_V9_20260831 */
 	_pSnesRom->Unload();
 	/* AURORA_SNES9X2010_V1 */
 	if (_pSnes9x2010) _pSnes9x2010->SetRom(NULL);
@@ -1641,6 +1642,66 @@ static Bool _MainLoopSwcIsFirmwareName(const char *pName)
             !strcasecmp(pExt, ".smc")) ? TRUE : FALSE;
 }
 
+/* AURORA_SWC_MEGA_V9_20260831: validate SWC media before destructive unload. */
+static Bool _MainLoopSwcFirmwareFileLooksValid(const char *pPath)
+{
+    FILE *fp;
+    long nBytes;
+    long nSkip = 0;
+    Uint8 v[2];
+
+    if (!pPath || !*pPath)
+        return FALSE;
+
+    fp = fopen(pPath, "rb");
+    if (!fp)
+        return FALSE;
+
+    if (fseek(fp, 0, SEEK_END) != 0)
+    {
+        fclose(fp);
+        return FALSE;
+    }
+    nBytes = ftell(fp);
+
+    if (nBytes == 0x4200L)
+        nSkip = 512;
+    else if (nBytes != 0x4000L)
+    {
+        fclose(fp);
+        return FALSE;
+    }
+
+    if (fseek(fp, nSkip + 0x1FFCL, SEEK_SET) != 0 ||
+        fread(v, 1, 2, fp) != 2)
+    {
+        fclose(fp);
+        return FALSE;
+    }
+    fclose(fp);
+
+    {
+        Uint16 resetVector = (Uint16)v[0] | ((Uint16)v[1] << 8);
+        return (resetVector != 0x0000 && resetVector != 0xFFFF)
+            ? TRUE : FALSE;
+    }
+}
+
+static Bool _MainLoopSwcDiskFileLooksValid(const char *pPath)
+{
+    struct stat st;
+    long n;
+
+    if (!pPath || !*pPath || stat(pPath, &st) != 0 ||
+        S_ISDIR(st.st_mode))
+        return FALSE;
+
+    n = (long)st.st_size;
+    return (n == 368640L || n == 737280L || n == 819200L ||
+            n == 1228800L || n == 1474560L || n == 1638400L ||
+            n == 1699840L || n == 1720320L) ? TRUE : FALSE;
+}
+
 static Bool _MainLoopFindSwcFirmware(char *pOut, Int32 nOutBytes)
 {
     static const char *kNames[] =
@@ -1666,8 +1727,10 @@ static Bool _MainLoopFindSwcFirmware(char *pOut, Int32 nOutBytes)
         {
             int n = snprintf(pOut, (size_t)nOutBytes,
                              "%s/%s", Directory, kNames[i]);
-            if (n >= 0 && n < nOutBytes)
+            if (n >= 0 && n < nOutBytes &&
+                _MainLoopSwcFirmwareFileLooksValid(pOut))
                 return TRUE;
+            pOut[0] = 0;
         }
     }
 
@@ -1684,11 +1747,13 @@ static Bool _MainLoopFindSwcFirmware(char *pOut, Int32 nOutBytes)
                 {
                     int n = snprintf(pOut, (size_t)nOutBytes,
                                      "%s/%s", Directory, pEntry->d_name);
-                    if (n >= 0 && n < nOutBytes)
+                    if (n >= 0 && n < nOutBytes &&
+                        _MainLoopSwcFirmwareFileLooksValid(pOut))
                     {
                         closedir(pDir);
                         return TRUE;
                     }
+                    pOut[0] = 0;
                 }
             }
             closedir(pDir);
@@ -1735,21 +1800,22 @@ static Bool _MainLoopExecuteSwcFirmware(const char *pFirmwarePath,
     return TRUE;
 }
 
+static Bool _MainLoopSwcEnsureInitialDisk(void);
+
 static Bool _MainLoopSwcInsertCartridge(const char *pPath)
 {
     CFileIO romfile;
     Emu::Rom::LoadErrorE eError;
     const Uint32 specialMask =
-        SNROM_FLAG_DSP1 | SNROM_FLAG_SUPERFX | SNROM_FLAG_DSP2 |
-        SNROM_FLAG_OBC1 | SNROM_FLAG_CX4 | SNROM_FLAG_SDD1 |
-        SNROM_FLAG_SRTC | SNROM_FLAG_DSP3 | SNROM_FLAG_DSP4;
+        SNROM_FLAG_DSP1 | SNROM_FLAG_SUPERFX | SNROM_FLAG_GAMEBOY |
+        SNROM_FLAG_DSP2 | SNROM_FLAG_OBC1 | SNROM_FLAG_CX4 |
+        SNROM_FLAG_SDD1 | SNROM_FLAG_SRTC |
+        SNROM_FLAG_DSP3 | SNROM_FLAG_DSP4;
 
     if (!_pSnes || !_pSnes->IsSuperWildCard() ||
+        _pSnes->HasSuperWildCardCartridge() ||
         !pPath || !*pPath || !_pSnesRom)
         return FALSE;
-
-    _pSnes->EjectSuperWildCardCartridge();
-    _pSnesRom->Unload();
 
     if (!romfile.Open(pPath, "rb"))
     {
@@ -1759,6 +1825,7 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
 
     eError = _pSnesRom->LoadRom(&romfile);
     romfile.Close();
+    SnesRomResetRuntimeCompatForExternalDevice();
 
     if (eError != Emu::Rom::LOADERROR_NONE)
     {
@@ -1772,7 +1839,7 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
     {
         _pSnesRom->Unload();
         MainLoopStatusPrintf(
-            210, "SWC V5: unsupported mapper/coprocessor cartridge");
+            210, "SWC: unsupported mapper/coprocessor cartridge");
         return FALSE;
     }
 
@@ -1786,42 +1853,144 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
     snprintf(
         s_SwcExternalCartPath, sizeof(s_SwcExternalCartPath),
         "%s", pPath);
+    MainLoopStateOnRomChanged();
 
-    MainLoopStatusPrintf(
-        180, "SWC cartridge inserted: %s",
-        _MainLoopSwcBaseName(pPath));
+    if (!_MainLoopSwcEnsureInitialDisk())
+        MainLoopStatusPrintf(
+            210, "SWC cartridge inserted; could not create first floppy");
+    else
+        MainLoopStatusPrintf(
+            180, "SWC cartridge inserted: %s",
+            _MainLoopSwcBaseName(pPath));
     return TRUE;
+}
+
+
+static Bool _MainLoopSwcCartStem(char *pOut, Int32 nOutBytes)
+{
+    const char *pName;
+    const char *pExt;
+    size_t n;
+
+    if (!pOut || nOutBytes <= 1 || !s_SwcExternalCartPath[0])
+        return FALSE;
+
+    pName = _MainLoopSwcBaseName(s_SwcExternalCartPath);
+    if (!pName || !*pName)
+        return FALSE;
+
+    pExt = strrchr(pName, '.');
+    n = pExt ? (size_t)(pExt - pName) : strlen(pName);
+    if (!n || n >= (size_t)nOutBytes)
+        return FALSE;
+
+    memcpy(pOut, pName, n);
+    pOut[n] = 0;
+
+    /* AURORA_SWC_MEGA_V9_20260831: FAT-safe host filename. */
+    for (size_t i = 0; i < n; ++i)
+    {
+        unsigned char c = (unsigned char)pOut[i];
+        if (c < 0x20 || strchr("\\/:*?\"<>|", c))
+            pOut[i] = '_';
+    }
+    while (n > 0 && (pOut[n - 1] == ' ' || pOut[n - 1] == '.'))
+        pOut[--n] = '_';
+
+    return pOut[0] ? TRUE : FALSE;
 }
 
 static Bool _MainLoopSwcBuildCartDiskPath(char *pOut,
                                           Int32 nOutBytes,
                                           unsigned nDisk)
 {
-    const char *pExt;
-    size_t nBase;
+    Char Directory[512];
+    Char Stem[256];
+    int n;
+
+    if (!pOut || nOutBytes <= 0 || nDisk == 0 ||
+        !_MainLoopSwcCartStem(Stem, sizeof(Stem)) ||
+        !MainLoopEnsureSwcDirectory(
+            Directory, (Int32)sizeof(Directory)))
+        return FALSE;
+
+    n = snprintf(
+        pOut, (size_t)nOutBytes,
+        "%s/%s_%u.img", Directory, Stem, nDisk);
+    return n >= 0 && n < nOutBytes ? TRUE : FALSE;
+}
+
+static Bool _MainLoopSwcFindFirstExistingCartDisk(
+    char *pOut, Int32 nOutBytes)
+{
+    Char Directory[512];
+    Char Stem[256];
+    Char Prefix[300];
+    DIR *pDir;
+    struct dirent *pEntry;
+    unsigned best = 0;
+    Char BestName[512] = "";
 
     if (!pOut || nOutBytes <= 0 ||
-        nDisk == 0 || !s_SwcExternalCartPath[0])
+        !_MainLoopSwcCartStem(Stem, sizeof(Stem)) ||
+        !MainLoopEnsureSwcDirectory(
+            Directory, (Int32)sizeof(Directory)))
         return FALSE;
 
-    pExt = strrchr(s_SwcExternalCartPath, '.');
-    nBase = pExt
-        ? (size_t)(pExt - s_SwcExternalCartPath)
-        : strlen(s_SwcExternalCartPath);
-
-    if (!nBase || nBase + 24 >= (size_t)nOutBytes)
+    if (snprintf(Prefix, sizeof(Prefix), "%s_", Stem) >=
+        (int)sizeof(Prefix))
         return FALSE;
 
-    memcpy(pOut, s_SwcExternalCartPath, nBase);
-    pOut[nBase] = 0;
+    pDir = opendir(Directory);
+    if (!pDir)
+        return FALSE;
 
-    return snprintf(
-        pOut + nBase,
-        (size_t)nOutBytes - nBase,
-        "_%u.img",
-        nDisk) < (nOutBytes - (Int32)nBase)
-        ? TRUE : FALSE;
+    while ((pEntry = readdir(pDir)) != NULL)
+    {
+        const char *p = pEntry->d_name;
+        const char *pDigits;
+        unsigned value = 0;
+
+        if (strncasecmp(p, Prefix, strlen(Prefix)) != 0)
+            continue;
+
+        pDigits = p + strlen(Prefix);
+        if (*pDigits < '0' || *pDigits > '9')
+            continue;
+
+        p = pDigits;
+        while (*p >= '0' && *p <= '9')
+        {
+            value = value * 10u + (unsigned)(*p - '0');
+            ++p;
+        }
+
+        if (value == 0 || strcasecmp(p, ".img") != 0)
+            continue;
+
+        if (!best || value < best)
+        {
+            best = value;
+            snprintf(BestName, sizeof(BestName), "%s", pEntry->d_name);
+        }
+    }
+    closedir(pDir);
+
+    if (!best)
+        return FALSE;
+
+    {
+        struct stat st;
+        int n = snprintf(
+            pOut, (size_t)nOutBytes,
+            "%s/%s", Directory, BestName);
+        if (n < 0 || n >= nOutBytes ||
+            stat(pOut, &st) != 0 || S_ISDIR(st.st_mode))
+            return FALSE;
+    }
+    return TRUE;
 }
+
 
 /* 1.44 MiB FAT12, already formatted for DOS-compatible copier firmware. */
 static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
@@ -1914,6 +2083,37 @@ static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
     fclose(fp);
     return TRUE;
 }
+
+static Bool _MainLoopSwcEnsureInitialDisk(void)
+{
+    Char Existing[1024];
+    Char FirstPath[1024];
+
+    if (!_pSnes || !_pSnes->IsSuperWildCard() ||
+        !_pSnes->HasSuperWildCardCartridge() ||
+        !s_SwcExternalCartPath[0])
+        return FALSE;
+
+    if (_MainLoopSwcFindFirstExistingCartDisk(
+            Existing, sizeof(Existing)))
+    {
+        MainLoopStatusPrintf(
+            120, "SWC: existing floppy ready; L2+Triangle to insert");
+        return TRUE;
+    }
+
+    if (!_MainLoopSwcBuildCartDiskPath(
+            FirstPath, sizeof(FirstPath), 1) ||
+        !_MainLoopSwcCreateFat12Image(FirstPath))
+        return FALSE;
+
+    MainLoopStatusPrintf(
+        180, "SWC: created %s; L2+Triangle to insert",
+        _MainLoopSwcBaseName(FirstPath));
+    return TRUE;
+}
+
+/* AURORA_SWC_MEGA_V9_20260831: cartridge insertion auto-provisions disk 1, never auto-mounts it. */
 
 Bool MainLoopSwcCreateNextDisk(void)
 {
@@ -2031,8 +2231,8 @@ Bool MainLoopSwcSwapNextDisk(void)
         struct stat FirstStatus;
 
         if (!_pSnes->HasSuperWildCardCartridge() ||
-            !_MainLoopSwcBuildCartDiskPath(
-                FirstPath, sizeof(FirstPath), 1) ||
+            !_MainLoopSwcFindFirstExistingCartDisk(
+                FirstPath, sizeof(FirstPath)) ||
             stat(FirstPath, &FirstStatus) != 0 ||
             S_ISDIR(FirstStatus.st_mode))
         {
@@ -2041,6 +2241,7 @@ Bool MainLoopSwcSwapNextDisk(void)
             return FALSE;
         }
 
+        /* AURORA_SWC_MEGA_V9_20260831: lowest existing numbered image. */
         if (!_pSnes->SwapSuperWildCardDisk(FirstPath))
             return FALSE;
 
@@ -2111,6 +2312,8 @@ Bool MainLoopSwcSwapNextDisk(void)
         return FALSE;
     }
 
+    MainLoopStateOnRomChanged(); /* AURORA_SWC_MEGA_V9_20260831 */
+
     {
         const Char *pNewExt = strrchr(NextPath, '.');
         const Char *p = pNewExt ? pNewExt : NextPath + strlen(NextPath);
@@ -2162,6 +2365,51 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     if (eType == MAINLOOP_ENTRYTYPE_NESPALETTE)
         return _MainLoopLoadNesPalette(pFileName); /* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
 
+    /* AURORA_SWC_MEGA_V9_20260831: reject bad copier BIOS/media before _MainLoopUnloadRom(). */
+    if (eType == MAINLOOP_ENTRYTYPE_SNESWCBIOS)
+    {
+        if (!_MainLoopSwcPathIsFirmware(pFileName))
+        {
+            MainLoopModalPrintf(
+                60 * 4, "SWC: unrelated .rom file is not a copier BIOS");
+            return FALSE;
+        }
+        if (!_MainLoopSwcFirmwareFileLooksValid(pFileName))
+        {
+            MainLoopModalPrintf(
+                60 * 5, "Requires classic 16 KiB Super Wild Card BIOS");
+            return FALSE;
+        }
+    }
+    else if (eType == MAINLOOP_ENTRYTYPE_SNESROM &&
+             _MainLoopSwcPathIsFirmware(pFileName))
+    {
+        if (!_MainLoopSwcFirmwareFileLooksValid(pFileName))
+        {
+            MainLoopModalPrintf(
+                60 * 5, "Requires classic 16 KiB Super Wild Card BIOS");
+            return FALSE;
+        }
+    }
+    else if (eType == MAINLOOP_ENTRYTYPE_SNESWCDISK)
+    {
+        Char FirmwarePath[1024];
+        if (!_MainLoopSwcDiskFileLooksValid(pFileName))
+        {
+            MainLoopModalPrintf(
+                60 * 4, "SWC: unsupported or invalid raw floppy image");
+            return FALSE;
+        }
+        if (!_MainLoopFindSwcFirmware(
+                FirmwarePath, sizeof(FirmwarePath)))
+        {
+            MainLoopModalPrintf(
+                60 * 5,
+                "SWC BIOS missing/invalid in SNESticle/SYSTEM");
+            return FALSE;
+        }
+    }
+
     /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830
      * Defensive guard for non-browser launch paths. */
     if (MainLoopSramSaveBusy())
@@ -2176,8 +2424,9 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         return FALSE;
     }
 
-    /* AURORA_SWC_FLOPPY_V5_20260831 */
+    /* AURORA_SWC_MEGA_V9_20260831: first cart attaches to SWC; a second cart is a normal SNES launch. */
     if (_pSnes && _pSnes->IsSuperWildCard() &&
+        !_pSnes->HasSuperWildCardCartridge() &&
         eType == MAINLOOP_ENTRYTYPE_SNESROM &&
         !_MainLoopSwcPathIsFirmware(pFileName))
     {

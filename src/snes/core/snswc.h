@@ -47,6 +47,9 @@ public:
 
     Bool Read(Uint32 uAddr, Uint8 *pData, Uint8 *pSRAM, Uint32 nSRAMBytes);
     Bool Write(Uint32 uAddr, Uint8 uData, Uint8 *pSRAM, Uint32 nSRAMBytes);
+    Bool ResolveDirectDram(Uint8 bank, Uint16 addr, Uint8 **ppMem); /* AURORA_SWC_MEGA_V9_20260831 */
+    Bool ResolveDirectCartridge(Uint8 bank, Uint16 addr,
+                                const Uint8 **ppMem) const;
 
 private:
     enum
@@ -81,6 +84,7 @@ private:
 
     FILE *m_pDisk;
     Bool m_bDiskWritable;
+    Bool m_bDiskDirty; /* AURORA_SWC_MEGA_V9_20260831: flush once per FDC command */
     Bool m_bDiskChanged;
     Char m_DiskPath[1024];
     Char m_LastError[192];
@@ -127,6 +131,7 @@ private:
     Bool DetectGeometry(long nBytes);
 
     void FdcReset(Bool bRaiseIRQ);
+    Bool FdcFlushDisk();
     Uint8 FdcMainStatus() const;
     Uint8 FdcReadData();
     void FdcWriteData(Uint8 uData);

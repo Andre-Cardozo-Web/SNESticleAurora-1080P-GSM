@@ -20,6 +20,7 @@ SNSuperWildCard::SNSuperWildCard()
     m_DiskPath[0] = 0;
     m_LastError[0] = 0;
     m_bDiskWritable = FALSE;
+    m_bDiskDirty = FALSE; /* AURORA_SWC_MEGA_V9_20260831 */
     m_bDiskChanged = FALSE;
     m_nTracks = m_nHeads = m_nSectorsPerTrack = 0;
     Reset();
@@ -96,7 +97,7 @@ Bool SNSuperWildCard::LoadFirmware(const Char *pPath)
     if (nBytes != SWC_FIRMWARE_BYTES)
     {
         fclose(pFile);
-        SetError("V1 requires classic 16 KiB Super Wild Card firmware");
+        SetError("Requires classic 16 KiB Super Wild Card BIOS");
         return FALSE;
     }
 
@@ -184,12 +185,17 @@ Bool SNSuperWildCard::MountDisk(const Char *pDiskPath)
 
     if (m_pDisk)
     {
-        fflush(m_pDisk);
+        if (!FdcFlushDisk())
+        {
+            fclose(pFile);
+            return FALSE;
+        }
         fclose(m_pDisk);
     }
 
     m_pDisk = pFile;
     m_bDiskWritable = bWritable;
+    m_bDiskDirty = FALSE; /* AURORA_SWC_MEGA_V9_20260831 */
     m_bDiskChanged = TRUE;
     snprintf(m_DiskPath, sizeof(m_DiskPath), "%s", pDiskPath);
 
@@ -267,7 +273,7 @@ void SNSuperWildCard::Shutdown()
     ClearExternalCartridge(); /* AURORA_SWC_FLOPPY_V5_20260831 */
     if (m_pDisk)
     {
-        fflush(m_pDisk);
+        (void)FdcFlushDisk();
         fclose(m_pDisk);
         m_pDisk = NULL;
     }
@@ -285,6 +291,7 @@ void SNSuperWildCard::Shutdown()
     m_bActive = FALSE;
     m_nFirmwareBytes = 0;
     m_bDiskWritable = FALSE;
+    m_bDiskDirty = FALSE;
     m_bDiskChanged = FALSE;
     m_DiskPath[0] = 0;
     m_nTracks = m_nHeads = m_nSectorsPerTrack = 0;
@@ -302,6 +309,23 @@ void SNSuperWildCard::Reset()
     m_uDCR = 0;
     FdcReset(FALSE);
 }
+
+Bool SNSuperWildCard::FdcFlushDisk()
+{
+    if (!m_pDisk || !m_bDiskDirty)
+        return TRUE;
+
+    if (fflush(m_pDisk) != 0)
+    {
+        SetError("SWC floppy flush failed");
+        return FALSE;
+    }
+
+    m_bDiskDirty = FALSE;
+    return TRUE;
+}
+
+/* AURORA_SWC_MEGA_V9_20260831: command-level persistence avoids one USB flush per 512-byte sector. */
 
 void SNSuperWildCard::FdcReset(Bool bRaiseIRQ)
 {
@@ -323,11 +347,17 @@ void SNSuperWildCard::FdcReset(Bool bRaiseIRQ)
 
 Uint8 SNSuperWildCard::FdcMainStatus() const
 {
+    /* AURORA_SWC_MEGA_V9_20260831: uPD765 non-DMA phase bits:
+     *   READ exec  = RQM|DIO|EXM|CB = F0
+     *   WRITE exec = RQM|EXM|CB     = B0
+     *   RESULT     = RQM|DIO|CB     = D0 (EXM must be clear)
+     */
     switch (m_FdcPhase)
     {
         case FDC_PHASE_READ:
-        case FDC_PHASE_RESULT:
             return 0xF0;
+        case FDC_PHASE_RESULT:
+            return 0xD0;
         case FDC_PHASE_WRITE:
         case FDC_PHASE_FORMAT:
             return 0xB0;
@@ -343,8 +373,11 @@ Uint8 SNSuperWildCard::FdcCommandLength(Uint8 uCommand) const
     {
         case 0x03: return 3;
         case 0x04: return 2;
+        case 0x02: return 9; /* Read Track */
         case 0x05: return 9;
         case 0x06: return 9;
+        case 0x09: return 9; /* Write Deleted Data: raw-sector alias */
+        case 0x0C: return 9; /* Read Deleted Data: raw-sector alias */
         case 0x07: return 2;
         case 0x08: return 1;
         case 0x0A: return 2;
@@ -416,7 +449,7 @@ Bool SNSuperWildCard::FdcStoreCurrentSector()
     if (fwrite(m_Sector, 1, SWC_SECTOR_BYTES, m_pDisk) != SWC_SECTOR_BYTES)
         return FALSE;
 
-    fflush(m_pDisk);
+    m_bDiskDirty = TRUE; /* AURORA_SWC_MEGA_V9_20260831 */
     return TRUE;
 }
 
@@ -441,6 +474,13 @@ Bool SNSuperWildCard::FdcAdvanceSector()
 void SNSuperWildCard::FdcFinishRW(Bool bOK, Uint8 uST1, Uint8 uST2)
 {
     Uint8 r[7];
+
+    /* AURORA_SWC_MEGA_V9_20260831: physical IMG persistence is command-granular, not sector-granular. */
+    if (m_bDiskDirty && !FdcFlushDisk())
+    {
+        bOK = FALSE;
+        if (!uST1) uST1 = 0x20;
+    }
 
     r[0] = bOK ? (Uint8)((m_uDataH << 2) | m_uDrive)
                : (Uint8)(0x40 | (m_uDataH << 2) | m_uDrive);
@@ -477,8 +517,11 @@ void SNSuperWildCard::FdcExecuteCommand()
             FdcSetResult(r, 1, FALSE);
             return;
 
+        case 0x02: /* Read Track: sector-model approximation */
         case 0x05:
         case 0x06:
+        case 0x09: /* Write Deleted Data -> raw-sector write */
+        case 0x0C: /* Read Deleted Data -> raw-sector read */
             m_uDrive = m_Command[1] & 3;
             m_uDataH = m_Command[3];
             m_uHead = m_uDataH;
@@ -497,7 +540,7 @@ void SNSuperWildCard::FdcExecuteCommand()
                 return;
             }
 
-            if (cmd == 0x06)
+            if (cmd == 0x06 || cmd == 0x0C || cmd == 0x02)
             {
                 if (!FdcLoadCurrentSector())
                 {
@@ -621,6 +664,10 @@ Uint8 SNSuperWildCard::FdcReadData()
 {
     if (m_FdcPhase == FDC_PHASE_RESULT)
     {
+        /* AURORA_SWC_MEGA_V9_20260831: the 765 clears transfer-complete INT when the first
+         * result byte is read. */
+        if (m_iResult == 0)
+            m_bIRQ = FALSE;
         Uint8 v = (m_iResult < m_nResult) ? m_Result[m_iResult++] : 0xFF;
         if (m_iResult >= m_nResult)
         {
@@ -703,8 +750,8 @@ void SNSuperWildCard::FdcWriteData(Uint8 uData)
                     ok = FALSE;
                     break;
                 }
+                m_bDiskDirty = TRUE; /* AURORA_SWC_MEGA_V9_20260831 */
             }
-            fflush(m_pDisk);
 
             m_uDataC = lastC;
             m_uDataH = lastH;
@@ -1115,6 +1162,106 @@ Bool SNSuperWildCard::WriteEmulation(Uint8 bank, Uint16 addr, Uint8 uData,
     }
 
     return FALSE;
+}
+
+/* AURORA_SWC_MEGA_V9_20260831
+ * Resolve stable 8 KiB windows so the 65816 hot path can use direct memory
+ * rather than calling ReadSWC/WriteSWC for every opcode/data byte.
+ */
+Bool SNSuperWildCard::ResolveDirectDram(Uint8 bank, Uint16 addr,
+                                        Uint8 **ppMem)
+{
+    Uint8 maxLoBank;
+    Uint8 maxHiBank;
+    Bool inBankRange;
+
+    if (!ppMem || !m_bActive || !m_pDRAM ||
+        (m_uSystemMode != 2 && m_uSystemMode != 3) ||
+        (addr & 0x1FFF))
+        return FALSE;
+
+    /* Keep the actual mode/control register block trapped. */
+    if ((bank == 0x00 || bank == 0x80) && addr == 0xE000)
+        return FALSE;
+
+    if (m_bCartridgeMap &&
+        ((bank >= 0x20 && bank <= 0x5F) ||
+         (bank >= 0xA0 && bank <= 0xDF)))
+        return FALSE;
+
+    if (!(m_uParallel & 0x02) &&
+        bank == 0x70 && addr >= 0x8000)
+        return FALSE;
+    if ((m_uParallel & 0x02) &&
+        bank >= 0x30 && bank <= 0x33 && addr == 0x6000)
+        return FALSE;
+
+    maxLoBank = (m_uSystemMode == 2) ? 0x70 : 0x6F;
+    maxHiBank = (m_uSystemMode == 2) ? 0xE0 : 0xDF;
+    inBankRange =
+        (bank <= maxLoBank) || (bank >= 0x80 && bank <= maxHiBank);
+    if (!inBankRange)
+        return FALSE;
+
+    if (m_uParallel & 0x01)
+    {
+        if (addr < 0x8000 &&
+            !((bank >= 0x40 && bank <= maxLoBank) ||
+              (bank >= 0xC0 && bank <= maxHiBank)))
+            return FALSE;
+    }
+    else if (addr < 0x8000)
+    {
+        return FALSE;
+    }
+
+    *ppMem = m_pDRAM + DramOffsetMode2(bank, addr);
+    return TRUE;
+}
+
+Bool SNSuperWildCard::ResolveDirectCartridge(
+    Uint8 bank, Uint16 addr, const Uint8 **ppMem) const
+{
+    Uint32 off;
+    Bool allowed = FALSE;
+
+    if (!ppMem || !m_bActive || !m_pCartRom || !m_nCartBytes ||
+        (addr & 0x1FFF))
+        return FALSE;
+
+    if (m_uSystemMode == 1)
+        allowed = TRUE;
+    else if ((m_uSystemMode == 2 || m_uSystemMode == 3) &&
+             m_bCartridgeMap &&
+             ((bank >= 0x20 && bank <= 0x5F) ||
+              (bank >= 0xA0 && bank <= 0xDF)))
+        allowed = TRUE;
+
+    if (!allowed)
+        return FALSE;
+
+    if (m_iCartMapping == 0)
+    {
+        if (addr < 0x8000)
+            return FALSE;
+        off = ((Uint32)(bank & 0x7F) << 15) |
+              (Uint32)(addr & 0x7FFF);
+    }
+    else
+    {
+        Bool fullBank =
+            ((bank >= 0x40 && bank <= 0x7D) || bank >= 0xC0);
+        if (addr < 0x8000 && !fullBank)
+            return FALSE;
+        off = ((Uint32)(bank & 0x3F) << 16) | (Uint32)addr;
+    }
+
+    off %= m_nCartBytes;
+    if (off + 0x2000u > m_nCartBytes)
+        return FALSE;
+
+    *ppMem = m_pCartRom + off;
+    return TRUE;
 }
 
 

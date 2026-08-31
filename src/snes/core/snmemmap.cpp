@@ -435,16 +435,53 @@ void SNCPU_TRAPFUNC SnesSystem::WriteSWC(SNCpuT *pCpu,
 {
     SnesSystem *pSnes = (SnesSystem *)pCpu->pUserData;
     if (pSnes->m_bSuperWildCard)
-        pSnes->m_SWC.Write(uAddr, uData, pSnes->m_SRam, 0x8000);
+    {
+        Bool handled =
+            pSnes->m_SWC.Write(uAddr, uData, pSnes->m_SRam, 0x8000);
+        Uint16 addr = (Uint16)(uAddr & 0xFFFF);
+
+        /* AURORA_SWC_MEGA_V9_20260831: page/mode/parallel/cart-map writes can change which
+         * 8 KiB banks are safely direct-mapped. */
+        if (handled &&
+            (addr == 0xC008 || (addr >= 0xE004 && addr <= 0xE00D)))
+            pSnes->MapSuperWildCard();
+    }
 }
 
 void SnesSystem::MapSuperWildCard(void)
 {
     SNCpuT *pCpu = &m_Cpu;
     Uint32 uBank;
+    Uint32 uBlock;
 
+    /* AURORA_SWC_MEGA_V9_20260831
+     * Fail-closed trap baseline, then stable direct 8 KiB windows.
+     * Mode 0 BIOS/FDC stays trapped; modes 2/3 no longer call C++ per ROM byte.
+     */
     SNCPUSetTrap(pCpu, 0, SNCPU_MEM_SIZE, ReadSWC, WriteSWC);
     SNCPUSetMemSpeed(pCpu, 0, SNCPU_MEM_SIZE, SNCPU_CYCLE_SLOW);
+
+    for (uBank = 0; uBank < 0x100; ++uBank)
+    {
+        for (uBlock = 0; uBlock < 8; ++uBlock)
+        {
+            Uint16 addr = (Uint16)(uBlock << 13);
+            Uint32 bus = (uBank << 16) | (Uint32)addr;
+            Uint8 *pDram = NULL;
+            const Uint8 *pCart = NULL;
+
+            if (m_SWC.ResolveDirectDram((Uint8)uBank, addr, &pDram))
+            {
+                SNCPUSetBank(pCpu, bus, 0x2000, pDram, TRUE);
+            }
+            else if (m_SWC.ResolveDirectCartridge(
+                         (Uint8)uBank, addr, &pCart))
+            {
+                SNCPUSetBank(
+                    pCpu, bus, 0x2000, (Uint8 *)pCart, FALSE);
+            }
+        }
+    }
 
     SNCPUSetBank(pCpu, 0x7E0000, 0x20000, m_Ram, TRUE);
 

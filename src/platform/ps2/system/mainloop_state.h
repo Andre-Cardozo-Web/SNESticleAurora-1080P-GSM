@@ -36,6 +36,7 @@ const Char *MainLoopSramGetDeviceName();
 const Char *MainLoopSramGetBrowseRoot();
 /* AURORA_SYSTEM_BIOS_PATH_FIX_V1_20260826: SYSTEM/firmware storage is independent from SRAM selection. */
 Bool MainLoopEnsureSystemDirectory(Char *pOut, Int32 nOutBytes);
+Bool MainLoopEnsureSwcDirectory(Char *pOut, Int32 nOutBytes); /* AURORA_SWC_MEGA_V9_20260831 */
 Bool MainLoopFindSystemFileDirectory(Char *pOut, Int32 nOutBytes,
                                      const Char *pFileName);
 Bool MainLoopSramNeedsMemoryCardPreflight();
