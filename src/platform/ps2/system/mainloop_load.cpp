@@ -1824,7 +1824,7 @@ static Bool _MainLoopSwcFirmwareFileLooksValid(const char *pPath)
 }
 
 /* AURORA_COPIER_DSK_PRIORITY_AUTO_DISK1_V10_17_20260901
- * DSK.* is the canonical user override for raw-.img autoboot. It wins over
+ * DSK.* is the canonical user override for classic copier autoboot. It wins over
  * every named BIOS. Determine classic model from payload, not filename.
  */
 static Bool _MainLoopDskMagicomPayloadLooksValid(const char *pPath)
