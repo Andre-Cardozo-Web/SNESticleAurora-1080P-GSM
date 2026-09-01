@@ -30,6 +30,19 @@ public:
         MODEL_MAGICOM = 1
     };
 
+    /* AURORA_FRONT_TRACE_V10_8_20260831
+     * Host-only diagnostic snapshot. Not serialized and not part of the
+     * emulated hardware state. */
+    struct DebugTransitionT
+    {
+        Uint8 oldMode, newMode, parallel;
+        Uint8 mappedD5, loD5, hiD5;
+        Uint16 mappedReset, loReset, hiReset;
+        Uint32 fdcReadBytes;
+        Uint32 dramWriteBytes;
+        Uint32 dramMaxOffset;
+    };
+
     SNSuperWildCard();
     ~SNSuperWildCard();
 
@@ -47,11 +60,22 @@ public:
     void ClearExternalCartridge();
     Bool HasExternalCartridge() const { return m_pCartRom != NULL; }
     Bool HasDisk() const { return m_pDisk != NULL; }
+    /* AURORA_SWC_MEDIA_PROBE_V10_2_20260831: host-side media diagnostics. */
+    Bool IsDiskWritable() const { return m_pDisk != NULL && m_bDiskWritable; }
 
     Bool IsActive() const { return m_bActive; }
     Bool IsSuperMagicom() const
         { return m_bActive && m_eModel == MODEL_MAGICOM; }
     ModelE GetModel() const { return m_eModel; }
+    /* AURORA_FRONT_GAMEBUS_V10_7_20260831
+     * Front DRAM is writable only through the BIOS page window (Mode 0).
+     * In cartridge emulation Modes 2/3 it is read-only on the SNES bus. */
+    /* AURORA_FRONT_TRACE_V10_8_20260831
+     * Diagnostic build: keep direct DRAM reads but trap ALL copier-DRAM
+     * writes so the loader byte counter is exact. This is semantically
+     * identical but slower only while the copier BIOS writes DRAM. */
+    Bool IsDirectDramWritable() const { return FALSE; }
+    Bool ConsumeDebugTransition(DebugTransitionT *pOut);
     const Char *GetModelName() const
         { return m_eModel == MODEL_MAGICOM ? "Super Magicom" : "Super Wild Card"; }
     const Char *GetDiskPath() const { return m_DiskPath; }
@@ -151,12 +175,27 @@ private:
     Uint8 m_uFormatSC;
     Uint8 m_uFormatFill;
 
+    /* AURORA_FRONT_TRACE_V10_8_20260831: transient diagnostics only. */
+    Uint32 m_uDebugFdcReadBytes;
+    Uint32 m_uDebugDramWriteBytes;
+    Uint32 m_uDebugDramMaxOffset;
+    Bool m_bDebugTransitionPending;
+    DebugTransitionT m_DebugTransition;
+
+    void CaptureDebugTransition(Uint8 uNewMode);
+    void ResetDebugTrace();
+
     void SetError(const Char *pText);
     Bool LoadFirmware(const Char *pPath);
     Bool DetectGeometry(long nBytes);
 
     void FdcReset(Bool bRaiseIRQ);
     Bool FdcFlushDisk();
+    /* AURORA_FRONT_FDC_DRIVE_MODEL_V10_3_20260831
+     * Front/MCS3201-compatible DOR: bits0-1 DSEL, bit2 /RES,
+     * bits4-7 MOTOR1..4. */
+    Uint8 FdcSelectedDrive() const;
+    Bool FdcDriveReady(Uint8 uDrive) const;
     Uint8 FdcMainStatus() const;
     Uint8 FdcReadData();
     void FdcWriteData(Uint8 uData);
@@ -171,7 +210,8 @@ private:
     Bool FdcValidCHS(Uint8 c, Uint8 h, Uint8 r) const;
 
     Bool ReadExternalCartridge(Uint8 bank, Uint16 addr, Uint8 *pData) const;
-    Bool ReadExternalPage(Uint16 addr, Uint8 *pData) const;
+    /* AURORA_FRONT_MODE0_PAGEBUS_V10_9_20260831 */
+    Bool ReadExternalPage(Uint8 bank, Uint16 addr, Uint8 *pData) const;
 
     Uint32 DramOffsetMode2(Uint8 bank, Uint16 addr) const;
     Bool ReadMode0(Uint8 bank, Uint16 addr, Uint8 *pData,

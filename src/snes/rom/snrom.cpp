@@ -1119,9 +1119,26 @@ Emu::Rom::LoadErrorE SnesRom::LoadRom(CDataIO *pFileIO, Uint8 *pBuffer, Uint32 n
 		switch (eRomHdrType)
 		{
 		case SNROM_HDRTYPE_SWC:
-			nRomBytes = RomHdr.SWC.uSize * 1024 * 1024 / 8 / 16;
-			m_eMapping = (RomHdr.SWC.uImageInfo & 0x10)  ? SNROM_MAPPING_HIROM : SNROM_MAPPING_LOROM;
+		{
+			/* AURORA_SWC_PHYSICAL_PAYLOAD_V10_10_20260831
+			 *
+			 * SWC header bytes 0-1 are an 8-KiB page count. Historically
+			 * this loader trusted that count and overwrote nRomBytes.
+			 * A stale/bad copier header can therefore truncate a perfectly
+			 * valid physical payload before a Front copier ever sees it.
+			 *
+			 * nRomBytes was already derived above from the real file length
+			 * after removing the 512-byte copier header. Keep that physical
+			 * payload as the source of truth. The SWC header still selects
+			 * LoROM/HiROM exactly as before.
+			 */
+			const Uint32 uDeclaredBytes =
+				(Uint32)RomHdr.SWC.uSize * 0x2000u;
+			(void)uDeclaredBytes;
+			m_eMapping = (RomHdr.SWC.uImageInfo & 0x10)
+				? SNROM_MAPPING_HIROM : SNROM_MAPPING_LOROM;
 			break;
+		}
 		default:
 		case SNROM_HDRTYPE_UNKNOWN:
 			m_eMapping = SNROM_MAPPING_LOROM;

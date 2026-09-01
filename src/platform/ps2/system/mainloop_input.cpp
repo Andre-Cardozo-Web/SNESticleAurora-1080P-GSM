@@ -293,6 +293,40 @@ static Uint16 _MainLoopSegaInput(Uint32 cond)
 
 Uint16 _MainLoopInput(Uint32 pad)
 {
+    /* AURORA_FRONT_TRACE_V10_8_20260831
+     * One-shot copier transition diagnostic through the existing status UI.
+     * MainLoopStatusPrintf is already rendered in Aurora's safe-zone UI;
+     * no raw framebuffer/overscan text is introduced. */
+    if (_pSnes && _pSystem == _pSnes && _pSnes->IsSuperWildCard())
+    {
+        SNSuperWildCard::DebugTransitionT d;
+        if (_pSnes->ConsumeFrontCopierDebugTransition(&d))
+        {
+            unsigned fkb = (unsigned)((d.fdcReadBytes + 1023u) >> 10);
+            unsigned dkb = (unsigned)((d.dramWriteBytes + 1023u) >> 10);
+
+            if (FALSE) MainLoopStatusPrintf(300, "M%u%u C%u F%u D%u H%02X V%04X",
+                (unsigned)d.oldMode, (unsigned)d.newMode,
+                (unsigned)(d.parallel & 3u), fkb, dkb,
+                (unsigned)d.mappedD5, (unsigned)d.mappedReset);
+
+            /* AURORA_FRONT_TRACE_V10_8C_PRINTF_20260831
+             * mainloop_input.cpp already has <stdio.h>; keep this diagnostic
+             * self-contained instead of depending on the console wrapper. */
+            printf(
+                "[FRONT V10_8] M%u->%u C008=%02X FDC=%u DRAM=%u MAX=%06X "
+                "SEL:D5=%02X RV=%04X LO:D5=%02X RV=%04X HI:D5=%02X RV=%04X\n",
+                (unsigned)d.oldMode, (unsigned)d.newMode,
+                (unsigned)d.parallel,
+                (unsigned)d.fdcReadBytes,
+                (unsigned)d.dramWriteBytes,
+                (unsigned)d.dramMaxOffset,
+                (unsigned)d.mappedD5, (unsigned)d.mappedReset,
+                (unsigned)d.loD5, (unsigned)d.loReset,
+                (unsigned)d.hiD5, (unsigned)d.hiReset);
+        }
+    }
+
 	if (_MainLoop_bSuppressGameInputUntilRelease)
 	{
 		return 0;

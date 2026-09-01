@@ -199,6 +199,9 @@ Bool SNSuperWildCard::MountDisk(const Char *pDiskPath)
     m_bDiskWritable = bWritable;
     m_bDiskDirty = FALSE; /* AURORA_SWC_MEGA_V9_20260831 */
     m_bDiskChanged = TRUE;
+    /* AURORA_FRONT_TRACE_V10_8_20260831: a newly inserted medium begins a
+     * fresh transfer accounting window. */
+    ResetDebugTrace();
     m_uIndexPollCounter = 0; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831: new medium starts at an INDEX pulse */
     snprintf(m_DiskPath, sizeof(m_DiskPath), "%s", pDiskPath);
 
@@ -228,6 +231,14 @@ Bool SNSuperWildCard::SwapDisk(const Char *pDiskPath)
     m_uResetSensePending = 0;
     m_bIRQ = FALSE;
     m_bDiskChanged = TRUE;
+
+    /* AURORA_FRONT_FDC_BYTEFLOW_V10_6_20260831
+     * Hot media change is not instantaneous on a real drive. The backing
+     * FILE* is already the new image, but expose 32 C000 polls with INDEX
+     * inactive first so the Front BIOS observes disk removal before the new
+     * medium starts producing index pulses. No frame timer or state-format
+     * change is required. */
+    m_uIndexPollCounter = 0x100u + 32u;
     return TRUE;
 }
 
@@ -253,10 +264,19 @@ Bool SNSuperWildCard::Load(const Char *pFirmwarePath,
         Char e[sizeof(m_LastError)]; snprintf(e,sizeof(e),"%s",m_LastError);
         Shutdown(); SetError(e); return FALSE;
     }
-    if (pDiskPath && *pDiskPath && !MountDisk(pDiskPath))
+    if (pDiskPath && *pDiskPath)
     {
-        Char e[sizeof(m_LastError)]; snprintf(e,sizeof(e),"%s",m_LastError);
-        Shutdown(); SetError(e); return FALSE;
+        if (!MountDisk(pDiskPath))
+        {
+            Char e[sizeof(m_LastError)]; snprintf(e,sizeof(e),"%s",m_LastError);
+            Shutdown(); SetError(e); return FALSE;
+        }
+
+        /* AURORA_SWC_MEDIA_PROBE_V10_2_20260831
+         * Media supplied together with the copier BIOS was already in the
+         * drive at cold power-on. Do not expose it as a post-boot disk
+         * change. Hot SwapDisk() intentionally keeps m_bDiskChanged=TRUE. */
+        m_bDiskChanged = FALSE;
     }
     m_bActive=TRUE;
     Reset();
@@ -305,6 +325,8 @@ void SNSuperWildCard::Reset()
     m_bCartridgeMap = FALSE;
     m_uDOR = 0;
     m_uDCR = 0;
+    /* AURORA_FRONT_TRACE_V10_8_20260831 */
+    ResetDebugTrace();
     m_uIndexPollCounter = 0; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831 */
     FdcReset(FALSE);
 }
@@ -328,6 +350,11 @@ Bool SNSuperWildCard::FdcFlushDisk()
 
 void SNSuperWildCard::FdcReset(Bool bRaiseIRQ)
 {
+    /* AURORA_FRONT_FDC_SILICON_V10_5_20260831
+     * Classic Front/MCS3201 behavior: /RES clears the controller state.
+     * READY polling is not wired on this part, so do not manufacture the
+     * PC-style four-drive post-reset Sense-Interrupt queue. */
+    (void)bRaiseIRQ;
     m_FdcPhase = FDC_PHASE_COMMAND;
     m_nCommand = 0;
     m_nCommandExpected = 0;
@@ -339,31 +366,73 @@ void SNSuperWildCard::FdcReset(Bool bRaiseIRQ)
     m_uCylinder = 0;
     m_uHead = 0;
     m_uDrive = 0;
-    m_uLastST0 = 0x20;
-    m_uResetSensePending = bRaiseIRQ ? 4 : 0;
-    m_bIRQ = bRaiseIRQ;
+    m_uLastST0 = 0;
+    m_uResetSensePending = 0;
+    m_bIRQ = FALSE;
+}
+
+/* AURORA_FRONT_FDC_DRIVE_MODEL_V10_3_20260831
+ * MCS3201/GM82C765-compatible Front copier drive wiring.
+ * DSEL is a 2-bit unit number; the motor bits are one-per-unit.
+ * Aurora has one physical backing IMG, attached to whichever unit the
+ * firmware actually selects and spins. No artificial spin-up delay. */
+Uint8 SNSuperWildCard::FdcSelectedDrive() const
+{
+    return (Uint8)(m_uDOR & 0x03);
+}
+
+Bool SNSuperWildCard::FdcDriveReady(Uint8 uDrive) const
+{
+    /* AURORA_FRONT_FDC_SILICON_V10_5_20260831
+     * NEC765 command HU selects the unit. DOR controls its motor.
+     * Requiring DOR DSEL == HU is over-strict and can reject valid Front
+     * firmware sequences. This helper means "media can be accessed". */
+    Uint8 unit = (Uint8)(uDrive & 0x03);
+    Uint8 motor = (Uint8)(0x10u << unit);
+
+    return m_pDisk &&
+           (m_uDOR & 0x04) &&
+           (m_uDOR & motor)
+        ? TRUE : FALSE;
 }
 
 Uint8 SNSuperWildCard::FdcMainStatus() const
 {
-    /* AURORA_SWC_MEGA_V9_20260831: uPD765 non-DMA phase bits:
-     *   READ exec  = RQM|DIO|EXM|CB = F0
-     *   WRITE exec = RQM|EXM|CB     = B0
-     *   RESULT     = RQM|DIO|CB     = D0 (EXM must be clear)
+    /* AURORA_FRONT_FDC_SILICON_V10_5_20260831
+     * NEC765 MSR:
+     *   /RES low -> controller not requesting the bus (00h)
+     *   seek/recalibrate -> drive busy bit remains set until SIS result
+     *   normal PIO phases retain the existing instantaneous RQM model.
      */
+    Uint8 value;
+
+    if (!(m_uDOR & 0x04))
+        return 0x00;
+
     switch (m_FdcPhase)
     {
         case FDC_PHASE_READ:
-            return 0xF0;
+            value = 0xF0;
+            break;
         case FDC_PHASE_RESULT:
-            return 0xD0;
+            value = 0xD0;
+            break;
         case FDC_PHASE_WRITE:
         case FDC_PHASE_FORMAT:
-            return 0xB0;
+            value = 0xB0;
+            break;
         case FDC_PHASE_COMMAND:
         default:
-            return m_nCommand ? 0x90 : 0x80;
+            value = m_nCommand ? 0x90 : 0x80;
+            break;
     }
+
+    if (m_bIRQ &&
+        (m_uLastST0 & 0x20) &&
+        !(m_uLastST0 & 0xC0))
+        value |= (Uint8)(1u << (m_uLastST0 & 3));
+
+    return value;
 }
 
 Uint8 SNSuperWildCard::FdcCommandLength(Uint8 uCommand) const
@@ -404,7 +473,7 @@ void SNSuperWildCard::FdcSetResult(const Uint8 *pData, Uint8 nBytes, Bool bIRQ)
 
 Bool SNSuperWildCard::FdcValidCHS(Uint8 c, Uint8 h, Uint8 r) const
 {
-    return m_pDisk &&
+    return FdcDriveReady(m_uDrive) &&
            c < (Uint8)m_nTracks &&
            h < (Uint8)m_nHeads &&
            r >= 1 && r <= (Uint8)m_nSectorsPerTrack;
@@ -509,10 +578,13 @@ void SNSuperWildCard::FdcExecuteCommand()
             m_uDrive = m_Command[1] & 3;
             m_uHead = (m_Command[1] >> 2) & 1;
             r[0] = (Uint8)(m_uDrive | (m_uHead << 2));
-            if (m_nHeads > 1) r[0] |= 0x08;
+            /* AURORA_FRONT_FDC_SILICON_V10_5_20260831
+             * ST3.TS is inverted: 0 means two-sided, 1 means single-sided.
+             * Front uses INDEX for disk presence; MCS READY is not wired. */
+            if (m_nHeads <= 1) r[0] |= 0x08;
             if (m_uCylinder == 0) r[0] |= 0x10;
-            if (m_pDisk) r[0] |= 0x20;
-            if (!m_bDiskWritable) r[0] |= 0x40;
+            r[0] |= 0x20;
+            if (m_pDisk && !m_bDiskWritable) r[0] |= 0x40;
             FdcSetResult(r, 1, FALSE);
             return;
 
@@ -529,6 +601,20 @@ void SNSuperWildCard::FdcExecuteCommand()
             m_uDataN = m_Command[5];
             m_uDataEOT = m_Command[6];
             m_bDataMT = (m_Command[0] & 0x80) ? TRUE : FALSE;
+
+            /* AURORA_FRONT_FDC_BYTEFLOW_V10_6_20260831
+             * READ TRACK is index-synchronous and EOT is the number of
+             * sector records to transfer. Treating R as the first sector
+             * shortens the byte stream whenever R != 1. */
+            if (cmd == 0x02)
+            {
+                m_uDataR = 1;
+                if (m_uDataEOT == 0 ||
+                    m_uDataEOT > (Uint8)m_nSectorsPerTrack)
+                    m_uDataEOT = (Uint8)m_nSectorsPerTrack;
+                m_bDataMT = FALSE;
+            }
+
             m_uCylinder = m_uDataC;
             m_iSectorByte = 0;
 
@@ -572,29 +658,26 @@ void SNSuperWildCard::FdcExecuteCommand()
             return;
 
         case 0x08:
-            /* NEC765-compatible reset completion: one pending Sense
-               Interrupt Status result for each drive. */
-            if (m_uResetSensePending)
+            /* AURORA_FRONT_FDC_SILICON_V10_5_20260831
+             * Sense Interrupt Status terminates Seek/Recalibrate.
+             * No interrupt pending -> IC=10 (80h), one byte.
+             * IRQ/busy clear when the first result byte is actually read. */
+            if (!m_bIRQ)
             {
-                Uint8 drive = (Uint8)(4 - m_uResetSensePending);
-                r[0] = (Uint8)(0xC0 | (drive & 3));
-                r[1] = 0;
-                --m_uResetSensePending;
-                m_bIRQ = m_uResetSensePending ? TRUE : FALSE;
-                FdcSetResult(r, 2, FALSE);
+                r[0] = 0x80;
+                FdcSetResult(r, 1, FALSE);
                 return;
             }
 
             r[0] = m_uLastST0;
             r[1] = m_uCylinder;
-            m_bIRQ = FALSE;
             FdcSetResult(r, 2, FALSE);
             return;
 
         case 0x0A:
             m_uDrive = m_Command[1] & 3;
             m_uHead = (m_Command[1] >> 2) & 1;
-            if (!m_pDisk)
+            if (!FdcDriveReady(m_uDrive))
             {
                 m_uDataC = m_uCylinder;
                 m_uDataH = m_uHead;
@@ -621,12 +704,19 @@ void SNSuperWildCard::FdcExecuteCommand()
             m_uFormatFill = m_Command[5];
             m_nFormatIDBytes = (Uint16)m_uFormatSC * 4;
             if (m_nFormatIDBytes > SWC_MAX_FORMAT_IDS ||
-                m_uDataN != 2 || !m_bDiskWritable)
+                m_uDataN != 2 ||
+                !FdcDriveReady(m_uDrive) ||
+                !m_bDiskWritable)
             {
                 m_uDataC = m_uCylinder;
                 m_uDataH = m_uHead;
                 m_uDataR = 1;
-                FdcFinishRW(FALSE, m_bDiskWritable ? 0x04 : 0x02, 0);
+                FdcFinishRW(
+                    FALSE,
+                    !FdcDriveReady(m_uDrive)
+                        ? 0x04
+                        : (m_bDiskWritable ? 0x04 : 0x02),
+                    0);
                 return;
             }
             m_iFormatIDByte = 0;
@@ -661,6 +751,10 @@ void SNSuperWildCard::FdcExecuteCommand()
 
 Uint8 SNSuperWildCard::FdcReadData()
 {
+    /* AURORA_FRONT_FDC_SILICON_V10_5_20260831 */
+    if (!(m_uDOR & 0x04))
+        return 0xFF;
+
     if (m_FdcPhase == FDC_PHASE_RESULT)
     {
         /* AURORA_SWC_MEGA_V9_20260831: the 765 clears transfer-complete INT when the first
@@ -679,6 +773,7 @@ Uint8 SNSuperWildCard::FdcReadData()
     if (m_FdcPhase == FDC_PHASE_READ)
     {
         Uint8 v = m_Sector[m_iSectorByte++];
+        ++m_uDebugFdcReadBytes; /* AURORA_FRONT_TRACE_V10_8_20260831 */
         if (m_iSectorByte >= SWC_SECTOR_BYTES)
         {
             if (FdcAdvanceSector())
@@ -699,6 +794,10 @@ Uint8 SNSuperWildCard::FdcReadData()
 
 void SNSuperWildCard::FdcWriteData(Uint8 uData)
 {
+    /* AURORA_FRONT_FDC_SILICON_V10_5_20260831 */
+    if (!(m_uDOR & 0x04))
+        return;
+
     if (m_FdcPhase == FDC_PHASE_WRITE)
     {
         m_Sector[m_iSectorByte++] = uData;
@@ -778,6 +877,72 @@ void SNSuperWildCard::FdcWriteData(Uint8 uData)
         FdcExecuteCommand();
 }
 
+
+/* AURORA_FRONT_TRACE_V10_8_20260831 */
+void SNSuperWildCard::ResetDebugTrace()
+{
+    m_uDebugFdcReadBytes = 0;
+    m_uDebugDramWriteBytes = 0;
+    m_uDebugDramMaxOffset = 0;
+    m_bDebugTransitionPending = FALSE;
+    memset(&m_DebugTransition, 0, sizeof(m_DebugTransition));
+}
+
+void SNSuperWildCard::CaptureDebugTransition(Uint8 uNewMode)
+{
+    Uint32 mask;
+    Uint32 loD5, loRV, hiD5, hiRV;
+    DebugTransitionT d;
+
+    if (!m_pDRAM || !m_nDRAMBytes)
+        return;
+
+    mask = m_nDRAMBytes - 1u;
+    loD5 = 0x007FD5u & mask;
+    loRV = 0x007FFCu & mask;
+    hiD5 = 0x00FFD5u & mask;
+    hiRV = 0x00FFFCu & mask;
+
+    memset(&d, 0, sizeof(d));
+    d.oldMode = m_uSystemMode;
+    d.newMode = uNewMode;
+    d.parallel = m_uParallel;
+    d.fdcReadBytes = m_uDebugFdcReadBytes;
+    d.dramWriteBytes = m_uDebugDramWriteBytes;
+    d.dramMaxOffset = m_uDebugDramMaxOffset;
+
+    d.loD5 = m_pDRAM[loD5];
+    d.loReset = (Uint16)m_pDRAM[loRV] |
+                ((Uint16)m_pDRAM[(loRV + 1u) & mask] << 8);
+    d.hiD5 = m_pDRAM[hiD5];
+    d.hiReset = (Uint16)m_pDRAM[hiRV] |
+                ((Uint16)m_pDRAM[(hiRV + 1u) & mask] << 8);
+
+    if (m_uParallel & 0x01)
+    {
+        d.mappedD5 = d.hiD5;
+        d.mappedReset = d.hiReset;
+    }
+    else
+    {
+        d.mappedD5 = d.loD5;
+        d.mappedReset = d.loReset;
+    }
+
+    m_DebugTransition = d;
+    m_bDebugTransitionPending = TRUE;
+}
+
+Bool SNSuperWildCard::ConsumeDebugTransition(DebugTransitionT *pOut)
+{
+    if (!pOut || !m_bDebugTransitionPending)
+        return FALSE;
+
+    *pOut = m_DebugTransition;
+    m_bDebugTransitionPending = FALSE;
+    return TRUE;
+}
+
 Uint32 SNSuperWildCard::DramOffsetMode2(Uint8 bank, Uint16 addr) const
 {
     Uint32 b = (Uint32)(bank & 0x7F);
@@ -814,19 +979,40 @@ void SNSuperWildCard::ClearExternalCartridge()
     m_iCartMapping = 0;
 }
 
-Bool SNSuperWildCard::ReadExternalPage(Uint16 addr, Uint8 *pData) const
+/* AURORA_FRONT_CART_PAGE_MAPPER_V10_11_20260831
+ * The Front aperture selects one of four 8-KiB pages inside a cartridge
+ * bank.  Crucially, "1 bank = 4 pages" here means 32 KiB of linear page
+ * space; the cartridge mapper then decides how that bus address reaches ROM.
+ *
+ * A000-BFFF represents the upper cartridge half ($8000-$FFFF), while the
+ * documented 40-7D/C0-FF:2000-3FFF aperture represents the lower half.
+ * Reconstruct that cartridge bus address, then reuse ReadExternalCartridge()
+ * so LoROM gets 32-KiB banks and HiROM gets 64-KiB banks naturally.
+ */
+Bool SNSuperWildCard::ReadExternalPage(Uint8 bank, Uint16 addr,
+                                       Uint8 *pData) const
 {
-    Uint32 off;
+    Bool upperPage;
+    Bool lowerHighBankPage;
+    Uint16 cartAddr;
 
-    if (!m_pCartRom || !m_nCartBytes || !pData ||
-        addr < 0xA000 || addr > 0xBFFF)
+    if (!m_pCartRom || !m_nCartBytes || !pData)
         return FALSE;
 
-    off = m_uSelectedDRAMPage * 0x2000u +
-          (Uint32)(addr - 0xA000);
-    off %= m_nCartBytes;
-    *pData = m_pCartRom[off];
-    return TRUE;
+    upperPage = (addr >= 0xA000 && addr <= 0xBFFF);
+    lowerHighBankPage =
+        ((bank >= 0x40 && bank <= 0x7D) || bank >= 0xC0) &&
+        addr >= 0x2000 && addr <= 0x3FFF;
+
+    if (!upperPage && !lowerHighBankPage)
+        return FALSE;
+
+    cartAddr = (Uint16)(((m_uSelectedDRAMPage & 3u) << 13) |
+                        ((Uint32)addr & 0x1FFFu));
+    if (upperPage)
+        cartAddr |= 0x8000;
+
+    return ReadExternalCartridge(bank, cartAddr, pData);
 }
 
 Bool SNSuperWildCard::ReadExternalCartridge(Uint8 bank,
@@ -870,33 +1056,56 @@ Bool SNSuperWildCard::ReadExternalCartridge(Uint8 bank,
 Bool SNSuperWildCard::ReadMode0(Uint8 bank, Uint16 addr, Uint8 *pData,
                                 Uint8 *pSRAM, Uint32 nSRAMBytes)
 {
+    /* AURORA_FRONT_FDC_MIRROR_DECODE_V10_4_20260831
+     * Front Fareast decodes only the low I/O address bits:
+     *   C010-DFFF mirror C000-C00F.
+     * C00A-C00F in turn mirror the parallel C008/C009 pair.
+     * Normalize before any individual FDC/parallel register test so real
+     * Magicom and Wild Card BIOS code sees the same partially-decoded bus.
+     */
+    if (addr >= 0xC010 && addr <= 0xDFFF)
+        addr = (Uint16)(0xC000 | (addr & 0x000F));
+    if (addr >= 0xC00A && addr <= 0xC00F)
+        addr = (Uint16)(0xC008 | (addr & 1));
+
     if (addr == 0xC000)
     {
         Uint8 value = m_bIRQ ? 0x80 : 0;
 
-        /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831
-         * C000 bit 6 is the floppy INDEX signal used by the SWC BIOS as a
-         * disk-insert check. A permanently-high "disk present" bit never
-         * produces an edge, so the real BIOS can keep asking Insert disk...
-         * even with a mounted IMG.
-         *
-         * Expose a short repeating pulse in the BIOS polling domain. No
-         * wall-clock wait or host I/O is introduced in this hot register.
-         */
-        /* AURORA_V7_FRONT_COPIER_MEDIA_CART_RESET_20260831
-         * C000 bit 6 follows the drive INDEX line: idle high, short low pulse.
-         * Use a small polling-domain revolution so loader loops see an edge
-         * promptly without wall-clock timing, per-frame work, or host I/O. */
-        if (m_pDisk)
+        /* AURORA_FRONT_FDC_BYTEFLOW_V10_6_20260831
+         * 0x100+N is the transient hot-eject sentinel installed by SwapDisk.
+         * During this interval INDEX is electrically inactive/high. */
+        if (m_uIndexPollCounter >= 0x100u)
         {
-            m_uIndexPollCounter = (m_uIndexPollCounter + 1u) & 0x1Fu;
-            if (m_uIndexPollCounter >= 2u)
+            if (m_uIndexPollCounter > 0x100u)
+                --m_uIndexPollCounter;
+            else
+                m_uIndexPollCounter = 0;
+
+            value |= 0x40;
+            *pData = value;
+            return TRUE;
+        }
+
+        /* AURORA_FRONT_FDC_DRIVE_MODEL_V10_3_20260831
+         * C000 bit6 is the raw active-low INDEX line used by Front BIOSes
+         * as the disk-insert check. INDEX exists only while the selected
+         * drive's motor is running and the FDC is out of reset.
+         *
+         * Keep a deliberately wide polling-domain pulse: first half LOW,
+         * second half HIGH. This guarantees both edges to a tight 65816
+         * polling loop without host timers or per-frame floppy work. */
+        if (FdcDriveReady(FdcSelectedDrive()))
+        {
+            m_uIndexPollCounter =
+                (m_uIndexPollCounter + 1u) & 0x0Fu;
+            if (m_uIndexPollCounter >= 8u)
                 value |= 0x40;
         }
         else
         {
             m_uIndexPollCounter = 0;
-            value |= 0x40;
+            value |= 0x40; /* inactive INDEX */
         }
 
         *pData = value;
@@ -943,14 +1152,18 @@ Bool SNSuperWildCard::ReadMode0(Uint8 bank, Uint16 addr, Uint8 *pData,
 
     if (addr >= 0x8000 && addr <= 0x9FFF && m_pDRAM)
     {
-        Uint32 off = (m_uSelectedDRAMPage * 0x2000u +
-                      (Uint32)(addr - 0x8000)) &
+        /* AURORA_FRONT_CART_PAGE_MAPPER_V10_11_20260831
+         * Front page bus: 4 * 8 KiB = 32 KiB per bank. */
+        Uint32 page = ((Uint32)bank << 2) |
+                      (m_uSelectedDRAMPage & 3u);
+        Uint32 off = (page * 0x2000u +
+                      ((Uint32)addr & 0x1FFFu)) &
                      (m_nDRAMBytes - 1);
         *pData = m_pDRAM[off];
         return TRUE;
     }
 
-    if (!m_bPageSRAM && ReadExternalPage(addr, pData))
+    if (!m_bPageSRAM && ReadExternalPage(bank, addr, pData))
         return TRUE;
 
     if (m_bPageSRAM && pSRAM && nSRAMBytes >= 0x8000)
@@ -975,10 +1188,26 @@ Bool SNSuperWildCard::ReadMode0(Uint8 bank, Uint16 addr, Uint8 *pData,
 Bool SNSuperWildCard::WriteMode0(Uint8 bank, Uint16 addr, Uint8 uData,
                                  Uint8 *pSRAM, Uint32 nSRAMBytes)
 {
+    /* AURORA_FRONT_FDC_MIRROR_DECODE_V10_4_20260831
+     * Same partial address decode on writes: all Front FDC/DOR/DCR and
+     * parallel mirrors must hit the canonical C000-C009 handlers. */
+    if (addr >= 0xC010 && addr <= 0xDFFF)
+        addr = (Uint16)(0xC000 | (addr & 0x000F));
+    if (addr >= 0xC00A && addr <= 0xC00F)
+        addr = (Uint16)(0xC008 | (addr & 1));
+
     if (addr == 0xC002)
     {
         Uint8 old = m_uDOR;
         m_uDOR = uData;
+
+        /* AURORA_FRONT_FDC_DRIVE_MODEL_V10_3_20260831
+         * Front DOR: DSEL=bits0-1, /RES=bit2, DMAEN=bit3,
+         * MOTOR1..4=bits4-7. A new selected/motor state starts a fresh
+         * INDEX revolution for the BIOS disk-insert polling loop. */
+        if ((old ^ uData) & 0xF3)
+            m_uIndexPollCounter = 0;
+
         if (!(uData & 0x04))
             FdcReset(FALSE);
         else if (!(old & 0x04))
@@ -1001,19 +1230,22 @@ Bool SNSuperWildCard::WriteMode0(Uint8 bank, Uint16 addr, Uint8 uData,
         return TRUE;
     }
 
-    /* Page register identity is encoded by CPU bank + E000..E003. */
+    /* AURORA_FRONT_MODE0_PAGEBUS_V10_9_20260831
+     * E000-E003 select page 0..3 globally. The CPU bank contributes the
+     * upper physical address bits when the page window itself is accessed. */
     if (addr >= 0xE000 && addr <= 0xE003)
     {
-        m_uSelectedDRAMPage = (((Uint32)bank << 2) |
-                               (Uint32)(addr & 3)) &
-                              ((m_nDRAMBytes / 0x2000u) - 1);
+        m_uSelectedDRAMPage = (Uint32)(addr & 3);
         m_uSelectedSRAMPage = addr & 3;
         return TRUE;
     }
 
     if (addr >= 0xE004 && addr <= 0xE007)
     {
-        m_uSystemMode = (Uint8)(addr - 0xE004);
+        Uint8 uNewMode = (Uint8)(addr - 0xE004);
+        if (uNewMode == 2 || uNewMode == 3)
+            CaptureDebugTransition(uNewMode); /* AURORA_FRONT_TRACE_V10_8_20260831 */
+        m_uSystemMode = uNewMode;
         return TRUE;
     }
     if (addr == 0xE008 || addr == 0xE009)
@@ -1039,16 +1271,29 @@ Bool SNSuperWildCard::WriteMode0(Uint8 bank, Uint16 addr, Uint8 uData,
 
     if (addr >= 0x8000 && addr <= 0x9FFF && m_pDRAM)
     {
-        Uint32 off = (m_uSelectedDRAMPage * 0x2000u +
-                      (Uint32)(addr - 0x8000)) &
+        /* AURORA_FRONT_CART_PAGE_MAPPER_V10_11_20260831
+         * Same 32-KiB-per-bank linear page bus as the read path. */
+        Uint32 page = ((Uint32)bank << 2) |
+                      (m_uSelectedDRAMPage & 3u);
+        Uint32 off = (page * 0x2000u +
+                      ((Uint32)addr & 0x1FFFu)) &
                      (m_nDRAMBytes - 1);
         m_pDRAM[off] = uData;
+        /* AURORA_FRONT_TRACE_V10_8_20260831
+         * V10_8 traps the Mode-0 write fastpath, so this is the exact number
+         * of bytes delivered by the BIOS into copier DRAM. */
+        ++m_uDebugDramWriteBytes;
+        if (off > m_uDebugDramMaxOffset)
+            m_uDebugDramMaxOffset = off;
         return TRUE;
     }
 
+    /* AURORA_FRONT_MODE0_PAGEBUS_V10_9_20260831 */
     if (!m_bPageSRAM && m_pCartRom &&
-        addr >= 0xA000 && addr <= 0xBFFF)
-        return TRUE; /* ROM ignores writes */
+        ((addr >= 0xA000 && addr <= 0xBFFF) ||
+         ((((bank >= 0x40 && bank <= 0x7D) || bank >= 0xC0)) &&
+          addr >= 0x2000 && addr <= 0x3FFF)))
+        return TRUE; /* physical cartridge ROM ignores writes */
 
     if (m_bPageSRAM && pSRAM && nSRAMBytes >= 0x8000)
     {
@@ -1138,7 +1383,10 @@ Bool SNSuperWildCard::WriteEmulation(Uint8 bank, Uint16 addr, Uint8 uData,
 {
     if (m_uSystemMode == 2 && addr >= 0xE004 && addr <= 0xE007)
     {
-        m_uSystemMode = (Uint8)(addr - 0xE004);
+        Uint8 uNewMode = (Uint8)(addr - 0xE004);
+        if (uNewMode == 2 || uNewMode == 3)
+            CaptureDebugTransition(uNewMode); /* AURORA_FRONT_TRACE_V10_8_20260831 */
+        m_uSystemMode = uNewMode;
         return TRUE;
     }
 
@@ -1185,13 +1433,19 @@ Bool SNSuperWildCard::WriteEmulation(Uint8 bank, Uint16 addr, Uint8 uData,
               (bank >= 0xC0 && bank <= maxHiBank)))
             return FALSE;
 
-        m_pDRAM[DramOffsetMode2(bank, addr)] = uData;
+        /* AURORA_FRONT_GAMEBUS_V10_7_20260831
+         * Cartridge-emulation DRAM is ROM on the SNES bus.
+         * Ignore writes instead of corrupting the loaded game image. */
+        (void)uData;
         return TRUE;
     }
 
     if (addr >= 0x8000)
     {
-        m_pDRAM[DramOffsetMode2(bank, addr)] = uData;
+        /* AURORA_FRONT_GAMEBUS_V10_7_20260831
+         * Cartridge-emulation DRAM is ROM on the SNES bus.
+         * Ignore writes instead of corrupting the loaded game image. */
+        (void)uData;
         return TRUE;
     }
 
@@ -1243,9 +1497,12 @@ Bool SNSuperWildCard::ResolveDirectDram(Uint8 bank, Uint16 addr,
             !((bank <= 0x7D) || (bank >= 0x80)))
             return FALSE;
 
+        /* AURORA_FRONT_CART_PAGE_MAPPER_V10_11_20260831
+         * 1 Front bank = 4 x 8-KiB pages = 32 KiB. */
+        Uint32 page = ((Uint32)bank << 2) |
+                      (m_uSelectedDRAMPage & 3u);
         *ppMem = m_pDRAM +
-            ((m_uSelectedDRAMPage * 0x2000u) &
-             (m_nDRAMBytes - 1));
+            ((page * 0x2000u) & (m_nDRAMBytes - 1));
         return TRUE;
     }
 

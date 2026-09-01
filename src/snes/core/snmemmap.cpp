@@ -482,20 +482,33 @@ void SNCPU_TRAPFUNC SnesSystem::WriteSWC(SNCpuT *pCpu,
 void SnesSystem::RemapSuperWildCardMode0Dram(void)
 {
     SNCpuT *pCpu = &m_Cpu;
-    Uint8 *pDram = NULL;
     Uint32 uBank;
 
-    if (!m_bSuperWildCard ||
-        !m_SWC.ResolveDirectDram(0x00, 0x8000, &pDram))
+    /* AURORA_FRONT_MODE0_PAGEBUS_V10_9_20260831
+     * Each CPU bank contributes A16-A23 to the physical copier page
+     * address. Never resolve bank 00 once and clone that pointer across the
+     * whole bus. V10_8 intentionally keeps direct reads read-only so writes
+     * remain observable by the diagnostic trap. */
+    if (!m_bSuperWildCard)
         return;
 
     for (uBank = 0x00; uBank <= 0x7D; ++uBank)
-        SNCPUSetBank(pCpu, (uBank << 16) | 0x8000,
-                     0x2000, pDram, TRUE);
+    {
+        Uint8 *pDram = NULL;
+        if (m_SWC.ResolveDirectDram((Uint8)uBank, 0x8000, &pDram))
+            SNCPUSetBank(pCpu, (uBank << 16) | 0x8000,
+                         0x2000, pDram,
+                         m_SWC.IsDirectDramWritable());
+    }
 
     for (uBank = 0x80; uBank <= 0xFF; ++uBank)
-        SNCPUSetBank(pCpu, (uBank << 16) | 0x8000,
-                     0x2000, pDram, TRUE);
+    {
+        Uint8 *pDram = NULL;
+        if (m_SWC.ResolveDirectDram((Uint8)uBank, 0x8000, &pDram))
+            SNCPUSetBank(pCpu, (uBank << 16) | 0x8000,
+                         0x2000, pDram,
+                         m_SWC.IsDirectDramWritable());
+    }
 
     SNCPUMirror24BitBus(pCpu);
 }
@@ -534,7 +547,13 @@ void SnesSystem::MapSuperWildCard(void)
             }
             else if (m_SWC.ResolveDirectDram((Uint8)uBank, addr, &pDram))
             {
-                SNCPUSetBank(pCpu, bus, 0x2000, pDram, TRUE);
+                /* AURORA_FRONT_GAMEBUS_V10_7_20260831
+                 * System Mode 0: loader page is real RW DRAM.
+                 * System Modes 2/3: DRAM is cartridge ROM (R only).
+                 * Keep direct reads, but trap writes in emulation modes. */
+                SNCPUSetBank(
+                    pCpu, bus, 0x2000, pDram,
+                    m_SWC.IsDirectDramWritable());
             }
             else if (m_SWC.ResolveDirectCartridge(
                          (Uint8)uBank, addr, &pCart))

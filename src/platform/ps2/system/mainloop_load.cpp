@@ -1618,9 +1618,9 @@ static Bool _MainLoopSwcPathIsFirmware(const char *pPath)
     if (!pName)
         return FALSE;
 
-    if (!strcasecmp(pName, "swc.rom") ||
-        !strcasecmp(pName, "swc.sfc") ||
-        !strcasecmp(pName, "swc.smc"))
+    if (!strcasecmp(pName, "dsk.rom") ||
+        !strcasecmp(pName, "dsk.sfc") ||
+        !strcasecmp(pName, "dsk.smc"))
         return TRUE;
 
     return _MainLoopSwcIsFirmwareName(pName);
@@ -1754,12 +1754,12 @@ static Bool _MainLoopFindSwcFirmware(char *pOut, Int32 nOutBytes)
     {
         /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
          * Canonical direct-.img fallback first; aliases remain accepted. */
-        "SWC.SFC",
-        "SWC.SMC",
-        "SWC.ROM",
-        "swc.sfc",
-        "swc.smc",
-        "swc.rom",
+        "DSK.SFC",
+        "DSK.SMC",
+        "DSK.ROM",
+        "dsk.sfc",
+        "dsk.smc",
+        "dsk.rom",
         "Super Wild Card V2.8CC 06-08-94 BIOS [!].smc",
         "Super Wild Card V2.8CC 06-08-94 BIOS.smc",
         "Super Wild Card V2.8CC 06-28-94 BIOS [!].smc",
@@ -2200,9 +2200,21 @@ Bool MainLoopSwcCreateNextDisk(void)
         return FALSE;
     }
 
-    /* L2+Square creates only; L2+Triangle owns insertion/swap. */
+    /* AURORA_FRONT_GAMEBUS_V10_7_20260831
+     * L2+Square now behaves like inserting a freshly created real floppy:
+     * create the formatted image, then mount it immediately. */
+    if (!_pSnes->SwapSuperWildCardDisk(Path))
+    {
+        MainLoopStatusPrintf(
+            180, "Copier: created %s but insert failed: %s",
+            _MainLoopSwcBaseName(Path),
+            _pSnes->GetSuperWildCardError());
+        return FALSE;
+    }
+
+    MainLoopStateOnRomChanged();
     MainLoopStatusPrintf(
-        150, "SWC: created %s; L2+Triangle to insert",
+        150, "Copier: created and inserted %s",
         _MainLoopSwcBaseName(Path));
     return TRUE;
 }
@@ -2232,8 +2244,10 @@ static Bool _MainLoopSwcInsertDisk(const char *pPath)
     }
 
     MainLoopStateOnRomChanged();
+    /* AURORA_SWC_MEDIA_PROBE_V10_2_20260831: prove mount + host write mode on-screen. */
     MainLoopStatusPrintf(
-        120, "SWC floppy inserted: %s",
+        180, "SWC floppy mounted %s: %s",
+        _pSnes->IsSuperWildCardDiskWritable() ? "RW" : "READ-ONLY",
         _MainLoopSwcBaseName(pPath));
     return TRUE;
 }
@@ -2253,7 +2267,7 @@ static Bool _MainLoopExecuteSwcDisk(const char *pMappedPath,
     {
         MainLoopModalPrintf(
             60 * 5,
-            "SWC BIOS missing in SYSTEM. Use swc.rom, swc.sfc, swc.smc or a Super Wild Card BIOS filename.");
+            "SWC BIOS missing in SYSTEM. Use dsk.rom, dsk.sfc, dsk.smc or a Super Wild Card BIOS filename.");
         return FALSE;
     }
 
@@ -2289,6 +2303,11 @@ static Bool _MainLoopExecuteSwcDisk(const char *pMappedPath,
 
     ConPrint("Super Wild Card V4: BIOS=%s disk=%s\n",
              FirmwarePath, pMappedPath);
+    /* AURORA_SWC_MEDIA_PROBE_V10_2_20260831: cold-boot media confirmation. */
+    MainLoopStatusPrintf(
+        210, "SWC cold-boot floppy mounted %s: %s",
+        _pSnes->IsSuperWildCardDiskWritable() ? "RW" : "READ-ONLY",
+        _MainLoopSwcBaseName(pMappedPath));
     return TRUE;
 }
 
@@ -2517,7 +2536,7 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
             MainLoopModalPrintf(60*4,"Copier: unsupported or invalid raw floppy image");
             return FALSE;
         }
-        /* Bare IMG deliberately retains SWC.SFC fallback from V5. */
+        /* Bare IMG deliberately retains DSK.SFC fallback from V5. */
         if (!(_pSnes && _pSnes->IsSuperWildCard()))
         {
             Char FirmwarePath[1024];

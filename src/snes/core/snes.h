@@ -66,11 +66,19 @@ public:
     const Char *GetFrontCopierName() const { return m_SWC.GetModelName(); }
     const Char *GetSuperWildCardDiskPath() const { return m_SWC.GetDiskPath(); }
     const Char *GetSuperWildCardError() const { return m_SWC.GetLastError(); }
+    /* AURORA_FRONT_TRACE_V10_8_20260831 */
+    Bool ConsumeFrontCopierDebugTransition(
+        SNSuperWildCard::DebugTransitionT *pOut)
+    {
+        return m_bSuperWildCard ? m_SWC.ConsumeDebugTransition(pOut) : FALSE;
+    }
     /* AURORA_SWC_FLOPPY_V5_20260831 */
     Bool    InsertSuperWildCardCartridge(SnesRom *pRom);
     void    EjectSuperWildCardCartridge();
     Bool    HasSuperWildCardCartridge() const { return m_SWC.HasExternalCartridge(); }
     Bool    HasSuperWildCardDisk() const { return m_SWC.HasDisk(); }
+    /* AURORA_SWC_MEDIA_PROBE_V10_2_20260831 */
+    Bool    IsSuperWildCardDiskWritable() const { return m_SWC.IsDiskWritable(); }
     void	Reset();
 	void	SoftReset();
 	void	ExecuteFrame(Emu::SysInputT *pInput, class CRenderSurface *pTarget, class CMixBuffer *pSound, ModeE eMode);
