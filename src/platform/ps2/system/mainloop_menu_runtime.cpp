@@ -136,6 +136,32 @@ void MainLoopAudioHardCut(void)
     }
 }
 
+/* AURORA_AUDIO_UI_SOFT_TRANSITION_V1_20260901
+ * UI entry must not stop audsrv. Reset only EE-side producer state, discard
+ * staged gameplay PCM and mute while the already-playing IOP ring drains. */
+void MainLoopAudioUiMute(void)
+{
+    if (_AudMix)
+        _AudMix->Reset();
+
+    if (_MainLoop_bAudioReady)
+    {
+        Aud_AsyncDiscardPending();
+        Aud_Setvol(0);
+    }
+}
+
+void MainLoopAudioUiResume(void)
+{
+    if (_MainLoop_bAudioReady)
+    {
+        /* Normally already playing. If an unrelated path stopped audsrv,
+           wake it while still muted, then restore full scale. */
+        Aud_Play();
+        Aud_Setvol(0x3FFF);
+    }
+}
+
 void MainLoopAudioResumeGame(void)
 {
     /* Clear once more before waking audsrv. This is intentional: closing a
@@ -158,7 +184,7 @@ void _MenuEnable(Bool bEnable)
 			/* Publish the menu state before any storage RPC. MainLoopProcess
 			   will render two frames, then run the pending save below. */
 			_bMenu = TRUE;
-			MainLoopAudioHardCut();
+			MainLoopAudioUiMute();
 			BgmMenuEnter();
 
 			/* Preserve a write performed in the <30-frame checksum window. */

@@ -21,6 +21,8 @@ void _MainLoopStateDevicePromptCancel();
 void _MainLoopStateConfirmPromptOpen(Bool bSave);
 void _MainLoopStateConfirmPromptCancel();
 void _MainLoopStateConfirmPromptInput(Uint32 buttons, Uint32 trigger);
+/* AURORA_AUDIO_UI_SOFT_TRANSITION_V2_20260901 */
+Bool _MainLoopStateConfirmPromptConsumeExecuted();
 void _MainLoopMemCardFormatPromptOpen(
 	Int32 iPort,
 	MainLoopMemCardFormatActionE eAction
@@ -32,9 +34,14 @@ extern char *_MainLoopStateMenuEntries[];
 void _MainLoopStateBrowserReturn(void);
 extern char *_MainLoop_pInstallFiles[];
 
-/* Hard audio transition helpers: clear EE mixer + audsrv/IOP queue. */
+/* AURORA_AUDIO_UI_SOFT_TRANSITION_V1_20260901
+ * Audio transition helpers. HardCut/ResumeGame destroy the audsrv queue and
+ * are reserved for real timeline discontinuities. UiMute/UiResume keep the
+ * IOP/SPU2 service running for menu/prompt transitions. */
 void MainLoopAudioHardCut(void);
 void MainLoopAudioResumeGame(void);
+void MainLoopAudioUiMute(void);
+void MainLoopAudioUiResume(void);
 
 /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */
 Bool MainLoopSramSaveBusy(void);

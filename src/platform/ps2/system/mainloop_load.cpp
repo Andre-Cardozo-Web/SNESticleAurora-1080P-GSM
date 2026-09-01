@@ -1823,6 +1823,102 @@ static Bool _MainLoopSwcFirmwareFileLooksValid(const char *pPath)
     }
 }
 
+/* AURORA_COPIER_DSK_PRIORITY_AUTO_DISK1_V10_17_20260901
+ * DSK.* is the canonical user override for raw-.img autoboot. It wins over
+ * every named BIOS. Determine classic model from payload, not filename.
+ */
+static Bool _MainLoopDskMagicomPayloadLooksValid(const char *pPath)
+{
+    FILE *fp;
+    long nBytes, nBase;
+    Uint8 v[2];
+
+    if (!pPath || !*pPath)
+        return FALSE;
+
+    fp = fopen(pPath, "rb");
+    if (!fp)
+        return FALSE;
+    if (fseek(fp, 0, SEEK_END) != 0)
+    {
+        fclose(fp);
+        return FALSE;
+    }
+
+    nBytes = ftell(fp);
+    if (nBytes == 0x2000L) nBase = 0;
+    else if (nBytes == 0x2200L) nBase = 0x200L;
+    else if (nBytes == 0x8000L) nBase = 0x6000L;
+    else
+    {
+        fclose(fp);
+        return FALSE;
+    }
+
+    if (fseek(fp, nBase + 0x1FFCL, SEEK_SET) != 0 ||
+        fread(v, 1, 2, fp) != 2)
+    {
+        fclose(fp);
+        return FALSE;
+    }
+    fclose(fp);
+
+    {
+        Uint16 rv = (Uint16)v[0] | ((Uint16)v[1] << 8);
+        return (rv >= 0xE000 && rv != 0xFFFF) ? TRUE : FALSE;
+    }
+}
+
+static Bool _MainLoopFindPriorityDskFirmware(
+    char *pOut, Int32 nOutBytes, Bool *pMagicom)
+{
+    static const char *kDskNames[] =
+    {
+        "DSK.SFC", "DSK.SMC", "DSK.ROM",
+        "dsk.sfc", "dsk.smc", "dsk.rom"
+    };
+    Char Directory[512];
+
+    if (!pOut || nOutBytes <= 0 || !pMagicom)
+        return FALSE;
+
+    pOut[0] = 0;
+    *pMagicom = FALSE;
+
+    for (Uint32 i = 0;
+         i < sizeof(kDskNames) / sizeof(kDskNames[0]); ++i)
+    {
+        if (!MainLoopFindSystemFileDirectory(
+                Directory, (Int32)sizeof(Directory), kDskNames[i]))
+            continue;
+
+        int n = snprintf(
+            pOut, (size_t)nOutBytes,
+            "%s/%s", Directory, kDskNames[i]);
+        if (n < 0 || n >= nOutBytes)
+        {
+            pOut[0] = 0;
+            continue;
+        }
+
+        if (_MainLoopSwcFirmwareFileLooksValid(pOut))
+        {
+            *pMagicom = FALSE;
+            return TRUE;
+        }
+
+        if (_MainLoopDskMagicomPayloadLooksValid(pOut))
+        {
+            *pMagicom = TRUE;
+            return TRUE;
+        }
+
+        pOut[0] = 0;
+    }
+
+    return FALSE;
+}
+
 static Bool _MainLoopSwcDiskFileLooksValid(const char *pPath)
 {
     struct stat st;
@@ -1967,6 +2063,11 @@ static Bool _MainLoopExecuteMagicomFirmware(
 }
 
 
+/* AURORA_COPIER_DSK_PRIORITY_AUTO_DISK1_V10_17_20260901 */
+static Bool _MainLoopSwcBuildCartDiskPath(
+    char *pOut, Int32 nOutBytes, unsigned nDisk);
+static Bool _MainLoopSwcCreateFat12Image(const char *pPath);
+
 static Bool _MainLoopSwcInsertCartridge(const char *pPath)
 {
     CFileIO romfile;
@@ -2020,10 +2121,44 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
         "%s", pPath);
     MainLoopStateOnRomChanged();
 
-    /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
-     * Cartridge insertion keeps the hardware reset performed by
-     * SnesSystem::InsertSuperWildCardCartridge(), but never auto-creates
-     * floppy media. */
+    /* AURORA_COPIER_DSK_PRIORITY_AUTO_DISK1_V10_17_20260901
+     * If this cartridge has no _1 image yet, create the same 1.60-MiB FAT12
+     * media used by L2+Square and hot-insert it immediately. Existing _1
+     * media is never overwritten or auto-inserted.
+     */
+    {
+        Char AutoDiskPath[1024];
+        struct stat AutoDiskStat;
+
+        if (_MainLoopSwcBuildCartDiskPath(
+                AutoDiskPath, sizeof(AutoDiskPath), 1) &&
+            stat(AutoDiskPath, &AutoDiskStat) != 0)
+        {
+            if (!_MainLoopSwcCreateFat12Image(AutoDiskPath))
+            {
+                MainLoopStatusPrintf(
+                    210,
+                    "Copier: cartridge inserted; could not create _1 disk");
+                return TRUE;
+            }
+
+            if (!_pSnes->SwapSuperWildCardDisk(AutoDiskPath))
+            {
+                remove(AutoDiskPath);
+                MainLoopStatusPrintf(
+                    210,
+                    "Copier: cartridge inserted; _1 disk insert failed");
+                return TRUE;
+            }
+
+            MainLoopStateOnRomChanged();
+            MainLoopStatusPrintf(
+                180, "Copier: cartridge + %s inserted",
+                _MainLoopSwcBaseName(AutoDiskPath));
+            return TRUE;
+        }
+    }
+
     MainLoopStatusPrintf(
         180, "SWC cartridge inserted: %s",
         _MainLoopSwcBaseName(pPath));
@@ -2133,7 +2268,18 @@ static Bool _MainLoopSwcFindFirstExistingCartDisk(
         p = pDigits;
         while (*p >= '0' && *p <= '9')
         {
-            value = value * 10u + (unsigned)(*p - '0');
+            unsigned digit = (unsigned)(*p - '0');
+
+            /* AURORA_SWC_SWAP_INDEX_BOUNDS_V4_4_20260901
+             * Reject malformed decimal suffixes before unsigned arithmetic
+             * can wrap; valid manually supplied indices remain supported. */
+            if (value > ((~0u) - digit) / 10u)
+            {
+                value = 0;
+                break;
+            }
+
+            value = value * 10u + digit;
             ++p;
         }
 
@@ -2164,10 +2310,11 @@ static Bool _MainLoopSwcFindFirstExistingCartDisk(
 }
 
 
-/* 1.44 MiB FAT12, already formatted for DOS-compatible copier firmware. */
+/* AURORA_SWC_DEFAULT_FLOPPY_1440_V4_1_20260901
+ * Standard 1.44 MiB FAT12: 2880 sectors, 18 sectors/track, 9 sectors/FAT. */
 static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
 {
-    enum { SectorBytes = 512, TotalSectors = 3200 };
+    enum { SectorBytes = 512, TotalSectors = 2880 };
     enum { ZeroChunkBytes = 128 * 1024 };
     Uint8 Sector[SectorBytes];
     Uint8 *pZero;
@@ -2215,10 +2362,10 @@ static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
     Sector[14] = 0x01; Sector[15] = 0x00;
     Sector[16] = 0x02;
     Sector[17] = 0xE0; Sector[18] = 0x00;
-    Sector[19] = 0x80; Sector[20] = 0x0C;
+    Sector[19] = 0x40; Sector[20] = 0x0B;
     Sector[21] = 0xF0;
-    Sector[22] = 0x0A; Sector[23] = 0x00;
-    Sector[24] = 0x14; Sector[25] = 0x00;
+    Sector[22] = 0x09; Sector[23] = 0x00;
+    Sector[24] = 0x12; Sector[25] = 0x00;
     Sector[26] = 0x02; Sector[27] = 0x00;
     Sector[38] = 0x29;
     Sector[39] = 0x41; Sector[40] = 0x55;
@@ -2243,7 +2390,7 @@ static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
 
     if (fseek(fp, SectorBytes * 1L, SEEK_SET) != 0 ||
         fwrite(Sector, 1, sizeof(Sector), fp) != sizeof(Sector) ||
-        fseek(fp, SectorBytes * 11L, SEEK_SET) != 0 ||
+        fseek(fp, SectorBytes * 10L, SEEK_SET) != 0 ||
         fwrite(Sector, 1, sizeof(Sector), fp) != sizeof(Sector))
     {
         fclose(fp);
@@ -2354,12 +2501,52 @@ static Bool _MainLoopExecuteSwcDisk(const char *pMappedPath,
         return FALSE;
 
     Bool bMagicom = FALSE;
-    if (!_MainLoopFindSwcFirmware(FirmwarePath, sizeof(FirmwarePath)))
+
+    /* AURORA_COPIER_DSK_PRIORITY_AUTO_DISK1_V10_17_20260901
+     * Canonical DSK.* always wins over every named copier BIOS. */
+    if (!_MainLoopFindPriorityDskFirmware(
+            FirmwarePath, sizeof(FirmwarePath), &bMagicom))
     {
-        Char Directory[512]; DIR *d = NULL; struct dirent *e;
-        if (MainLoopEnsureSystemDirectory(Directory, sizeof(Directory))) d = opendir(Directory);
-        if (d) { while ((e = readdir(d)) != NULL) { if (_MainLoopMagicomPathIsFirmware(e->d_name)) { int n=snprintf(FirmwarePath,sizeof(FirmwarePath),"%s/%s",Directory,e->d_name); if (n>0 && n<(int)sizeof(FirmwarePath) && _MainLoopMagicomFirmwareFileLooksValid(FirmwarePath)) { bMagicom=TRUE; break; } } } closedir(d); }
-        if (!bMagicom) { MainLoopModalPrintf(60*5,"Classic copier BIOS missing in SYSTEM"); return FALSE; }
+        if (!_MainLoopFindSwcFirmware(FirmwarePath, sizeof(FirmwarePath)))
+        {
+            Char Directory[512];
+            DIR *d = NULL;
+            struct dirent *e;
+
+            if (MainLoopEnsureSystemDirectory(
+                    Directory, sizeof(Directory)))
+                d = opendir(Directory);
+
+            if (d)
+            {
+                while ((e = readdir(d)) != NULL)
+                {
+                    if (_MainLoopMagicomPathIsFirmware(e->d_name))
+                    {
+                        int n = snprintf(
+                            FirmwarePath, sizeof(FirmwarePath),
+                            "%s/%s", Directory, e->d_name);
+                        if (n > 0 &&
+                            n < (int)sizeof(FirmwarePath) &&
+                            _MainLoopMagicomFirmwareFileLooksValid(
+                                FirmwarePath))
+                        {
+                            bMagicom = TRUE;
+                            break;
+                        }
+                    }
+                }
+                closedir(d);
+            }
+
+            if (!bMagicom)
+            {
+                MainLoopModalPrintf(
+                    60 * 5,
+                    "Classic copier BIOS missing in SYSTEM");
+                return FALSE;
+            }
+        }
     }
 
     if (!MainLoopEnsureGameplayRasterWidth(256))
@@ -2402,6 +2589,54 @@ static Bool _MainLoopExecuteSwcDisk(const char *pMappedPath,
     return TRUE;
 }
 
+/* AURORA_SWC_SWAP_REPORT_REAL_INDEX_V4_2_20260901
+ * AURORA_SWC_SWAP_REPORT_STRICT_INDEX_V4_3_20260901
+ * AURORA_SWC_SWAP_INDEX_BOUNDS_V4_4_20260901
+ * Parse basename_<n>.img without unsigned wrap.  Reporting follows the
+ * actual mounted suffix even for manually supplied indices above 9999. */
+static Bool _MainLoopSwcNumberedDiskIndex(
+    const char *pPath, unsigned *pIndex)
+{
+    const Char *pName;
+    const Char *pExt;
+    const Char *pDigits;
+    const Char *p;
+    unsigned value = 0;
+
+    if (!pPath || !*pPath || !pIndex)
+        return FALSE;
+
+    pName = _MainLoopSwcBaseName(pPath);
+    if (!pName || !*pName)
+        return FALSE;
+
+    pExt = strrchr(pName, '.');
+    if (!pExt || strcasecmp(pExt, ".img") != 0)
+        return FALSE;
+
+    pDigits = pExt;
+    while (pDigits > pName &&
+           pDigits[-1] >= '0' && pDigits[-1] <= '9')
+        --pDigits;
+
+    if (pDigits == pExt || pDigits <= pName || pDigits[-1] != '_')
+        return FALSE;
+
+    for (p = pDigits; p < pExt; ++p)
+    {
+        unsigned digit = (unsigned)(*p - '0');
+        if (value > ((~0u) - digit) / 10u)
+            return FALSE;
+        value = value * 10u + digit;
+    }
+
+    if (value == 0)
+        return FALSE;
+
+    *pIndex = value;
+    return TRUE;
+}
+
 Bool MainLoopSwcSwapNextDisk(void)
 {
     const Char *pCurrent;
@@ -2438,7 +2673,16 @@ Bool MainLoopSwcSwapNextDisk(void)
             return FALSE;
 
         MainLoopStateOnRomChanged();
-        MainLoopStatusPrintf(90, "SWC: disk 1 inserted");
+
+        {
+            unsigned shown;
+            if (_MainLoopSwcNumberedDiskIndex(FirstPath, &shown))
+                MainLoopStatusPrintf(90, "SWC: disk %u inserted", shown);
+            else
+                MainLoopStatusPrintf(
+                    90, "SWC: floppy inserted: %s",
+                    _MainLoopSwcBaseName(FirstPath));
+        }
         return TRUE;
     }
 
@@ -2463,13 +2707,14 @@ Bool MainLoopSwcSwapNextDisk(void)
     pDigits = pUnderscore;
     while (pDigits < pExt && *pDigits >= '0' && *pDigits <= '9')
     {
-        nDisk = nDisk * 10u + (unsigned)(*pDigits - '0');
         ++nDigits;
         ++pDigits;
     }
-    if (pDigits != pExt || nDigits == 0)
+    if (pDigits != pExt || nDigits == 0 ||
+        !_MainLoopSwcNumberedDiskIndex(pCurrent, &nDisk))
     {
-        MainLoopStatusPrintf(150, "SWC: disk name must end in _1.img, _2.img, ...");
+        MainLoopStatusPrintf(
+            150, "SWC: disk name must end in _1.img, _2.img, ...");
         return FALSE;
     }
 
@@ -2481,12 +2726,26 @@ Bool MainLoopSwcSwapNextDisk(void)
         Prefix[nPrefix] = 0;
     }
 
-    if (snprintf(NextPath, sizeof(NextPath), "%s_%0*u%s",
-                 Prefix, (int)nDigits, nDisk + 1u, pExt) >= (int)sizeof(NextPath))
-        return FALSE;
-
-    if (stat(NextPath, &Status) != 0 || S_ISDIR(Status.st_mode))
     {
+        Bool bHaveNext = FALSE;
+
+        /* AURORA_SWC_SWAP_INDEX_BOUNDS_V4_4_20260901
+         * Preserve legacy next-disk behavior for every representable index.
+         * Only UINT_MAX-equivalent (~0u) skips +1, preventing wrap to _0. */
+        if (nDisk != ~0u)
+        {
+            if (snprintf(NextPath, sizeof(NextPath), "%s_%0*u%s",
+                         Prefix, (int)nDigits, nDisk + 1u, pExt) >=
+                (int)sizeof(NextPath))
+                return FALSE;
+
+            if (stat(NextPath, &Status) == 0 &&
+                !S_ISDIR(Status.st_mode))
+                bHaveNext = TRUE;
+        }
+
+        if (!bHaveNext)
+        {
         unsigned nFirst;
         Bool bFoundFirst = FALSE;
 
@@ -2508,10 +2767,12 @@ Bool MainLoopSwcSwapNextDisk(void)
             }
         }
 
-        if (!bFoundFirst)
-        {
-            MainLoopStatusPrintf(120, "Copier: no numbered floppy image found");
-            return FALSE;
+            if (!bFoundFirst)
+            {
+                MainLoopStatusPrintf(
+                    120, "Copier: no numbered floppy image found");
+                return FALSE;
+            }
         }
     }
 
@@ -2525,16 +2786,13 @@ Bool MainLoopSwcSwapNextDisk(void)
     MainLoopStateOnRomChanged(); /* AURORA_SWC_MEGA_V9_20260831 */
 
     {
-        const Char *pNewExt = strrchr(NextPath, '.');
-        const Char *p = pNewExt ? pNewExt : NextPath + strlen(NextPath);
-        unsigned shown = 0, mul = 1;
-        while (p > NextPath && p[-1] >= '0' && p[-1] <= '9')
-        {
-            shown += (unsigned)(p[-1] - '0') * mul;
-            mul *= 10;
-            --p;
-        }
-        MainLoopStatusPrintf(90, "SWC: disk %u inserted", shown);
+        unsigned shown;
+        if (_MainLoopSwcNumberedDiskIndex(NextPath, &shown))
+            MainLoopStatusPrintf(90, "SWC: disk %u inserted", shown);
+        else
+            MainLoopStatusPrintf(
+                90, "SWC: floppy inserted: %s",
+                _MainLoopSwcBaseName(NextPath));
     }
     return TRUE;
 }

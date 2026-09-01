@@ -457,7 +457,13 @@ void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 		_MainLoopStateDevicePromptOpen();
 		return;
 	}
-	MainLoopAudioHardCut();
+	/* AURORA_AUDIO_UI_SOFT_TRANSITION_V1_20260901
+	 * Saving is not a timeline discontinuity: keep audsrv alive and muted.
+	 * Loading replaces emulated time, so retain the hard queue cut. */
+	if (bSave)
+		MainLoopAudioUiMute();
+	else
+		MainLoopAudioHardCut();
 
 	MainLoopModalPrintf(
 		1,
@@ -471,7 +477,7 @@ void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 	{
 		Int32 iPort = MainLoopStateGetUnformattedCard();
 
-		MainLoopAudioResumeGame();
+		MainLoopAudioUiResume();
 		_MainLoopMemCardFormatPromptOpen(
 			iPort,
 			MAINLOOP_MEMCARDFORMAT_STATE_SAVE
@@ -479,7 +485,10 @@ void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 		return;
 	}
 
-	MainLoopAudioResumeGame();
+	if (bSave)
+		MainLoopAudioUiResume();
+	else
+		MainLoopAudioResumeGame();
 
 	MainLoopStatusPrintf(
 		bOK ? 90 : 180,
@@ -488,30 +497,14 @@ void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 	);
 }
 
-/* AURORA_STATE_PROMPT_AUDIO_GUARD_V3
- * Final semantics: a prompt is a real audio discontinuity, not a mute. */
-static Bool s_StatePromptAudioMuted = FALSE;
-static void _MainLoopStatePromptMuteAudio(void)
-{
-    if (!s_StatePromptAudioMuted)
-    {
-        MainLoopAudioHardCut();
-        s_StatePromptAudioMuted = TRUE;
-    }
-}
-static void _MainLoopStatePromptRestoreAudio(void)
-{
-    if (s_StatePromptAudioMuted)
-        MainLoopAudioResumeGame();
-    s_StatePromptAudioMuted = FALSE;
-}
-
+/* AURORA_AUDIO_UI_SOFT_TRANSITION_V1_20260901
+ * The confirmation screen is UI, not an emulated-time discontinuity. */
 static void _MainLoopQuickStateAction(Bool bSave)
 {
-	_MainLoopStatePromptMuteAudio();
+	MainLoopAudioUiMute();
 	_MainLoopStateConfirmPromptOpen(bSave);
 	if (_MainLoop_pScreen != (CScreen *)_MainLoop_pStateConfirmScreen)
-		_MainLoopStatePromptRestoreAudio();
+		MainLoopAudioUiResume();
 }
 
 void _MainLoopInputProcess(Uint32 buttons)
@@ -673,7 +666,13 @@ void _MainLoopInputProcess(Uint32 buttons)
 	{
 		_MainLoopStateConfirmPromptInput(buttons, trigger);
 		if (_MainLoop_pScreen != (CScreen *)_MainLoop_pStateConfirmScreen)
-			_MainLoopStatePromptRestoreAudio();
+		{
+			/* AURORA_AUDIO_UI_SOFT_TRANSITION_V2_20260901
+			 * YES already completed save/load + its correct resume. Only a
+			 * plain close/cancel needs the prompt-level soft resume here. */
+			if (!_MainLoopStateConfirmPromptConsumeExecuted())
+				MainLoopAudioUiResume();
+		}
 		return;
 	}
 

@@ -77,7 +77,6 @@ User interface:
 Just for fun:
 
 * Famiclone audio option for NES games (swap duty cycles, a known hardware bug in some Famiclones you can intentionally turn on)
-* Select SRAM size (to intentionally trigger anti-piracy screens and measures) for SNES games
 
 
 

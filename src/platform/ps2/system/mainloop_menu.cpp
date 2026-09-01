@@ -423,6 +423,10 @@ static char *_MainLoop_StateConfirmEntries[] =
 };
 static Bool _MainLoop_StateConfirmSave = FALSE;
 static Bool _MainLoop_StateConfirmArmed = FALSE;
+/* AURORA_AUDIO_UI_SOFT_TRANSITION_V2_20260901
+ * UI-only one-shot: tells the caller that YES already performed the complete
+ * save/load audio transition, so it must not issue an extra UiResume(). */
+static Bool _MainLoop_StateConfirmExecuted = FALSE;
 static CScreen *_MainLoop_StateConfirmPreviousScreen = NULL;
 
 static void _MainLoopStateConfirmPromptClose()
@@ -435,7 +439,11 @@ static void _MainLoopStateConfirmPromptClose()
         _MainLoopSetScreen(pReturn);
         _MainLoop_StateConfirmPreviousScreen = NULL;
         _MainLoop_StateConfirmArmed = FALSE;
-        _MenuEnable(FALSE);
+        /* AURORA_AUDIO_UI_SOFT_TRANSITION_V1_20260901
+         * Isolated quick-state prompt: it never scheduled normal menu SRAM
+         * work or entered menu BGM, so do not route its close through
+         * _MenuEnable(FALSE), which performs a destructive audsrv hard-cut. */
+        _bMenu = FALSE;
 }
 
 void _MainLoopStateConfirmPromptOpen(Bool bSave)
@@ -443,11 +451,11 @@ void _MainLoopStateConfirmPromptOpen(Bool bSave)
         if (!_MainLoop_pStateConfirmScreen || _bMenu || !_pSystem)
                 return;
 
-        /* AURORA_STATE_PROMPT_HARDCUT_OPEN_V1 */
-        MainLoopAudioHardCut();
-
+        /* AURORA_AUDIO_UI_SOFT_TRANSITION_V1_20260901
+         * Audio was already soft-muted by the quick-state input path. */
         _MainLoop_StateConfirmSave = bSave;
         _MainLoop_StateConfirmArmed = FALSE;
+        _MainLoop_StateConfirmExecuted = FALSE;
         _MainLoop_StateConfirmPreviousScreen = _MainLoop_pScreen;
         _MainLoop_pStateConfirmScreen->SetEntries(_MainLoop_StateConfirmEntries);
         _MainLoop_pStateConfirmScreen->SetSelection(0);
@@ -467,6 +475,14 @@ void _MainLoopStateConfirmPromptCancel()
 {
         if (_MainLoop_pScreen == (CScreen *)_MainLoop_pStateConfirmScreen)
                 _MainLoopStateConfirmPromptClose();
+}
+
+/* AURORA_AUDIO_UI_SOFT_TRANSITION_V2_20260901 */
+Bool _MainLoopStateConfirmPromptConsumeExecuted()
+{
+        const Bool executed = _MainLoop_StateConfirmExecuted;
+        _MainLoop_StateConfirmExecuted = FALSE;
+        return executed;
 }
 
 void _MainLoopStateConfirmPromptInput(Uint32 buttons, Uint32 trigger)
@@ -510,6 +526,7 @@ int _MainLoopStateConfirmMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
 
         _MainLoopStateConfirmPromptClose();
         _MainLoopQuickStateExecuteConfirmed(bSave);
+        _MainLoop_StateConfirmExecuted = TRUE;
         return 0;
 }
 

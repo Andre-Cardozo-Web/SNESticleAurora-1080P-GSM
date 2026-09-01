@@ -959,12 +959,14 @@ void BgmMenuEnter(void)
        never scan a drive or reload a module before the first frame appears. */
     _BgmLock();
     s_menuActive = TRUE;
-    /* AURORA_BGM_MENU_REARM_V1: _MenuEnable may have hard-cleared audsrv. */
+    /* AURORA_AUDIO_UI_SOFT_TRANSITION_V1_20260901
+     * UI entry now leaves audsrv running and muted so the gameplay tail can
+     * drain naturally. Never unmute here: _BgmUpdateLocked() already owns the
+     * drain threshold/timeout and raises volume only when it is safe to feed
+     * menu PCM. Aud_Play() remains as a fail-soft wake if another path had
+     * stopped audsrv before menu entry. */
     if (s_enabled && s_volume > 0 && Aud_IsInitialized())
-    {
-        Aud_Setvol(0x3FFFu);
         Aud_Play();
-    }
     _BgmUnlock();
 }
 

@@ -1582,15 +1582,10 @@ Bool SNSuperWildCard::ResolveDirectDram(Uint8 bank, Uint16 addr,
     if (m_uSystemMode != 2 && m_uSystemMode != 3)
         return FALSE;
 
-    /* AURORA_FRONT_MEMORY_MODE_REG_MIRROR_V10_13_20260831
-     * Mode 2 keeps E004-E007 alive in banks 00-7D/80-FF. The CPU mapper
-     * installs 8-KiB direct chunks, so E000-FFFF must stay trapped in those
-     * banks; reads still resolve normally, while register writes reach the
-     * Front decoder. Mode 3 keeps copier I/O disabled. */
-    if (m_uSystemMode == 2 && addr == 0xE000 &&
-        (bank <= 0x7D || bank >= 0x80))
-        return FALSE;
-
+    /* AURORA_CLASSIC_MEMORY_MODE_DIRECT_READ_V4_20260901
+     * E004-E007 are write-only mode-select registers. SNCPUSetBank(...,
+     * FALSE) keeps the direct read pointer while bRAM=0 sends every write
+     * through the existing WriteSWC trap. */
     if (m_bCartridgeMap &&
         ((bank >= 0x20 && bank <= 0x5F) ||
          (bank >= 0xA0 && bank <= 0xDF)))
@@ -1647,14 +1642,9 @@ Bool SNSuperWildCard::ResolveDirectCartridge(
     if (!allowed)
         return FALSE;
 
-    /* AURORA_FRONT_MEMORY_MODE_REG_MIRROR_V10_13_20260831
-     * In Mode 2, E004-E007 take precedence over the optional external CART
-     * window. Keep this 8-KiB chunk trapped so writes cannot be swallowed by
-     * the direct cartridge fastpath. */
-    if (m_uSystemMode == 2 && addr == 0xE000 &&
-        (bank <= 0x7D || bank >= 0x80))
-        return FALSE;
-
+    /* AURORA_CLASSIC_MEMORY_MODE_DIRECT_READ_V4_20260901
+     * External CART follows the same split read/write descriptor rule:
+     * direct reads stay enabled; E004-E007 writes remain trapped. */
     if (m_iCartMapping == 0)
     {
         /* AURORA_V7_FRONT_COPIER_MEDIA_CART_RESET_20260831: same Mode-21 LoROM mirror in the direct 8-KiB fastpath. */

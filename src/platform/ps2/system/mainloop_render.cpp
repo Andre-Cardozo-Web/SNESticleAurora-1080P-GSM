@@ -780,7 +780,12 @@ void MainLoopRender()
 		static Bool s_bgmArmed = FALSE;
 		if ((void *)_MainLoop_pScreen == (void *)_MainLoop_pBrowserScreen)
 			s_bgmArmed = TRUE;
-		if (s_bgmArmed)
+		/* AURORA_AUDIO_UI_SOFT_TRANSITION_V1_20260901
+		 * Quick-state confirmation stays silent. It is an isolated prompt,
+		 * not the pause-menu music session, and its soft audio mute must be
+		 * allowed to drain the gameplay tail without being undone here. */
+		if (s_bgmArmed &&
+		    _MainLoop_pScreen != (CScreen *)_MainLoop_pStateConfirmScreen)
 			BgmUpdate();
 		/* Draw the live menu first, then place modal/status text on top. The
 		   previous order painted _MenuDraw after the status and hid it. */
