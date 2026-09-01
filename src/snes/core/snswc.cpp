@@ -79,6 +79,22 @@ Bool SNSuperWildCard::DetectGeometry(long nBytes)
     return FALSE;
 }
 
+/* AURORA_CLASSIC_MEMORY_MODE_V10_15B_20260831
+ * Cumulative: accurate Mode-2 register mirror + classic firmware revisions.
+ */
+
+/* AURORA_CLASSIC_COPIER_FIRMWARE_V10_15B_20260831
+ * Normalize only the classic Front-family firmware layouts. DX/DX2 are
+ * different hardware and are intentionally not folded into this model. */
+static Bool _AuroraClassicSwcVectorOK(const Uint8 *p, Uint32 nBytes)
+{
+    Uint16 rv;
+    if (!p || nBytes < 0x2000u)
+        return FALSE;
+    rv = (Uint16)p[0x1FFCu] | ((Uint16)p[0x1FFDu] << 8);
+    return (rv >= 0xE000u && rv != 0xFFFFu) ? TRUE : FALSE;
+}
+
 Bool SNSuperWildCard::LoadFirmware(const Char *pPath)
 {
     FILE *pFile;
@@ -110,10 +126,62 @@ Bool SNSuperWildCard::LoadFirmware(const Char *pPath)
     else
     {
         want=SWC_FIRMWARE_BYTES;
-        if (nBytes==(long)SWC_FIRMWARE_BYTES+512L) sourceOffset=512L;
-        else if (nBytes!=(long)SWC_FIRMWARE_BYTES)
+        if (nBytes==(long)SWC_FIRMWARE_BYTES+512L)
+            sourceOffset=512L;
+        else if (nBytes==(long)SWC_FIRMWARE_BYTES)
+            sourceOffset=0;
+        else if (nBytes==65536L)
         {
-            fclose(pFile); SetError("Requires classic 16 KiB Super Wild Card BIOS"); return FALSE;
+            /* AURORA_CLASSIC_COPIER_FIRMWARE_V10_15B_20260831
+             * Some V2.8CC dumps are 64-KiB EPROM images although the classic
+             * machine exposes a 16-KiB BIOS. Accept only an unambiguous
+             * classic 16-KiB payload: exactly one valid quarter, or multiple
+             * valid quarters that are byte-identical. */
+            Uint8 firstBlock[SWC_FIRMWARE_BYTES];
+            Uint8 block[SWC_FIRMWARE_BYTES];
+            Int32 first = -1;
+            Int32 nValid = 0;
+            Bool identical = TRUE;
+
+            for (Int32 q = 0; q < 4; ++q)
+            {
+                long off = (long)q * (long)SWC_FIRMWARE_BYTES;
+                if (fseek(pFile, off, SEEK_SET) != 0 ||
+                    fread(block, 1, SWC_FIRMWARE_BYTES, pFile) != SWC_FIRMWARE_BYTES)
+                {
+                    fclose(pFile);
+                    SetError("cannot inspect classic SWC 64 KiB overdump");
+                    return FALSE;
+                }
+
+                if (_AuroraClassicSwcVectorOK(block, SWC_FIRMWARE_BYTES))
+                {
+                    if (first < 0)
+                    {
+                        first = q;
+                        memcpy(firstBlock, block, SWC_FIRMWARE_BYTES);
+                    }
+                    else if (memcmp(firstBlock, block, SWC_FIRMWARE_BYTES) != 0)
+                    {
+                        identical = FALSE;
+                    }
+                    ++nValid;
+                }
+            }
+
+            if (nValid == 0 || (nValid > 1 && !identical))
+            {
+                fclose(pFile);
+                SetError("64 KiB image is not an unambiguous classic SWC BIOS");
+                return FALSE;
+            }
+            sourceOffset = (long)first * (long)SWC_FIRMWARE_BYTES;
+        }
+        else
+        {
+            fclose(pFile);
+            SetError("Requires classic 16 KiB SWC BIOS (safe 64 KiB V2.8CC overdump accepted)");
+            return FALSE;
         }
     }
 
@@ -1381,7 +1449,12 @@ Bool SNSuperWildCard::ReadEmulation(Uint8 bank, Uint16 addr, Uint8 *pData,
 Bool SNSuperWildCard::WriteEmulation(Uint8 bank, Uint16 addr, Uint8 uData,
                                      Uint8 *pSRAM, Uint32 nSRAMBytes)
 {
-    if (m_uSystemMode == 2 && addr >= 0xE004 && addr <= 0xE007)
+    /* AURORA_FRONT_MEMORY_MODE_REG_MIRROR_V10_13_20260831
+     * In System Mode 2 the Front mode-select registers E004-E007 remain
+     * decoded in copier banks 00-7D/80-FF. 7E/7F are native SNES WRAM. */
+    if (m_uSystemMode == 2 &&
+        (bank <= 0x7D || bank >= 0x80) &&
+        addr >= 0xE004 && addr <= 0xE007)
     {
         Uint8 uNewMode = (Uint8)(addr - 0xE004);
         if (uNewMode == 2 || uNewMode == 3)
@@ -1509,8 +1582,13 @@ Bool SNSuperWildCard::ResolveDirectDram(Uint8 bank, Uint16 addr,
     if (m_uSystemMode != 2 && m_uSystemMode != 3)
         return FALSE;
 
-    /* Keep the actual mode/control register block trapped. */
-    if ((bank == 0x00 || bank == 0x80) && addr == 0xE000)
+    /* AURORA_FRONT_MEMORY_MODE_REG_MIRROR_V10_13_20260831
+     * Mode 2 keeps E004-E007 alive in banks 00-7D/80-FF. The CPU mapper
+     * installs 8-KiB direct chunks, so E000-FFFF must stay trapped in those
+     * banks; reads still resolve normally, while register writes reach the
+     * Front decoder. Mode 3 keeps copier I/O disabled. */
+    if (m_uSystemMode == 2 && addr == 0xE000 &&
+        (bank <= 0x7D || bank >= 0x80))
         return FALSE;
 
     if (m_bCartridgeMap &&
@@ -1567,6 +1645,14 @@ Bool SNSuperWildCard::ResolveDirectCartridge(
         allowed = TRUE;
 
     if (!allowed)
+        return FALSE;
+
+    /* AURORA_FRONT_MEMORY_MODE_REG_MIRROR_V10_13_20260831
+     * In Mode 2, E004-E007 take precedence over the optional external CART
+     * window. Keep this 8-KiB chunk trapped so writes cannot be swallowed by
+     * the direct cartridge fastpath. */
+    if (m_uSystemMode == 2 && addr == 0xE000 &&
+        (bank <= 0x7D || bank >= 0x80))
         return FALSE;
 
     if (m_iCartMapping == 0)

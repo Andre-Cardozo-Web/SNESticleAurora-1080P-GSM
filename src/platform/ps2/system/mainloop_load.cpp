@@ -1634,6 +1634,11 @@ static Bool _MainLoopSwcIsFirmwareName(const char *pName)
     if (strncasecmp(pName, "Super Wild Card", 15) != 0)
         return FALSE;
 
+    /* AURORA_CLASSIC_COPIER_FIRMWARE_V10_15B_20260831
+     * DX/DX2 are later hardware families, not BIOS revisions of this model. */
+    if (!strncasecmp(pName, "Super Wild Card DX", 18))
+        return FALSE;
+
     pExt = strrchr(pName, '.');
     if (!pExt) return FALSE;
 
@@ -1689,6 +1694,17 @@ static Bool _MainLoopMagicomFirmwareFileLooksValid(const char *pPath)
 }
 
 /* AURORA_SWC_MEGA_V9_20260831: validate SWC media before destructive unload. */
+/* AURORA_CLASSIC_MEMORY_MODE_V10_15B_20260831 */
+/* AURORA_CLASSIC_COPIER_FIRMWARE_V10_15B_20260831 */
+static Bool _MainLoopClassicSwcVectorOK(const Uint8 *p, Uint32 nBytes)
+{
+    Uint16 rv;
+    if (!p || nBytes < 0x2000u)
+        return FALSE;
+    rv = (Uint16)p[0x1FFCu] | ((Uint16)p[0x1FFDu] << 8);
+    return (rv >= 0xE000u && rv != 0xFFFFu) ? TRUE : FALSE;
+}
+
 static Bool _MainLoopSwcFirmwareFileLooksValid(const char *pPath)
 {
     FILE *fp;
@@ -1712,7 +1728,50 @@ static Bool _MainLoopSwcFirmwareFileLooksValid(const char *pPath)
 
     if (nBytes == 0x4200L)
         nSkip = 512;
-    else if (nBytes != 0x4000L)
+    else if (nBytes == 0x4000L)
+        nSkip = 0;
+    else if (nBytes == 0x10000L)
+    {
+        Uint8 firstBlock[0x4000];
+        Uint8 block[0x4000];
+        Int32 first = -1;
+        Int32 nValid = 0;
+        Bool identical = TRUE;
+
+        for (Int32 q = 0; q < 4; ++q)
+        {
+            long off = (long)q * 0x4000L;
+            if (fseek(fp, off, SEEK_SET) != 0 ||
+                fread(block, 1, sizeof(block), fp) != sizeof(block))
+            {
+                fclose(fp);
+                return FALSE;
+            }
+
+            if (_MainLoopClassicSwcVectorOK(block, (Uint32)sizeof(block)))
+            {
+                if (first < 0)
+                {
+                    first = q;
+                    memcpy(firstBlock, block, sizeof(block));
+                }
+                else if (memcmp(firstBlock, block, sizeof(block)) != 0)
+                {
+                    identical = FALSE;
+                }
+                ++nValid;
+            }
+        }
+
+        if (nValid == 0 || (nValid > 1 && !identical))
+        {
+            fclose(fp);
+            return FALSE;
+        }
+
+        nSkip = (long)first * 0x4000L;
+    }
+    else
     {
         fclose(fp);
         return FALSE;
@@ -2077,7 +2136,7 @@ static Bool _MainLoopSwcFindFirstExistingCartDisk(
 /* 1.44 MiB FAT12, already formatted for DOS-compatible copier firmware. */
 static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
 {
-    enum { SectorBytes = 512, TotalSectors = 2880 };
+    enum { SectorBytes = 512, TotalSectors = 3200 };
     enum { ZeroChunkBytes = 128 * 1024 };
     Uint8 Sector[SectorBytes];
     Uint8 *pZero;
@@ -2125,10 +2184,10 @@ static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
     Sector[14] = 0x01; Sector[15] = 0x00;
     Sector[16] = 0x02;
     Sector[17] = 0xE0; Sector[18] = 0x00;
-    Sector[19] = 0x40; Sector[20] = 0x0B;
+    Sector[19] = 0x80; Sector[20] = 0x0C;
     Sector[21] = 0xF0;
-    Sector[22] = 0x09; Sector[23] = 0x00;
-    Sector[24] = 0x12; Sector[25] = 0x00;
+    Sector[22] = 0x0A; Sector[23] = 0x00;
+    Sector[24] = 0x14; Sector[25] = 0x00;
     Sector[26] = 0x02; Sector[27] = 0x00;
     Sector[38] = 0x29;
     Sector[39] = 0x41; Sector[40] = 0x55;
@@ -2153,7 +2212,7 @@ static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
 
     if (fseek(fp, SectorBytes * 1L, SEEK_SET) != 0 ||
         fwrite(Sector, 1, sizeof(Sector), fp) != sizeof(Sector) ||
-        fseek(fp, SectorBytes * 10L, SEEK_SET) != 0 ||
+        fseek(fp, SectorBytes * 11L, SEEK_SET) != 0 ||
         fwrite(Sector, 1, sizeof(Sector), fp) != sizeof(Sector))
     {
         fclose(fp);
