@@ -725,6 +725,37 @@ void _MainLoopUnloadRom()
     /* AURORA_AUDIO_HARDCUT_ROM_UNLOAD_V1 */
     MainLoopAudioHardCut();
 
+    /* AURORA_COPIER_SRAM_FLUSH_V10_16_20260831
+     *
+     * Classic Front copiers have 256 Kbit / 32 KiB battery-backed SRAM.
+     * Aurora deliberately does not poll SNES SRAM during gameplay, so a
+     * direct game/core switch could otherwise detach the copier before the
+     * menu-open checksum/save path notices the last writes.
+     *
+     * Flush only the real copier SRAM, only at an unload boundary:
+     * - no gameplay polling or periodic I/O;
+     * - no effect on ordinary SNES cartridges or any other core;
+     * - no write at all when the 32 KiB contents are unchanged.
+     *
+     * Do this before SetRom(NULL), while _pSystem, _RomName and the live
+     * SRAM buffer still identify the departing Magicom/SWC instance.
+     */
+    if (_pSystem == _pSnes && _pSnes &&
+        _pSnes->IsSuperWildCard() &&
+        _pSystem->GetSRAMBytes() == 0x8000)
+    {
+        if (_MainLoopForceCheckSRAM() && _MainLoop_SRAMUpdated)
+        {
+            Bool bSaved = _MainLoopSaveSRAM(TRUE);
+            ConPrint("Copier SRAM unload flush: %s\n",
+                     bSaved ? "saved" : "FAILED");
+            MainLoopStatusPrintf(
+                bSaved ? 120 : 240,
+                bSaved ? "Copier SRAM saved."
+                       : "WARNING: Copier SRAM save failed!");
+        }
+    }
+
     /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830
      * BgmStop intentionally retains libxmp for fast menu reopen.
      * A real game switch prefers maximum free EE heap. */
