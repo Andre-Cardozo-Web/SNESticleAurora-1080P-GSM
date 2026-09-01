@@ -2353,12 +2353,13 @@ static Bool _MainLoopExecuteSwcDisk(const char *pMappedPath,
         !_pSnes)
         return FALSE;
 
+    Bool bMagicom = FALSE;
     if (!_MainLoopFindSwcFirmware(FirmwarePath, sizeof(FirmwarePath)))
     {
-        MainLoopModalPrintf(
-            60 * 5,
-            "SWC BIOS missing in SYSTEM. Use dsk.rom, dsk.sfc, dsk.smc or a Super Wild Card BIOS filename.");
-        return FALSE;
+        Char Directory[512]; DIR *d = NULL; struct dirent *e;
+        if (MainLoopEnsureSystemDirectory(Directory, sizeof(Directory))) d = opendir(Directory);
+        if (d) { while ((e = readdir(d)) != NULL) { if (_MainLoopMagicomPathIsFirmware(e->d_name)) { int n=snprintf(FirmwarePath,sizeof(FirmwarePath),"%s/%s",Directory,e->d_name); if (n>0 && n<(int)sizeof(FirmwarePath) && _MainLoopMagicomFirmwareFileLooksValid(FirmwarePath)) { bMagicom=TRUE; break; } } } closedir(d); }
+        if (!bMagicom) { MainLoopModalPrintf(60*5,"Classic copier BIOS missing in SYSTEM"); return FALSE; }
     }
 
     if (!MainLoopEnsureGameplayRasterWidth(256))
@@ -2367,7 +2368,7 @@ static Bool _MainLoopExecuteSwcDisk(const char *pMappedPath,
         return FALSE;
     }
 
-    if (!_pSnes->LoadSuperWildCard(FirmwarePath, pMappedPath))
+    if (!(bMagicom ? _pSnes->LoadSuperMagicom(FirmwarePath, pMappedPath) : _pSnes->LoadSuperWildCard(FirmwarePath, pMappedPath)))
     {
         MainLoopModalPrintf(
             60 * 5,
@@ -2377,7 +2378,7 @@ static Bool _MainLoopExecuteSwcDisk(const char *pMappedPath,
     }
 
     _pSystem = _pSnes;
-    snprintf(_RomName, sizeof(_RomName), "%s", "Super Wild Card");
+    snprintf(_RomName, sizeof(_RomName), "%s", bMagicom ? "Super Magicom" : "Super Wild Card");
     s_SwcExternalCartPath[0] = 0; /* AURORA_SWC_FLOPPY_V5_20260831 */
     snprintf(_RomPath, sizeof(_RomPath), "%s", pOriginalPath);
     MainLoopStateOnRomChanged();
