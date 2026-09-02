@@ -159,6 +159,36 @@ private:
     /* AURORA_SWC_D88_ONLY_V5_20260901 */
     Uint32 m_D88TrackOffset[D88_TRACK_TABLE];
     Uint32 m_uD88DiskBytes;
+
+    /* AURORA_D88_RAM_IO_PERF_V1_1_20260901
+     * Host-only acceleration. The D88 remains authoritative on storage:
+     * reads use this RAM mirror; writes mark tracks dirty and are persisted
+     * by FdcFlushDisk() at the existing command boundary. */
+    Uint8 *m_pD88Image;
+    Uint32 m_D88SectorDataOffset[D88_TRACK_ACTIVE][D88_MAX_SECTORS];
+    Uint8 m_D88TrackSpt[D88_TRACK_ACTIVE];
+    Uint8 m_D88FirstSectorR[D88_TRACK_ACTIVE];
+    Bool m_D88TrackDirty[D88_TRACK_ACTIVE];
+
+    /* AURORA_D88_RAM_IO_PERF_V1_5_MULTIDISK_20260901
+     * WRITE DATA dirties sector payloads; FORMAT dirties a whole track.
+     * This removes 10-KiB write amplification for one-sector commands. */
+    Bool m_D88SectorDirty[D88_TRACK_ACTIVE][D88_MAX_SECTORS];
+
+    /* Transient host-side split-media handshake. Intentionally not
+     * serialized into save states. */
+    Bool m_bSplitNextMediaRequired;
+    Bool m_bSplitAwaitingMediaSwap;
+
+    /* AURORA_D88_V1_6_MULTIDISK_1600_20260901
+     * Save-side split accounting is transient host state. The SWC header
+     * stores an 8-KiB block count for each part; accumulate those counts and
+     * stop honoring "more split files" once the real cartridge is exhausted. */
+    Uint32 m_uSplitSavedBlocks;
+    Uint32 m_uSplitBlocksOnMedia;
+
+    Bool m_bD88HeaderDirty;
+
     Bool m_bDiskWritable;
     Bool m_bDiskDirty; /* AURORA_SWC_MEGA_V9_20260831: flush once per FDC command */
     Bool m_bDiskChanged;
@@ -216,10 +246,11 @@ private:
     void SetError(const Char *pText);
     Bool LoadFirmware(const Char *pPath);
     /* AURORA_SWC_D88_ONLY_V5_20260901 */
-    Bool D88Probe(FILE *pFile, long nBytes,
+    Bool D88Probe(const Uint8 *pImage, Uint32 nBytes,
                   Int32 *pTracks, Int32 *pHeads, Int32 *pMaxSpt,
-                  Uint32 *pOffsets, Uint32 *pDiskBytes,
-                  Bool *pProtected);
+                  Uint32 *pOffsets, Uint32 *pSectorOffsets,
+                  Uint8 *pTrackSpt, Uint8 *pFirstR,
+                  Uint32 *pDiskBytes, Bool *pProtected);
     Bool D88FindSector(Uint8 c, Uint8 h, Uint8 r, Uint8 n,
                        long *pDataOffset);
     Uint8 D88TrackSectorCount(Uint8 c, Uint8 h);

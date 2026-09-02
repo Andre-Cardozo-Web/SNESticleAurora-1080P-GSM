@@ -2130,7 +2130,11 @@ static Bool _MainLoopExecuteMagicomFirmware(
 /* AURORA_COPIER_DSK_PRIORITY_AUTO_DISK1_V10_17_20260901 */
 static Bool _MainLoopSwcBuildCartDiskPath(
     char *pOut, Int32 nOutBytes, unsigned nDisk);
+/* AURORA_D88_RAM_IO_PERF_V1_5_MULTIDISK_20260901 */
+/* AURORA_D88_V1_6_MULTIDISK_1600_20260901 */
 static Bool _MainLoopSwcCreateFat12D88(const char *pPath);
+static Bool _MainLoopSwcNumberedDiskIndex(
+    const char *pPath, unsigned *pIndex);
 
 static Bool _MainLoopSwcInsertCartridge(const char *pPath)
 {
@@ -2146,6 +2150,14 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
         _pSnes->HasSuperWildCardCartridge() ||
         !pPath || !*pPath || !_pSnesRom)
         return FALSE;
+
+    /* AURORA_D88_RAM_IO_PERF_V1_1_20260901
+     * Two renders cover both GS buffers before synchronous work. */
+    /* AURORA_D88_RAM_IO_PERF_V1_5_MULTIDISK_20260901:
+     * MainLoopStatusPrintf is the exact blue/left path used by "SRAM saved.". */
+    MainLoopStatusPrintf(180, "Inserting cartridge...");
+    MainLoopRender();
+    MainLoopRender();
 
     if (!romfile.Open(pPath, "rb"))
     {
@@ -2201,6 +2213,10 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
                 AutoDiskPath, sizeof(AutoDiskPath), 1) &&
             stat(AutoDiskPath, &AutoDiskStat) != 0)
         {
+            MainLoopStatusPrintf(180, "Creating disk 1...");
+            MainLoopRender();
+            MainLoopRender();
+
             if (!_MainLoopSwcCreateFat12D88(AutoDiskPath))
             {
                 MainLoopStatusPrintf(
@@ -2208,6 +2224,10 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
                     "Copier: cartridge inserted; could not create _1 disk");
                 return TRUE;
             }
+
+            MainLoopStatusPrintf(180, "Inserting disk 1...");
+            MainLoopRender();
+            MainLoopRender();
 
             if (!_pSnes->SwapSuperWildCardDisk(AutoDiskPath))
             {
@@ -2402,6 +2422,27 @@ static void _MainLoopD88Put32(Uint8 *p, Uint32 v)
     p[3] = (Uint8)((v >> 24) & 0xFFu);
 }
 
+/* AURORA_SWC_DEFAULT_FLOPPY_1440_V4_1_20260901
+ * AURORA_SWC_D88_ONLY_V5_20260901
+ * AURORA_SWC_D88_ONLY_V5_1_20260901
+ * AURORA_D88_RAM_IO_PERF_V1_1_20260901
+ *
+ * Build the complete fixed-capacity D88 in EE RAM and emit it with one
+ * sequential fwrite. Logical FAT12 remains 1.44 MiB / 18 SPT; each track
+ * still reserves physical room for 20 SPT so BIOS FORMAT can reach 1.6 MiB. */
+/* AURORA_SWC_DEFAULT_FLOPPY_1440_V4_1_20260901
+ * AURORA_SWC_D88_ONLY_V5_20260901
+ * AURORA_SWC_D88_ONLY_V5_1_20260901
+ * AURORA_D88_RAM_IO_PERF_V1_1_20260901
+ * AURORA_D88_V1_6_MULTIDISK_1600_20260901
+ *
+ * NEW media default is restored to 1.6 MiB:
+ *   80 cylinders x 2 heads x 20 sectors x 512 = 1,638,400 logical bytes.
+ * FAT12 requires 10 sectors/FAT at this geometry.
+ *
+ * The D88 container is streamed one physical track at a time. Peak temporary
+ * creation RAM is only 20 x (16+512) = 10,560 bytes, important because the
+ * currently inserted D88 is already cached in EE RAM. */
 static Bool _MainLoopSwcCreateFat12D88(const char *pPath)
 {
     enum
@@ -2409,141 +2450,148 @@ static Bool _MainLoopSwcCreateFat12D88(const char *pPath)
         HeaderBytes = 0x2B0,
         Tracks = 80,
         Heads = 2,
-        ActiveSectors = 18,
+        ActiveSectors = 20,
         D88SlotSectors = 20,
         SectorBytes = 512,
-        SectorHeaderBytes = 16
+        SectorHeaderBytes = 16,
+        SlotBytes =
+            D88SlotSectors * (SectorHeaderBytes + SectorBytes)
     };
+
     Uint8 Header[HeaderBytes];
-    Uint8 SectorHeader[SectorHeaderBytes];
-    Uint8 Sector[SectorBytes];
-    Uint8 Pad[SectorHeaderBytes + SectorBytes];
-    const Uint32 slotBytes =
-        (Uint32)D88SlotSectors * (SectorHeaderBytes + SectorBytes);
+    Uint8 *Track = NULL;
     const Uint32 totalBytes =
-        HeaderBytes + (Uint32)Tracks * Heads * slotBytes;
-    FILE *fp;
+        HeaderBytes + (Uint32)Tracks * Heads * SlotBytes;
+    FILE *fp = NULL;
+    Bool ok = FALSE;
 
     if (!pPath || !*pPath)
         return FALSE;
 
+    Track = (Uint8 *)malloc(SlotBytes);
+    if (!Track)
+        return FALSE;
+
     fp = fopen(pPath, "wb");
     if (!fp)
-        return FALSE;
+        goto done;
 
     memset(Header, 0, sizeof(Header));
     memcpy(Header, "AURORA SWC", 10);
-    Header[0x1A] = 0x00; /* writable */
-    Header[0x1B] = 0x20; /* physical 2HD medium */
+    Header[0x1A] = 0x00;
+    Header[0x1B] = 0x20;
     _MainLoopD88Put32(Header + 0x1C, totalBytes);
 
     for (Uint32 t = 0; t < (Uint32)(Tracks * Heads); ++t)
         _MainLoopD88Put32(
             Header + 0x20 + t * 4,
-            HeaderBytes + t * slotBytes);
+            HeaderBytes + t * SlotBytes);
 
     if (fwrite(Header, 1, sizeof(Header), fp) != sizeof(Header))
-    {
-        fclose(fp);
-        remove(pPath);
-        return FALSE;
-    }
-
-    memset(Pad, 0, sizeof(Pad));
+        goto done;
 
     for (Uint32 c = 0; c < Tracks; ++c)
     {
         for (Uint32 h = 0; h < Heads; ++h)
         {
+            memset(Track, 0, SlotBytes);
+
             for (Uint32 r = 1; r <= ActiveSectors; ++r)
             {
                 Uint32 lba =
                     ((c * Heads + h) * ActiveSectors) + (r - 1);
+                Uint32 rec =
+                    (r - 1) * (SectorHeaderBytes + SectorBytes);
+                Uint8 *sh = Track + rec;
+                Uint8 *sector = sh + SectorHeaderBytes;
 
-                memset(SectorHeader, 0, sizeof(SectorHeader));
-                SectorHeader[0] = (Uint8)c;
-                SectorHeader[1] = (Uint8)h;
-                SectorHeader[2] = (Uint8)r;
-                SectorHeader[3] = 2; /* 512 bytes */
+                sh[0] = (Uint8)c;
+                sh[1] = (Uint8)h;
+                sh[2] = (Uint8)r;
+                sh[3] = 2;
                 _MainLoopD88Put16(
-                    SectorHeader + 4, (Uint16)ActiveSectors);
-                SectorHeader[6] = 0x00; /* MFM/double density flag */
-                SectorHeader[7] = 0x00; /* normal data */
-                SectorHeader[8] = 0x00; /* normal FDC status */
-                SectorHeader[13] = 1; /* 300 rpm / 1.44-style D88 flag */
-                _MainLoopD88Put16(SectorHeader + 14, SectorBytes);
-
-                memset(Sector, 0, sizeof(Sector));
+                    sh + 4, (Uint16)ActiveSectors);
+                sh[6] = 0x00;
+                sh[7] = 0x00;
+                sh[8] = 0x00;
+                sh[13] = 1;
+                _MainLoopD88Put16(
+                    sh + 14, SectorBytes);
 
                 if (lba == 0)
                 {
-                    Sector[0] = 0xEB;
-                    Sector[1] = 0x3C;
-                    Sector[2] = 0x90;
-                    memcpy(Sector + 3, "AURORASW", 8);
-                    Sector[11] = 0x00; Sector[12] = 0x02;
-                    Sector[13] = 0x01;
-                    Sector[14] = 0x01; Sector[15] = 0x00;
-                    Sector[16] = 0x02;
-                    Sector[17] = 0xE0; Sector[18] = 0x00;
-                    Sector[19] = 0x40; Sector[20] = 0x0B;
-                    Sector[21] = 0xF0;
-                    Sector[22] = 0x09; Sector[23] = 0x00;
-                    Sector[24] = 0x12; Sector[25] = 0x00;
-                    Sector[26] = 0x02; Sector[27] = 0x00;
-                    Sector[38] = 0x29;
-                    Sector[39] = 0x41; Sector[40] = 0x55;
-                    Sector[41] = 0x52; Sector[42] = 0x35;
-                    memcpy(Sector + 43, "NO NAME    ", 11);
-                    memcpy(Sector + 54, "FAT12   ", 8);
-                    Sector[510] = 0x55;
-                    Sector[511] = 0xAA;
-                }
-                else if (lba == 1 || lba == 10)
-                {
-                    Sector[0] = 0xF0;
-                    Sector[1] = 0xFF;
-                    Sector[2] = 0xFF;
-                }
+                    sector[0] = 0xEB;
+                    sector[1] = 0x3C;
+                    sector[2] = 0x90;
+                    memcpy(sector + 3, "AURORASW", 8);
 
-                if (fwrite(
-                        SectorHeader, 1, sizeof(SectorHeader), fp) !=
-                        sizeof(SectorHeader) ||
-                    fwrite(Sector, 1, sizeof(Sector), fp) != sizeof(Sector))
+                    sector[11] = 0x00;
+                    sector[12] = 0x02;
+                    sector[13] = 0x01;
+                    sector[14] = 0x01;
+                    sector[15] = 0x00;
+                    sector[16] = 0x02;
+                    sector[17] = 0xE0;
+                    sector[18] = 0x00;
+
+                    sector[19] = 0x80;
+                    sector[20] = 0x0C;
+                    sector[21] = 0xF0;
+                    sector[22] = 0x0A;
+                    sector[23] = 0x00;
+                    sector[24] = 0x14;
+                    sector[25] = 0x00;
+                    sector[26] = 0x02;
+                    sector[27] = 0x00;
+
+                    sector[38] = 0x29;
+                    sector[39] = 0x41;
+                    sector[40] = 0x55;
+                    sector[41] = 0x52;
+                    sector[42] = 0x36;
+                    memcpy(sector + 43, "NO NAME    ", 11);
+                    memcpy(sector + 54, "FAT12   ", 8);
+                    sector[510] = 0x55;
+                    sector[511] = 0xAA;
+                }
+                else if (lba == 1 || lba == 11)
                 {
-                    fclose(fp);
-                    remove(pPath);
-                    return FALSE;
+                    sector[0] = 0xF0;
+                    sector[1] = 0xFF;
+                    sector[2] = 0xFF;
                 }
             }
 
-            for (Uint32 r = ActiveSectors;
-                 r < D88SlotSectors; ++r)
-            {
-                if (fwrite(Pad, 1, sizeof(Pad), fp) != sizeof(Pad))
-                {
-                    fclose(fp);
-                    remove(pPath);
-                    return FALSE;
-                }
-            }
+            if (fwrite(Track, 1, SlotBytes, fp) != SlotBytes)
+                goto done;
         }
     }
 
-    if (fflush(fp) != 0 || ftell(fp) != (long)totalBytes)
-    {
+    if (fflush(fp) != 0 ||
+        ftell(fp) != (long)totalBytes)
+        goto done;
+
+    ok = TRUE;
+
+done:
+    if (fp)
         fclose(fp);
-        remove(pPath);
-        return FALSE;
-    }
+    if (Track)
+        free(Track);
 
-    fclose(fp);
-
-    if (!_MainLoopSwcD88FileLooksValid(pPath, (long)totalBytes))
+    if (!ok)
     {
         remove(pPath);
         return FALSE;
     }
+
+    if (!_MainLoopSwcD88FileLooksValid(
+            pPath, (long)totalBytes))
+    {
+        remove(pPath);
+        return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -2558,11 +2606,13 @@ Bool MainLoopSwcCreateNextDisk(void)
     if (!_pSnes || !_pSnes->IsSuperWildCard())
         return FALSE;
 
-    /* L2+Square always creates the first free numbered image. */
+    /* AURORA_D88_RAM_IO_PERF_V1_5_MULTIDISK_20260901
+     * Manual L2+Square creation is CREATE-ONLY. It must never eject/replace
+     * the currently inserted disk. The sole automatic insertion remains the
+     * cartridge auto-provision path for a missing _1.d88. */
     for (nDisk = 1; nDisk < 10000; ++nDisk)
     {
-        if (!_MainLoopSwcBuildCartDiskPath(
-                Path, sizeof(Path), nDisk))
+        if (!_MainLoopSwcBuildCartDiskPath(Path, sizeof(Path), nDisk))
             return FALSE;
 
         if (stat(Path, &st) != 0)
@@ -2575,47 +2625,56 @@ Bool MainLoopSwcCreateNextDisk(void)
         return FALSE;
     }
 
+    MainLoopStatusPrintf(180, "Creating disk %u...", nDisk);
+    MainLoopRender();
+    MainLoopRender();
+
     if (!_MainLoopSwcCreateFat12D88(Path))
     {
         MainLoopStatusPrintf(180, "SWC: could not create disk image");
         return FALSE;
     }
 
-    /* AURORA_FRONT_GAMEBUS_V10_7_20260831
-     * L2+Square now behaves like inserting a freshly created real floppy:
-     * create the formatted image, then mount it immediately. */
-    if (!_pSnes->SwapSuperWildCardDisk(Path))
-    {
-        MainLoopStatusPrintf(
-            180, "Copier: created %s but insert failed: %s",
-            _MainLoopSwcBaseName(Path),
-            _pSnes->GetSuperWildCardError());
-        return FALSE;
-    }
-
-    MainLoopStateOnRomChanged();
     MainLoopStatusPrintf(
-        150, "Copier: created and inserted %s",
+        150,
+        "Copier: created disk %u: %s",
+        nDisk,
         _MainLoopSwcBaseName(Path));
     return TRUE;
 }
 
 static Bool _MainLoopSwcInsertDisk(const char *pPath)
 {
+    const char *pExt;
+    unsigned shown = 0;
+
     if (!_pSnes || !_pSnes->IsSuperWildCard() ||
         !pPath || !*pPath)
         return FALSE;
 
-    if (!_MainLoopSwcDiskFileLooksValid(pPath))
+    pExt = strrchr(pPath, '.');
+    if (!pExt || strcasecmp(pExt, ".d88") != 0)
     {
         MainLoopStatusPrintf(
-            180, "SWC: unsupported or invalid D88 floppy image");
+            180, "SWC: unsupported D88 floppy image");
         return FALSE;
     }
 
-    /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
-     * With a loader already running, browser-selected .d88 media is a
-     * hot insert/swap. Do not unload or reset the copier or cartridge. */
+    /* AURORA_D88_RAM_IO_PERF_V1_5_MULTIDISK_20260901
+     * Do not pre-open/pre-read the D88 here. MountDisk already performs the
+     * authoritative full RAM-cache validation, so the old frontend pre-probe
+     * was duplicate host I/O on every browser insertion. */
+    if (_MainLoopSwcNumberedDiskIndex(pPath, &shown))
+        MainLoopStatusPrintf(180, "Inserting disk %u...", shown);
+    else
+        MainLoopStatusPrintf(
+            180,
+            "Inserting disk: %s...",
+            _MainLoopSwcBaseName(pPath));
+
+    MainLoopRender();
+    MainLoopRender();
+
     if (!_pSnes->SwapSuperWildCardDisk(pPath))
     {
         MainLoopStatusPrintf(
@@ -2625,7 +2684,7 @@ static Bool _MainLoopSwcInsertDisk(const char *pPath)
     }
 
     MainLoopStateOnRomChanged();
-    /* AURORA_SWC_MEDIA_PROBE_V10_2_20260831: prove mount + host write mode on-screen. */
+
     MainLoopStatusPrintf(
         180, "SWC floppy mounted %s: %s",
         _pSnes->IsSuperWildCardDiskWritable() ? "RW" : "READ-ONLY",
@@ -2813,6 +2872,19 @@ Bool MainLoopSwcSwapNextDisk(void)
         }
 
         /* AURORA_SWC_MEGA_V9_20260831: lowest existing numbered image. */
+        {
+            unsigned shown = 0;
+            if (_MainLoopSwcNumberedDiskIndex(FirstPath, &shown))
+                MainLoopStatusPrintf(180, "Inserting disk %u...", shown);
+            else
+                MainLoopStatusPrintf(
+                    180,
+                    "Inserting disk: %s...",
+                    _MainLoopSwcBaseName(FirstPath));
+        }
+        MainLoopRender();
+        MainLoopRender();
+
         if (!_pSnes->SwapSuperWildCardDisk(FirstPath))
             return FALSE;
 
@@ -2919,6 +2991,19 @@ Bool MainLoopSwcSwapNextDisk(void)
             }
         }
     }
+
+    {
+        unsigned shown = 0;
+        if (_MainLoopSwcNumberedDiskIndex(NextPath, &shown))
+            MainLoopStatusPrintf(180, "Inserting disk %u...", shown);
+        else
+            MainLoopStatusPrintf(
+                180,
+                "Inserting disk: %s...",
+                _MainLoopSwcBaseName(NextPath));
+    }
+    MainLoopRender();
+    MainLoopRender();
 
     if (!_pSnes->SwapSuperWildCardDisk(NextPath))
     {
