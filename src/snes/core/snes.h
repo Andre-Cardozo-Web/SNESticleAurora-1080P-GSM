@@ -29,6 +29,7 @@ extern "C" {
 #include "snsdd1.h"
 #include "snsrtc.h"
 #include "snswc.h" /* AURORA_SWC_FLOPPY_V1_20260831 */
+#include "snsa1.h" /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
 
 #define SNES_RAMSIZE  0x20000
 #define SNES_SRAMSIZE (256 * 1024)
@@ -164,6 +165,9 @@ private:
 	Bool		m_bSRTC;
 	Bool		m_bSuperFX;   // cartucho usa SuperFX/GSU -> rotear $3000-34FF
 
+	SNSA1       m_SA1;      /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
+	Bool        m_bSA1IRQ;
+
 	/* AURORA_SWC_FLOPPY_V1_20260831 */
 	SNSuperWildCard m_SWC;
 	Bool            m_bSuperWildCard;
@@ -207,6 +211,10 @@ private:
 	static void SNCPU_TRAPFUNC  WriteGSU(SNCpuT *pCpu, Uint32 uAddr, Uint8 uData);
 	static Uint8 SNCPU_TRAPFUNC ReadSWC(SNCpuT *pCpu, Uint32 uAddr);
 	static void SNCPU_TRAPFUNC  WriteSWC(SNCpuT *pCpu, Uint32 uAddr, Uint8 uData);
+	static Uint8 SNCPU_TRAPFUNC ReadSA1BWRAM(SNCpuT *pCpu, Uint32 uAddr);
+	static void SNCPU_TRAPFUNC  WriteSA1BWRAM(SNCpuT *pCpu, Uint32 uAddr, Uint8 uData);
+	static Uint8 SNCPU_TRAPFUNC ReadSA1ROM(SNCpuT *pCpu, Uint32 uAddr);
+	static void SNCPU_TRAPFUNC  WriteSA1ROM(SNCpuT *pCpu, Uint32 uAddr, Uint8 uData);
 	static Uint8 CX4ReadMem(void *pCtx, Uint32 uAddr);
 
     static Uint8 SNCPU_TRAPFUNC Read2000Debug(SNCpuT *pCpu, Uint32 uAddr);
@@ -222,6 +230,12 @@ private:
 	void	MapMem(SNRomMappingE eRomMapping, Uint32 uFlags);
 	void	MapMemExLoRom(void);
 	void	MapSuperWildCard(void); /* AURORA_SWC_FLOPPY_V1_20260831 */
+	void	MapSuperWildCardDevice(struct SnesMemMapT *pMemMap);
+	void	MapSuperWildCardCoprocessor(void);
+	void    SetSA1IRQ(Bool bPending);
+	void    UpdateMainIRQLine(void);
+	void    MarkSA1BWRAMDirty(void);
+	friend class SNSA1;
 	void	RemapSuperWildCardMode0Dram(void); /* AURORA_SWC_V11_MENU_FASTPATH_20260831 */
 	void	RemapSDD1(void);   // (re)mapeia $C0-$FF conforme $4804-$4807
 	void	DumpMemMap();

@@ -3,9 +3,31 @@
 #include <string.h>
 #include "types.h"
 #include "snswc.h"
+#include "snrom.h"
 
 /* AURORA_SWC_FLOPPY_V1_20260831 */
 /* AURORA_SWC_FLOPPY_V2_20260831: read-only media + FDC hardening. */
+
+/* Cartridge address decoders mirror a non-power-of-two mask ROM by address
+ * lines, not by modulo. Keep the donor/cart path identical to the native
+ * mapper (notably for 12-Mbit and ExLoROM images). */
+static Uint32 _AuroraSwcMirrorRomOffset(Uint32 uSize, Uint32 uPos)
+{
+    Uint32 uMask;
+
+    if (uSize == 0 || uPos < uSize)
+        return (uSize == 0) ? 0 : uPos;
+
+    uMask = 0x80000000u;
+    while (!(uPos & uMask))
+        uMask >>= 1;
+
+    if (uSize <= (uPos & uMask))
+        return _AuroraSwcMirrorRomOffset(uSize, uPos - uMask);
+
+    return uMask +
+        _AuroraSwcMirrorRomOffset(uSize - uMask, uPos - uMask);
+}
 
 SNSuperWildCard::SNSuperWildCard()
 {
@@ -18,6 +40,7 @@ SNSuperWildCard::SNSuperWildCard()
     m_pCartRom = NULL; /* AURORA_SWC_FLOPPY_V5_20260831 */
     m_nCartBytes = 0;
     m_iCartMapping = 0;
+    m_uCartFlags = 0; /* AURORA_SWC_DONOR_CART_V1_20260902 */
 
     /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901 */
     m_pCartSRAM = NULL;
@@ -2029,12 +2052,12 @@ Uint32 SNSuperWildCard::DramOffsetMode2(Uint8 bank, Uint16 addr) const
 /* AURORA_SWC_FLOPPY_V5_20260831 */
 Bool SNSuperWildCard::SetExternalCartridge(
     const Uint8 *pRom, Uint32 nRomBytes, Int32 iMapping,
-    Uint32 nSramBytes, Bool bBatterySRAM)
+    Uint32 nSramBytes, Bool bBatterySRAM, Uint32 uFlags)
 {
     Uint8 *pNewSRAM = NULL;
 
     if (!m_bActive || !pRom || !nRomBytes ||
-        (iMapping != 0 && iMapping != 1))
+        (iMapping != 0 && iMapping != 1 && iMapping != 2))
     {
         SetError("invalid external cartridge");
         return FALSE;
@@ -2068,6 +2091,7 @@ Bool SNSuperWildCard::SetExternalCartridge(
     m_pCartRom = pRom;
     m_nCartBytes = nRomBytes;
     m_iCartMapping = iMapping;
+    m_uCartFlags = uFlags;
     m_pCartSRAM = pNewSRAM;
     m_nCartSRAMBytes = nSramBytes;
     m_bCartSRAMBattery =
@@ -2094,6 +2118,7 @@ void SNSuperWildCard::ClearExternalCartridge()
     m_pCartRom = NULL;
     m_nCartBytes = 0;
     m_iCartMapping = 0;
+    m_uCartFlags = 0;
     m_nCartSRAMBytes = 0;
     m_bCartSRAMBattery = FALSE;
     m_bCartSRAMDirty = FALSE;
@@ -2124,7 +2149,7 @@ Bool SNSuperWildCard::ExternalCartridgeSRAMOffset(
     if (!pOffset || !m_pCartSRAM || !m_nCartSRAMBytes)
         return FALSE;
 
-    if (m_iCartMapping == 0) /* LoROM */
+    if (m_iCartMapping == 0 || m_iCartMapping == 2) /* LoROM / ExLoROM */
     {
         Bool bankOK =
             (bank >= 0x70 && bank <= 0x7D) || bank >= 0xF0;
@@ -2158,6 +2183,22 @@ Bool SNSuperWildCard::ExternalCartridgeSRAMOffset(
 
     *pOffset = off & (m_nCartSRAMBytes - 1u);
     return TRUE;
+}
+
+/* AURORA_SWC_DONOR_CART_V1_20260902
+ * In DRAM game modes a coprocessor cartridge is a hardware donor, not a
+ * second ROM overlay. The copier gates its mask ROM while leaving the
+ * cartridge-side device decode available. This distinction is essential:
+ * exposing the donor ROM at 20-5F/A0-DF would replace chunks of the game
+ * loaded from floppy before the DSP ever receives a command. */
+Bool SNSuperWildCard::ExternalCartridgeIsDonor() const
+{
+    const Uint32 specialMask =
+        SNROM_FLAG_DSP1 | SNROM_FLAG_SUPERFX | SNROM_FLAG_GAMEBOY |
+        SNROM_FLAG_DSP2 | SNROM_FLAG_OBC1 | SNROM_FLAG_CX4 |
+        SNROM_FLAG_SDD1 | SNROM_FLAG_SRTC |
+        SNROM_FLAG_DSP3 | SNROM_FLAG_DSP4 | SNROM_FLAG_SA1;
+    return (m_uCartFlags & specialMask) ? TRUE : FALSE;
 }
 
 Bool SNSuperWildCard::ReadExternalCartridgeSRAM(
@@ -2276,7 +2317,7 @@ Bool SNSuperWildCard::ReadExternalCartridge(Uint8 bank,
         off = ((Uint32)(bank & 0x7F) << 15) |
               (Uint32)(addr & 0x7FFF);
     }
-    else /* HiROM */
+    else if (m_iCartMapping == 1) /* HiROM */
     {
         Bool fullBank =
             ((bank >= 0x40 && bank <= 0x7D) || bank >= 0xC0);
@@ -2286,8 +2327,29 @@ Bool SNSuperWildCard::ReadExternalCartridge(Uint8 bank,
 
         off = ((Uint32)(bank & 0x3F) << 16) | (Uint32)addr;
     }
+    else /* ExLoROM: normalized Jumbo LoROM layout used by SnesRom */
+    {
+        Uint32 chunk;
+        Uint32 pos;
 
-    off %= m_nCartBytes;
+        if ((bank < 0x40 || (bank >= 0x80 && bank < 0xC0)) &&
+            addr < 0x8000)
+            return FALSE;
+
+        if (bank < 0x40)
+            chunk = 0x400000u + (Uint32)bank * 0x8000u;
+        else if (bank < 0x80)
+            chunk = 0x600000u + (Uint32)(bank - 0x40) * 0x8000u;
+        else if (bank < 0xC0)
+            chunk = (Uint32)(bank - 0x80) * 0x8000u;
+        else
+            chunk = 0x200000u + (Uint32)(bank - 0xC0) * 0x8000u;
+
+        pos = chunk + ((Uint32)addr & 0x7FFFu);
+        off = _AuroraSwcMirrorRomOffset(m_nCartBytes, pos);
+    }
+
+    off = _AuroraSwcMirrorRomOffset(m_nCartBytes, off);
     *pData = m_pCartRom[off];
     return TRUE;
 }
@@ -2585,7 +2647,7 @@ Bool SNSuperWildCard::ReadEmulation(Uint8 bank, Uint16 addr, Uint8 *pData,
     /* AURORA_SWC_FLOPPY_V3_20260831
      * E00D enables the real cartridge in banks 20-5F/A0-DF. Aurora V3 has
      * no inserted cartridge, so those windows are physical open bus. */
-    if (m_bCartridgeMap &&
+    if (m_bCartridgeMap && !ExternalCartridgeIsDonor() &&
         ((bank >= 0x20 && bank <= 0x5F) ||
          (bank >= 0xA0 && bank <= 0xDF)))
     {
@@ -2665,7 +2727,7 @@ Bool SNSuperWildCard::WriteEmulation(Uint8 bank, Uint16 addr, Uint8 uData,
      * external-cartridge overlay must precede the copier SRAM mapping, just
      * as ReadEmulation already does. This is essential for HiROM cart SRAM
      * in the overlapping 30-33:6000-7FFF region. */
-    if (m_bCartridgeMap &&
+    if (m_bCartridgeMap && !ExternalCartridgeIsDonor() &&
         ((bank >= 0x20 && bank <= 0x5F) ||
          (bank >= 0xA0 && bank <= 0xDF)))
     {
@@ -2790,7 +2852,7 @@ Bool SNSuperWildCard::ResolveDirectDram(Uint8 bank, Uint16 addr,
      * E004-E007 are write-only mode-select registers. SNCPUSetBank(...,
      * FALSE) keeps the direct read pointer while bRAM=0 sends every write
      * through the existing WriteSWC trap. */
-    if (m_bCartridgeMap &&
+    if (m_bCartridgeMap && !ExternalCartridgeIsDonor() &&
         ((bank >= 0x20 && bank <= 0x5F) ||
          (bank >= 0xA0 && bank <= 0xDF)))
         return FALSE;
@@ -2838,6 +2900,7 @@ Bool SNSuperWildCard::ResolveDirectCartridge(
     if (m_uSystemMode == 1)
         allowed = TRUE;
     else if ((m_uSystemMode == 2 || m_uSystemMode == 3) &&
+             !ExternalCartridgeIsDonor() &&
              m_bCartridgeMap &&
              ((bank >= 0x20 && bank <= 0x5F) ||
               (bank >= 0xA0 && bank <= 0xDF)))
@@ -2867,7 +2930,7 @@ Bool SNSuperWildCard::ResolveDirectCartridge(
         off = ((Uint32)(bank & 0x7F) << 15) |
               (Uint32)(addr & 0x7FFF);
     }
-    else
+    else if (m_iCartMapping == 1)
     {
         Bool fullBank =
             ((bank >= 0x40 && bank <= 0x7D) || bank >= 0xC0);
@@ -2875,8 +2938,17 @@ Bool SNSuperWildCard::ResolveDirectCartridge(
             return FALSE;
         off = ((Uint32)(bank & 0x3F) << 16) | (Uint32)addr;
     }
+    else
+    {
+        Uint8 value;
+        if (!ReadExternalCartridge(bank, addr, &value))
+            return FALSE;
+        /* ExLoROM's recursive mirror is not guaranteed to leave a complete
+         * direct 8-KiB span contiguous. Keep it on the correct trapped path. */
+        return FALSE;
+    }
 
-    off %= m_nCartBytes;
+    off = _AuroraSwcMirrorRomOffset(m_nCartBytes, off);
     if (off + 0x2000u > m_nCartBytes)
         return FALSE;
 

@@ -326,6 +326,14 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read2000(SNCpuT *pCpu, Uint32 uAddr)
 
 	uAddr &= 0xFFFF;
 
+	if (pSnes->m_SA1.IsActive())
+	{
+		if (uAddr >= 0x2200 && uAddr <= 0x23FF)
+			return pSnes->m_SA1.ReadMainRegister((Uint16)uAddr, pCpu->uMDR);
+		if (uAddr >= 0x3000 && uAddr <= 0x37FF)
+			return pSnes->m_SA1.ReadMainIRAM((Uint16)uAddr, pCpu->uMDR);
+	}
+
 	// S-RTC: relogio em $2800 (leitura)
 	if (pSnes->m_bSRTC && uAddr == 0x2800)
 		return pSnes->m_SRTC.ReadReg();
@@ -340,7 +348,7 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read2000(SNCpuT *pCpu, Uint32 uAddr)
 		Uint8 v = pSnes->m_GSU.ReadReg((Uint16)uAddr);
 		// ler o SFR ($3031) limpa o flag de IRQ do GSU -> baixa a linha de IRQ.
 		if (!pSnes->m_GSU.IrqPending())
-			SNCPUSignalIRQ(&pSnes->m_Cpu, 0);
+			pSnes->UpdateMainIRQLine();
 		return v;
 	}
 
@@ -525,6 +533,20 @@ void SNCPU_TRAPFUNC SnesSystem::Write2000(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
 
 	uAddr &= 0xFFFF;
 
+	if (pSnes->m_SA1.IsActive())
+	{
+		if (uAddr >= 0x2200 && uAddr <= 0x23FF)
+		{
+			pSnes->m_SA1.WriteMainRegister((Uint16)uAddr, uData);
+			return;
+		}
+		if (uAddr >= 0x3000 && uAddr <= 0x37FF)
+		{
+			pSnes->m_SA1.WriteMainIRAM((Uint16)uAddr, uData);
+			return;
+		}
+	}
+
 	// S-RTC: relogio em $2801 (escrita)
 	if (pSnes->m_bSRTC && uAddr == 0x2801)
 	{
@@ -685,7 +707,7 @@ Uint8 SNCPU_TRAPFUNC SnesSystem::Read4000(SNCpuT *pCpu, Uint32 uAddr)
         {
             Uint8 uData = pIO->m_Regs.timeup;
             pIO->m_Regs.timeup &= ~0x80;
-            SNCPUSignalIRQ(pCpu, 0);
+            pSnes->UpdateMainIRQLine();
 
             /* AURORA_SPEEDY_MDR_4211_V1
                TIMEUP drives bit 7; bits 0-6 are S-CPU MDR/open bus.
@@ -822,7 +844,7 @@ void SNCPU_TRAPFUNC SnesSystem::Write4000(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
                     pIO->m_Regs.timeup &= ~0x80;
                 }
                 // clear IRQ
-                SNCPUSignalIRQ(pCpu, 0);
+                pSnes->UpdateMainIRQLine();
             }
 
             // set new nmi signal
@@ -933,7 +955,7 @@ void SNCPU_TRAPFUNC SnesSystem::Write4000(SNCpuT *pCpu, Uint32 uAddr, Uint8 uDat
 
 		case 0x4211:	// TIMEUP 
 			pIO->m_Regs.timeup &= ~0x80;
-			SNCPUSignalIRQ(pCpu, 0);
+			pSnes->UpdateMainIRQLine();
 			break;
 
 		case 0x4212:	// HVBJOY
@@ -1163,6 +1185,7 @@ SnesSystem::SnesSystem()
 	m_DMAC.SetSDD1(&m_SDD1);
 
 	m_bSDD1 = FALSE;
+	m_bSA1IRQ = FALSE; /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
 	m_bSuperWildCard = FALSE; /* AURORA_SWC_FLOPPY_V1_20260831 */
 
 	// setup ppu
@@ -1221,6 +1244,9 @@ void SnesSystem::Reset()
 	m_GSU.Reset();
 
 	m_SDD1.Reset();
+
+	if (m_SA1.IsActive())
+		m_SA1.Reset();
 
 	// So' o cartucho com S-RTC deve tocar o relogio do host (time/gmtime).
 	// Antes isso rodava no boot de TODO jogo -> se time()/gmtime() falhar no
@@ -1332,6 +1358,8 @@ void SnesSystem::SoftReset()
     m_CX4.Reset();
     m_GSU.Reset();
     m_SDD1.Reset();
+    if (m_SA1.IsActive())
+        m_SA1.Reset();
 
     /*
      * Do not randomize or clear main RAM/SRAM here.
@@ -1366,6 +1394,8 @@ void SnesSystem::SetSnesRom(SnesRom *pRom)
 		m_SWC.Shutdown();
 		m_bSuperWildCard = FALSE;
 	}
+	m_SA1.Detach(); /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
+	m_bSA1IRQ = FALSE;
 	if (m_pRom)
 	{
 		// disconnect from current rom
@@ -1490,7 +1520,8 @@ Bool SnesSystem::InsertSuperWildCardCartridge(SnesRom *pRom)
         return FALSE;
 
     if (pRom->m_eMapping != SNROM_MAPPING_LOROM &&
-        pRom->m_eMapping != SNROM_MAPPING_HIROM)
+        pRom->m_eMapping != SNROM_MAPPING_HIROM &&
+        pRom->m_eMapping != SNROM_MAPPING_EXLOROM)
         return FALSE;
 
     /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
@@ -1501,7 +1532,8 @@ Bool SnesSystem::InsertSuperWildCardCartridge(SnesRom *pRom)
         pRom->GetBytes(),
         (Int32)pRom->m_eMapping,
         pRom->GetSRAMBytes(),
-        (pRom->m_Flags & SNROM_FLAG_SAVERAM) ? TRUE : FALSE);
+        (pRom->m_Flags & SNROM_FLAG_SAVERAM) ? TRUE : FALSE,
+        pRom->m_Flags);
     if (ok)
     {
         /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831
@@ -1591,6 +1623,28 @@ void SnesSystem::RescheduleLineIRQ(Bool bAllowImmediate)
 	SNCPUAbort(&m_Cpu);
 }
 #endif
+
+/* AURORA_SA1_V1_SNES9X_LOGIC_20260902
+ * Preserve all existing IRQ sources when one device clears its own latch. */
+void SnesSystem::UpdateMainIRQLine(void)
+{
+    Bool bPending = (m_IO.m_Regs.timeup & 0x80) ? TRUE : FALSE;
+    if (m_bSuperFX && m_GSU.IrqPending()) bPending = TRUE;
+    if (m_bSA1IRQ) bPending = TRUE;
+    SNCPUSignalIRQ(&m_Cpu, bPending ? 1 : 0);
+}
+
+void SnesSystem::SetSA1IRQ(Bool bPending)
+{
+    m_bSA1IRQ = bPending;
+    UpdateMainIRQLine();
+}
+
+void SnesSystem::MarkSA1BWRAMDirty(void)
+{
+    if (m_bSuperWildCard && m_SWC.HasExternalCartridge())
+        m_SWC.MarkExternalCartridgeSRAMDirty();
+}
 
 void SnesSystem::ExecuteCPU(Int32 nCycles)
 {
@@ -1706,7 +1760,8 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
 					}
 				}
 
-                SNCPUNMI(&m_Cpu);
+                if (!m_SA1.EnterMainNMIOverride(&m_Cpu))
+                    SNCPUNMI(&m_Cpu);
                 // clear NMI edge signal
                 m_Cpu.uSignal&= ~SNCPU_SIGNAL_NMIEDGE;
             } else
@@ -1714,7 +1769,8 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
             {
                 // attempt irq
                 // irqs will always be attempted until signal has been cleared
-                SNCPUIRQ(&m_Cpu);
+                if (!m_SA1.EnterMainIRQOverride(&m_Cpu))
+                    SNCPUIRQ(&m_Cpu);
             } else
             if (m_Cpu.uSignal & SNCPU_SIGNAL_RESET)
             {
@@ -1733,6 +1789,17 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
         if (m_bLineIRQActive && m_bLineIRQReschedule)
             break;
 #endif
+    }
+
+    if (m_SA1.IsActive())
+    {
+        Int32 nElapsed = nCycles;
+#if SNES_HVIRQ_RESCHEDULE
+        if (m_bLineIRQActive && m_bLineIRQReschedule && m_Cpu.Cycles > 0)
+            nElapsed -= m_Cpu.Cycles;
+#endif
+        if (nElapsed > 0)
+            m_SA1.Run(nElapsed);
     }
 }
 

@@ -832,8 +832,21 @@ void SnesRom::SetCartInfo(SNRomInfoT *pCartInfo)
 		{
 			m_uSRAMSize = 0;
 		}
-		switch (pCartInfo->RomType)
-		{
+		/* AURORA_SA1_V1_SNES9X_LOGIC_20260902
+	 * Snes9x's cartridge classifier uses IDs $3423/$3523.  Do this before
+	 * the legacy RomType-only switch so $34/$35 are not mistaken for a
+	 * generic RAM layout. */
+	if (pCartInfo->RomMakeup == 0x23 &&
+	    (pCartInfo->RomType == 0x34 || pCartInfo->RomType == 0x35))
+	{
+		m_Flags = SNROM_FLAG_ROM | SNROM_FLAG_SA1 |
+		    ((pCartInfo->RomType == 0x35) ? SNROM_FLAG_SAVERAM : SNROM_FLAG_RAM);
+		return;
+	}
+
+	switch (pCartInfo->RomType)
+	{
+
 		case 0:
 		case 53:
 			m_Flags		 = SNROM_FLAG_ROM;

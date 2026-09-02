@@ -58,7 +58,7 @@ public:
     /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901 */
     Bool SetExternalCartridge(const Uint8 *pRom, Uint32 nRomBytes,
                               Int32 iMapping, Uint32 nSramBytes,
-                              Bool bBatterySRAM);
+                              Bool bBatterySRAM, Uint32 uFlags);
     void ClearExternalCartridge();
     Bool HasExternalCartridge() const { return m_pCartRom != NULL; }
     Uint32 GetExternalCartridgeSRAMBytes() const { return m_nCartSRAMBytes; }
@@ -77,6 +77,16 @@ public:
     /* AURORA_SWC_MEDIA_FLOW_V2_20260902 */
     Bool IsFirmwareMode() const
         { return m_bActive && m_uSystemMode == 0; }
+    Uint8 GetSystemMode() const { return m_uSystemMode; }
+    Uint8 GetParallelMode() const { return m_uParallel; }
+    Uint32 GetExternalCartridgeFlags() const { return m_uCartFlags; }
+    Int32 GetExternalCartridgeMapping() const { return m_iCartMapping; }
+    const Uint8 *GetExternalCartridgeData() const { return m_pCartRom; }
+    Uint32 GetExternalCartridgeBytes() const { return m_nCartBytes; }
+    void MarkExternalCartridgeSRAMDirty()
+        { if (m_pCartSRAM && m_bCartSRAMBattery) m_bCartSRAMDirty = TRUE; }
+    const Uint8 *GetDRAMData() const { return m_pDRAM; }
+    Uint32 GetDRAMBytes() const { return m_nDRAMBytes; }
     Bool IsSuperMagicom() const
         { return m_bActive && m_eModel == MODEL_MAGICOM; }
     ModelE GetModel() const { return m_eModel; }
@@ -143,6 +153,7 @@ private:
     const Uint8 *m_pCartRom; /* AURORA_SWC_FLOPPY_V5_20260831 */
     Uint32 m_nCartBytes;
     Int32 m_iCartMapping;
+    Uint32 m_uCartFlags; /* AURORA_SWC_DONOR_CART_V1_20260902 */
 
     /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
      * Separate physical Game Pak RAM from the copier's own 32 KiB B-RAM. */
@@ -292,6 +303,7 @@ private:
         Uint8 bank, Uint16 addr, Uint8 *pData) const;
     Bool WriteExternalCartridgeSRAM(
         Uint8 bank, Uint16 addr, Uint8 uData);
+    Bool ExternalCartridgeIsDonor() const;
 
     /* AURORA_FRONT_MODE0_PAGEBUS_V10_9_20260831 */
     Bool ReadExternalPage(Uint8 bank, Uint16 addr, Uint8 *pData) const;

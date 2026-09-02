@@ -2416,6 +2416,7 @@ static const Char *_MainLoopStateGetUnsupportedChip(Uint32 uFlags)
      * cartridge cannot fit that envelope safely. */
     if (uFlags & SNROM_FLAG_GAMEBOY) return "Super Game Boy";
     if (uFlags & SNROM_FLAG_DSP3)    return "DSP-3";
+    if (uFlags & SNROM_FLAG_SA1)     return "SA-1"; /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
 
     if ((uFlags & SNROM_FLAG_SUPERFX) &&
         (!_pSnes || !_pSnes->CanSerializeSpecialChipState()))

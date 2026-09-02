@@ -660,6 +660,7 @@ SRCS := \
 	src/snes/core/snio.cpp \
 	src/snes/core/snmask128.cpp \
 	src/snes/core/snmemmap.cpp \
+	src/snes/core/snsa1.cpp \
 	src/snes/core/snswc.cpp \
 	src/snes/ppu/snppubg.cpp \
 	src/snes/ppu/snppublend_gs.cpp \

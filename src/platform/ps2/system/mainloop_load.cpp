@@ -2140,12 +2140,6 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
 {
     CFileIO romfile;
     Emu::Rom::LoadErrorE eError;
-    const Uint32 specialMask =
-        SNROM_FLAG_DSP1 | SNROM_FLAG_SUPERFX | SNROM_FLAG_GAMEBOY |
-        SNROM_FLAG_DSP2 | SNROM_FLAG_OBC1 | SNROM_FLAG_CX4 |
-        SNROM_FLAG_SDD1 | SNROM_FLAG_SRTC |
-        SNROM_FLAG_DSP3 | SNROM_FLAG_DSP4;
-
     if (!_pSnes || !_pSnes->IsSuperWildCard() ||
         !pPath || !*pPath || !_pSnesRom)
         return FALSE;
@@ -2186,15 +2180,6 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
     {
         _pSnesRom->Unload();
         MainLoopStatusPrintf(180, "Invalid SNES cartridge");
-        return FALSE;
-    }
-
-    if (_pSnesRom->m_eMapping == SNROM_MAPPING_EXLOROM ||
-        (_pSnesRom->m_Flags & specialMask))
-    {
-        _pSnesRom->Unload();
-        MainLoopStatusPrintf(
-            210, "Unsupported mapper/coprocessor cartridge");
         return FALSE;
     }
 
