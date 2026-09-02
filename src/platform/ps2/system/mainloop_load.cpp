@@ -2262,31 +2262,54 @@ static Bool _MainLoopSwcCartStem(char *pOut, Int32 nOutBytes)
 {
     const char *pName;
     const char *pExt;
+    const char *pSource;
+    Bool bDiskStem = FALSE;
     size_t n;
 
     if (!pOut || nOutBytes <= 1)
         return FALSE;
 
-    /* AURORA_SWC_D88_ONLY_V5_20260901: bare loader media is Dummy_N.d88. */
-    if (!s_SwcExternalCartPath[0])
+    pSource = s_SwcExternalCartPath;
+
+    /* AURORA_SWC_BROWSER_DISK_STEM_V1_20260902:
+     * With no donor/external cartridge, inherit the currently mounted D88
+     * family instead of creating Dummy_N.  GAME_3.d88 therefore continues
+     * as GAME_4.d88 (subject to the normal first-free numbered scan). */
+    if (!pSource[0])
     {
-        int nChars = snprintf(pOut, (size_t)nOutBytes, "%s", "Dummy");
-        return nChars >= 0 && nChars < nOutBytes ? TRUE : FALSE;
+        pSource = (_pSnes && _pSnes->IsSuperWildCard())
+                    ? _pSnes->GetSuperWildCardDiskPath()
+                    : NULL;
+        if (!pSource || !*pSource)
+        {
+            int nChars = snprintf(pOut, (size_t)nOutBytes, "%s", "Dummy");
+            return nChars >= 0 && nChars < nOutBytes ? TRUE : FALSE;
+        }
+        bDiskStem = TRUE;
     }
 
-    pName = _MainLoopSwcBaseName(s_SwcExternalCartPath);
+    pName = _MainLoopSwcBaseName(pSource);
     if (!pName || !*pName)
         return FALSE;
 
     pExt = strrchr(pName, '.');
     n = pExt ? (size_t)(pExt - pName) : strlen(pName);
+
+    if (bDiskStem)
+    {
+        size_t end = n;
+        while (end > 0 && pName[end - 1] >= '0' && pName[end - 1] <= '9')
+            --end;
+        if (end < n && end > 0 && pName[end - 1] == '_')
+            n = end - 1;
+    }
+
     if (!n || n >= (size_t)nOutBytes)
         return FALSE;
 
     memcpy(pOut, pName, n);
     pOut[n] = 0;
 
-    /* AURORA_SWC_MEGA_V9_20260831: FAT-safe host filename. */
     for (size_t i = 0; i < n; ++i)
     {
         unsigned char c = (unsigned char)pOut[i];

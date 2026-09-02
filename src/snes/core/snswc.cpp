@@ -2374,25 +2374,12 @@ Bool SNSuperWildCard::ReadMode0(Uint8 bank, Uint16 addr, Uint8 *pData,
     {
         Uint8 value = m_bIRQ ? 0x80 : 0;
 
-        /* AURORA_D88_RAM_IO_PERF_V1_5_MULTIDISK_20260901
-         * C000 bit6 is the physical INDEX line used by the SWC BIOS as
-         * Disk Insert Check. A split file that says "more" must not let
-         * the already-inserted medium satisfy the next prompt. */
-        if (m_bSplitNextMediaRequired &&
-            m_FdcPhase == FDC_PHASE_COMMAND &&
-            m_nCommand == 0)
-        {
-            m_bSplitNextMediaRequired = FALSE;
-            m_bSplitAwaitingMediaSwap = TRUE;
-            m_uIndexPollCounter = 0;
-        }
-
-        if (m_bSplitAwaitingMediaSwap)
-        {
-            value |= 0x40;
-            *pData = value;
-            return TRUE;
-        }
+        /* AURORA_SWC_SPLIT_MEDIA_FLOW_CURE_V1_20260902
+         * Header bit 6 means another logical SWC split file follows.
+         * It is not a physical-floppy eject request. Keep C000/INDEX tied to
+         * the mounted FDC/media state; the BIOS/FAT decides when an actual
+         * disk swap is necessary. This remains valid if media is formatted
+         * 18 -> 20 SPT or 20 -> 18 SPT. */
 
         /* AURORA_FRONT_FDC_BYTEFLOW_V10_6_20260831
          * 0x100+N is the transient hot-eject sentinel installed by SwapDisk.

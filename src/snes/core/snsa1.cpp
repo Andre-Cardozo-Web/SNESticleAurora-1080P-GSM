@@ -1190,7 +1190,35 @@ void SNSA1::Run(Int32 nMainMasterCycles)
     g_SnesCpuSlowCycle = SNCPU_CYCLE_SLOW;
 
     SNCPUAddCycles(&m_Cpu, nSA1);
-    SNCPUExecute(&m_Cpu);
+
+    /* AURORA_SA1_BOUNDED_EXECUTOR_V4_20260902
+     * Preserve the same SA-1 cycle budget, but return to the C-CPU
+     * dispatcher at instruction boundaries. SA-1 software changes Super MMC,
+     * MMIO and WAI/STP state while it runs; a monolithic host batch can hide
+     * those transitions until too late and may pin the EE in a bad path.
+     *
+     * This is SA-1-only. Normal S-CPU execution is untouched.
+     */
+    while (m_Cpu.Cycles > 0)
+    {
+        Int32 before = m_Cpu.Cycles;
+
+        ServiceInterrupts();
+        if (m_Cpu.uSignal & (SNCPU_SIGNAL_WAI | SNCPU_SIGNAL_STP))
+        {
+            m_Cpu.Cycles = 0;
+            break;
+        }
+
+        if (!SNCPUExecuteOne(&m_Cpu))
+            break;
+
+        /* A valid execution step must consume clocks. If an unexpected
+         * opcode/trap path makes no progress, consume one fast quantum so
+         * the SA-1 path cannot hold the PS2 main thread forever. */
+        if (m_Cpu.Cycles >= before)
+            SNCPUConsumeCycles(&m_Cpu, SNCPU_CYCLE_FAST);
+    }
 
     g_SnesCpuInternalCycle = oldInternal;
     g_SnesCpuSlowCycle = oldSlow;
