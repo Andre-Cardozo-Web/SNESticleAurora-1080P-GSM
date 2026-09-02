@@ -74,6 +74,9 @@ public:
     Bool IsDiskWritable() const { return m_pDisk != NULL && m_bDiskWritable; }
 
     Bool IsActive() const { return m_bActive; }
+    /* AURORA_SWC_MEDIA_FLOW_V2_20260902 */
+    Bool IsFirmwareMode() const
+        { return m_bActive && m_uSystemMode == 0; }
     Bool IsSuperMagicom() const
         { return m_bActive && m_eModel == MODEL_MAGICOM; }
     ModelE GetModel() const { return m_eModel; }

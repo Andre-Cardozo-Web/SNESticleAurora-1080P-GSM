@@ -2147,9 +2147,22 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
         SNROM_FLAG_DSP3 | SNROM_FLAG_DSP4;
 
     if (!_pSnes || !_pSnes->IsSuperWildCard() ||
-        _pSnes->HasSuperWildCardCartridge() ||
         !pPath || !*pPath || !_pSnesRom)
         return FALSE;
+
+    /* AURORA_SWC_MEDIA_FLOW_V2_20260902 */
+    if (_pSnes->HasSuperWildCardCartridge())
+    {
+        if (!_pSnes->IsSuperWildCardFirmwareMode())
+            return FALSE;
+
+        (void)_MainLoopForceCheckSRAM();
+        (void)_MainLoopSaveSRAM(TRUE);
+        _MainLoopSwcCartSRAMDetach();
+        _pSnes->EjectSuperWildCardCartridge();
+        _pSnesRom->Unload();
+        s_SwcExternalCartPath[0] = 0;
+    }
 
     /* AURORA_D88_RAM_IO_PERF_V1_1_20260901
      * Two renders cover both GS buffers before synchronous work. */
@@ -2161,7 +2174,7 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
 
     if (!romfile.Open(pPath, "rb"))
     {
-        MainLoopStatusPrintf(180, "SWC: cannot open cartridge");
+        MainLoopStatusPrintf(180, "Cannot open cartridge");
         return FALSE;
     }
 
@@ -2172,7 +2185,7 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
     if (eError != Emu::Rom::LOADERROR_NONE)
     {
         _pSnesRom->Unload();
-        MainLoopStatusPrintf(180, "SWC: invalid SNES cartridge");
+        MainLoopStatusPrintf(180, "Invalid SNES cartridge");
         return FALSE;
     }
 
@@ -2181,14 +2194,14 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
     {
         _pSnesRom->Unload();
         MainLoopStatusPrintf(
-            210, "SWC: unsupported mapper/coprocessor cartridge");
+            210, "Unsupported mapper/coprocessor cartridge");
         return FALSE;
     }
 
     if (!_pSnes->InsertSuperWildCardCartridge(_pSnesRom))
     {
         _pSnesRom->Unload();
-        MainLoopStatusPrintf(180, "SWC: cartridge insertion failed");
+        MainLoopStatusPrintf(180, "Cartridge insertion failed");
         return FALSE;
     }
 
@@ -2210,19 +2223,25 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
         struct stat AutoDiskStat;
 
         if (_MainLoopSwcBuildCartDiskPath(
-                AutoDiskPath, sizeof(AutoDiskPath), 1) &&
-            stat(AutoDiskPath, &AutoDiskStat) != 0)
+                AutoDiskPath, sizeof(AutoDiskPath), 1))
         {
-            MainLoopStatusPrintf(180, "Creating disk 1...");
-            MainLoopRender();
-            MainLoopRender();
+            Bool bExists =
+                stat(AutoDiskPath, &AutoDiskStat) == 0 &&
+                !S_ISDIR(AutoDiskStat.st_mode);
 
-            if (!_MainLoopSwcCreateFat12D88(AutoDiskPath))
+            if (!bExists)
             {
-                MainLoopStatusPrintf(
-                    210,
-                    "Copier: cartridge inserted; could not create _1 disk");
-                return TRUE;
+                MainLoopStatusPrintf(180, "Creating disk 1...");
+                MainLoopRender();
+                MainLoopRender();
+
+                if (!_MainLoopSwcCreateFat12D88(AutoDiskPath))
+                {
+                    MainLoopStatusPrintf(
+                        210,
+                        "Cartridge inserted; could not create _1 disk");
+                    return TRUE;
+                }
             }
 
             MainLoopStatusPrintf(180, "Inserting disk 1...");
@@ -2231,16 +2250,17 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
 
             if (!_pSnes->SwapSuperWildCardDisk(AutoDiskPath))
             {
-                remove(AutoDiskPath);
+                if (!bExists)
+                    remove(AutoDiskPath);
                 MainLoopStatusPrintf(
                     210,
-                    "Copier: cartridge inserted; _1 disk insert failed");
+                    "Cartridge inserted; _1 disk insert failed");
                 return TRUE;
             }
 
             MainLoopStateOnRomChanged();
             MainLoopStatusPrintf(
-                180, "Copier: cartridge + %s inserted",
+                180, "Cartridge + %s inserted",
                 _MainLoopSwcBaseName(AutoDiskPath));
             return TRUE;
         }
@@ -2621,7 +2641,7 @@ Bool MainLoopSwcCreateNextDisk(void)
 
     if (nDisk >= 10000)
     {
-        MainLoopStatusPrintf(180, "SWC: too many numbered disks");
+        MainLoopStatusPrintf(180, "Too many numbered disks");
         return FALSE;
     }
 
@@ -2631,13 +2651,13 @@ Bool MainLoopSwcCreateNextDisk(void)
 
     if (!_MainLoopSwcCreateFat12D88(Path))
     {
-        MainLoopStatusPrintf(180, "SWC: could not create disk image");
+        MainLoopStatusPrintf(180, "Could not create disk image");
         return FALSE;
     }
 
     MainLoopStatusPrintf(
         150,
-        "Copier: created disk %u: %s",
+        "Created disk %u: %s",
         nDisk,
         _MainLoopSwcBaseName(Path));
     return TRUE;
@@ -2656,7 +2676,7 @@ static Bool _MainLoopSwcInsertDisk(const char *pPath)
     if (!pExt || strcasecmp(pExt, ".d88") != 0)
     {
         MainLoopStatusPrintf(
-            180, "SWC: unsupported D88 floppy image");
+            180, "Unsupported D88 floppy image");
         return FALSE;
     }
 
@@ -2867,7 +2887,7 @@ Bool MainLoopSwcSwapNextDisk(void)
             S_ISDIR(FirstStatus.st_mode))
         {
             MainLoopStatusPrintf(
-                120, "SWC: no existing disk to insert");
+                120, "No existing disk to insert");
             return FALSE;
         }
 
@@ -2893,10 +2913,10 @@ Bool MainLoopSwcSwapNextDisk(void)
         {
             unsigned shown;
             if (_MainLoopSwcNumberedDiskIndex(FirstPath, &shown))
-                MainLoopStatusPrintf(90, "SWC: disk %u inserted", shown);
+                MainLoopStatusPrintf(90, "Disk %u inserted", shown);
             else
                 MainLoopStatusPrintf(
-                    90, "SWC: floppy inserted: %s",
+                    90, "Floppy inserted: %s",
                     _MainLoopSwcBaseName(FirstPath));
         }
         return TRUE;
@@ -2905,7 +2925,7 @@ Bool MainLoopSwcSwapNextDisk(void)
     pExt = strrchr(pCurrent, '.');
     if (!pExt || strcasecmp(pExt, ".d88"))
     {
-        MainLoopStatusPrintf(120, "SWC: current disk is not .d88");
+        MainLoopStatusPrintf(120, "Current disk is not .d88");
         return FALSE;
     }
 
@@ -2916,7 +2936,7 @@ Bool MainLoopSwcSwapNextDisk(void)
 
     if (pUnderscore <= pCurrent || pUnderscore[-1] != '_')
     {
-        MainLoopStatusPrintf(150, "SWC: disk name must end in _1.d88, _2.d88, ...");
+        MainLoopStatusPrintf(150, "Disk name must end in _1.d88, _2.d88, ...");
         return FALSE;
     }
 
@@ -2930,7 +2950,7 @@ Bool MainLoopSwcSwapNextDisk(void)
         !_MainLoopSwcNumberedDiskIndex(pCurrent, &nDisk))
     {
         MainLoopStatusPrintf(
-            150, "SWC: disk name must end in _1.d88, _2.d88, ...");
+            150, "Disk name must end in _1.d88, _2.d88, ...");
         return FALSE;
     }
 
@@ -2986,7 +3006,7 @@ Bool MainLoopSwcSwapNextDisk(void)
             if (!bFoundFirst)
             {
                 MainLoopStatusPrintf(
-                    120, "Copier: no numbered floppy image found");
+                    120, "No numbered floppy image found");
                 return FALSE;
             }
         }
@@ -3017,10 +3037,10 @@ Bool MainLoopSwcSwapNextDisk(void)
     {
         unsigned shown;
         if (_MainLoopSwcNumberedDiskIndex(NextPath, &shown))
-            MainLoopStatusPrintf(90, "SWC: disk %u inserted", shown);
+            MainLoopStatusPrintf(90, "Disk %u inserted", shown);
         else
             MainLoopStatusPrintf(
-                90, "SWC: floppy inserted: %s",
+                90, "Floppy inserted: %s",
                 _MainLoopSwcBaseName(NextPath));
     }
     return TRUE;
@@ -3111,7 +3131,7 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     {
         if (!_MainLoopSwcDiskFileLooksValid(pFileName))
         {
-            MainLoopModalPrintf(60*4,"Copier: unsupported or invalid D88 floppy image");
+            MainLoopModalPrintf(60*4,"Unsupported or invalid D88 floppy image");
             return FALSE;
         }
         /* AURORA_SWC_D88_ONLY_V5_20260901: bare D88 retains DSK.SFC fallback. */
@@ -3149,7 +3169,8 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         return _MainLoopSwcInsertDisk(pFileName);
     }
     if (_pSnes && _pSnes->IsSuperWildCard() &&
-        !_pSnes->HasSuperWildCardCartridge() &&
+        (!_pSnes->HasSuperWildCardCartridge() ||
+         _pSnes->IsSuperWildCardFirmwareMode()) &&
         eType == MAINLOOP_ENTRYTYPE_SNESROM &&
         !_MainLoopSwcPathIsFirmware(pFileName) &&
         !_MainLoopMagicomPathIsFirmware(pFileName))

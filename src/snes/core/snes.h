@@ -62,6 +62,8 @@ public:
     void    ShutdownSuperWildCard();
     /* Legacy predicate intentionally means active classic Front copier. */
     Bool    IsSuperWildCard() const { return m_bSuperWildCard; }
+    Bool    IsSuperWildCardFirmwareMode() const
+        { return m_bSuperWildCard && m_SWC.IsFirmwareMode(); }
     Bool    IsSuperMagicom() const { return m_bSuperWildCard && m_SWC.IsSuperMagicom(); }
     const Char *GetFrontCopierName() const { return m_SWC.GetModelName(); }
     const Char *GetSuperWildCardDiskPath() const { return m_SWC.GetDiskPath(); }

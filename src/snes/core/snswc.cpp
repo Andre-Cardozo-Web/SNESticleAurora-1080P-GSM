@@ -218,6 +218,7 @@ static void _AuroraD88Put16(Uint8 *p, Uint16 v)
 /* AURORA_D88_RAM_IO_PERF_V1_5_MULTIDISK_20260901 */
 /* AURORA_D88_RAM_IO_PERF_V1_5_MULTIDISK_20260901
  * AURORA_D88_V1_6_MULTIDISK_1600_20260901
+ * AURORA_SWC_MULTIDISK_SIZE_FINALFLAG_V1_20260902
  *
  * Official 512-byte SWC program header:
  *   bytes 0-1 = number of 8-KiB blocks in this split
@@ -225,10 +226,11 @@ static void _AuroraD88Put16(Uint8 *p, Uint16 v)
  *   3-7       = reserved zero
  *   8-9       = AA BB
  *   10        = 04 program
- *   11-511    = reserved zero
+ *   11-511    = copier/tool metadata or reserved data
  *
- * Requiring the complete reserved area prevents ordinary ROM payload data
- * from ever being mistaken for another split header. */
+ * Real SWC files and tools may use the otherwise reserved tail. Requiring it
+ * all to be zero rejected valid size/split headers and disabled final-media
+ * accounting. Signature + reserved prefix + physical DRAM bound are strict. */
 static Bool _AuroraSwcProgramSplitHeader(
     const Uint8 *pSector,
     Bool *pNeedsNext,
@@ -244,6 +246,7 @@ static Bool _AuroraSwcProgramSplitHeader(
         ((Uint16)pSector[1] << 8);
 
     if (!blocks ||
+        blocks > ((4u * 1024u * 1024u) / 8192u) ||
         pSector[3] != 0 ||
         pSector[4] != 0 ||
         pSector[5] != 0 ||
@@ -254,9 +257,6 @@ static Bool _AuroraSwcProgramSplitHeader(
         pSector[10] != 0x04)
         return FALSE;
 
-    for (Uint16 i = 11; i < 512; ++i)
-        if (pSector[i] != 0)
-            return FALSE;
 
     *pBlocks = blocks;
     *pNeedsNext =
@@ -1060,6 +1060,8 @@ candidate_failed:
 
 Bool SNSuperWildCard::SwapDisk(const Char *pDiskPath)
 {
+    /* AURORA_SWC_MEDIA_FLOW_V2_20260902 */
+    Bool bWasAwaitingSplitMedia = m_bSplitAwaitingMediaSwap;
     Uint8 oldCylinder = m_uCylinder;
     Uint8 oldHead = m_uHead;
     Uint8 oldDrive = m_uDrive;
@@ -1087,7 +1089,9 @@ Bool SNSuperWildCard::SwapDisk(const Char *pDiskPath)
      * inactive first so the Front BIOS observes disk removal before the new
      * medium starts producing index pulses. No frame timer or state-format
      * change is required. */
-    m_uIndexPollCounter = 0x100u + 32u;
+    m_uIndexPollCounter = bWasAwaitingSplitMedia
+        ? 0u
+        : 0x100u + 32u;
     return TRUE;
 }
 
@@ -1507,11 +1511,6 @@ Bool SNSuperWildCard::FdcStoreCurrentSector()
         (Uint32)off + SWC_SECTOR_BYTES > m_uD88DiskBytes)
         return FALSE;
 
-    memcpy(
-        m_pD88Image + (Uint32)off,
-        m_Sector,
-        SWC_SECTOR_BYTES);
-
     if (_AuroraSwcProgramSplitHeader(
             m_Sector, &bNeedsNext, &blocks))
     {
@@ -1536,11 +1535,23 @@ Bool SNSuperWildCard::FdcStoreCurrentSector()
                 (m_nCartBytes + 8191u) / 8192u;
 
             if (m_uSplitSavedBlocks >= targetBlocks)
+            {
                 bNeedsNext = FALSE;
+
+                /* The transient handshake is not authoritative: persist the
+                 * final-part decision in the SWC header stored on the D88. */
+                m_Sector[2] &= (Uint8)~0x40u;
+            }
         }
 
         m_bSplitNextMediaRequired = bNeedsNext;
     }
+
+    /* Copy after the header correction: RAM mirror and D88 agree. */
+    memcpy(
+        m_pD88Image + (Uint32)off,
+        m_Sector,
+        SWC_SECTOR_BYTES);
 
     index = (Uint32)m_uDataC * 2u + m_uDataH;
     if (index >= D88_TRACK_ACTIVE ||
