@@ -1,3 +1,4 @@
+/* AURORA_FINAL_V1_7_D88_DUAL_SRAM_PERSIST_20260901 */
 /* mainloop_menu_runtime.cpp
  *
  * Hosts the runtime menu helpers used by MainLoopRender() and the input
@@ -34,6 +35,8 @@
 #include "memcard.h"
 #include "uiScreen.h"
 #include "mainloop_bgm.h"
+#include "pce/beetle/pce_bridge.h" /* AURORA_PCE_CD_MENU_IO_QUIESCE_V1_20260901 */
+#include "sega/picodrive/picodrive_bridge.h" /* AURORA_SEGACD_MENU_IO_QUIESCE_V1_20260901 */
 #include "audmixbuffer.h"
 
 extern "C" {
@@ -49,6 +52,17 @@ extern "C" {
 static Bool s_sramSavePending = FALSE;
 static Bool s_sramSaveActive = FALSE;
 static Int32 s_sramSaveDelay = 0;
+
+/* AURORA_FINAL_V1_3_NORMAL_MENU_BGM_SESSION_20260901
+ * _bMenu is also used by isolated quick-state/device/format prompts, so it
+ * cannot identify a real pause-menu BGM session. Only _MenuEnable(TRUE)
+ * owns this flag. */
+static Bool s_NormalMenuBgmSession = FALSE;
+
+Bool MainLoopNormalMenuBgmSessionActive(void)
+{
+    return s_NormalMenuBgmSession;
+}
 
 /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */
 Bool MainLoopSramSaveBusy(void)
@@ -175,12 +189,72 @@ void MainLoopAudioResumeGame(void)
     }
 }
 
+/* AURORA_FINAL_V1_1_UI_CD_STORAGE_BARRIER_20260901
+ *
+ * One frontend owner for CD transport quiescence. PCE CD and Sega CD are
+ * intentionally different cores and keep their native barriers; this helper
+ * only owns their UI lifetime and prevents duplicate/unconditional resumes.
+ */
+static Bool s_CdUiPceHeld = FALSE;
+static Bool s_CdUiSegaHeld = FALSE;
+
+Bool MainLoopCdUiQuiesce(void)
+{
+    if (s_CdUiPceHeld || s_CdUiSegaHeld)
+        return TRUE;
+
+    if (_pSystem == _pPce && PceBridge_IsDiscLoaded())
+    {
+        if (!PceBridge_QuiesceDiscIO())
+            return FALSE;
+        s_CdUiPceHeld = TRUE;
+        return TRUE;
+    }
+
+    if (_pSystem == _pSega && PicoDriveBridge_IsSegaCD())
+    {
+        if (!PicoDriveBridge_PrepareGameSwitch())
+            return FALSE;
+        s_CdUiSegaHeld = TRUE;
+        return TRUE;
+    }
+
+    return TRUE;
+}
+
+void MainLoopCdUiResume(void)
+{
+    /* Beetle keeps an explicit paused worker. PicoDrive private fileXio
+       transport was closed by its native barrier and automatically reopens
+       from the logical CDDA position on the next emulated frame. */
+    if (s_CdUiPceHeld)
+        PceBridge_ResumeDiscIO();
+
+    s_CdUiPceHeld = FALSE;
+    s_CdUiSegaHeld = FALSE;
+}
+
 void _MenuEnable(Bool bEnable)
 {
 	if (bEnable!=_bMenu)
 	{
 		if (bEnable)
 		{
+			/* AURORA_FINAL_V1_1_UI_CD_STORAGE_BARRIER_20260901
+			 * Normal menu storage/BGM work must never overlap either CD core's
+			 * private transport. Ownership is centralized so quick-state and the
+			 * one-time state-device chooser can share the exact same rule. */
+			if (!MainLoopCdUiQuiesce())
+			{
+				MainLoopStatusPrintf(
+					120, "CD I/O busy; menu deferred.");
+				return;
+			}
+
+			/* AURORA_FINAL_V1_3_NORMAL_MENU_BGM_SESSION_20260901
+			 * Arm only after the CD transport is known idle. */
+			s_NormalMenuBgmSession = TRUE;
+
 			/* Publish the menu state before any storage RPC. MainLoopProcess
 			   will render two frames, then run the pending save below. */
 			_bMenu = TRUE;
@@ -189,7 +263,10 @@ void _MenuEnable(Bool bEnable)
 
 			/* Preserve a write performed in the <30-frame checksum window. */
 			_MainLoopForceCheckSRAM();
-			if (_MainLoopHasSRAM() && _MainLoop_SRAMUpdated)
+			if (_MainLoopHasSRAM() &&
+                (_MainLoop_SRAMUpdated ||
+                 (_pSystem == _pSnes && _pSnes &&
+                  _pSnes->IsSuperWildCard())))
 			{
 				s_sramSavePending = TRUE;
 				s_sramSaveDelay = 2;
@@ -203,8 +280,11 @@ void _MenuEnable(Bool bEnable)
 			   game directly while a save was queued for the previous ROM. */
 			s_sramSavePending = FALSE;
 			s_sramSaveDelay = 0;
+			s_NormalMenuBgmSession = FALSE;
 			_bMenu = FALSE;
 			BgmStop();
+			/* AURORA_FINAL_V1_1_UI_CD_STORAGE_BARRIER_20260901 */
+			MainLoopCdUiResume();
 			MainLoopAudioResumeGame();
 		}
 	}

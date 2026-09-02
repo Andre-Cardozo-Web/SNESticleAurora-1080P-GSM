@@ -680,6 +680,16 @@ int _MainLoopStateDeviceMenuEvent(
                 return 0;
         }
 
+        /* AURORA_FINAL_V1_1_UI_CD_STORAGE_BARRIER_20260901
+         * The chooser UI is intentionally instant. Quiesce only after X
+         * confirms a device, before state.cfg or state payload touches disk. */
+        if (!MainLoopCdUiQuiesce())
+        {
+                MainLoopStatusPrintf(
+                        120, "CD I/O busy; save deferred.");
+                return 1;
+        }
+
         MainLoopStateSetDevice(_MainLoop_StateDeviceMap[Parm1]);
         MainLoopStateSettingsSave();
 
@@ -689,6 +699,7 @@ int _MainLoopStateDeviceMenuEvent(
                 (int)MainLoopStateGetSlot() + 1
         );
         bOK = _MainLoopSaveState();
+        MainLoopCdUiResume();
         _MainLoopStateMenuRefresh();
 
         if (!bOK && MainLoopStateGetUnformattedCard() >= 0)
@@ -824,6 +835,7 @@ int _MainLoopMemCardFormatMenuEvent(
 {
         Char SaveDirectory[32];
         Bool bOK = FALSE;
+        Bool bCdIoHeld = FALSE; /* AURORA_FINAL_V1_2_STORAGE_CLOSURE_20260901 */
         CScreen *pNextScreen = NULL;
         Int32 iPort = _MainLoop_MemCardFormatPort;
 
@@ -839,9 +851,31 @@ int _MainLoopMemCardFormatMenuEvent(
                 return 1;
         }
 
+        /* AURORA_FINAL_V1_2_STORAGE_CLOSURE_20260901
+         * If this prompt came directly from gameplay (quick-save failure),
+         * the previous state attempt already released its temporary CD hold.
+         * Re-acquire only for the destructive storage transaction. If the
+         * prompt came from the normal menu, that menu already owns quiesce
+         * and must keep owning it across this nested screen. */
+        if (_MainLoop_MemCardFormatResumeGame)
+        {
+                if (!MainLoopCdUiQuiesce())
+                {
+                        MainLoopStatusPrintf(
+                                120, "CD I/O busy; format deferred.");
+                        return 1;
+                }
+                bCdIoHeld = TRUE;
+        }
+
         MainLoopModalPrintf(1, "Formatting mc%d:...", (int)iPort);
         if (!MemCardFormat(iPort))
         {
+                if (bCdIoHeld)
+                {
+                        MainLoopCdUiResume();
+                        bCdIoHeld = FALSE;
+                }
                 MainLoopStatusPrintf(
                         180,
                         "Could not format mc%d:.",
@@ -892,6 +926,12 @@ int _MainLoopMemCardFormatMenuEvent(
                                 (CScreen *)_MainLoop_pStateBrowserScreen;
                         bOK = TRUE;
                         break;
+        }
+
+        if (bCdIoHeld)
+        {
+                MainLoopCdUiResume();
+                bCdIoHeld = FALSE;
         }
 
         _MainLoopMemCardFormatPromptFinish(pNextScreen);

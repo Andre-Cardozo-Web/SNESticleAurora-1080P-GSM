@@ -18,7 +18,16 @@ SNSuperWildCard::SNSuperWildCard()
     m_pCartRom = NULL; /* AURORA_SWC_FLOPPY_V5_20260831 */
     m_nCartBytes = 0;
     m_iCartMapping = 0;
+
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901 */
+    m_pCartSRAM = NULL;
+    m_nCartSRAMBytes = 0;
+    m_bCartSRAMBattery = FALSE;
+    m_bCartSRAMDirty = FALSE;
     m_pDisk = NULL;
+    /* AURORA_SWC_D88_ONLY_V5_20260901 */
+    memset(m_D88TrackOffset, 0, sizeof(m_D88TrackOffset));
+    m_uD88DiskBytes = 0;
     m_DiskPath[0] = 0;
     m_LastError[0] = 0;
     m_bDiskWritable = FALSE;
@@ -40,44 +49,7 @@ void SNSuperWildCard::SetError(const Char *pText)
              pText ? pText : "unknown SWC error");
 }
 
-Bool SNSuperWildCard::DetectGeometry(long nBytes)
-{
-    /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: classic Magicom documented media set only. */
-    if (m_eModel == MODEL_MAGICOM &&
-        nBytes != 737280L && nBytes != 819200L &&
-        nBytes != 1474560L && nBytes != 1638400L)
-    {
-        SetError("Super Magicom supports raw 720K/800K/1.44M/1.6M media");
-        return FALSE;
-    }
 
-    struct GeometryT { long bytes; Int32 tracks, heads, spt; };
-    static const GeometryT kGeometry[] =
-    {
-        {  368640L, 40, 2,  9 }, /* 360 KiB */
-        {  737280L, 80, 2,  9 }, /* 720 KiB */
-        {  819200L, 80, 2, 10 }, /* 800 KiB */
-        { 1228800L, 80, 2, 15 }, /* 1.2 MiB */
-        { 1474560L, 80, 2, 18 }, /* 1.44 MiB */
-        { 1638400L, 80, 2, 20 }, /* 1.60 MiB */
-        { 1699840L, 83, 2, 20 }, /* 1.66 MiB copier format */
-        { 1720320L, 80, 2, 21 }  /* 1.68 MiB / 21-SPT */
-    };
-
-    for (Uint32 i = 0; i < sizeof(kGeometry) / sizeof(kGeometry[0]); ++i)
-    {
-        if (nBytes == kGeometry[i].bytes)
-        {
-            m_nTracks = kGeometry[i].tracks;
-            m_nHeads = kGeometry[i].heads;
-            m_nSectorsPerTrack = kGeometry[i].spt;
-            return TRUE;
-        }
-    }
-
-    SetError("unsupported floppy geometry (raw 360K/720K/800K/1.2M/1.44M/1.6M/1.66M/1.68M only)");
-    return FALSE;
-}
 
 /* AURORA_CLASSIC_MEMORY_MODE_V10_15B_20260831
  * Cumulative: accurate Mode-2 register mirror + classic firmware revisions.
@@ -211,11 +183,615 @@ Bool SNSuperWildCard::LoadFirmware(const Char *pPath)
     return TRUE;
 }
 
+/* AURORA_SWC_D88_ONLY_V5_20260901 */
+static Uint16 _AuroraD88Get16(const Uint8 *p)
+{
+    return (Uint16)p[0] | ((Uint16)p[1] << 8);
+}
+
+static Uint32 _AuroraD88Get32(const Uint8 *p)
+{
+    return (Uint32)p[0] |
+           ((Uint32)p[1] << 8) |
+           ((Uint32)p[2] << 16) |
+           ((Uint32)p[3] << 24);
+}
+
+static void _AuroraD88Put16(Uint8 *p, Uint16 v)
+{
+    p[0] = (Uint8)(v & 0xFF);
+    p[1] = (Uint8)((v >> 8) & 0xFF);
+}
+
+/* AURORA_SWC_D88_ONLY_V5_1_20260901:
+ * D88 mount validates sector-count geometry against the active copier. */
+Bool SNSuperWildCard::D88Probe(
+    FILE *pFile, long nBytes,
+    Int32 *pTracks, Int32 *pHeads, Int32 *pMaxSpt,
+    Uint32 *pOffsets, Uint32 *pDiskBytes,
+    Bool *pProtected)
+{
+    Uint8 header[D88_HEADER_MAX_BYTES];
+    Uint8 sh[D88_SECTOR_HEADER_BYTES];
+    Uint32 diskBytes;
+    Uint32 firstTrack = 0;
+    Uint32 prev = 0;
+    Uint32 tableCount;
+    Int32 tracks = 0, heads = 0, maxSpt = 0;
+
+    if (!pFile || nBytes < D88_HEADER_MIN_BYTES ||
+        !pTracks || !pHeads || !pMaxSpt ||
+        !pOffsets || !pDiskBytes || !pProtected)
+        return FALSE;
+
+    memset(header, 0, sizeof(header));
+
+    if (fseek(pFile, 0, SEEK_SET) != 0 ||
+        fread(
+            header,
+            1,
+            D88_HEADER_MIN_BYTES,
+            pFile) != D88_HEADER_MIN_BYTES)
+        return FALSE;
+
+    diskBytes = _AuroraD88Get32(header + 0x1C);
+
+    /* AURORA_SWC_D88_ONLY_V5_2_20260901:
+     * one D88 medium may become 2DD or 2HD after FORMAT. */
+    if (diskBytes != (Uint32)nBytes ||
+        (header[0x1B] != 0x10 && header[0x1B] != 0x20))
+        return FALSE;
+
+    for (Uint32 i = 0; i < D88_TRACK_ACTIVE; ++i)
+    {
+        Uint32 off = _AuroraD88Get32(header + 0x20 + i * 4);
+        if (off)
+        {
+            firstTrack = off;
+            break;
+        }
+    }
+
+    if (firstTrack == D88_HEADER_MIN_BYTES)
+    {
+        tableCount = 160;
+    }
+    else if (firstTrack == D88_HEADER_MAX_BYTES)
+    {
+        if (nBytes < D88_HEADER_MAX_BYTES ||
+            fseek(pFile, D88_HEADER_MIN_BYTES, SEEK_SET) != 0 ||
+            fread(
+                header + D88_HEADER_MIN_BYTES,
+                1,
+                D88_HEADER_MAX_BYTES - D88_HEADER_MIN_BYTES,
+                pFile) !=
+                D88_HEADER_MAX_BYTES - D88_HEADER_MIN_BYTES)
+            return FALSE;
+
+        tableCount = D88_TRACK_TABLE;
+    }
+    else
+    {
+        return FALSE;
+    }
+
+    memset(pOffsets, 0, sizeof(Uint32) * D88_TRACK_TABLE);
+
+    for (Uint32 i = 0; i < tableCount; ++i)
+    {
+        Uint32 off = _AuroraD88Get32(header + 0x20 + i * 4);
+
+        /* 80 cylinders x two heads is an intentional hard ceiling.
+         * Some D88 tools put diskBytes in unused tail entries, so accept
+         * that standard sentinel without treating it as a real track. */
+        if (i >= D88_TRACK_ACTIVE)
+        {
+            if (off != 0 && off != diskBytes)
+                return FALSE;
+            continue;
+        }
+
+        /* V5 models a complete inserted 80x2 physical medium. Missing
+         * track slots are rejected rather than guessed or synthesized. */
+        if (!off)
+            return FALSE;
+
+        if (off < firstTrack || off >= diskBytes ||
+            (prev && off <= prev))
+            return FALSE;
+
+        pOffsets[i] = off;
+        prev = off;
+    }
+
+    for (Uint32 i = 0; i < D88_TRACK_ACTIVE; ++i)
+    {
+        Uint32 start = pOffsets[i];
+        Uint32 end = diskBytes;
+        Uint32 pos;
+        Uint16 count;
+        Uint8 seen[256];
+
+        if (!start)
+            continue;
+
+        for (Uint32 j = i + 1; j < D88_TRACK_ACTIVE; ++j)
+        {
+            if (pOffsets[j])
+            {
+                end = pOffsets[j];
+                break;
+            }
+        }
+
+        if (end <= start ||
+            start + D88_SECTOR_HEADER_BYTES > end ||
+            fseek(pFile, (long)start, SEEK_SET) != 0 ||
+            fread(sh, 1, sizeof(sh), pFile) != sizeof(sh))
+            return FALSE;
+
+        count = _AuroraD88Get16(sh + 4);
+        if (!count || count > D88_MAX_SECTORS ||
+            !D88FormatSectorCountAllowed((Uint8)count))
+            return FALSE;
+
+        memset(seen, 0, sizeof(seen));
+        pos = start;
+
+        for (Uint16 k = 0; k < count; ++k)
+        {
+            Uint16 declared;
+            Uint16 bytes;
+
+            if (pos + D88_SECTOR_HEADER_BYTES > end ||
+                fseek(pFile, (long)pos, SEEK_SET) != 0 ||
+                fread(sh, 1, sizeof(sh), pFile) != sizeof(sh))
+                return FALSE;
+
+            declared = _AuroraD88Get16(sh + 4);
+            bytes = _AuroraD88Get16(sh + 14);
+
+            if (declared != count ||
+                sh[0] != (Uint8)(i >> 1) ||
+                sh[1] != (Uint8)(i & 1) ||
+                sh[2] == 0 || sh[2] > count ||
+                seen[sh[2]] ||
+                sh[3] != 2 ||
+                sh[6] != 0x00 || sh[7] != 0x00 || sh[8] != 0x00 ||
+                bytes != SWC_SECTOR_BYTES)
+                return FALSE;
+
+            seen[sh[2]] = 1;
+
+            pos += D88_SECTOR_HEADER_BYTES + bytes;
+            if (pos > end)
+                return FALSE;
+        }
+
+        for (Uint16 r = 1; r <= count; ++r)
+            if (!seen[r])
+                return FALSE;
+
+        {
+            Int32 c = (Int32)(i >> 1) + 1;
+            Int32 h = (Int32)(i & 1) + 1;
+            if (c > tracks) tracks = c;
+            if (h > heads) heads = h;
+            if ((Int32)count > maxSpt) maxSpt = count;
+        }
+    }
+
+    if (tracks != 80 || heads != 2 ||
+        !maxSpt || maxSpt > D88_MAX_SECTORS)
+        return FALSE;
+
+    *pTracks = tracks;
+    *pHeads = heads;
+    *pMaxSpt = maxSpt;
+    *pDiskBytes = diskBytes;
+    *pProtected = header[0x1A] ? TRUE : FALSE;
+
+    rewind(pFile);
+    return TRUE;
+}
+
+Bool SNSuperWildCard::D88FindSector(
+    Uint8 c, Uint8 h, Uint8 r, Uint8 n, long *pDataOffset)
+{
+    Uint32 index = (Uint32)c * 2u + h;
+    Uint32 start;
+    Uint32 end;
+    Uint32 pos;
+    Uint8 sh[D88_SECTOR_HEADER_BYTES];
+    Uint16 count;
+
+    if (!m_pDisk ||
+        index >= D88_TRACK_ACTIVE ||
+        !r || r > D88_MAX_SECTORS ||
+        !m_D88TrackOffset[index])
+        return FALSE;
+
+    start = m_D88TrackOffset[index];
+    end = m_uD88DiskBytes;
+
+    for (Uint32 j = index + 1; j < D88_TRACK_ACTIVE; ++j)
+    {
+        if (m_D88TrackOffset[j])
+        {
+            end = m_D88TrackOffset[j];
+            break;
+        }
+    }
+
+    if (fseek(m_pDisk, (long)start, SEEK_SET) != 0 ||
+        fread(sh, 1, sizeof(sh), m_pDisk) != sizeof(sh))
+        return FALSE;
+
+    count = _AuroraD88Get16(sh + 4);
+    if (!count || count > D88_MAX_SECTORS)
+        return FALSE;
+
+    pos = start;
+    for (Uint16 k = 0; k < count; ++k)
+    {
+        Uint16 bytes;
+
+        if (pos + D88_SECTOR_HEADER_BYTES > end ||
+            fseek(m_pDisk, (long)pos, SEEK_SET) != 0 ||
+            fread(sh, 1, sizeof(sh), m_pDisk) != sizeof(sh))
+            return FALSE;
+
+        bytes = _AuroraD88Get16(sh + 14);
+        if (bytes != SWC_SECTOR_BYTES)
+            return FALSE;
+
+        if (sh[0] == c && sh[1] == h &&
+            sh[2] == r && sh[3] == n)
+        {
+            if (pDataOffset)
+                *pDataOffset =
+                    (long)(pos + D88_SECTOR_HEADER_BYTES);
+            return TRUE;
+        }
+
+        pos += D88_SECTOR_HEADER_BYTES + bytes;
+        if (pos > end)
+            return FALSE;
+    }
+
+    return FALSE;
+}
+
+Uint8 SNSuperWildCard::D88TrackSectorCount(Uint8 c, Uint8 h)
+{
+    Uint32 index = (Uint32)c * 2u + h;
+    Uint8 sh[D88_SECTOR_HEADER_BYTES];
+    Uint16 count;
+
+    if (!m_pDisk ||
+        index >= D88_TRACK_ACTIVE ||
+        !m_D88TrackOffset[index])
+        return 0;
+
+    if (fseek(
+            m_pDisk,
+            (long)m_D88TrackOffset[index],
+            SEEK_SET) != 0 ||
+        fread(sh, 1, sizeof(sh), m_pDisk) != sizeof(sh))
+        return 0;
+
+    count = _AuroraD88Get16(sh + 4);
+    return (!count || count > D88_MAX_SECTORS)
+        ? 0 : (Uint8)count;
+}
+
+Uint8 SNSuperWildCard::D88TrackSlotCapacity(Uint8 c, Uint8 h)
+{
+    Uint32 index = (Uint32)c * 2u + h;
+    Uint32 start;
+    Uint32 end;
+    Uint32 entryBytes =
+        D88_SECTOR_HEADER_BYTES + SWC_SECTOR_BYTES;
+    Uint32 capacity;
+
+    if (!m_pDisk ||
+        index >= D88_TRACK_ACTIVE ||
+        !m_D88TrackOffset[index])
+        return 0;
+
+    start = m_D88TrackOffset[index];
+    end = m_uD88DiskBytes;
+
+    for (Uint32 j = index + 1; j < D88_TRACK_ACTIVE; ++j)
+    {
+        if (m_D88TrackOffset[j])
+        {
+            end = m_D88TrackOffset[j];
+            break;
+        }
+    }
+
+    if (end <= start ||
+        ((end - start) % entryBytes) != 0)
+        return 0;
+
+    capacity = (end - start) / entryBytes;
+    if (capacity > D88_SLOT_SECTORS)
+        capacity = D88_SLOT_SECTORS;
+
+    return (Uint8)capacity;
+}
+
+Bool SNSuperWildCard::D88FirstSectorID(
+    Uint8 c, Uint8 h,
+    Uint8 *pC, Uint8 *pH, Uint8 *pR, Uint8 *pN)
+{
+    Uint32 index = (Uint32)c * 2u + h;
+    Uint8 sh[D88_SECTOR_HEADER_BYTES];
+
+    if (!pC || !pH || !pR || !pN ||
+        !m_pDisk ||
+        index >= D88_TRACK_ACTIVE ||
+        !m_D88TrackOffset[index])
+        return FALSE;
+
+    if (fseek(
+            m_pDisk,
+            (long)m_D88TrackOffset[index],
+            SEEK_SET) != 0 ||
+        fread(sh, 1, sizeof(sh), m_pDisk) != sizeof(sh))
+        return FALSE;
+
+    *pC = sh[0];
+    *pH = sh[1];
+    *pR = sh[2];
+    *pN = sh[3];
+    return TRUE;
+}
+
+Bool SNSuperWildCard::D88RefreshGeometry()
+{
+    Int32 maxSpt = 0;
+
+    if (!m_pDisk)
+        return FALSE;
+
+    for (Uint32 i = 0; i < D88_TRACK_ACTIVE; ++i)
+    {
+        Uint8 count;
+
+        if (!m_D88TrackOffset[i])
+            return FALSE;
+
+        count = D88TrackSectorCount(
+            (Uint8)(i >> 1),
+            (Uint8)(i & 1));
+        if (!count)
+            return FALSE;
+
+        if ((Int32)count > maxSpt)
+            maxSpt = count;
+    }
+
+    if (!maxSpt || maxSpt > D88_MAX_SECTORS)
+        return FALSE;
+
+    m_nTracks = 80;
+    m_nHeads = 2;
+    m_nSectorsPerTrack = maxSpt;
+    return TRUE;
+}
+
+Bool SNSuperWildCard::D88FormatSectorCountAllowed(Uint8 count) const
+{
+    /* AURORA_SWC_D88_ONLY_V5_1_20260901
+     * Preserve the media sets from before RAW was retired.
+     * Magicom: 720K/800K/1.44M/1.6M.
+     * SWC: same plus 1.2M. */
+    if (m_eModel == MODEL_MAGICOM)
+    {
+        return count == 9  ||
+               count == 10 ||
+               count == 18 ||
+               count == 20;
+    }
+
+    return count == 9  ||
+           count == 10 ||
+           count == 15 ||
+           count == 18 ||
+           count == 20;
+}
+
+Bool SNSuperWildCard::D88FormatCurrentTrack()
+{
+    Uint32 index = (Uint32)m_uCylinder * 2u + m_uHead;
+    Uint32 start;
+    Uint32 end;
+    Uint32 slotBytes;
+    Uint8 capacity;
+    Uint8 seen[256];
+    Uint8 oldMediaFlag = 0;
+    Uint8 desiredMediaFlag = 0;
+    Uint8 uniformSpt = 0;
+    Uint8 *oldSlot = NULL;
+    Uint8 *newSlot = NULL;
+    Bool bUniform = TRUE;
+    Bool ok = FALSE;
+
+    if (!m_pDisk || !m_bDiskWritable ||
+        index >= D88_TRACK_ACTIVE ||
+        !m_D88TrackOffset[index] ||
+        !D88FormatSectorCountAllowed(m_uFormatSC) ||
+        m_uFormatSC > D88_SLOT_SECTORS ||
+        m_nFormatIDBytes != (Uint16)m_uFormatSC * 4u)
+        return FALSE;
+
+    capacity = D88TrackSlotCapacity(m_uCylinder, m_uHead);
+    if (!capacity || m_uFormatSC > capacity)
+    {
+        SetError("D88 track has no safe room for requested format");
+        return FALSE;
+    }
+
+    memset(seen, 0, sizeof(seen));
+    for (Uint16 i = 0; i < m_nFormatIDBytes; i += 4)
+    {
+        Uint8 c = m_FormatIDs[i + 0];
+        Uint8 h = m_FormatIDs[i + 1];
+        Uint8 r = m_FormatIDs[i + 2];
+        Uint8 n = m_FormatIDs[i + 3];
+
+        if (c != m_uCylinder || h != m_uHead ||
+            r == 0 || r > m_uFormatSC ||
+            seen[r] || n != 2)
+            return FALSE;
+        seen[r] = 1;
+    }
+
+    for (Uint8 r = 1; r <= m_uFormatSC; ++r)
+        if (!seen[r])
+            return FALSE;
+
+    start = m_D88TrackOffset[index];
+    end = m_uD88DiskBytes;
+    for (Uint32 j = index + 1; j < D88_TRACK_ACTIVE; ++j)
+    {
+        if (m_D88TrackOffset[j])
+        {
+            end = m_D88TrackOffset[j];
+            break;
+        }
+    }
+    if (end <= start)
+        return FALSE;
+
+    slotBytes = end - start;
+    oldSlot = (Uint8 *)malloc(slotBytes);
+    newSlot = (Uint8 *)calloc(1, slotBytes);
+    if (!oldSlot || !newSlot)
+        goto done;
+
+    /* AURORA_SWC_D88_ONLY_V5_2_20260901:
+     * header media type participates in the same rollback as this track. */
+    if (fseek(m_pDisk, 0x1B, SEEK_SET) != 0 ||
+        fread(&oldMediaFlag, 1, 1, m_pDisk) != 1 ||
+        (oldMediaFlag != 0x10 && oldMediaFlag != 0x20))
+        goto done;
+
+    if (fseek(m_pDisk, (long)start, SEEK_SET) != 0 ||
+        fread(oldSlot, 1, slotBytes, m_pDisk) != slotBytes)
+        goto done;
+
+    {
+        Uint32 pos = 0;
+        for (Uint8 s = 0; s < m_uFormatSC; ++s)
+        {
+            Uint16 id = (Uint16)s * 4u;
+            Uint8 *sh;
+            Uint8 *data;
+
+            if (pos + D88_SECTOR_HEADER_BYTES + SWC_SECTOR_BYTES > slotBytes)
+                goto rollback;
+
+            sh = newSlot + pos;
+            data = sh + D88_SECTOR_HEADER_BYTES;
+            sh[0] = m_FormatIDs[id + 0];
+            sh[1] = m_FormatIDs[id + 1];
+            sh[2] = m_FormatIDs[id + 2];
+            sh[3] = m_FormatIDs[id + 3];
+            _AuroraD88Put16(sh + 4, m_uFormatSC);
+            sh[6] = 0x00;
+            sh[7] = 0x00;
+            sh[8] = 0x00;
+            /* AURORA_SWC_D88_ONLY_V5_1_20260901 */
+            sh[13] = (m_uFormatSC == 15) ? 0 : 1;
+            _AuroraD88Put16(sh + 14, SWC_SECTOR_BYTES);
+            memset(data, m_uFormatFill, SWC_SECTOR_BYTES);
+            pos += D88_SECTOR_HEADER_BYTES + SWC_SECTOR_BYTES;
+        }
+    }
+
+    clearerr(m_pDisk);
+    if (fseek(m_pDisk, (long)start, SEEK_SET) != 0 ||
+        fwrite(newSlot, 1, slotBytes, m_pDisk) != slotBytes ||
+        fflush(m_pDisk) != 0)
+        goto rollback;
+
+    m_bDiskDirty = FALSE;
+    if (!D88RefreshGeometry())
+        goto rollback;
+
+    /* Mixed geometry is normal while a whole-disk FORMAT is in progress.
+     * Commit 2DD/2HD only when all 160 track-sides are uniform. */
+    for (Uint32 i = 0; i < D88_TRACK_ACTIVE; ++i)
+    {
+        Uint8 count = D88TrackSectorCount(
+            (Uint8)(i >> 1), (Uint8)(i & 1));
+        if (!count || !D88FormatSectorCountAllowed(count))
+            goto rollback;
+
+        if (!uniformSpt)
+            uniformSpt = count;
+        else if (count != uniformSpt)
+        {
+            bUniform = FALSE;
+            break;
+        }
+    }
+
+    if (bUniform && uniformSpt)
+    {
+        desiredMediaFlag =
+            (uniformSpt == 9 || uniformSpt == 10) ? 0x10 : 0x20;
+
+        if (desiredMediaFlag != oldMediaFlag)
+        {
+            if (fseek(m_pDisk, 0x1B, SEEK_SET) != 0 ||
+                fwrite(&desiredMediaFlag, 1, 1, m_pDisk) != 1 ||
+                fflush(m_pDisk) != 0)
+                goto rollback;
+        }
+    }
+
+    ok = TRUE;
+    goto done;
+
+rollback:
+    clearerr(m_pDisk);
+
+    if (oldMediaFlag == 0x10 || oldMediaFlag == 0x20)
+    {
+        if (fseek(m_pDisk, 0x1B, SEEK_SET) == 0)
+            (void)fwrite(&oldMediaFlag, 1, 1, m_pDisk);
+    }
+
+    if (oldSlot && fseek(m_pDisk, (long)start, SEEK_SET) == 0)
+        (void)fwrite(oldSlot, 1, slotBytes, m_pDisk);
+
+    (void)fflush(m_pDisk);
+    m_bDiskDirty = FALSE;
+    (void)D88RefreshGeometry();
+    ok = FALSE;
+
+done:
+    if (newSlot) free(newSlot);
+    if (oldSlot) free(oldSlot);
+    return ok;
+}
+
 Bool SNSuperWildCard::MountDisk(const Char *pDiskPath)
 {
     FILE *pFile;
+    const Char *pExt;
     long nBytes;
     Bool bWritable = TRUE;
+    Int32 tracks = 0;
+    Int32 heads = 0;
+    Int32 maxSpt = 0;
+    Uint32 offsets[D88_TRACK_TABLE];
+    Uint32 diskBytes = 0;
+    Bool d88Protected = FALSE;
 
     if (!pDiskPath || !*pDiskPath)
     {
@@ -223,10 +799,13 @@ Bool SNSuperWildCard::MountDisk(const Char *pDiskPath)
         return FALSE;
     }
 
-    /* AURORA_SWC_FLOPPY_V4_20260831
-     * Writable raw floppy when the backing file permits it; otherwise the
-     * controller naturally reports write-protect. */
-    bWritable = TRUE;
+    pExt = strrchr(pDiskPath, '.');
+    if (!pExt || strcasecmp(pExt, ".d88") != 0)
+    {
+        SetError("SWC V5 accepts D88 floppy images only");
+        return FALSE;
+    }
+
     pFile = fopen(pDiskPath, "r+b");
     if (!pFile)
     {
@@ -235,22 +814,33 @@ Bool SNSuperWildCard::MountDisk(const Char *pDiskPath)
     }
     if (!pFile)
     {
-        SetError("cannot open SWC floppy image");
+        SetError("cannot open SWC D88 floppy image");
         return FALSE;
     }
 
-    if (fseek(pFile, 0, SEEK_END) != 0)
+    if (fseek(pFile, 0, SEEK_END) != 0 ||
+        (nBytes = ftell(pFile)) < 0)
     {
         fclose(pFile);
-        SetError("cannot size SWC floppy image");
+        SetError("cannot size SWC D88 floppy image");
         return FALSE;
     }
-    nBytes = ftell(pFile);
-    if (!DetectGeometry(nBytes))
+
+    if (!D88Probe(
+            pFile,
+            nBytes,
+            &tracks,
+            &heads,
+            &maxSpt,
+            offsets,
+            &diskBytes,
+            &d88Protected))
     {
         fclose(pFile);
+        SetError("invalid or unsupported SWC D88 floppy image");
         return FALSE;
     }
+
     rewind(pFile);
 
     if (m_pDisk)
@@ -260,18 +850,31 @@ Bool SNSuperWildCard::MountDisk(const Char *pDiskPath)
             fclose(pFile);
             return FALSE;
         }
+
         fclose(m_pDisk);
     }
 
     m_pDisk = pFile;
-    m_bDiskWritable = bWritable;
-    m_bDiskDirty = FALSE; /* AURORA_SWC_MEGA_V9_20260831 */
+
+    memcpy(
+        m_D88TrackOffset,
+        offsets,
+        sizeof(m_D88TrackOffset));
+    m_uD88DiskBytes = diskBytes;
+    m_nTracks = tracks;
+    m_nHeads = heads;
+    m_nSectorsPerTrack = maxSpt;
+    m_bDiskWritable = bWritable && !d88Protected;
+    m_bDiskDirty = FALSE;
     m_bDiskChanged = TRUE;
-    /* AURORA_FRONT_TRACE_V10_8_20260831: a newly inserted medium begins a
-     * fresh transfer accounting window. */
+
     ResetDebugTrace();
-    m_uIndexPollCounter = 0; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831: new medium starts at an INDEX pulse */
-    snprintf(m_DiskPath, sizeof(m_DiskPath), "%s", pDiskPath);
+    m_uIndexPollCounter = 0;
+    snprintf(
+        m_DiskPath,
+        sizeof(m_DiskPath),
+        "%s",
+        pDiskPath);
 
     FdcReset(FALSE);
     return TRUE;
@@ -379,6 +982,9 @@ void SNSuperWildCard::Shutdown()
     m_bDiskDirty = FALSE;
     m_bDiskChanged = FALSE;
     m_uIndexPollCounter = 0; /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831 */
+    /* AURORA_SWC_D88_ONLY_V5_20260901 */
+    memset(m_D88TrackOffset, 0, sizeof(m_D88TrackOffset));
+    m_uD88DiskBytes = 0;
     m_DiskPath[0] = 0;
     m_nTracks = m_nHeads = m_nSectorsPerTrack = 0;
 }
@@ -539,31 +1145,37 @@ void SNSuperWildCard::FdcSetResult(const Uint8 *pData, Uint8 nBytes, Bool bIRQ)
         m_bIRQ = TRUE;
 }
 
-Bool SNSuperWildCard::FdcValidCHS(Uint8 c, Uint8 h, Uint8 r) const
+Bool SNSuperWildCard::FdcValidCHS(Uint8 c, Uint8 h, Uint8 r)
 {
+    long off;
+
     return FdcDriveReady(m_uDrive) &&
-           c < (Uint8)m_nTracks &&
-           h < (Uint8)m_nHeads &&
-           r >= 1 && r <= (Uint8)m_nSectorsPerTrack;
+           D88FindSector(c, h, r, 2, &off)
+        ? TRUE : FALSE;
 }
 
-long SNSuperWildCard::FdcSectorOffset(Uint8 c, Uint8 h, Uint8 r) const
-{
-    return (((long)c * m_nHeads + h) * m_nSectorsPerTrack + (r - 1)) *
-           SWC_SECTOR_BYTES;
-}
+
 
 Bool SNSuperWildCard::FdcLoadCurrentSector()
 {
-    if (!FdcValidCHS(m_uDataC, m_uDataH, m_uDataR) || m_uDataN != 2)
+    long off;
+
+    if (m_uDataN != 2 ||
+        !FdcDriveReady(m_uDrive) ||
+        !D88FindSector(
+            m_uDataC,
+            m_uDataH,
+            m_uDataR,
+            m_uDataN,
+            &off))
         return FALSE;
 
-    if (fseek(m_pDisk,
-              FdcSectorOffset(m_uDataC, m_uDataH, m_uDataR),
-              SEEK_SET) != 0)
-        return FALSE;
-
-    if (fread(m_Sector, 1, SWC_SECTOR_BYTES, m_pDisk) != SWC_SECTOR_BYTES)
+    if (fseek(m_pDisk, off, SEEK_SET) != 0 ||
+        fread(
+            m_Sector,
+            1,
+            SWC_SECTOR_BYTES,
+            m_pDisk) != SWC_SECTOR_BYTES)
         return FALSE;
 
     m_iSectorByte = 0;
@@ -572,38 +1184,68 @@ Bool SNSuperWildCard::FdcLoadCurrentSector()
 
 Bool SNSuperWildCard::FdcStoreCurrentSector()
 {
+    long off;
+
     if (!m_bDiskWritable ||
-        !FdcValidCHS(m_uDataC, m_uDataH, m_uDataR) ||
-        m_uDataN != 2)
+        m_uDataN != 2 ||
+        !FdcDriveReady(m_uDrive) ||
+        !D88FindSector(
+            m_uDataC,
+            m_uDataH,
+            m_uDataR,
+            m_uDataN,
+            &off))
         return FALSE;
 
-    if (fseek(m_pDisk,
-              FdcSectorOffset(m_uDataC, m_uDataH, m_uDataR),
-              SEEK_SET) != 0)
+    if (fseek(m_pDisk, off, SEEK_SET) != 0 ||
+        fwrite(
+            m_Sector,
+            1,
+            SWC_SECTOR_BYTES,
+            m_pDisk) != SWC_SECTOR_BYTES)
         return FALSE;
 
-    if (fwrite(m_Sector, 1, SWC_SECTOR_BYTES, m_pDisk) != SWC_SECTOR_BYTES)
-        return FALSE;
-
-    m_bDiskDirty = TRUE; /* AURORA_SWC_MEGA_V9_20260831 */
+    m_bDiskDirty = TRUE;
     return TRUE;
 }
 
 Bool SNSuperWildCard::FdcAdvanceSector()
 {
     if (m_uDataR < m_uDataEOT &&
-        m_uDataR < (Uint8)m_nSectorsPerTrack)
+        m_uDataR < D88_MAX_SECTORS)
     {
-        ++m_uDataR;
-        return TRUE;
+        long off;
+        Uint8 next = (Uint8)(m_uDataR + 1);
+
+        if (D88FindSector(
+                m_uDataC,
+                m_uDataH,
+                next,
+                m_uDataN,
+                &off))
+        {
+            m_uDataR = next;
+            return TRUE;
+        }
     }
 
     if (m_bDataMT && m_uDataH == 0 && m_nHeads > 1)
     {
-        m_uDataH = 1;
-        m_uDataR = 1;
-        return TRUE;
+        long off;
+
+        if (D88FindSector(
+                m_uDataC,
+                1,
+                1,
+                m_uDataN,
+                &off))
+        {
+            m_uDataH = 1;
+            m_uDataR = 1;
+            return TRUE;
+        }
     }
+
     return FALSE;
 }
 
@@ -611,7 +1253,7 @@ void SNSuperWildCard::FdcFinishRW(Bool bOK, Uint8 uST1, Uint8 uST2)
 {
     Uint8 r[7];
 
-    /* AURORA_SWC_MEGA_V9_20260831: physical IMG persistence is command-granular, not sector-granular. */
+    /* AURORA_SWC_MEGA_V9_20260831: physical floppy persistence is command-granular, not sector-granular. */
     if (m_bDiskDirty && !FdcFlushDisk())
     {
         bOK = FALSE;
@@ -676,10 +1318,12 @@ void SNSuperWildCard::FdcExecuteCommand()
              * shortens the byte stream whenever R != 1. */
             if (cmd == 0x02)
             {
+                Uint8 trackSpt =
+                    D88TrackSectorCount(m_uDataC, m_uDataH);
+
                 m_uDataR = 1;
-                if (m_uDataEOT == 0 ||
-                    m_uDataEOT > (Uint8)m_nSectorsPerTrack)
-                    m_uDataEOT = (Uint8)m_nSectorsPerTrack;
+                if (m_uDataEOT == 0 || m_uDataEOT > trackSpt)
+                    m_uDataEOT = trackSpt;
                 m_bDataMT = FALSE;
             }
 
@@ -745,7 +1389,15 @@ void SNSuperWildCard::FdcExecuteCommand()
         case 0x0A:
             m_uDrive = m_Command[1] & 3;
             m_uHead = (m_Command[1] >> 2) & 1;
-            if (!FdcDriveReady(m_uDrive))
+
+            if (!FdcDriveReady(m_uDrive) ||
+                !D88FirstSectorID(
+                    m_uCylinder,
+                    m_uHead,
+                    &r[3],
+                    &r[4],
+                    &r[5],
+                    &r[6]))
             {
                 m_uDataC = m_uCylinder;
                 m_uDataH = m_uHead;
@@ -754,13 +1406,10 @@ void SNSuperWildCard::FdcExecuteCommand()
                 FdcFinishRW(FALSE, 0x04, 0x00);
                 return;
             }
+
             r[0] = (Uint8)((m_uHead << 2) | m_uDrive);
             r[1] = 0;
             r[2] = 0;
-            r[3] = m_uCylinder;
-            r[4] = m_uHead;
-            r[5] = 1;
-            r[6] = 2;
             FdcSetResult(r, 7, TRUE);
             return;
 
@@ -773,6 +1422,7 @@ void SNSuperWildCard::FdcExecuteCommand()
             m_nFormatIDBytes = (Uint16)m_uFormatSC * 4;
             if (m_nFormatIDBytes > SWC_MAX_FORMAT_IDS ||
                 m_uDataN != 2 ||
+                !D88FormatSectorCountAllowed(m_uFormatSC) ||
                 !FdcDriveReady(m_uDrive) ||
                 !m_bDiskWritable)
             {
@@ -897,27 +1547,22 @@ void SNSuperWildCard::FdcWriteData(Uint8 uData)
 
         if (m_iFormatIDByte >= m_nFormatIDBytes)
         {
-            Bool ok = TRUE;
-            Uint8 lastC = m_uCylinder, lastH = m_uHead, lastR = 1, lastN = 2;
+            Bool ok;
+            Uint8 lastC = m_uCylinder;
+            Uint8 lastH = m_uHead;
+            Uint8 lastR = 1;
+            Uint8 lastN = 2;
 
-            memset(m_Sector, m_uFormatFill, sizeof(m_Sector));
-            for (Uint16 i = 0; i + 3 < m_nFormatIDBytes; i += 4)
+            if (m_nFormatIDBytes >= 4)
             {
-                Uint8 c = m_FormatIDs[i + 0];
-                Uint8 h = m_FormatIDs[i + 1];
-                Uint8 r = m_FormatIDs[i + 2];
-                Uint8 n = m_FormatIDs[i + 3];
-
-                lastC = c; lastH = h; lastR = r; lastN = n;
-                if (n != 2 || !FdcValidCHS(c, h, r) ||
-                    fseek(m_pDisk, FdcSectorOffset(c, h, r), SEEK_SET) != 0 ||
-                    fwrite(m_Sector, 1, SWC_SECTOR_BYTES, m_pDisk) != SWC_SECTOR_BYTES)
-                {
-                    ok = FALSE;
-                    break;
-                }
-                m_bDiskDirty = TRUE; /* AURORA_SWC_MEGA_V9_20260831 */
+                Uint16 i = (Uint16)(m_nFormatIDBytes - 4);
+                lastC = m_FormatIDs[i + 0];
+                lastH = m_FormatIDs[i + 1];
+                lastR = m_FormatIDs[i + 2];
+                lastN = m_FormatIDs[i + 3];
             }
+
+            ok = D88FormatCurrentTrack();
 
             m_uDataC = lastC;
             m_uDataH = lastH;
@@ -925,6 +1570,7 @@ void SNSuperWildCard::FdcWriteData(Uint8 uData)
             m_uDataN = lastN;
             FdcFinishRW(ok, ok ? 0 : 0x20, 0);
         }
+
         return;
     }
 
@@ -1026,25 +1672,71 @@ Uint32 SNSuperWildCard::DramOffsetMode2(Uint8 bank, Uint16 addr) const
 
 
 /* AURORA_SWC_FLOPPY_V5_20260831 */
-Bool SNSuperWildCard::SetExternalCartridge(const Uint8 *pRom,
-                                           Uint32 nRomBytes,
-                                           Int32 iMapping)
+Bool SNSuperWildCard::SetExternalCartridge(
+    const Uint8 *pRom, Uint32 nRomBytes, Int32 iMapping,
+    Uint32 nSramBytes, Bool bBatterySRAM)
 {
+    Uint8 *pNewSRAM = NULL;
+
     if (!m_bActive || !pRom || !nRomBytes ||
         (iMapping != 0 && iMapping != 1))
+    {
+        SetError("invalid external cartridge");
         return FALSE;
+    }
+
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
+     * SnesRom accepts ordinary Game Pak RAM up to the fixed 256 KiB
+     * SNESticle backing. A power-of-two size is required by the real
+     * mirroring/address-mask semantics used by the normal Aurora mapper. */
+    if (nSramBytes > 0x40000u ||
+        (nSramBytes && (nSramBytes & (nSramBytes - 1u))))
+    {
+        SetError("unsupported external cartridge SRAM size");
+        return FALSE;
+    }
+
+    if (nSramBytes)
+    {
+        pNewSRAM = (Uint8 *)malloc(nSramBytes);
+        if (!pNewSRAM)
+        {
+            SetError("not enough EE memory for cartridge SRAM");
+            return FALSE;
+        }
+        memset(pNewSRAM, 0xFF, nSramBytes);
+    }
+
+    if (m_pCartSRAM)
+        free(m_pCartSRAM);
 
     m_pCartRom = pRom;
     m_nCartBytes = nRomBytes;
     m_iCartMapping = iMapping;
+    m_pCartSRAM = pNewSRAM;
+    m_nCartSRAMBytes = nSramBytes;
+    m_bCartSRAMBattery =
+        (pNewSRAM && bBatterySRAM) ? TRUE : FALSE;
+    m_bCartSRAMDirty = FALSE;
     return TRUE;
 }
 
 void SNSuperWildCard::ClearExternalCartridge()
 {
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901 */
+    if (m_pCartSRAM)
+    {
+        free(m_pCartSRAM);
+        m_pCartSRAM = NULL;
+    }
+
     m_pCartRom = NULL;
     m_nCartBytes = 0;
     m_iCartMapping = 0;
+    m_nCartSRAMBytes = 0;
+    m_bCartSRAMBattery = FALSE;
+    m_bCartSRAMDirty = FALSE;
+    m_bCartridgeMap = FALSE;
 }
 
 /* AURORA_FRONT_CART_PAGE_MAPPER_V10_11_20260831
@@ -1057,6 +1749,80 @@ void SNSuperWildCard::ClearExternalCartridge()
  * Reconstruct that cartridge bus address, then reuse ReadExternalCartridge()
  * so LoROM gets 32-KiB banks and HiROM gets 64-KiB banks naturally.
  */
+/* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901 */
+Bool SNSuperWildCard::ExternalCartridgeSRAMOffset(
+    Uint8 bank, Uint16 addr, Uint32 *pOffset) const
+{
+    Uint32 off;
+
+    if (!pOffset || !m_pCartSRAM || !m_nCartSRAMBytes)
+        return FALSE;
+
+    if (m_iCartMapping == 0) /* LoROM */
+    {
+        Bool bankOK =
+            (bank >= 0x70 && bank <= 0x7D) || bank >= 0xF0;
+        Bool lowHalf = addr < 0x8000;
+        Bool smallFullBank =
+            m_nCartBytes <= 0x200000u &&
+            m_nCartSRAMBytes <= 0x8000u;
+
+        if (!bankOK || (!lowHalf && !smallFullBank))
+            return FALSE;
+
+        off = ((Uint32)(bank & 0x0F) * 0x8000u) +
+              ((Uint32)addr & 0x7FFFu);
+    }
+    else if (m_iCartMapping == 1) /* HiROM */
+    {
+        Bool bankOK =
+            (bank >= 0x20 && bank <= 0x3F) ||
+            (bank >= 0xA0 && bank <= 0xBF);
+
+        if (!bankOK || addr < 0x6000 || addr > 0x7FFF)
+            return FALSE;
+
+        off = ((Uint32)(bank & 0x1F) * 0x2000u) +
+              (Uint32)(addr - 0x6000);
+    }
+    else
+    {
+        return FALSE;
+    }
+
+    *pOffset = off & (m_nCartSRAMBytes - 1u);
+    return TRUE;
+}
+
+Bool SNSuperWildCard::ReadExternalCartridgeSRAM(
+    Uint8 bank, Uint16 addr, Uint8 *pData) const
+{
+    Uint32 off;
+
+    if (!pData || !ExternalCartridgeSRAMOffset(bank, addr, &off))
+        return FALSE;
+
+    *pData = m_pCartSRAM[off];
+    return TRUE;
+}
+
+Bool SNSuperWildCard::WriteExternalCartridgeSRAM(
+    Uint8 bank, Uint16 addr, Uint8 uData)
+{
+    Uint32 off;
+
+    if (!ExternalCartridgeSRAMOffset(bank, addr, &off))
+        return FALSE;
+
+    if (m_pCartSRAM[off] != uData)
+    {
+        m_pCartSRAM[off] = uData;
+        if (m_bCartSRAMBattery)
+            m_bCartSRAMDirty = TRUE;
+    }
+    return TRUE;
+}
+
 Bool SNSuperWildCard::ReadExternalPage(Uint8 bank, Uint16 addr,
                                        Uint8 *pData) const
 {
@@ -1080,7 +1846,46 @@ Bool SNSuperWildCard::ReadExternalPage(Uint8 bank, Uint16 addr,
     if (upperPage)
         cartAddr |= 0x8000;
 
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
+     * Cartridge-page mapping exposes the physical Game Pak bus. Battery/
+     * work RAM therefore has precedence over ROM wherever the cart decoder
+     * selects it; this is also what lets BIOS battery-RAM transfer operate
+     * without borrowing the copier's own B-RAM. */
+    if (ReadExternalCartridgeSRAM(bank, cartAddr, pData))
+        return TRUE;
+
     return ReadExternalCartridge(bank, cartAddr, pData);
+}
+
+Bool SNSuperWildCard::WriteExternalPage(
+    Uint8 bank, Uint16 addr, Uint8 uData)
+{
+    Bool upperPage;
+    Bool lowerHighBankPage;
+    Uint16 cartAddr;
+    Uint8 ignored;
+
+    if (!m_pCartRom || !m_nCartBytes)
+        return FALSE;
+
+    upperPage = (addr >= 0xA000 && addr <= 0xBFFF);
+    lowerHighBankPage =
+        ((bank >= 0x40 && bank <= 0x7D) || bank >= 0xC0) &&
+        addr >= 0x2000 && addr <= 0x3FFF;
+
+    if (!upperPage && !lowerHighBankPage)
+        return FALSE;
+
+    cartAddr = (Uint16)(((m_uSelectedDRAMPage & 3u) << 13) |
+                        ((Uint32)addr & 0x1FFFu));
+    if (upperPage)
+        cartAddr |= 0x8000;
+
+    if (WriteExternalCartridgeSRAM(bank, cartAddr, uData))
+        return TRUE;
+
+    /* ROM writes are electrically ignored but the cartridge handled them. */
+    return ReadExternalCartridge(bank, cartAddr, &ignored);
 }
 
 Bool SNSuperWildCard::ReadExternalCartridge(Uint8 bank,
@@ -1361,7 +2166,7 @@ Bool SNSuperWildCard::WriteMode0(Uint8 bank, Uint16 addr, Uint8 uData,
         ((addr >= 0xA000 && addr <= 0xBFFF) ||
          ((((bank >= 0x40 && bank <= 0x7D) || bank >= 0xC0)) &&
           addr >= 0x2000 && addr <= 0x3FFF)))
-        return TRUE; /* physical cartridge ROM ignores writes */
+        return WriteExternalPage(bank, addr, uData);
 
     if (m_bPageSRAM && pSRAM && nSRAMBytes >= 0x8000)
     {
@@ -1397,6 +2202,11 @@ Bool SNSuperWildCard::ReadEmulation(Uint8 bank, Uint16 addr, Uint8 *pData,
         ((bank >= 0x20 && bank <= 0x5F) ||
          (bank >= 0xA0 && bank <= 0xDF)))
     {
+        /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
+         * E00D overlays the physical cartridge bus. HiROM battery RAM at
+         * 20-3F/A0-BF:6000-7FFF therefore wins over the external ROM. */
+        if (ReadExternalCartridgeSRAM(bank, addr, pData))
+            return TRUE;
         if (ReadExternalCartridge(bank, addr, pData))
             return TRUE;
         return FALSE;
@@ -1463,6 +2273,21 @@ Bool SNSuperWildCard::WriteEmulation(Uint8 bank, Uint16 addr, Uint8 uData,
         return TRUE;
     }
 
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
+     * E004-E007 above retain absolute write priority. After that, E00D's
+     * external-cartridge overlay must precede the copier SRAM mapping, just
+     * as ReadEmulation already does. This is essential for HiROM cart SRAM
+     * in the overlapping 30-33:6000-7FFF region. */
+    if (m_bCartridgeMap &&
+        ((bank >= 0x20 && bank <= 0x5F) ||
+         (bank >= 0xA0 && bank <= 0xDF)))
+    {
+        Uint8 ignored;
+        if (WriteExternalCartridgeSRAM(bank, addr, uData))
+            return TRUE;
+        return ReadExternalCartridge(bank, addr, &ignored);
+    }
+
     if (pSRAM && nSRAMBytes >= 0x8000)
     {
         if (!(m_uParallel & 0x02) &&
@@ -1487,14 +2312,6 @@ Bool SNSuperWildCard::WriteEmulation(Uint8 bank, Uint16 addr, Uint8 uData,
     Uint8 maxHiBank = (m_uSystemMode == 2) ? 0xE0 : 0xDF;
     Bool inBankRange =
         (bank <= maxLoBank) || (bank >= 0x80 && bank <= maxHiBank);
-
-    if (m_bCartridgeMap &&
-        ((bank >= 0x20 && bank <= 0x5F) ||
-         (bank >= 0xA0 && bank <= 0xDF)))
-    {
-        Uint8 ignored;
-        return ReadExternalCartridge(bank, addr, &ignored);
-    }
 
     if (!m_pDRAM || !inBankRange)
         return FALSE;
@@ -1641,6 +2458,15 @@ Bool SNSuperWildCard::ResolveDirectCartridge(
 
     if (!allowed)
         return FALSE;
+
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
+     * Keep complete 8-KiB physical SRAM pages trapped/RW. This applies to
+     * Mode 1 and to the E00D external-cart overlay in Modes 2/3. */
+    {
+        Uint32 sramOff;
+        if (ExternalCartridgeSRAMOffset(bank, addr, &sramOff))
+            return FALSE;
+    }
 
     /* AURORA_CLASSIC_MEMORY_MODE_DIRECT_READ_V4_20260901
      * External CART follows the same split read/write descriptor rule:
@@ -2015,7 +2841,10 @@ Bool SNSuperWildCard::Read(Uint32 uAddr, Uint8 *pData,
     switch (m_uSystemMode)
     {
         case 0: return ReadMode0(bank, addr, pData, pSRAM, nSRAMBytes);
-        case 1: return ReadExternalCartridge(bank, addr, pData);
+        case 1:
+            if (ReadExternalCartridgeSRAM(bank, addr, pData))
+                return TRUE;
+            return ReadExternalCartridge(bank, addr, pData);
         case 2:
         case 3: return ReadEmulation(bank, addr, pData, pSRAM, nSRAMBytes);
         default: return FALSE;
@@ -2037,6 +2866,8 @@ Bool SNSuperWildCard::Write(Uint32 uAddr, Uint8 uData,
         case 1:
         {
             Uint8 ignored;
+            if (WriteExternalCartridgeSRAM(bank, addr, uData))
+                return TRUE;
             return ReadExternalCartridge(bank, addr, &ignored);
         }
         case 2:

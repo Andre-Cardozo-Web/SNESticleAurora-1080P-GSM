@@ -95,6 +95,7 @@ int PathGetMaxFileNameLength(const char *pPath)
     return 256;
 }
 
+/* AURORA_FINAL_V1_7_D88_DUAL_SRAM_PERSIST_20260901 */
 /* AURORA_SRAM_STORAGE_V1
  * _SramPath stays the settings/legacy root. SRAM data has its own policy. */
 static MainLoopSramDeviceE _MainLoop_SramDevice = MAINLOOP_SRAMDEVICE_AUTO;
@@ -554,6 +555,256 @@ static Bool _MainLoopSramWriteFile(const Char *pPath, Uint8 *pData, Uint32 nByte
 }
 
 
+
+/* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
+ *
+ * Physical cartridge SRAM persistence is intentionally separate from the
+ * classic copier's own 32 KiB battery B-RAM. The filename is derived from
+ * the inserted cartridge exactly like an ordinary SNES .srm.
+ */
+static Char s_SwcCartSRAMName[512] = {0};
+static Bool s_SwcCartSRAMMigrationPending = FALSE;
+
+static Bool _MainLoopSwcCartSramBuildPath(
+    Char *pPath, Int32 nPathBytes,
+    const Char *pRoot, Bool bLegacyRoot,
+    Bool bCopiedMcName)
+{
+    Char Directory[512];
+    Char SaveName[512];
+    const Char *pExtension;
+    Int32 nSuffixBytes;
+    Int32 nBaseMax;
+    int n;
+
+    if (!pPath || nPathBytes <= 0 || !pRoot ||
+        !s_SwcCartSRAMName[0] || !_pSnes)
+        return FALSE;
+
+    pExtension =
+        _pSnes->GetString(Emu::System::StringE::STRING_SRAMEXT);
+    if (!pExtension || !*pExtension)
+        return FALSE;
+
+    if (bLegacyRoot)
+        snprintf(Directory, sizeof(Directory), "%s", pRoot);
+    else
+        snprintf(Directory, sizeof(Directory), "%s/%s", pRoot,
+                 _MainLoopSramGetSystemDirectoryName());
+
+    nSuffixBytes = (Int32)strlen(pExtension) + 1;
+    nBaseMax = bCopiedMcName
+        ? (32 - nSuffixBytes)
+        : (PathGetMaxFileNameLength(Directory) - nSuffixBytes);
+
+    if (nBaseMax <= 0)
+        return FALSE;
+
+    PathTruncFileName(SaveName, s_SwcCartSRAMName, nBaseMax);
+    n = snprintf(
+        pPath, (size_t)nPathBytes,
+        "%s/%s.%s", Directory, SaveName, pExtension);
+    return n >= 0 && n < nPathBytes ? TRUE : FALSE;
+}
+
+static Bool _MainLoopLoadSwcCartSRAMFrom(
+    MainLoopSramDeviceE eDevice, Bool *pbLegacy)
+{
+    const Char *pRoot = _MainLoopSramRoot(eDevice);
+    Uint8 *pData;
+    Int32 nBytes;
+    Char Path[1024];
+    Char Alias[1024];
+
+    Path[0] = 0;
+    Alias[0] = 0;
+    if (pbLegacy)
+        *pbLegacy = FALSE;
+
+    if (!_pSnes || _pSystem != _pSnes ||
+        !_pSnes->IsSuperWildCard() ||
+        !_pSnes->HasSuperWildCardCartridgeBatterySRAM())
+        return FALSE;
+
+    nBytes = _pSnes->GetSuperWildCardCartridgeSRAMBytes();
+    pData = _pSnes->GetSuperWildCardCartridgeSRAMData();
+    if (!pData || nBytes <= 0)
+        return FALSE;
+
+    if (_MainLoopSwcCartSramBuildPath(
+            Path, sizeof(Path), pRoot, FALSE, FALSE) &&
+        _MainLoopSramReadFile(Path, pData, (Uint32)nBytes))
+    {
+        ConPrint("SWC cartridge SRAM loaded: %s\n", Path);
+        return TRUE;
+    }
+
+    if (eDevice == MAINLOOP_SRAMDEVICE_USB &&
+        _MainLoopSwcCartSramBuildPath(
+            Alias, sizeof(Alias), pRoot, FALSE, TRUE) &&
+        (!Path[0] || strcmp(Alias, Path) != 0) &&
+        _MainLoopSramReadFile(Alias, pData, (Uint32)nBytes))
+    {
+        if (pbLegacy) *pbLegacy = TRUE;
+        ConPrint("SWC cartridge SRAM loaded (MC-copy alias): %s\n", Alias);
+        return TRUE;
+    }
+
+    Path[0] = 0;
+    if (_MainLoopSwcCartSramBuildPath(
+            Path, sizeof(Path), pRoot, TRUE, FALSE) &&
+        _MainLoopSramReadFile(Path, pData, (Uint32)nBytes))
+    {
+        if (pbLegacy) *pbLegacy = TRUE;
+        ConPrint("SWC cartridge SRAM loaded (legacy): %s\n", Path);
+        return TRUE;
+    }
+
+    Alias[0] = 0;
+    if (eDevice == MAINLOOP_SRAMDEVICE_USB &&
+        _MainLoopSwcCartSramBuildPath(
+            Alias, sizeof(Alias), pRoot, TRUE, TRUE) &&
+        (!Path[0] || strcmp(Alias, Path) != 0) &&
+        _MainLoopSramReadFile(Alias, pData, (Uint32)nBytes))
+    {
+        if (pbLegacy) *pbLegacy = TRUE;
+        ConPrint(
+            "SWC cartridge SRAM loaded (legacy MC-copy alias): %s\n",
+            Alias);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+void _MainLoopSwcCartSRAMAttach(const Char *pCartPath)
+{
+    const Char *pName;
+    Bool bLoaded = FALSE;
+    Bool bLegacy = FALSE;
+    Bool bMcFallback = FALSE;
+    int n;
+
+    s_SwcCartSRAMName[0] = 0;
+    s_SwcCartSRAMMigrationPending = FALSE;
+
+    if (!pCartPath || !*pCartPath || !_pSnes ||
+        _pSystem != _pSnes || !_pSnes->IsSuperWildCard() ||
+        !_pSnes->HasSuperWildCardCartridge())
+        return;
+
+    pName = pCartPath;
+    for (const Char *p = pCartPath; *p; ++p)
+        if (*p == '/' || *p == '\\')
+            pName = p + 1;
+
+    if (!*pName)
+        return;
+
+    n = snprintf(
+        s_SwcCartSRAMName, sizeof(s_SwcCartSRAMName), "%s", pName);
+    if (n < 0 || n >= (int)sizeof(s_SwcCartSRAMName))
+    {
+        s_SwcCartSRAMName[0] = 0;
+        return;
+    }
+
+    /* AURORA_FINAL_V1_7_D88_DUAL_SRAM_PERSIST_20260901
+     * Ordinary Aurora saves use the ROM stem. Keep the physical cart SRAM
+     * namespace identical: "Game.sfc" -> "Game.srm". */
+    {
+        Char *pExt = strrchr(s_SwcCartSRAMName, '.');
+        if (pExt && pExt != s_SwcCartSRAMName)
+            *pExt = 0;
+    }
+
+    /* Volatile cartridge RAM is emulated by the core but never persisted. */
+    if (!_pSnes->HasSuperWildCardCartridgeBatterySRAM())
+        return;
+
+    if (_MainLoop_SramDevice == MAINLOOP_SRAMDEVICE_USB)
+    {
+        if (_MainLoopSramUsbReady())
+            bLoaded = _MainLoopLoadSwcCartSRAMFrom(
+                MAINLOOP_SRAMDEVICE_USB, &bLegacy);
+    }
+    else if (_MainLoop_SramDevice == MAINLOOP_SRAMDEVICE_MEMCARD)
+    {
+        bLoaded = _MainLoopLoadSwcCartSRAMFrom(
+            MAINLOOP_SRAMDEVICE_MEMCARD, &bLegacy);
+    }
+    else
+    {
+        if (_MainLoopSramUsbReady())
+            bLoaded = _MainLoopLoadSwcCartSRAMFrom(
+                MAINLOOP_SRAMDEVICE_USB, &bLegacy);
+
+        if (!bLoaded)
+        {
+            Bool bMcLegacy = FALSE;
+            bLoaded = _MainLoopLoadSwcCartSRAMFrom(
+                MAINLOOP_SRAMDEVICE_MEMCARD, &bMcLegacy);
+            if (bLoaded)
+            {
+                bLegacy = bMcLegacy;
+                bMcFallback = TRUE;
+            }
+        }
+    }
+
+    _pSnes->ClearSuperWildCardCartridgeSRAMDirty();
+
+    /* Same copy/migration policy as ordinary Aurora SRAM: never delete source. */
+    s_SwcCartSRAMMigrationPending =
+        bLoaded &&
+        (bLegacy || (bMcFallback && _MainLoopSramUsbReady()));
+
+    if (s_SwcCartSRAMMigrationPending)
+        _MainLoop_SRAMUpdated = TRUE;
+}
+
+void _MainLoopSwcCartSRAMDetach()
+{
+    s_SwcCartSRAMName[0] = 0;
+    s_SwcCartSRAMMigrationPending = FALSE;
+}
+
+static Bool _MainLoopSaveSwcCartSRAMTo(
+    MainLoopSramDeviceE eDevice)
+{
+    const Char *pRoot = _MainLoopSramRoot(eDevice);
+    Bool bMemCard =
+        eDevice == MAINLOOP_SRAMDEVICE_MEMCARD ? TRUE : FALSE;
+    Uint8 *pData;
+    Int32 nBytes;
+    Char Path[1024];
+
+    if (!_pSnes || _pSystem != _pSnes ||
+        !_pSnes->IsSuperWildCard() ||
+        !_pSnes->HasSuperWildCardCartridgeBatterySRAM())
+        return TRUE;
+
+    /* AURORA_FINAL_V1_7_D88_DUAL_SRAM_PERSIST_20260901
+     * Menu/unload are explicit persistence boundaries. Do not use the dirty
+     * bit to skip a battery-cart write once the boundary has been entered. */
+    nBytes = _pSnes->GetSuperWildCardCartridgeSRAMBytes();
+    pData = _pSnes->GetSuperWildCardCartridgeSRAMData();
+
+    if (!pData || nBytes <= 0 || !s_SwcCartSRAMName[0] ||
+        !_MainLoopSramEnsureSystemDirectory(pRoot, bMemCard) ||
+        !_MainLoopSwcCartSramBuildPath(
+            Path, sizeof(Path), pRoot, FALSE, FALSE))
+        return FALSE;
+
+    if (!_MainLoopSramWriteFile(Path, pData, (Uint32)nBytes))
+        return FALSE;
+
+    _pSnes->ClearSuperWildCardCartridgeSRAMDirty();
+    s_SwcCartSRAMMigrationPending = FALSE;
+    ConPrint("SWC cartridge SRAM saved: %s\n", Path);
+    return TRUE;
+}
+
 /* AURORA_QN_TURBOFILE_SAVE_V2_20260828
  * The original ASCII Turbo File is one 8 KiB expansion-port memory unit,
  * shared by compatible Famicom software. Keep one physical-style file in
@@ -891,6 +1142,16 @@ static Bool _MainLoopSaveSRAMTo(MainLoopSramDeviceE eDevice, Bool bSync)
         }
     }
 
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901: save physical cartridge SRAM independently. */
+    if (_pSystem == _pSnes && _pSnes &&
+        _pSnes->IsSuperWildCard() &&
+        _pSnes->HasSuperWildCardCartridgeBatterySRAM())
+    {
+        bAny = TRUE;
+        if (!_MainLoopSaveSwcCartSRAMTo(eDevice))
+            bOK = FALSE;
+    }
+
     /* AURORA_QN_TURBOFILE_SAVE_V2_20260828 */
     if (_pSystem == _pNes &&
         QuicknesBridge_TurboFileEnabled() &&
@@ -1111,6 +1372,15 @@ Bool _MainLoopForceCheckSRAM()
         }
     }
 
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
+     * Game Pak SRAM writes mark themselves dirty immediately; no full second
+     * SRAM checksum is added to menu entry or gameplay. */
+    if (_pSystem == _pSnes && _pSnes &&
+        _pSnes->IsSuperWildCard() &&
+        (_pSnes->IsSuperWildCardCartridgeSRAMDirty() ||
+         s_SwcCartSRAMMigrationPending))
+        _MainLoop_SRAMUpdated = TRUE;
+
     /* AURORA_QN_TURBOFILE_SAVE_V2_20260828: protocol writes set their
      * dirty bit immediately, so no 8 KiB checksum polling is required. */
     if (_pSystem == _pNes &&
@@ -1148,6 +1418,13 @@ Bool _MainLoopCheckSRAM()
          * dirty state to the existing deterministic menu-save flow. */
         if (SnesTurboFileEnabled() && SnesTurboFileDirty())
             _MainLoop_SRAMUpdated = TRUE;
+
+        /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901: O(1) physical-cart dirty state. */
+        if (_pSnes && _pSnes->IsSuperWildCard() &&
+            (_pSnes->IsSuperWildCardCartridgeSRAMDirty() ||
+             s_SwcCartSRAMMigrationPending))
+            _MainLoop_SRAMUpdated = TRUE;
+
         return TRUE;
     }
 

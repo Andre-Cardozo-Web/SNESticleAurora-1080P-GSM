@@ -43,6 +43,14 @@ void MainLoopAudioResumeGame(void);
 void MainLoopAudioUiMute(void);
 void MainLoopAudioUiResume(void);
 
+/* AURORA_FINAL_V1_1_UI_CD_STORAGE_BARRIER_20260901
+ * Shared by normal menu and isolated state-storage actions. */
+Bool MainLoopCdUiQuiesce(void);
+void MainLoopCdUiResume(void);
+
+/* AURORA_FINAL_V1_3_NORMAL_MENU_BGM_SESSION_20260901 */
+Bool MainLoopNormalMenuBgmSessionActive(void);
+
 /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830 */
 Bool MainLoopSramSaveBusy(void);
 

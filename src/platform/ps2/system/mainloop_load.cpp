@@ -744,17 +744,26 @@ void _MainLoopUnloadRom()
         _pSnes->IsSuperWildCard() &&
         _pSystem->GetSRAMBytes() == 0x8000)
     {
-        if (_MainLoopForceCheckSRAM() && _MainLoop_SRAMUpdated)
+        /* AURORA_FINAL_V1_7_D88_DUAL_SRAM_PERSIST_20260901
+         * This is a real power/lifetime boundary. Persist the copier B-RAM
+         * and the inserted battery cart SRAM even when neither dirty detector
+         * changed since the previous save. */
+        (void)_MainLoopForceCheckSRAM();
         {
             Bool bSaved = _MainLoopSaveSRAM(TRUE);
-            ConPrint("Copier SRAM unload flush: %s\n",
+            ConPrint("Copier + cart SRAM unload flush: %s\n",
                      bSaved ? "saved" : "FAILED");
             MainLoopStatusPrintf(
                 bSaved ? 120 : 240,
-                bSaved ? "Copier SRAM saved."
-                       : "WARNING: Copier SRAM save failed!");
+                bSaved ? "Copier/cart SRAM saved."
+                       : "WARNING: copier/cart SRAM save failed!");
         }
     }
+
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
+     * The flush above calls _MainLoopForceCheckSRAM/_MainLoopSaveSRAM while
+     * the cart backing and cartridge filename still exist. Detach only now. */
+    _MainLoopSwcCartSRAMDetach();
 
     /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830
      * BgmStop intentionally retains libxmp for fast menu reopen.
@@ -1919,19 +1928,74 @@ static Bool _MainLoopFindPriorityDskFirmware(
     return FALSE;
 }
 
+/* AURORA_SWC_D88_ONLY_V5_20260901 */
+static Uint32 _MainLoopD88Get32(const Uint8 *p)
+{
+    return (Uint32)p[0] |
+           ((Uint32)p[1] << 8) |
+           ((Uint32)p[2] << 16) |
+           ((Uint32)p[3] << 24);
+}
+
+static Bool _MainLoopSwcD88FileLooksValid(const char *pPath, long nBytes)
+{
+    enum { HeaderMin = 0x2A0, HeaderMax = 0x2B0 };
+    Uint8 Header[HeaderMin];
+    Uint32 diskBytes;
+    Uint32 firstTrack = 0;
+    FILE *fp;
+
+    if (!pPath || nBytes < HeaderMin)
+        return FALSE;
+
+    fp = fopen(pPath, "rb");
+    if (!fp)
+        return FALSE;
+
+    if (fread(Header, 1, sizeof(Header), fp) != sizeof(Header))
+    {
+        fclose(fp);
+        return FALSE;
+    }
+    fclose(fp);
+
+    diskBytes = _MainLoopD88Get32(Header + 0x1C);
+    /* AURORA_SWC_D88_ONLY_V5_2_20260901:
+     * a completed in-BIOS reformat may make the same D88 2DD or 2HD. */
+    if (diskBytes != (Uint32)nBytes ||
+        (Header[0x1B] != 0x10 && Header[0x1B] != 0x20))
+        return FALSE;
+
+    for (Uint32 i = 0; i < 160; ++i)
+    {
+        Uint32 off = _MainLoopD88Get32(Header + 0x20 + i * 4);
+        if (off)
+        {
+            firstTrack = off;
+            break;
+        }
+    }
+
+    return (firstTrack == HeaderMin || firstTrack == HeaderMax)
+        ? TRUE : FALSE;
+}
+
 static Bool _MainLoopSwcDiskFileLooksValid(const char *pPath)
 {
     struct stat st;
     long n;
+    const char *pExt;
 
     if (!pPath || !*pPath || stat(pPath, &st) != 0 ||
         S_ISDIR(st.st_mode))
         return FALSE;
 
+    pExt = strrchr(pPath, '.');
+    if (!pExt || strcasecmp(pExt, ".d88") != 0)
+        return FALSE;
+
     n = (long)st.st_size;
-    return (n == 368640L || n == 737280L || n == 819200L ||
-            n == 1228800L || n == 1474560L || n == 1638400L ||
-            n == 1699840L || n == 1720320L) ? TRUE : FALSE;
+    return _MainLoopSwcD88FileLooksValid(pPath, n);
 }
 
 static Bool _MainLoopFindSwcFirmware(char *pOut, Int32 nOutBytes)
@@ -1939,7 +2003,7 @@ static Bool _MainLoopFindSwcFirmware(char *pOut, Int32 nOutBytes)
     static const char *kNames[] =
     {
         /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
-         * Canonical direct-.img fallback first; aliases remain accepted. */
+         * AURORA_SWC_D88_ONLY_V5_20260901: canonical copier BIOS fallback first. */
         "DSK.SFC",
         "DSK.SMC",
         "DSK.ROM",
@@ -2066,7 +2130,7 @@ static Bool _MainLoopExecuteMagicomFirmware(
 /* AURORA_COPIER_DSK_PRIORITY_AUTO_DISK1_V10_17_20260901 */
 static Bool _MainLoopSwcBuildCartDiskPath(
     char *pOut, Int32 nOutBytes, unsigned nDisk);
-static Bool _MainLoopSwcCreateFat12Image(const char *pPath);
+static Bool _MainLoopSwcCreateFat12D88(const char *pPath);
 
 static Bool _MainLoopSwcInsertCartridge(const char *pPath)
 {
@@ -2119,11 +2183,14 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
     snprintf(
         s_SwcExternalCartPath, sizeof(s_SwcExternalCartPath),
         "%s", pPath);
+
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901 */
+    _MainLoopSwcCartSRAMAttach(pPath);
     MainLoopStateOnRomChanged();
 
     /* AURORA_COPIER_DSK_PRIORITY_AUTO_DISK1_V10_17_20260901
-     * If this cartridge has no _1 image yet, create the same 1.60-MiB FAT12
-     * media used by L2+Square and hot-insert it immediately. Existing _1
+     * If this cartridge has no _1 D88 yet, create the same logical 1.44-MiB
+     * D88 media used by L2+Square and hot-insert it immediately. Existing _1
      * media is never overwritten or auto-inserted.
      */
     {
@@ -2134,7 +2201,7 @@ static Bool _MainLoopSwcInsertCartridge(const char *pPath)
                 AutoDiskPath, sizeof(AutoDiskPath), 1) &&
             stat(AutoDiskPath, &AutoDiskStat) != 0)
         {
-            if (!_MainLoopSwcCreateFat12Image(AutoDiskPath))
+            if (!_MainLoopSwcCreateFat12D88(AutoDiskPath))
             {
                 MainLoopStatusPrintf(
                     210,
@@ -2175,7 +2242,7 @@ static Bool _MainLoopSwcCartStem(char *pOut, Int32 nOutBytes)
     if (!pOut || nOutBytes <= 1)
         return FALSE;
 
-    /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831: bare loader media is Dummy_N.img. */
+    /* AURORA_SWC_D88_ONLY_V5_20260901: bare loader media is Dummy_N.d88. */
     if (!s_SwcExternalCartPath[0])
     {
         int nChars = snprintf(pOut, (size_t)nOutBytes, "%s", "Dummy");
@@ -2208,8 +2275,8 @@ static Bool _MainLoopSwcCartStem(char *pOut, Int32 nOutBytes)
 }
 
 static Bool _MainLoopSwcBuildCartDiskPath(char *pOut,
-                                          Int32 nOutBytes,
-                                          unsigned nDisk)
+                                           Int32 nOutBytes,
+                                           unsigned nDisk)
 {
     Char Directory[512];
     Char Stem[256];
@@ -2221,9 +2288,10 @@ static Bool _MainLoopSwcBuildCartDiskPath(char *pOut,
             Directory, (Int32)sizeof(Directory)))
         return FALSE;
 
+    /* AURORA_SWC_D88_ONLY_V5_20260901 */
     n = snprintf(
         pOut, (size_t)nOutBytes,
-        "%s/%s_%u.img", Directory, Stem, nDisk);
+        "%s/%s_%u.d88", Directory, Stem, nDisk);
     return n >= 0 && n < nOutBytes ? TRUE : FALSE;
 }
 
@@ -2257,6 +2325,7 @@ static Bool _MainLoopSwcFindFirstExistingCartDisk(
         const char *p = pEntry->d_name;
         const char *pDigits;
         unsigned value = 0;
+        Bool overflow = FALSE;
 
         if (strncasecmp(p, Prefix, strlen(Prefix)) != 0)
             continue;
@@ -2270,12 +2339,10 @@ static Bool _MainLoopSwcFindFirstExistingCartDisk(
         {
             unsigned digit = (unsigned)(*p - '0');
 
-            /* AURORA_SWC_SWAP_INDEX_BOUNDS_V4_4_20260901
-             * Reject malformed decimal suffixes before unsigned arithmetic
-             * can wrap; valid manually supplied indices remain supported. */
+            /* AURORA_SWC_SWAP_INDEX_BOUNDS_V4_4_20260901 */
             if (value > ((~0u) - digit) / 10u)
             {
-                value = 0;
+                overflow = TRUE;
                 break;
             }
 
@@ -2283,7 +2350,8 @@ static Bool _MainLoopSwcFindFirstExistingCartDisk(
             ++p;
         }
 
-        if (value == 0 || strcasecmp(p, ".img") != 0)
+        if (overflow || value == 0 ||
+            strcasecmp(p, ".d88") != 0)
             continue;
 
         if (!best || value < best)
@@ -2312,14 +2380,49 @@ static Bool _MainLoopSwcFindFirstExistingCartDisk(
 
 /* AURORA_SWC_DEFAULT_FLOPPY_1440_V4_1_20260901
  * Standard 1.44 MiB FAT12: 2880 sectors, 18 sectors/track, 9 sectors/FAT. */
-static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
+/* AURORA_SWC_DEFAULT_FLOPPY_1440_V4_1_20260901
+ * AURORA_SWC_D88_ONLY_V5_20260901
+ * AURORA_SWC_D88_ONLY_V5_1_20260901
+ * The D88 container reserves 20 sector records per physical track while
+ * declaring only 18 active sectors. Logical format is standard FAT12 1.44
+ * MiB; the same file can later be FORMAT TRACK'ed to 20 SPT / 1.6 MiB. */
+/* AURORA_D88_WRITE_HELPERS_COMPILEFIX_20260901
+ * D88 stores integer fields little-endian. */
+static void _MainLoopD88Put16(Uint8 *p, Uint16 v)
 {
-    enum { SectorBytes = 512, TotalSectors = 2880 };
-    enum { ZeroChunkBytes = 128 * 1024 };
+    p[0] = (Uint8)(v & 0xFFu);
+    p[1] = (Uint8)((v >> 8) & 0xFFu);
+}
+
+static void _MainLoopD88Put32(Uint8 *p, Uint32 v)
+{
+    p[0] = (Uint8)(v & 0xFFu);
+    p[1] = (Uint8)((v >> 8) & 0xFFu);
+    p[2] = (Uint8)((v >> 16) & 0xFFu);
+    p[3] = (Uint8)((v >> 24) & 0xFFu);
+}
+
+static Bool _MainLoopSwcCreateFat12D88(const char *pPath)
+{
+    enum
+    {
+        HeaderBytes = 0x2B0,
+        Tracks = 80,
+        Heads = 2,
+        ActiveSectors = 18,
+        D88SlotSectors = 20,
+        SectorBytes = 512,
+        SectorHeaderBytes = 16
+    };
+    Uint8 Header[HeaderBytes];
+    Uint8 SectorHeader[SectorHeaderBytes];
     Uint8 Sector[SectorBytes];
-    Uint8 *pZero;
+    Uint8 Pad[SectorHeaderBytes + SectorBytes];
+    const Uint32 slotBytes =
+        (Uint32)D88SlotSectors * (SectorHeaderBytes + SectorBytes);
+    const Uint32 totalBytes =
+        HeaderBytes + (Uint32)Tracks * Heads * slotBytes;
     FILE *fp;
-    Int32 nRemaining;
 
     if (!pPath || !*pPath)
         return FALSE;
@@ -2328,78 +2431,119 @@ static Bool _MainLoopSwcCreateFat12Image(const char *pPath)
     if (!fp)
         return FALSE;
 
-    /* AURORA_SWC_FAST_CREATE_NOAUTO_V1_20260831 */
-    pZero = (Uint8 *)calloc(1, ZeroChunkBytes);
-    if (!pZero)
+    memset(Header, 0, sizeof(Header));
+    memcpy(Header, "AURORA SWC", 10);
+    Header[0x1A] = 0x00; /* writable */
+    Header[0x1B] = 0x20; /* physical 2HD medium */
+    _MainLoopD88Put32(Header + 0x1C, totalBytes);
+
+    for (Uint32 t = 0; t < (Uint32)(Tracks * Heads); ++t)
+        _MainLoopD88Put32(
+            Header + 0x20 + t * 4,
+            HeaderBytes + t * slotBytes);
+
+    if (fwrite(Header, 1, sizeof(Header), fp) != sizeof(Header))
     {
         fclose(fp);
         remove(pPath);
         return FALSE;
     }
 
-    nRemaining = SectorBytes * TotalSectors;
-    while (nRemaining > 0)
+    memset(Pad, 0, sizeof(Pad));
+
+    for (Uint32 c = 0; c < Tracks; ++c)
     {
-        size_t nChunk = (size_t)(nRemaining > ZeroChunkBytes ? ZeroChunkBytes : nRemaining);
-        if (fwrite(pZero, 1, nChunk, fp) != nChunk)
+        for (Uint32 h = 0; h < Heads; ++h)
         {
-            free(pZero);
-            fclose(fp);
-            remove(pPath);
-            return FALSE;
+            for (Uint32 r = 1; r <= ActiveSectors; ++r)
+            {
+                Uint32 lba =
+                    ((c * Heads + h) * ActiveSectors) + (r - 1);
+
+                memset(SectorHeader, 0, sizeof(SectorHeader));
+                SectorHeader[0] = (Uint8)c;
+                SectorHeader[1] = (Uint8)h;
+                SectorHeader[2] = (Uint8)r;
+                SectorHeader[3] = 2; /* 512 bytes */
+                _MainLoopD88Put16(
+                    SectorHeader + 4, (Uint16)ActiveSectors);
+                SectorHeader[6] = 0x00; /* MFM/double density flag */
+                SectorHeader[7] = 0x00; /* normal data */
+                SectorHeader[8] = 0x00; /* normal FDC status */
+                SectorHeader[13] = 1; /* 300 rpm / 1.44-style D88 flag */
+                _MainLoopD88Put16(SectorHeader + 14, SectorBytes);
+
+                memset(Sector, 0, sizeof(Sector));
+
+                if (lba == 0)
+                {
+                    Sector[0] = 0xEB;
+                    Sector[1] = 0x3C;
+                    Sector[2] = 0x90;
+                    memcpy(Sector + 3, "AURORASW", 8);
+                    Sector[11] = 0x00; Sector[12] = 0x02;
+                    Sector[13] = 0x01;
+                    Sector[14] = 0x01; Sector[15] = 0x00;
+                    Sector[16] = 0x02;
+                    Sector[17] = 0xE0; Sector[18] = 0x00;
+                    Sector[19] = 0x40; Sector[20] = 0x0B;
+                    Sector[21] = 0xF0;
+                    Sector[22] = 0x09; Sector[23] = 0x00;
+                    Sector[24] = 0x12; Sector[25] = 0x00;
+                    Sector[26] = 0x02; Sector[27] = 0x00;
+                    Sector[38] = 0x29;
+                    Sector[39] = 0x41; Sector[40] = 0x55;
+                    Sector[41] = 0x52; Sector[42] = 0x35;
+                    memcpy(Sector + 43, "NO NAME    ", 11);
+                    memcpy(Sector + 54, "FAT12   ", 8);
+                    Sector[510] = 0x55;
+                    Sector[511] = 0xAA;
+                }
+                else if (lba == 1 || lba == 10)
+                {
+                    Sector[0] = 0xF0;
+                    Sector[1] = 0xFF;
+                    Sector[2] = 0xFF;
+                }
+
+                if (fwrite(
+                        SectorHeader, 1, sizeof(SectorHeader), fp) !=
+                        sizeof(SectorHeader) ||
+                    fwrite(Sector, 1, sizeof(Sector), fp) != sizeof(Sector))
+                {
+                    fclose(fp);
+                    remove(pPath);
+                    return FALSE;
+                }
+            }
+
+            for (Uint32 r = ActiveSectors;
+                 r < D88SlotSectors; ++r)
+            {
+                if (fwrite(Pad, 1, sizeof(Pad), fp) != sizeof(Pad))
+                {
+                    fclose(fp);
+                    remove(pPath);
+                    return FALSE;
+                }
+            }
         }
-        nRemaining -= (Int32)nChunk;
     }
-    free(pZero);
 
-    memset(Sector, 0, sizeof(Sector));
-    Sector[0] = 0xEB;
-    Sector[1] = 0x3C;
-    Sector[2] = 0x90;
-    memcpy(Sector + 3, "AURORASW", 8);
-    Sector[11] = 0x00; Sector[12] = 0x02;
-    Sector[13] = 0x01;
-    Sector[14] = 0x01; Sector[15] = 0x00;
-    Sector[16] = 0x02;
-    Sector[17] = 0xE0; Sector[18] = 0x00;
-    Sector[19] = 0x40; Sector[20] = 0x0B;
-    Sector[21] = 0xF0;
-    Sector[22] = 0x09; Sector[23] = 0x00;
-    Sector[24] = 0x12; Sector[25] = 0x00;
-    Sector[26] = 0x02; Sector[27] = 0x00;
-    Sector[38] = 0x29;
-    Sector[39] = 0x41; Sector[40] = 0x55;
-    Sector[41] = 0x52; Sector[42] = 0x35;
-    memcpy(Sector + 43, "NO NAME    ", 11);
-    memcpy(Sector + 54, "FAT12   ", 8);
-    Sector[510] = 0x55;
-    Sector[511] = 0xAA;
-
-    if (fseek(fp, 0, SEEK_SET) != 0 ||
-        fwrite(Sector, 1, sizeof(Sector), fp) != sizeof(Sector))
+    if (fflush(fp) != 0 || ftell(fp) != (long)totalBytes)
     {
         fclose(fp);
         remove(pPath);
         return FALSE;
     }
 
-    memset(Sector, 0, sizeof(Sector));
-    Sector[0] = 0xF0;
-    Sector[1] = 0xFF;
-    Sector[2] = 0xFF;
-
-    if (fseek(fp, SectorBytes * 1L, SEEK_SET) != 0 ||
-        fwrite(Sector, 1, sizeof(Sector), fp) != sizeof(Sector) ||
-        fseek(fp, SectorBytes * 10L, SEEK_SET) != 0 ||
-        fwrite(Sector, 1, sizeof(Sector), fp) != sizeof(Sector))
-    {
-        fclose(fp);
-        remove(pPath);
-        return FALSE;
-    }
-
-    fflush(fp);
     fclose(fp);
+
+    if (!_MainLoopSwcD88FileLooksValid(pPath, (long)totalBytes))
+    {
+        remove(pPath);
+        return FALSE;
+    }
     return TRUE;
 }
 
@@ -2431,7 +2575,7 @@ Bool MainLoopSwcCreateNextDisk(void)
         return FALSE;
     }
 
-    if (!_MainLoopSwcCreateFat12Image(Path))
+    if (!_MainLoopSwcCreateFat12D88(Path))
     {
         MainLoopStatusPrintf(180, "SWC: could not create disk image");
         return FALSE;
@@ -2465,12 +2609,12 @@ static Bool _MainLoopSwcInsertDisk(const char *pPath)
     if (!_MainLoopSwcDiskFileLooksValid(pPath))
     {
         MainLoopStatusPrintf(
-            180, "SWC: unsupported or invalid raw floppy image");
+            180, "SWC: unsupported or invalid D88 floppy image");
         return FALSE;
     }
 
     /* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
-     * With a loader already running, browser-selected .img media is a
+     * With a loader already running, browser-selected .d88 media is a
      * hot insert/swap. Do not unload or reset the copier or cartridge. */
     if (!_pSnes->SwapSuperWildCardDisk(pPath))
     {
@@ -2592,8 +2736,8 @@ static Bool _MainLoopExecuteSwcDisk(const char *pMappedPath,
 /* AURORA_SWC_SWAP_REPORT_REAL_INDEX_V4_2_20260901
  * AURORA_SWC_SWAP_REPORT_STRICT_INDEX_V4_3_20260901
  * AURORA_SWC_SWAP_INDEX_BOUNDS_V4_4_20260901
- * Parse basename_<n>.img without unsigned wrap.  Reporting follows the
- * actual mounted suffix even for manually supplied indices above 9999. */
+ * AURORA_SWC_D88_ONLY_V5_20260901
+ * Parse basename_<n>.d88 without unsigned wrap. */
 static Bool _MainLoopSwcNumberedDiskIndex(
     const char *pPath, unsigned *pIndex)
 {
@@ -2611,7 +2755,7 @@ static Bool _MainLoopSwcNumberedDiskIndex(
         return FALSE;
 
     pExt = strrchr(pName, '.');
-    if (!pExt || strcasecmp(pExt, ".img") != 0)
+    if (!pExt || strcasecmp(pExt, ".d88") != 0)
         return FALSE;
 
     pDigits = pExt;
@@ -2687,9 +2831,9 @@ Bool MainLoopSwcSwapNextDisk(void)
     }
 
     pExt = strrchr(pCurrent, '.');
-    if (!pExt || strcasecmp(pExt, ".img"))
+    if (!pExt || strcasecmp(pExt, ".d88"))
     {
-        MainLoopStatusPrintf(120, "SWC: current disk is not .img");
+        MainLoopStatusPrintf(120, "SWC: current disk is not .d88");
         return FALSE;
     }
 
@@ -2700,7 +2844,7 @@ Bool MainLoopSwcSwapNextDisk(void)
 
     if (pUnderscore <= pCurrent || pUnderscore[-1] != '_')
     {
-        MainLoopStatusPrintf(150, "SWC: disk name must end in _1.img, _2.img, ...");
+        MainLoopStatusPrintf(150, "SWC: disk name must end in _1.d88, _2.d88, ...");
         return FALSE;
     }
 
@@ -2714,7 +2858,7 @@ Bool MainLoopSwcSwapNextDisk(void)
         !_MainLoopSwcNumberedDiskIndex(pCurrent, &nDisk))
     {
         MainLoopStatusPrintf(
-            150, "SWC: disk name must end in _1.img, _2.img, ...");
+            150, "SWC: disk name must end in _1.d88, _2.d88, ...");
         return FALSE;
     }
 
@@ -2882,10 +3026,10 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     {
         if (!_MainLoopSwcDiskFileLooksValid(pFileName))
         {
-            MainLoopModalPrintf(60*4,"Copier: unsupported or invalid raw floppy image");
+            MainLoopModalPrintf(60*4,"Copier: unsupported or invalid D88 floppy image");
             return FALSE;
         }
-        /* Bare IMG deliberately retains DSK.SFC fallback from V5. */
+        /* AURORA_SWC_D88_ONLY_V5_20260901: bare D88 retains DSK.SFC fallback. */
         if (!(_pSnes && _pSnes->IsSuperWildCard()))
         {
             Char FirmwarePath[1024];
@@ -2902,12 +3046,14 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     if (MainLoopSramSaveBusy())
         return FALSE;
 
-    /* AURORA_V4_17_SAFE_CD_GAME_SWITCH_QUIESCE_20260830
-     * Browser launches normally already passed this barrier.  Keep the same
-     * safety property for any other caller of _MainLoopExecuteFile(). */
-    if (!PicoDriveBridge_PrepareGameSwitch())
+    /* AURORA_FINAL_V1_2_STORAGE_CLOSURE_20260901
+     * One teardown boundary for both CD cores. Browser launches normally
+     * already own this hold through the menu; non-browser callers acquire it
+     * here. PCE needs the same protection Sega CD already had before its
+     * cdstream objects can be destroyed under an in-flight async read. */
+    if (!MainLoopCdUiQuiesce())
     {
-        MainLoopStatusPrintf(120, "Sega CD I/O busy; try again.");
+        MainLoopStatusPrintf(120, "CD I/O busy; try again.");
         return FALSE;
     }
 
@@ -2928,6 +3074,11 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
 
     _MainLoopUnloadRom();
 
+    /* AURORA_FINAL_V1_2_STORAGE_CLOSURE_20260901
+     * Old CD objects are gone now. Release Beetle's pause gate before any new
+     * content is loaded; PicoDrive requires no explicit native resume. */
+    MainLoopCdUiResume();
+
 #if MAINLOOP_HISTORY
     _MainLoopResetHistory();
 #endif
@@ -2947,7 +3098,7 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
         return _MainLoopExecuteSwcFirmware(
             pFileName, OriginalPath, bLoadSRAM);
 
-    /* AURORA_SWC_FLOPPY_V1_20260831: .img bypasses cartridge allocation. */
+    /* AURORA_SWC_D88_ONLY_V5_20260901: .d88 bypasses cartridge allocation. */
     if (eType == MAINLOOP_ENTRYTYPE_SNESWCDISK)
         return _MainLoopExecuteSwcDisk(pFileName, OriginalPath, bLoadSRAM);
 

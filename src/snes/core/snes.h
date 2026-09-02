@@ -76,6 +76,19 @@ public:
     Bool    InsertSuperWildCardCartridge(SnesRom *pRom);
     void    EjectSuperWildCardCartridge();
     Bool    HasSuperWildCardCartridge() const { return m_SWC.HasExternalCartridge(); }
+
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901 */
+    Int32   GetSuperWildCardCartridgeSRAMBytes() const
+        { return (Int32)m_SWC.GetExternalCartridgeSRAMBytes(); }
+    Uint8  *GetSuperWildCardCartridgeSRAMData()
+        { return m_SWC.GetExternalCartridgeSRAMData(); }
+    Bool    HasSuperWildCardCartridgeBatterySRAM() const
+        { return m_SWC.HasExternalCartridgeBatterySRAM(); }
+    Bool    IsSuperWildCardCartridgeSRAMDirty() const
+        { return m_SWC.IsExternalCartridgeSRAMDirty(); }
+    void    ClearSuperWildCardCartridgeSRAMDirty()
+        { m_SWC.ClearExternalCartridgeSRAMDirty(); }
+
     Bool    HasSuperWildCardDisk() const { return m_SWC.HasDisk(); }
     /* AURORA_SWC_MEDIA_PROBE_V10_2_20260831 */
     Bool    IsSuperWildCardDiskWritable() const { return m_SWC.IsDiskWritable(); }

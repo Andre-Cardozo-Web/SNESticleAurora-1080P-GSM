@@ -576,8 +576,10 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"gd7");
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"dx2");
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"bsx");
-	/* AURORA_SWC_FLOPPY_V1_20260831: .img is a copier floppy, never a cartridge. */
-	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESWCDISK, (char *)"img");
+	/* AURORA_SWC_FLOPPY_V1_20260831
+	 * AURORA_SWC_D88_ONLY_V5_20260901:
+	 * copier floppy media is D88-only; IMG/raw is intentionally retired. */
+	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESWCDISK, (char *)"d88");
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESWCBIOS, (char *)"rom"); /* AURORA_SWC_FLOPPY_V5_20260831 */
 
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESPALETTE, (char *)"snpal");
@@ -714,7 +716,24 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
         _MainLoopLoadSnesPalette("mc0:/SNESticle/default.snpal");
 	// load rom
         _MainLoopExecuteFile(_pRomFile, TRUE);
-        _bMenu = _pSystem ? FALSE : TRUE;
+
+        /* AURORA_FINAL_V1_4_BOOT_MENU_SESSION_20260901
+         * FINAL V1_3 made BGM/filesystem permission an explicit normal-menu
+         * lifetime owned by _MenuEnable(TRUE), rather than a sticky browser
+         * screen latch. The initial browser must therefore enter through the
+         * same owner. A successful autoboot remains gameplay and does not arm
+         * a menu session. */
+        if (_pSystem)
+        {
+            _bMenu = FALSE;
+        }
+        else
+        {
+            /* MainLoopInit set _bMenu FALSE immediately before autoboot, so
+             * this executes the full normal-menu entry path exactly once. */
+            _MenuEnable(TRUE);
+        }
+
         if (_MainLoop_bAudioReady)
         {
             /* Aud_Init already starts with a clean queue.  Stopping audsrv

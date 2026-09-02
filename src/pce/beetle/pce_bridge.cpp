@@ -58,6 +58,9 @@ int PCE_AuroraPrefetchCdAudio(void);
 /* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
 void PCE_AuroraSetCdMusicEnabled(int enabled);
 int PCE_AuroraCdMusicEnabled(void);
+/* AURORA_PCE_CD_MENU_IO_QUIESCE_V1_20260901 */
+int PCE_AuroraCdAsyncQuiesce(unsigned int timeout_ms);
+void PCE_AuroraCdAsyncResume(void);
 }
 
 static bool s_Initialized = false;
@@ -588,6 +591,28 @@ void PceBridge_UnloadGame(void)
 bool PceBridge_IsDiscLoaded(void)
 {
     return s_GameLoaded && s_DiscLoaded;
+}
+
+/* AURORA_PCE_CD_MENU_IO_QUIESCE_V1_20260901
+ * PCE-CD only. HuCard timing and isolated quick-state UI are unchanged.
+ * 250 ms is a safety ceiling; normally ack follows the current 8 KiB read
+ * and returns almost immediately. */
+bool PceBridge_QuiesceDiscIO(void)
+{
+    if (!s_GameLoaded || !s_DiscLoaded)
+        return true;
+
+    if (PCE_AuroraCdAsyncQuiesce(250U))
+        return true;
+
+    PCE_AuroraCdAsyncResume();
+    printf("[PCE/CD] async worker quiesce timeout; menu deferred\n");
+    return false;
+}
+
+void PceBridge_ResumeDiscIO(void)
+{
+    PCE_AuroraCdAsyncResume();
 }
 
 void PceBridge_Reset(void){if(s_GameLoaded)PCE_retro_reset();}

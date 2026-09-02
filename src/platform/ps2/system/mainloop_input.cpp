@@ -465,6 +465,21 @@ void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 	else
 		MainLoopAudioHardCut();
 
+	/* AURORA_FINAL_V1_1_UI_CD_STORAGE_BARRIER_20260901
+	 * The confirmation screen itself remains instant and I/O-free. Only YES,
+	 * immediately before state scanning/writing, retires the active CD
+	 * transport. */
+	if (!MainLoopCdUiQuiesce())
+	{
+		if (bSave)
+			MainLoopAudioUiResume();
+		else
+			MainLoopAudioResumeGame();
+		MainLoopStatusPrintf(
+			120, "CD I/O busy; state operation deferred.");
+		return;
+	}
+
 	MainLoopModalPrintf(
 		1,
 		bSave ? "Saving state slot %d..." : "Loading state slot %d...",
@@ -472,6 +487,9 @@ void _MainLoopQuickStateExecuteConfirmed(Bool bSave)
 	);
 
 	bOK = bSave ? _MainLoopSaveState() : _MainLoopLoadState();
+
+	/* AURORA_FINAL_V1_1_UI_CD_STORAGE_BARRIER_20260901 */
+	MainLoopCdUiResume();
 
 	if (bSave && !bOK && MainLoopStateGetUnformattedCard() >= 0)
 	{

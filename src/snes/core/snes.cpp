@@ -1493,10 +1493,15 @@ Bool SnesSystem::InsertSuperWildCardCartridge(SnesRom *pRom)
         pRom->m_eMapping != SNROM_MAPPING_HIROM)
         return FALSE;
 
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
+     * The external cart owns separate Game Pak RAM. SNROM_FLAG_SAVERAM is
+     * battery-backed; plain SNROM_FLAG_RAM remains volatile. */
     ok = m_SWC.SetExternalCartridge(
         pRom->GetData(),
         pRom->GetBytes(),
-        (Int32)pRom->m_eMapping);
+        (Int32)pRom->m_eMapping,
+        pRom->GetSRAMBytes(),
+        (pRom->m_Flags & SNROM_FLAG_SAVERAM) ? TRUE : FALSE);
     if (ok)
     {
         /* AURORA_SWC_V10_MENU_INDEX_CARTRESET_20260831

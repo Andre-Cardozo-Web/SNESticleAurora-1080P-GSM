@@ -55,10 +55,20 @@ public:
     Bool SwapDisk(const Char *pDiskPath);
 
     /* AURORA_SWC_FLOPPY_V5_20260831 */
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901 */
     Bool SetExternalCartridge(const Uint8 *pRom, Uint32 nRomBytes,
-                              Int32 iMapping);
+                              Int32 iMapping, Uint32 nSramBytes,
+                              Bool bBatterySRAM);
     void ClearExternalCartridge();
     Bool HasExternalCartridge() const { return m_pCartRom != NULL; }
+    Uint32 GetExternalCartridgeSRAMBytes() const { return m_nCartSRAMBytes; }
+    Uint8 *GetExternalCartridgeSRAMData() { return m_pCartSRAM; }
+    Bool HasExternalCartridgeBatterySRAM() const
+        { return m_pCartSRAM && m_nCartSRAMBytes && m_bCartSRAMBattery; }
+    Bool IsExternalCartridgeSRAMDirty() const
+        { return m_bCartSRAMDirty; }
+    void ClearExternalCartridgeSRAMDirty()
+        { m_bCartSRAMDirty = FALSE; }
     Bool HasDisk() const { return m_pDisk != NULL; }
     /* AURORA_SWC_MEDIA_PROBE_V10_2_20260831: host-side media diagnostics. */
     Bool IsDiskWritable() const { return m_pDisk != NULL && m_bDiskWritable; }
@@ -104,6 +114,14 @@ private:
         MAGICOM_FIRMWARE_BYTES = 8 * 1024,
         SWC_SECTOR_BYTES = 512,
         SWC_MAX_FORMAT_IDS = 36 * 4,
+        /* AURORA_SWC_D88_ONLY_V5_20260901 */
+        D88_TRACK_TABLE = 164,
+        D88_TRACK_ACTIVE = 160,
+        D88_HEADER_MIN_BYTES = 0x2A0,
+        D88_HEADER_MAX_BYTES = 0x2B0,
+        D88_SECTOR_HEADER_BYTES = 16,
+        D88_SLOT_SECTORS = 20,
+        D88_MAX_SECTORS = 20,
 
         FDC_PHASE_COMMAND = 0,
         FDC_PHASE_READ,
@@ -123,6 +141,13 @@ private:
     Uint32 m_nCartBytes;
     Int32 m_iCartMapping;
 
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
+     * Separate physical Game Pak RAM from the copier's own 32 KiB B-RAM. */
+    Uint8 *m_pCartSRAM;
+    Uint32 m_nCartSRAMBytes;
+    Bool m_bCartSRAMBattery;
+    Bool m_bCartSRAMDirty;
+
     Uint32 m_uSelectedDRAMPage;
     Uint32 m_uSelectedSRAMPage;
     Uint8 m_uSystemMode;
@@ -131,6 +156,9 @@ private:
     Bool m_bCartridgeMap; /* AURORA_SWC_FLOPPY_V3_20260831: external cart window in Modes 2/3 */
 
     FILE *m_pDisk;
+    /* AURORA_SWC_D88_ONLY_V5_20260901 */
+    Uint32 m_D88TrackOffset[D88_TRACK_TABLE];
+    Uint32 m_uD88DiskBytes;
     Bool m_bDiskWritable;
     Bool m_bDiskDirty; /* AURORA_SWC_MEGA_V9_20260831: flush once per FDC command */
     Bool m_bDiskChanged;
@@ -187,7 +215,20 @@ private:
 
     void SetError(const Char *pText);
     Bool LoadFirmware(const Char *pPath);
-    Bool DetectGeometry(long nBytes);
+    /* AURORA_SWC_D88_ONLY_V5_20260901 */
+    Bool D88Probe(FILE *pFile, long nBytes,
+                  Int32 *pTracks, Int32 *pHeads, Int32 *pMaxSpt,
+                  Uint32 *pOffsets, Uint32 *pDiskBytes,
+                  Bool *pProtected);
+    Bool D88FindSector(Uint8 c, Uint8 h, Uint8 r, Uint8 n,
+                       long *pDataOffset);
+    Uint8 D88TrackSectorCount(Uint8 c, Uint8 h);
+    Uint8 D88TrackSlotCapacity(Uint8 c, Uint8 h);
+    Bool D88FirstSectorID(Uint8 c, Uint8 h,
+                          Uint8 *pC, Uint8 *pH, Uint8 *pR, Uint8 *pN);
+    Bool D88RefreshGeometry();
+    Bool D88FormatSectorCountAllowed(Uint8 count) const;
+    Bool D88FormatCurrentTrack();
 
     void FdcReset(Bool bRaiseIRQ);
     Bool FdcFlushDisk();
@@ -206,12 +247,21 @@ private:
     Bool FdcLoadCurrentSector();
     Bool FdcStoreCurrentSector();
     Bool FdcAdvanceSector();
-    long FdcSectorOffset(Uint8 c, Uint8 h, Uint8 r) const;
-    Bool FdcValidCHS(Uint8 c, Uint8 h, Uint8 r) const;
+    Bool FdcValidCHS(Uint8 c, Uint8 h, Uint8 r);
 
     Bool ReadExternalCartridge(Uint8 bank, Uint16 addr, Uint8 *pData) const;
+
+    /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901 */
+    Bool ExternalCartridgeSRAMOffset(
+        Uint8 bank, Uint16 addr, Uint32 *pOffset) const;
+    Bool ReadExternalCartridgeSRAM(
+        Uint8 bank, Uint16 addr, Uint8 *pData) const;
+    Bool WriteExternalCartridgeSRAM(
+        Uint8 bank, Uint16 addr, Uint8 uData);
+
     /* AURORA_FRONT_MODE0_PAGEBUS_V10_9_20260831 */
     Bool ReadExternalPage(Uint8 bank, Uint16 addr, Uint8 *pData) const;
+    Bool WriteExternalPage(Uint8 bank, Uint16 addr, Uint8 uData);
 
     Uint32 DramOffsetMode2(Uint8 bank, Uint16 addr) const;
     Bool ReadMode0(Uint8 bank, Uint16 addr, Uint8 *pData,

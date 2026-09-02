@@ -29,6 +29,11 @@ Bool _MainLoopSaveSRAM(Bool bSync);
 void _MainLoopLoadSRAM();
 Bool _MainLoopCheckSRAM();
 Bool _MainLoopForceCheckSRAM();
+
+/* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901 */
+void _MainLoopSwcCartSRAMAttach(const Char *pCartPath);
+void _MainLoopSwcCartSRAMDetach();
+
 void MainLoopSramSetDevice(MainLoopSramDeviceE eDevice);
 void MainLoopSramCycleDevice();
 MainLoopSramDeviceE MainLoopSramGetDevice();

@@ -13,6 +13,7 @@
 #include "mainloop_debug.h"
 #include "mainloop_shared.h"
 #include "mainloop_ui.h"
+#include "mainloop_menu.h" /* AURORA_FINAL_V1_5_RENDER_MENU_API_INCLUDE_20260901 */
 #include "mainloop_bgm.h"
 #include "mainloop_safe_frameskip.h" /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 #include "sega/picodrive/picodrive_bridge.h"
@@ -777,14 +778,12 @@ void MainLoopRender()
 	   message starved audsrv regardless of whether any I/O was happening. */
 	if (_bMenu)
 	{
-		static Bool s_bgmArmed = FALSE;
-		if ((void *)_MainLoop_pScreen == (void *)_MainLoop_pBrowserScreen)
-			s_bgmArmed = TRUE;
-		/* AURORA_AUDIO_UI_SOFT_TRANSITION_V1_20260901
-		 * Quick-state confirmation stays silent. It is an isolated prompt,
-		 * not the pause-menu music session, and its soft audio mute must be
-		 * allowed to drain the gameplay tail without being undone here. */
-		if (s_bgmArmed &&
+		/* AURORA_FINAL_V1_3_NORMAL_MENU_BGM_SESSION_20260901
+		 * _bMenu alone is insufficient: isolated quick-state/device/format
+		 * prompts also pause the core without acquiring the CD transport.
+		 * BGM may scan/open storage, so it is legal only for a session that
+		 * successfully entered through _MenuEnable(TRUE). */
+		if (MainLoopNormalMenuBgmSessionActive() &&
 		    _MainLoop_pScreen != (CScreen *)_MainLoop_pStateConfirmScreen)
 			BgmUpdate();
 		/* Draw the live menu first, then place modal/status text on top. The

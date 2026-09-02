@@ -13,6 +13,9 @@ bool PceBridge_LoadGame(const void *pData, size_t nBytes, size_t nCapacity, cons
 bool PceBridge_LoadDisc(const char *pPath, const char *pSystemPath);
 /* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */
 bool PceBridge_IsDiscLoaded(void);
+/* AURORA_PCE_CD_MENU_IO_QUIESCE_V1_20260901 */
+bool PceBridge_QuiesceDiscIO(void);
+void PceBridge_ResumeDiscIO(void);
 void PceBridge_UnloadGame(void);
 void PceBridge_Reset(void);
 void PceBridge_SoftReset(void);

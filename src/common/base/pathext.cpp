@@ -4,7 +4,7 @@
 #include "pathext.h"
 
 #define PATHEXT_SIZE 		  (8)
-#define PATHEXT_MAXEXTENSIONS (40) /* AURORA_SWC_FLOPPY_V1_20260831: room for isolated .img type */
+#define PATHEXT_MAXEXTENSIONS (40) /* AURORA_SWC_D88_ONLY_V5_20260901: room for isolated copier .d88 type */
 typedef struct 
 {
 	char			Ext[PATHEXT_SIZE];
