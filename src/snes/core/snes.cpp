@@ -1576,6 +1576,27 @@ void SnesSystem::ShutdownSuperWildCard()
     SetSnesRom(NULL);
 }
 
+/* AURORA_FRONT_COPIER_POWER_CYCLE_V2_20260902
+ * Model a host-requested power-off/power-on of the active classic Front
+ * copier without changing physical topology:
+ *   - m_SWC.Reset() returns System Mode/page/FDC control state to power-on;
+ *   - mounted D88 remains mounted;
+ *   - inserted external/donor cartridge remains inserted;
+ *   - the selected copier model/firmware remains the same;
+ *   - Reset() hard-resets S-CPU/PPU/SPC and rebuilds the now-Mode-0 map,
+ *     so the reset vector is taken from the copier BIOS.
+ *
+ * No host file is closed/reopened and no cartridge is detached/reinserted.
+ */
+void SnesSystem::PowerCycleFrontCopier()
+{
+    if (!m_bSuperWildCard)
+        return;
+
+    m_SWC.Reset();
+    Reset();
+}
+
 #if SNES_HVIRQ_RESCHEDULE
 /* AURORA_HVIRQ_RESCHEDULE_V4
  * Return the absolute master-clock position of the timer event on the

@@ -621,7 +621,24 @@ void SNCPU_TRAPFUNC SnesSystem::WriteSWC(SNCpuT *pCpu,
         if (handled && addr >= 0xE000 && addr <= 0xE003)
             pSnes->RemapSuperWildCardMode0Dram();
         else if (handled && addr >= 0xE004 && addr <= 0xE007)
+        {
+            /* AURORA_SWC_MODE_SWITCH_FETCH_ABORT_V1_20260902
+             * E004-E007 change the physical S-CPU bus immediately.
+             *
+             * The PS2 MIPS 65816 executor caches the current direct-fetch
+             * bank in R_PC/SP_PCBank. Rebuilding Bank[] alone is therefore
+             * insufficient while the CPU is inside the WriteSWC trap: after
+             * returning from the trap it could continue fetching opcodes
+             * through the stale pre-switch firmware/ROM host pointer.
+             *
+             * Abort only the current execution slice after installing the new
+             * map. SNCPUExecute() preserves the remaining cycle budget and the
+             * next entry resolves PC against the new Bank[] mapping. No reset,
+             * reset-vector jump or game-specific workaround is involved.
+             */
             pSnes->MapSuperWildCard();
+            SNCPUAbort(pCpu);
+        }
     }
 }
 

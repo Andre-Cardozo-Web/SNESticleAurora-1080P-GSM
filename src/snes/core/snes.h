@@ -61,6 +61,10 @@ public:
     Bool    LoadSuperMagicom(const Char *pFirmwarePath, const Char *pDiskPath); /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831 */
     Bool    SwapSuperWildCardDisk(const Char *pDiskPath);
     void    ShutdownSuperWildCard();
+    /* AURORA_FRONT_COPIER_POWER_CYCLE_V2_20260902
+     * Host-requested copier power cycle: keep inserted media/topology but
+     * return the Front copier and the SNES to their boot/BIOS state. */
+    void    PowerCycleFrontCopier();
     /* Legacy predicate intentionally means active classic Front copier. */
     Bool    IsSuperWildCard() const { return m_bSuperWildCard; }
     Bool    IsSuperWildCardFirmwareMode() const

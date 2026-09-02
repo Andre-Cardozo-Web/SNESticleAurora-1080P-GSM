@@ -534,6 +534,7 @@ void _MainLoopInputProcess(Uint32 buttons)
 	static Bool bFdsSwapHotkeyHeld = FALSE; /* AURORA_FCEUMM_FDS_V0_6_SIDE_SWAP */
     static Bool bSwcSwapHotkeyHeld = FALSE; /* AURORA_SWC_FLOPPY_V1_20260831 */
     static Bool bSwcCreateHotkeyHeld = FALSE; /* AURORA_SWC_FLOPPY_V5_20260831 */
+    static Bool bFrontCopierPowerHotkeyHeld = FALSE; /* AURORA_FRONT_COPIER_L2_L3_POWER_CYCLE_V2_20260902 */
 	Uint32 trigger;
 
 	/* AURORA_INPUT_SUPPRESS_ALL_GAMEPLAY_V1_4_3 */
@@ -571,6 +572,8 @@ void _MainLoopInputProcess(Uint32 buttons)
 		bSwcSwapHotkeyHeld = FALSE;
 	if (!(buttons & PAD_L2) || !(buttons & PAD_SQUARE))
 		bSwcCreateHotkeyHeld = FALSE;
+    if (!(buttons & PAD_L2) || !(buttons & PAD_L3))
+        bFrontCopierPowerHotkeyHeld = FALSE;
 
 	/* AURORA_V6_PHYSICAL_CONSOLE_BUTTON_CONSUME_20260828 */
 	{
@@ -588,6 +591,31 @@ void _MainLoopInputProcess(Uint32 buttons)
 			return;
 		}
 	}
+
+    /* AURORA_FRONT_COPIER_L2_L3_POWER_CYCLE_V2_20260902
+     * L2+L3 is a host-only cold restart of the active classic Front copier.
+     * It intentionally preserves physical topology: mounted disk/no-disk and
+     * inserted cartridge/no-cartridge remain exactly as they are. The copier
+     * control state returns to Mode 0 and SnesSystem takes the BIOS vector.
+     *
+     * The held latch makes this one-shot. R2 is excluded so L2+R2 keeps its
+     * existing menu/SRAM meaning. Suppress gameplay until full release so the
+     * same physical press cannot leak into the first BIOS frame.
+     */
+    if (!_bMenu && _pSystem == _pSnes &&
+        _pSnes->IsSuperWildCard() &&
+        !bFrontCopierPowerHotkeyHeld &&
+        (buttons & (PAD_L2 | PAD_L3)) == (PAD_L2 | PAD_L3) &&
+        !(buttons & PAD_R2) &&
+        (trigger & (PAD_L2 | PAD_L3)))
+    {
+        bFrontCopierPowerHotkeyHeld = TRUE;
+        _MenuTriggerTimeout[0] = 0;
+        _MenuTriggerTimeout[1] = 0;
+        _MainLoopInputSuppressUntilRelease();
+        _pSnes->PowerCycleFrontCopier();
+        return;
+    }
 
 	/* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
 	 * L2+Square creates the next numbered image for the active loader:
