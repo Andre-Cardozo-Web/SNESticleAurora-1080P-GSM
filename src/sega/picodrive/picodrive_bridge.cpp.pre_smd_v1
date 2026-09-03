@@ -32,8 +32,6 @@ extern "C" {
 #include <libretro_gskit_ps2.h>
 #include <pico/pico.h>
 #include <pico/pico_int.h>
-#include <malloc.h> /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-#include <pico/smd.h> /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
 
 #include <pico/cd/cd_parse.h> /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
 /* AURORA_PD_BORROW_AURORA_ROM_V1 */
@@ -68,9 +66,6 @@ void PicoSmsInjectPauseNmi(int normal_pause_pressed);
 
 static bool s_Initialized = false;
 static bool s_GameLoaded = false;
-/* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-static Uint8 *s_SmdBootstrapBacking = NULL;
-static size_t s_SmdBootstrapCapacity = 0;
 static bool s_Use6Button = false;
 static int  s_AuroraRegion = SNES_FORCE_REGION_OFF;
 static bool s_VariablesChanged = false;
@@ -1212,56 +1207,6 @@ bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes,
     return true;
 }
 
-
-/* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-static void pdSmdRefreshContentMeta(const void *pData, size_t nBytes, const char *pName)
-{
-    const char *base, *base2, *dot; size_t baseLen;
-    if (pName && *pName) { strncpy(s_ContentName,pName,sizeof(s_ContentName)-1); s_ContentName[sizeof(s_ContentName)-1]=0; }
-    s_ContentData=pData; s_ContentBytes=nBytes;
-    base=strrchr(s_ContentName,'/'); base2=strrchr(s_ContentName,'\\'); if(!base||(base2&&base2>base))base=base2; base=base?base+1:s_ContentName;
-    dot=strrchr(base,'.'); baseLen=dot&&dot>base?(size_t)(dot-base):strlen(base); if(baseLen>=sizeof(s_ContentBaseName))baseLen=sizeof(s_ContentBaseName)-1;
-    memcpy(s_ContentBaseName,base,baseLen);s_ContentBaseName[baseLen]=0;
-    if(dot&&dot[1]){strncpy(s_ContentExt,dot+1,sizeof(s_ContentExt)-1);s_ContentExt[sizeof(s_ContentExt)-1]=0;}else strcpy(s_ContentExt,"bin");
-    memset(&s_ContentInfoExt,0,sizeof(s_ContentInfoExt));s_ContentInfoExt.full_path=s_ContentName;s_ContentInfoExt.dir=s_DotPath;s_ContentInfoExt.name=s_ContentBaseName;s_ContentInfoExt.ext=s_ContentExt;s_ContentInfoExt.data=s_ContentData;s_ContentInfoExt.size=s_ContentBytes;s_ContentInfoExt.file_in_archive=false;s_ContentInfoExt.persistent_data=true;
-}
-static void pdSmdAdoptBatteryRam(void){s_pSramData=PicoDriveAurora_SmdBatteryRam();s_SramBytes=(Int32)PicoDriveAurora_SmdBatteryRamBytes();}
-
-bool PicoDriveBridge_LoadSuperMagicDrive(const char *pBiosPath,const char *pDiskPath)
-{
-    FILE *fp; long n; Uint8 *buf; size_t cap; bool ok;
-    if(!pBiosPath||!*pBiosPath)return false;fp=fopen(pBiosPath,"rb");if(!fp)return false;
-    if(fseek(fp,0,SEEK_END)!=0||(n=ftell(fp))!=0x2000L){fclose(fp);return false;}rewind(fp);
-    cap=PicoDriveBridge_RequiredRomCapacity(0x2000);if(!cap){fclose(fp);return false;}
-    buf=(Uint8*)memalign(64,cap);if(!buf){fclose(fp);return false;}memset(buf,0,cap);
-    if(fread(buf,1,0x2000,fp)!=0x2000){fclose(fp);free(buf);return false;}fclose(fp);
-    ok=PicoDriveBridge_LoadGame(buf,0x2000,cap,"mdpbios.sms");if(!ok){free(buf);return false;}
-    s_SmdBootstrapBacking=buf;s_SmdBootstrapCapacity=cap;
-    if(!PicoDriveAurora_SmdStart(buf,0x2000,4u*1024u*1024u,pDiskPath)){PicoDriveBridge_UnloadGame();return false;}
-    pdSmdRefreshContentMeta(buf,0x2000,"mdpbios.bin");pdSmdAdoptBatteryRam();s_VariablesChanged=true;pdInvalidateDirectVideoInfo();
-    printf("[PicoDrive/SMD] mdpbios.bin booted; DRAM=32 Mbit; BRAM=32 KiB\\n");return true;
-}
-
-bool PicoDriveBridge_SmdInsertCartridge(const void *pData,size_t nBytes,size_t nCapacity,const char *pName)
-{
-    bool ok;
-    if(!PicoDriveAurora_SmdIsActive()||!PicoDriveAurora_SmdIsFirmwareMode()||!pData||!nBytes||nCapacity>0xffffffffU)return false;
-    PicoCartSetExternalRomBuffer((const unsigned char*)pData,(unsigned int)nCapacity);
-    ok=PicoDriveAurora_SmdInsertCartridge((const unsigned char*)pData,(unsigned int)nBytes)!=0;
-    PicoCartSetExternalRomBuffer(NULL,0);if(!ok)return false;
-    if(s_SmdBootstrapBacking){free(s_SmdBootstrapBacking);s_SmdBootstrapBacking=NULL;s_SmdBootstrapCapacity=0;}
-    pdSmdRefreshContentMeta(pData,nBytes,pName?pName:"cartridge.md");pdSmdAdoptBatteryRam();s_VariablesChanged=true;pdInvalidateDirectVideoInfo();return true;
-}
-void PicoDriveBridge_SmdEjectCartridge(void){if(PicoDriveAurora_SmdIsActive()){PicoDriveAurora_SmdEjectCartridge();pdSmdAdoptBatteryRam();pdInvalidateDirectVideoInfo();}}
-bool PicoDriveBridge_SmdSwapDisk(const char*p){return PicoDriveAurora_SmdSwapDisk(p)!=0;}
-void PicoDriveBridge_SmdPowerCycle(void){if(PicoDriveAurora_SmdIsActive()){PicoDriveAurora_SmdPowerCycle();s_VariablesChanged=true;pdInvalidateDirectVideoInfo();pdAudioTailReset();}}
-bool PicoDriveBridge_IsSuperMagicDrive(void){return PicoDriveAurora_SmdIsActive()!=0;}
-bool PicoDriveBridge_IsSuperMagicDriveFirmwareMode(void){return PicoDriveAurora_SmdIsFirmwareMode()!=0;}
-bool PicoDriveBridge_SmdHasCartridge(void){return PicoDriveAurora_SmdHasCartridge()!=0;}
-bool PicoDriveBridge_SmdHasDisk(void){return PicoDriveAurora_SmdHasDisk()!=0;}
-const char*PicoDriveBridge_SmdDiskPath(void){return PicoDriveAurora_SmdDiskPath();}
-const char*PicoDriveBridge_SmdLastError(void){return PicoDriveAurora_SmdLastError();}
-
 /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824
  * Both Sega CD and PC Engine CD use .cue. Parse the CUE with PicoDrive's
  * own resolver and classify only the canonical Sega boot signature. */
@@ -1444,17 +1389,7 @@ void PicoDriveBridge_UnloadGame(void)
         /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: libretro's unload is empty; release CD tracks and MCD RAM. */
         if ((PicoIn.AHW & PAHW_MCD) || Pico_mcd)
             PicoExitMCD();
-        if (PicoDriveAurora_SmdIsActive())
-            PicoDriveAurora_SmdPrepareUnload();
         PicoCartUnload();
-        if (PicoDriveAurora_SmdIsActive())
-            PicoDriveAurora_SmdShutdown();
-        if (s_SmdBootstrapBacking)
-        {
-            free(s_SmdBootstrapBacking);
-            s_SmdBootstrapBacking = NULL;
-            s_SmdBootstrapCapacity = 0;
-        }
         PicoIn.AHW = 0;
         PicoIn.quirks = 0;
     }
@@ -1785,10 +1720,6 @@ void PicoDriveBridge_RunFrame(Emu::SysInputT *pInput,
         PicoDriveAurora_RunFrameNative(
             inputMasks, 2, skipVideo ? 1 : 0, refreshVariables);
     }
-
-    /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-    if (PicoDriveAurora_SmdIsActive())
-        PicoDriveAurora_SmdPostFrame();
 
     /* AURORA_EXTREME_CD_VIDEO_FIRST_V1_20260830 */
     PicoDriveAurora_SetCdAudioSafeWindow(0);
@@ -2195,30 +2126,41 @@ bool PicoDriveBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     return true;
 }
 
-/* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-struct PdSmdStateEnvelope { Uint32 magic, coreBytes, smdBytes, reserved; };
 int PicoDriveBridge_GetStateSize(void)
 {
-    size_t core; unsigned int extra;
-    if(!s_GameLoaded)return 0;core=retro_serialize_size();if(!core)return 0;
-    if(!PicoDriveAurora_SmdIsActive())return core>0x7fffffffU?0:(int)core;
-    extra=PicoDriveAurora_SmdStateSize();if(!extra||core>0x7fffffffU-sizeof(PdSmdStateEnvelope)-extra)return 0;
-    return (int)(sizeof(PdSmdStateEnvelope)+core+extra);
+    if (!s_GameLoaded)
+        return 0;
+    size_t n = retro_serialize_size();
+    return n > 0x7fffffffU ? 0 : (int)n;
 }
-int PicoDriveBridge_SaveState(void *pData,int nBytes)
+
+int PicoDriveBridge_SaveState(void *pData, int nBytes)
 {
-    size_t core;unsigned int extra;if(!s_GameLoaded||!pData||nBytes<=0)return 0;core=retro_serialize_size();if(!core)return 0;
-    if(!PicoDriveAurora_SmdIsActive()){if(core!=(size_t)nBytes)return 0;return retro_serialize(pData,core)?(int)core:0;}
-    extra=PicoDriveAurora_SmdStateSize();if(!extra||(size_t)nBytes!=sizeof(PdSmdStateEnvelope)+core+extra)return 0;
-    PdSmdStateEnvelope h={0x314d5350u,(Uint32)core,extra,0};memcpy(pData,&h,sizeof(h));Uint8*cd=(Uint8*)pData+sizeof(h);Uint8*sd=cd+core;
-    if(!retro_serialize(cd,core))return 0;if(PicoDriveAurora_SmdSaveState(sd,extra)!=(int)extra)return 0;return nBytes;
+    if (!s_GameLoaded || !pData || nBytes <= 0)
+        return 0;
+    size_t need = retro_serialize_size();
+    if (!need || need > (size_t)nBytes)
+        return 0;
+    return retro_serialize(pData, need) ? (int)need : 0;
 }
-bool PicoDriveBridge_LoadState(const void *pData,int nBytes)
+
+bool PicoDriveBridge_LoadState(const void *pData, int nBytes)
 {
-    bool ok=false;if(!s_GameLoaded||!pData||nBytes<=0)return false;
-    if(!PicoDriveAurora_SmdIsActive())ok=retro_unserialize(pData,(size_t)nBytes);
-    else{PdSmdStateEnvelope h;if((size_t)nBytes<sizeof(h))return false;memcpy(&h,pData,sizeof(h));if(h.magic!=0x314d5350u||(size_t)nBytes!=sizeof(h)+h.coreBytes+h.smdBytes)return false;const Uint8*cs=(const Uint8*)pData+sizeof(h);const Uint8*ss=cs+h.coreBytes;if(!PicoDriveAurora_SmdPrepareLoadState(ss,h.smdBytes))return false;if(!retro_unserialize(cs,h.coreBytes))return false;if(!PicoDriveAurora_SmdLoadState(ss,h.smdBytes))return false;ok=true;pdSmdAdoptBatteryRam();}
-    if(ok){s_DirectClutValid=false;pdInvalidateDirectVideoInfo();pdAudioTailReset();}return ok;
+    bool ok;
+    if (!s_GameLoaded || !pData || nBytes <= 0)
+        return false;
+
+    ok = retro_unserialize(pData, (size_t)nBytes);
+    if (ok)
+    {
+        /* AURORA_MD_STATE_CLUT_INVALIDATE_V1 */
+        s_DirectClutValid = false;
+        pdInvalidateDirectVideoInfo();
+
+        /* Pending PCM belongs to the pre-load timeline. */
+        pdAudioTailReset();
+    }
+    return ok;
 }
 
 int PicoDriveBridge_GetSRAMBytes(void)

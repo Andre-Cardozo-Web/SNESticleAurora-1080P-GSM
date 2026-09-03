@@ -697,23 +697,12 @@ _SNCPU_Write8:
         
 
 _SNCPU_Write8ZeroBank:
-        lw      t1,SNCPU_pMem(R_pCpu)
-        beq     t1,zr,_SNCPU_Write8ZeroBankTrap
-        nop
-        addiu   R_Cycles,R_Cycles,-SNCPU_CYCLE_SLOW
-        addu    t0,t1,R_Addr
-        jr      ra
-        sb      R_Data,0(t0)
-
-_SNCPU_Write8ZeroBankTrap:
-        /* AURORA_SA1_BANK0_TRAP_FALLBACK_V8_20260903
-         * Descriptor zero is direct WRAM on normal S-CPU, but trapped on
-         * SA-1. Reconstruct the generic write-trap inputs when pMem==NULL. */
-        move    t0,R_pCpu
-        lh      t2,SNCPU_uBankCycle(t0)
-        j       _SNCPU_Write8Trap
-        andi    t2,t2,0xFF
-
+        lw		t0,SNCPU_pMem(R_pCpu)	 				// t0 = bank addr
+        addiu	R_Cycles,R_Cycles,-SNCPU_CYCLE_SLOW		// zero bank is slow
+        addu	t0,t0,R_Addr
+		jr		ra										
+        sb		R_Data, 0(t0)							// load byte unsigned
+        
 _SNCPU_Write8Trap:
         lw		t1,SNCPU_WriteTrap(t0)					// t1 -> trap handler
 		subu	R_Cycles, R_Cycles, t2					// consume cycles for memory access
@@ -903,21 +892,13 @@ _SNCPU_Read8:
 
 
 _SNCPU_Read8ZeroBank:
-        lw      t1,SNCPU_pMem(R_pCpu)
-        beq     t1,zr,_SNCPU_Read8ZeroBankTrap
-        nop
-        addiu   R_Cycles,R_Cycles,-SNCPU_CYCLE_SLOW
-        addu    t0,t1,R_Addr
-        jr      ra
-        lbu     R_Data,0(t0)
+        lw		t0,SNCPU_pMem(R_pCpu)	 				// t0 = bank addr
+        addiu	R_Cycles,R_Cycles,-SNCPU_CYCLE_SLOW		// zero bank is slow
+        addu	t0,t0,R_Addr
+		jr		ra										
+        lbu		R_Data, 0(t0)							// load byte unsigned
 
-_SNCPU_Read8ZeroBankTrap:
-        /* AURORA_SA1_BANK0_TRAP_FALLBACK_V8_20260903 */
-        move    t0,R_pCpu
-        lbu     t2,SNCPU_uBankCycle(t0)
-        j       _SNCPU_Read8Trap
-        subu    R_Cycles,R_Cycles,t2
-
+        
 _SNCPU_Read8Trap:
         lw		t1,SNCPU_ReadTrap(t0)					// t1 -> trap handler
 

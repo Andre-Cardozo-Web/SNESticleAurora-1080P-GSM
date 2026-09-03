@@ -764,20 +764,7 @@ void _MainLoopUnloadRom()
     /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
      * The flush above calls _MainLoopForceCheckSRAM/_MainLoopSaveSRAM while
      * the cart backing and cartridge filename still exist. Detach only now. */
-        /* AURORA_SMD_L2_R3_CLOSE_V1_20260903
-     * B-RAM is the current Sega SRAM while SMD is active. Save before the
-     * bridge/device teardown. */
-    if (_pSystem == _pSega && _pSega && _pSega->IsSuperMagicDrive() &&
-        _pSystem->GetSRAMBytes() == 0x8000)
-    {
-        (void)_MainLoopForceCheckSRAM();
-        Bool bSaved = _MainLoopSaveSRAM(TRUE);
-        ConPrint("SMD B-RAM unload flush: %s\n", bSaved ? "saved" : "FAILED");
-        MainLoopStatusPrintf(bSaved ? 120 : 240,
-            bSaved ? "SMD B-RAM saved." : "WARNING: SMD B-RAM save failed!");
-    }
-
-_MainLoopSwcCartSRAMDetach();
+    _MainLoopSwcCartSRAMDetach();
 
     /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830
      * BgmStop intentionally retains libxmp for fast menu reopen.

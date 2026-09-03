@@ -25,8 +25,6 @@ extern Bool g_SnesCompatSunsetRidersObj128;
 #define AURORA_SUNSET_RIDERS_OBJ_FETCH_MAX 128
 
 static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPriority, SNMaskT *pOpaque);
-static void _BuildMode7ExtBG(Uint8 *pLineBG2, SNMaskT *pPriority,
-	SNMaskT *pOpaque, const Uint8 *pLineBG1);
 
 #if SNPPU_OBJ_CACHE || SNPPU_BG_CACHE
 static SnesPPUChrCacheT _SnesPPU_ChrCache _ALIGN(64);
@@ -1521,10 +1519,7 @@ static void _ClearLinePlanar(SNMaskT *pPlanes, Int32 nPlanes)
 void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 {
 	SNMaskT BG3Pri;
-	SNMaskT M7BG2MainPri;
-	SNMaskT M7BG2SubPri;
 	Bool bBG3Pri;
-	/* AURORA_MODE7_EXTBG_COMPOSITOR_V1_20260903: EXTBG BG2 main/sub priority masks. */
 	SnesBGInfoT	BGInfo[4];
 	/* AURORA_SUNSET_RIDERS_CRC_OBJ128_V2_ARRAY_20260825 */
 	SnesRenderObj8T ObjLine[AURORA_SUNSET_RIDERS_OBJ_FETCH_MAX];
@@ -1535,8 +1530,6 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	 * scanline. Snapshot fields repeatedly used across helper calls. */
 	const Uint8 uBGModeReg = pRegs->bgmode;
 	const Uint8 uBGMode = (Uint8)(uBGModeReg & 7);
-	const Bool bMode7ExtBG =
-		(uBGMode == 7) && ((pRegs->setini & 0x40) != 0);
 	const Uint8 uOBSEL = pRegs->obsel;
 	/* AURORA_V85_SOFTWARE_LAYER_MASK
 	 * Mask before fetch/decode so disabled layers really save EE work. */
@@ -1569,20 +1562,6 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
     Uint8  *pMain8 = pRenderInfo->BlendInfo.uMain8;
     Uint8  *pSub8 = pRenderInfo->BlendInfo.uSub8;
 
-	/* AURORA_MODE7_EXTBG_COMPOSITOR_V1_20260903
-	 * Keep BG1/BG2 identities independent in Mode 7 EXTBG. */
-	if (uBGMode == 7)
-	{
-		Uint8 uMode7LayerMask = SNESPPU_MASK_BG1 | SNESPPU_MASK_OBJ;
-		if (bMode7ExtBG)
-			uMode7LayerMask |= SNESPPU_MASK_BG2;
-
-		tm  &= uMode7LayerMask;
-		ts  &= uMode7LayerMask;
-		tmw &= uMode7LayerMask;
-		tsw &= uMode7LayerMask;
-	}
-
 	/* Fixed-color math never samples the sub screen.  With no CGADSUB target,
 	   color math cannot affect a pixel at all.  Apply both facts before
 	   tile/OBJ fetch so disabled layers do no invisible EE work. */
@@ -1602,13 +1581,13 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	PROF_ENTER("DecodeBGInfo");
 	if (uBGMode == 7)
 	{
-		/* AURORA_MODE7_MIN_BGINFO_V2 / AURORA_MODE7_EXTBG_COMPOSITOR_V1_20260903 */
+		/* AURORA_MODE7_MIN_BGINFO_V2
+		 * _FetchMode7 reads PPU registers directly. The generic compositor
+		 * only needs these BG1 fields afterwards. */
 		BGInfo[0].uBitDepth = 8;
 		BGInfo[0].uScrollX = 0;
-		BGInfo[0].Priority = 0;
-		BGInfo[1].uBitDepth = bMode7ExtBG ? 7 : 0;
-		BGInfo[1].uScrollX = 0;
-		BGInfo[1].Priority = 4;
+		BGInfo[0].Priority = 7;
+		BGInfo[1].uBitDepth = 0;
 		BGInfo[2].uBitDepth = 0;
 		BGInfo[3].uBitDepth = 0;
 	}
@@ -1780,22 +1759,26 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 		Uint32 _tM7 = ProfCtrGetCycle();
 #endif
 		if (uFetchLayers & (SNESPPU_MASK_BG1 | SNESPPU_MASK_BG2))
-		{
 			_FetchMode7((Uint8 *)pRenderInfo->BGPlanes[0], m_pPPU, iLine,
 				&pRenderInfo->BGPlanes[0][SNPPU_BGPLANE_PRI],
 				&pRenderInfo->BGPlanes[0][SNPPU_BGPLANE_OPAQUE]);
-
-			if (bMode7ExtBG && (uFetchLayers & SNESPPU_MASK_BG2))
-				_BuildMode7ExtBG(
-					(Uint8 *)pRenderInfo->BGPlanes[1],
-					&pRenderInfo->BGPlanes[1][SNPPU_BGPLANE_PRI],
-					&pRenderInfo->BGPlanes[1][SNPPU_BGPLANE_OPAQUE],
-					(const Uint8 *)pRenderInfo->BGPlanes[0]);
-		}
 #if SNDBG_LOG
 		g_TmgCycM7 += ProfCtrGetCycle() - _tM7;
 #endif
 		PROF_LEAVE("BGMODE7");
+
+		// only draw BG 1
+		if (tm & 0x3)
+		{
+			tm&=~0xF;
+			tm|=SNESPPU_MASK_BG1;
+		}
+
+		if (ts & 0x3)
+		{
+			ts&=~0xF;
+			ts|=SNESPPU_MASK_BG1;
+		}
 	}
 
 	PROF_ENTER("RenderBG");
@@ -1825,9 +1808,9 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	if (tm & SNESPPU_MASK_BG3)
 		_RenderBG8(pMain8, pMain, pRenderInfo->BGPlanes[2], (tmw&SNESPPU_MASK_BG3) ? &pBGWindow[2] : NULL, BGInfo[2].uBitDepth,  pMainAddSubMask, cgadsub & SNESPPU_MASK_BG3, &BG3Pri, NULL, BGInfo[2].Priority, bRendered, BGInfo[2].uScrollX);
 	if (tm & SNESPPU_MASK_BG2)
-		_RenderBG8(pMain8, pMain, pRenderInfo->BGPlanes[1], (tmw&SNESPPU_MASK_BG2) ? &pBGWindow[1] : NULL, BGInfo[1].uBitDepth,  pMainAddSubMask, cgadsub & SNESPPU_MASK_BG2, bMode7ExtBG ? &M7BG2MainPri : NULL, bBG3Pri ? &BG3Pri : NULL, BGInfo[1].Priority, bRendered, BGInfo[1].uScrollX);
+		_RenderBG8(pMain8, pMain, pRenderInfo->BGPlanes[1], (tmw&SNESPPU_MASK_BG2) ? &pBGWindow[1] : NULL, BGInfo[1].uBitDepth,  pMainAddSubMask, cgadsub & SNESPPU_MASK_BG2, NULL, bBG3Pri ? &BG3Pri : NULL, BGInfo[1].Priority, bRendered, BGInfo[1].uScrollX);
 	if (tm & SNESPPU_MASK_BG1)
-		_RenderBG8(pMain8, pMain, pRenderInfo->BGPlanes[0], (tmw&SNESPPU_MASK_BG1) ? &pBGWindow[0] : NULL, BGInfo[0].uBitDepth,  pMainAddSubMask, cgadsub & SNESPPU_MASK_BG1, NULL, (bMode7ExtBG && (tm & SNESPPU_MASK_BG2)) ? &M7BG2MainPri : (bBG3Pri ? &BG3Pri : NULL), BGInfo[0].Priority, bRendered, BGInfo[0].uScrollX);
+		_RenderBG8(pMain8, pMain, pRenderInfo->BGPlanes[0], (tmw&SNESPPU_MASK_BG1) ? &pBGWindow[0] : NULL, BGInfo[0].uBitDepth,  pMainAddSubMask, cgadsub & SNESPPU_MASK_BG1, NULL, bBG3Pri ? &BG3Pri : NULL, BGInfo[0].Priority, bRendered, BGInfo[0].uScrollX);
 	if (!bRendered)
 		_ClearLinePlanar((SNMaskT *)pMain8, 8);
 #if SNDBG_LOG
@@ -1886,9 +1869,9 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 	if (ts & SNESPPU_MASK_BG3)
 		_RenderBG8(pSub8, pSub, pRenderInfo->BGPlanes[2], (tsw&SNESPPU_MASK_BG3) ? &pBGWindow[2] : NULL, BGInfo[2].uBitDepth, pSubAddSubMask, 1, &BG3Pri, NULL, BGInfo[2].Priority, bRendered, BGInfo[2].uScrollX);
 	if (ts & SNESPPU_MASK_BG2)
-		_RenderBG8(pSub8, pSub, pRenderInfo->BGPlanes[1], (tsw&SNESPPU_MASK_BG2) ? &pBGWindow[1] : NULL, BGInfo[1].uBitDepth, pSubAddSubMask, 1, bMode7ExtBG ? &M7BG2SubPri : NULL, bBG3Pri ? &BG3Pri : NULL, BGInfo[1].Priority, bRendered, BGInfo[1].uScrollX);
+		_RenderBG8(pSub8, pSub, pRenderInfo->BGPlanes[1], (tsw&SNESPPU_MASK_BG2) ? &pBGWindow[1] : NULL, BGInfo[1].uBitDepth, pSubAddSubMask, 1, NULL, bBG3Pri ? &BG3Pri : NULL, BGInfo[1].Priority, bRendered, BGInfo[1].uScrollX);
 	if (ts & SNESPPU_MASK_BG1)
-		_RenderBG8(pSub8, pSub, pRenderInfo->BGPlanes[0], (tsw&SNESPPU_MASK_BG1) ? &pBGWindow[0] : NULL, BGInfo[0].uBitDepth, pSubAddSubMask, 1, NULL, (bMode7ExtBG && (ts & SNESPPU_MASK_BG2)) ? &M7BG2SubPri : (bBG3Pri ? &BG3Pri : NULL), BGInfo[0].Priority, bRendered, BGInfo[0].uScrollX);
+		_RenderBG8(pSub8, pSub, pRenderInfo->BGPlanes[0], (tsw&SNESPPU_MASK_BG1) ? &pBGWindow[0] : NULL, BGInfo[0].uBitDepth, pSubAddSubMask, 1, NULL, bBG3Pri ? &BG3Pri : NULL, BGInfo[0].Priority, bRendered, BGInfo[0].uScrollX);
 	if (!bRendered)
 		_ClearLinePlanar((SNMaskT *)pSub8, 8);
 #if SNDBG_LOG
@@ -2305,22 +2288,22 @@ static void _FetchMode7(Uint8 *pLine, SnesPPU *pPPU, Int32 iLine, SNMaskT *pPrio
 		}
 	}
 
-	/* AURORA_MODE7_EXTBG_COMPOSITOR_V1_20260903
-	 * BG1 keeps the full 8-bit Mode 7 sample; EXTBG derives BG2 separately. */
 	if (pPriority)
-		SNMaskSet(pPriority);
+	{
+		if (pRegs->setini & 0x40)
+		{
+			PROF_ENTER("_FetchMode7Priority");
+			_FetchMode7Priority(pPriority->uMask8, pLine, 256);
+			PROF_LEAVE("_FetchMode7Priority");
+		}
+		else
+		{
+			SNMaskSet(pPriority);
+		}
+	}
 
 	_FetchMode7Opaque(pOpaque->uMask8, pLine, 256);
 
 	#undef AURORA_M7_CLIP
 	#undef AURORA_M7_SIGN13
-}
-
-static void _BuildMode7ExtBG(Uint8 *pLineBG2, SNMaskT *pPriority,
-	SNMaskT *pOpaque, const Uint8 *pLineBG1)
-{
-	/* AURORA_MODE7_EXTBG_COMPOSITOR_V1_20260903 */
-	memcpy(pLineBG2, pLineBG1, 256);
-	_FetchMode7Priority(pPriority->uMask8, pLineBG2, 256);
-	_FetchMode7Opaque(pOpaque->uMask8, pLineBG2, 256);
 }

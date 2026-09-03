@@ -26,18 +26,6 @@ public:
     virtual void SetRom(Emu::Rom *pRom);
     /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
     Bool LoadDisc(const Char *pPath, const Char *pSystemPath);
-    /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-    Bool LoadSuperMagicDrive(const Char *pBiosPath, const Char *pDiskPath);
-    Bool InsertSuperMagicDriveCartridge(SegaRom *pRom);
-    void EjectSuperMagicDriveCartridge();
-    Bool SwapSuperMagicDriveDisk(const Char *pPath);
-    void PowerCycleSuperMagicDrive();
-    Bool IsSuperMagicDrive() const;
-    Bool IsSuperMagicDriveFirmwareMode() const;
-    Bool HasSuperMagicDriveCartridge() const;
-    Bool HasSuperMagicDriveDisk() const;
-    const Char *GetSuperMagicDriveDiskPath() const;
-    const Char *GetSuperMagicDriveError() const;
     virtual void Reset();
     virtual void SoftReset();
 

@@ -168,7 +168,6 @@ void SNCPUResetCounter(SNCpuT *pCPU, Int32 iCounter);
 void SNCPUSetExecuteFunc(SNCpuExecuteFuncT pFunc);
 Bool SNCPUExecute(SNCpuT *pCpu);
 Bool SNCPUExecuteOne(SNCpuT *pCpu);
-Bool SNCPUExecuteBounded(SNCpuT *pCpu, Int32 nMaxCycles); /* AURORA_SA1_BOUNDED_CHUNK_EXECUTOR_V7_20260903 */
 void SNCPUSetDebug(Bool bDebug, Int32 nDebugCycles);
 
 

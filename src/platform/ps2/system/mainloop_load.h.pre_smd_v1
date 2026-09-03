@@ -16,6 +16,4 @@ void _MainLoopUnloadRom();
 Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM);
 Bool MainLoopSwcSwapNextDisk(void); /* AURORA_SWC_FLOPPY_V1_20260831 */
 Bool MainLoopSwcCreateNextDisk(void); /* AURORA_SWC_FLOPPY_V5_20260831 */
-Bool MainLoopSmdSwapNextDisk(void); /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-Bool MainLoopSmdCreateNextDisk(void);
 void _MainLoopSetSampleRate(Uint32 uSampleRate);

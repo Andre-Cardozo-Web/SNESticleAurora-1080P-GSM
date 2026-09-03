@@ -534,91 +534,63 @@ void _MainLoopInputProcess(Uint32 buttons)
 	static Bool bFdsSwapHotkeyHeld = FALSE; /* AURORA_FCEUMM_FDS_V0_6_SIDE_SWAP */
     static Bool bSwcSwapHotkeyHeld = FALSE; /* AURORA_SWC_FLOPPY_V1_20260831 */
     static Bool bSwcCreateHotkeyHeld = FALSE; /* AURORA_SWC_FLOPPY_V5_20260831 */
-    static Bool bFrontCopierCloseHotkeyHeld = FALSE; /* AURORA_FRONT_COPIER_L2_R3_CLOSE_V1_20260903 */
-    static Bool bFrontCopierPowerHotkeyHeld = FALSE;
+    static Bool bFrontCopierPowerHotkeyHeld = FALSE; /* AURORA_FRONT_COPIER_L2_L3_POWER_CYCLE_V2_20260902 */
+	Uint32 trigger;
 
-    Uint32 trigger;
-    /* AURORA_INPUT_SUPPRESS_ALL_GAMEPLAY_V1_4_3
-     * Host inputs consumed by menu/copier transitions stay suppressed until
-     * release; this is independent of emulated controller state. */
-    if (_MainLoop_bSuppressGameInputUntilRelease &&
-        !(buttons & (SNES_GAMEPLAY_HOST_BUTTONS | PAD_L2 | PAD_R2)))
-    {
-        _MainLoop_bSuppressGameInputUntilRelease = FALSE;
-    }
+	/* AURORA_INPUT_SUPPRESS_ALL_GAMEPLAY_V1_4_3 */
+	if (_MainLoop_bSuppressGameInputUntilRelease &&
+	    !(buttons & (SNES_GAMEPLAY_HOST_BUTTONS | PAD_L2 | PAD_R2)))
+	{
+		_MainLoop_bSuppressGameInputUntilRelease = FALSE;
+	}
 
-    if (!(buttons & MENU_REPEATBUTTONS))
-    {
-        repeat = 0;
-    }
+	if (!(buttons& MENU_REPEATBUTTONS))
+	{
+		repeat=0;
+	}
 
-    repeat++;
-    if (repeat > MENU_REPEAT)
-    {
-        repeat -= 1;
-        lastbuttons &= ~MENU_REPEATBUTTONS;
-    }
+	// 
+	repeat++;
+	if (repeat > MENU_REPEAT)
+	{
+		repeat -= 1;
+		lastbuttons &= ~MENU_REPEATBUTTONS;
+	}
 
-    trigger = ((buttons ^ lastbuttons) & buttons);
-    lastbuttons = buttons;
+	trigger = ((buttons ^ lastbuttons) & buttons);
+	lastbuttons = buttons;
 
-    if (!(buttons & PAD_L2) ||
-        !(buttons & (PAD_CROSS | PAD_CIRCLE)))
-    {
-        bStateHotkeyHeld = FALSE;
-    }
+	if (!(buttons & PAD_L2) ||
+	    !(buttons & (PAD_CROSS | PAD_CIRCLE)))
+	{
+		bStateHotkeyHeld = FALSE;
+	}
 
-    if (!(buttons & PAD_L2) || !(buttons & PAD_TRIANGLE))
-        bFdsSwapHotkeyHeld = FALSE;
-    if (!(buttons & PAD_L2) || !(buttons & PAD_TRIANGLE))
-        bSwcSwapHotkeyHeld = FALSE;
-    if (!(buttons & PAD_L2) || !(buttons & PAD_SQUARE))
-        bSwcCreateHotkeyHeld = FALSE;
+	if (!(buttons & PAD_L2) || !(buttons & PAD_TRIANGLE))
+		bFdsSwapHotkeyHeld = FALSE;
+	if (!(buttons & PAD_L2) || !(buttons & PAD_TRIANGLE))
+		bSwcSwapHotkeyHeld = FALSE;
+	if (!(buttons & PAD_L2) || !(buttons & PAD_SQUARE))
+		bSwcCreateHotkeyHeld = FALSE;
     if (!(buttons & PAD_L2) || !(buttons & PAD_L3))
         bFrontCopierPowerHotkeyHeld = FALSE;
 
-    /* AURORA_V6_PHYSICAL_CONSOLE_BUTTON_CONSUME_20260828 */
-    {
-        const Int32 physicalEvent = _MainLoopPollPhysicalConsoleButton();
+	/* AURORA_V6_PHYSICAL_CONSOLE_BUTTON_CONSUME_20260828 */
+	{
+		const Int32 physicalEvent = _MainLoopPollPhysicalConsoleButton();
 
-        if (physicalEvent == MAINLOOP_PHYSICAL_BUTTON_SMS_PAUSE)
-        {
-            PicoDriveBridge_QueueMasterSystemPause();
-        }
-        else if (physicalEvent == MAINLOOP_PHYSICAL_BUTTON_FDS_SIDE)
-        {
-            _MenuTriggerTimeout[0] = 0;
-            _MenuTriggerTimeout[1] = 0;
-            _MainLoopFdsSideSwapAction();
-            return;
-        }
-    }
-    if (!(buttons & PAD_L2) || !(buttons & PAD_R3))
-        bFrontCopierCloseHotkeyHeld = FALSE;
-
-    /* AURORA_FRONT_COPIER_L2_R3_CLOSE_V1_20260903
-     * AURORA_SMD_L2_R3_CLOSE_V1_20260903 */
-    if (!_bMenu &&
-        (((_pSystem == _pSnes) && _pSnes && _pSnes->IsSuperWildCard()) ||
-         ((_pSystem == _pSega) && _pSega && _pSega->IsSuperMagicDrive())) &&
-        !bFrontCopierCloseHotkeyHeld &&
-        (buttons & (PAD_L2 | PAD_R3)) == (PAD_L2 | PAD_R3) &&
-        !(buttons & PAD_R2) && (trigger & (PAD_L2 | PAD_R3)))
-    {
-        bFrontCopierCloseHotkeyHeld = TRUE;
-        _MenuTriggerTimeout[0] = _MenuTriggerTimeout[1] = 0;
-        _MainLoopInputSuppressUntilRelease();
-        _MainLoopUnloadRom();
-        return;
-    }
-
-    /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-    if (!_bMenu && _pSystem == _pSega && _pSega->IsSuperMagicDrive() && !bFrontCopierPowerHotkeyHeld &&
-        (buttons & (PAD_L2|PAD_L3)) == (PAD_L2|PAD_L3) && !(buttons & PAD_R2) && (trigger & (PAD_L2|PAD_L3)))
-    {
-        bFrontCopierPowerHotkeyHeld=TRUE; _MenuTriggerTimeout[0]=_MenuTriggerTimeout[1]=0;
-        _MainLoopInputSuppressUntilRelease(); _pSega->PowerCycleSuperMagicDrive(); return;
-    }
+		if (physicalEvent == MAINLOOP_PHYSICAL_BUTTON_SMS_PAUSE)
+		{
+			PicoDriveBridge_QueueMasterSystemPause();
+		}
+		else if (physicalEvent == MAINLOOP_PHYSICAL_BUTTON_FDS_SIDE)
+		{
+			_MenuTriggerTimeout[0] = 0;
+			_MenuTriggerTimeout[1] = 0;
+			_MainLoopFdsSideSwapAction();
+			return;
+		}
+	}
 
     /* AURORA_FRONT_COPIER_L2_L3_POWER_CYCLE_V2_20260902
      * L2+L3 is a host-only cold restart of the active classic Front copier.
@@ -644,11 +616,6 @@ void _MainLoopInputProcess(Uint32 buttons)
         _pSnes->PowerCycleFrontCopier();
         return;
     }
-
-    /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-    if (!_bMenu && _pSystem == _pSega && _pSega->IsSuperMagicDrive() && !bSwcCreateHotkeyHeld &&
-        (buttons & PAD_L2) && (buttons & PAD_SQUARE) && !(buttons & PAD_R2) && (trigger & (PAD_L2|PAD_SQUARE)))
-    { bSwcCreateHotkeyHeld=TRUE; _MenuTriggerTimeout[0]=_MenuTriggerTimeout[1]=0; MainLoopSmdCreateNextDisk(); return; }
 
 	/* AURORA_V5_COPIER_LOADER_MEDIA_FLOW_20260831
 	 * L2+Square creates the next numbered image for the active loader:
@@ -678,11 +645,6 @@ void _MainLoopInputProcess(Uint32 buttons)
 		_MenuTriggerTimeout[1] = 0;
 		return;
 	}
-
-    /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-    if (!_bMenu && _pSystem == _pSega && _pSega->IsSuperMagicDrive() && !bSwcSwapHotkeyHeld &&
-        (buttons & PAD_L2) && (buttons & PAD_TRIANGLE) && !(buttons & PAD_R2) && (trigger & (PAD_L2|PAD_TRIANGLE)))
-    { bSwcSwapHotkeyHeld=TRUE; _MenuTriggerTimeout[0]=_MenuTriggerTimeout[1]=0; MainLoopSmdSwapNextDisk(); return; }
 
 	/* AURORA_SWC_FLOPPY_V1_20260831 */
 	if (!_bMenu && _pSystem == _pSnes &&
@@ -1084,3 +1046,4 @@ if (_pSystem && (buttons & PAD_L2))
 	}
 #endif
 }
+

@@ -1123,11 +1123,12 @@ Bool SNSA1::EnterMainNMIOverride(SNCpuT *pMainCpu)
 
 void SNSA1::ServiceInterrupts()
 {
-    /* AURORA_SA1_CCNT_INTERRUPT_HANDSHAKE_V6_20260903
-     * S-CPU -> SA-1 NMI/IRQ are live CCNT request lines. CIC is their
-     * acknowledge/clear latch; CFR reports occurrence. Timer/DMA remain
-     * CIE-qualified pending sources. */
-    if ((m_Reg[0x00] & 0x10) && !(m_Reg[0x0B] & 0x10))
+    /* AURORA_SA1_SMRPG_IRQ_FLAG_CURE_V3_20260902
+     * CCNT ($2200) requests latch into CFR ($2301). CIE ($220A)
+     * gates delivery; CIC ($220B) acknowledges it. Testing the live
+     * CCNT bit loses pulse-style S-CPU -> SA-1 IRQ/NMI handshakes. */
+    if ((m_Reg[0x0A] & 0x10) && (m_Reg[0x101] & 0x10) &&
+        !(m_Reg[0x0B] & 0x10))
     {
         m_Reg[0x101] |= 0x10;
         m_Reg[0x0B] |= 0x10;
@@ -1138,26 +1139,15 @@ void SNSA1::ServiceInterrupts()
 
     if (!(m_Cpu.Regs.rP & SNCPU_FLAG_I))
     {
-        if ((m_Reg[0x0A] & 0x40) &&
-            (m_Reg[0x101] & 0x40) &&
-            !(m_Reg[0x0B] & 0x40))
-        {
-            EnterInterrupt(&m_Cpu,
-                (Uint16)m_Reg[0x07] | ((Uint16)m_Reg[0x08] << 8), FALSE);
-        }
-        else if ((m_Reg[0x0A] & 0x20) &&
-                 (m_Reg[0x101] & 0x20) &&
-                 !(m_Reg[0x0B] & 0x20))
-        {
-            EnterInterrupt(&m_Cpu,
-                (Uint16)m_Reg[0x07] | ((Uint16)m_Reg[0x08] << 8), FALSE);
-        }
-        else if ((m_Reg[0x00] & 0x80) &&
+        if ((m_Reg[0x0A] & 0x40) && (m_Reg[0x101] & 0x40) && !(m_Reg[0x0B] & 0x40))
+            EnterInterrupt(&m_Cpu, (Uint16)m_Reg[0x07] | ((Uint16)m_Reg[0x08] << 8), FALSE);
+        else if ((m_Reg[0x0A] & 0x20) && (m_Reg[0x101] & 0x20) && !(m_Reg[0x0B] & 0x20))
+            EnterInterrupt(&m_Cpu, (Uint16)m_Reg[0x07] | ((Uint16)m_Reg[0x08] << 8), FALSE);
+        else if ((m_Reg[0x0A] & 0x80) && (m_Reg[0x101] & 0x80) &&
                  !(m_Reg[0x0B] & 0x80))
         {
             m_Reg[0x101] |= 0x80;
-            EnterInterrupt(&m_Cpu,
-                (Uint16)m_Reg[0x07] | ((Uint16)m_Reg[0x08] << 8), FALSE);
+            EnterInterrupt(&m_Cpu, (Uint16)m_Reg[0x07] | ((Uint16)m_Reg[0x08] << 8), FALSE);
         }
     }
 }
@@ -1222,9 +1212,14 @@ void SNSA1::Run(Int32 nMainMasterCycles)
 
     SNCPUAddCycles(&m_Cpu, nSA1);
 
-    /* AURORA_SA1_BOUNDED_CHUNK_EXECUTOR_V7_20260903
-     * Keep the scheduled SA-1 budget, but return to the scheduler after a
-     * small native group so MMIO/remap/WAI transitions become visible. */
+    /* AURORA_SA1_BOUNDED_EXECUTOR_V4_20260902
+     * Preserve the same SA-1 cycle budget, but return to the C-CPU
+     * dispatcher at instruction boundaries. SA-1 software changes Super MMC,
+     * MMIO and WAI/STP state while it runs; a monolithic host batch can hide
+     * those transitions until too late and may pin the EE in a bad path.
+     *
+     * This is SA-1-only. Normal S-CPU execution is untouched.
+     */
     while (m_Cpu.Cycles > 0)
     {
         Int32 before = m_Cpu.Cycles;
@@ -1236,8 +1231,12 @@ void SNSA1::Run(Int32 nMainMasterCycles)
             break;
         }
 
-        (void)SNCPUExecuteBounded(&m_Cpu, 64);
+        if (!SNCPUExecuteOne(&m_Cpu))
+            break;
 
+        /* A valid execution step must consume clocks. If an unexpected
+         * opcode/trap path makes no progress, consume one fast quantum so
+         * the SA-1 path cannot hold the PS2 main thread forever. */
         if (m_Cpu.Cycles >= before)
             SNCPUConsumeCycles(&m_Cpu, SNCPU_CYCLE_FAST);
     }

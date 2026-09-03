@@ -3,7 +3,6 @@
 /* AURORA_SWC_FLOPPY_V3_20260831 */
 /* AURORA_SWC_FLOPPY_V4_20260831: writable IMG + isolated states. */
 static char s_SwcExternalCartPath[1024] = {0}; /* AURORA_SWC_FLOPPY_V5_20260831 */
-static char s_SmdExternalCartPath[1024] = {0}; /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <malloc.h>
@@ -764,20 +763,7 @@ void _MainLoopUnloadRom()
     /* AURORA_SWC_CART_SRAM_MEMORY_FINAL_V5_3_20260901
      * The flush above calls _MainLoopForceCheckSRAM/_MainLoopSaveSRAM while
      * the cart backing and cartridge filename still exist. Detach only now. */
-        /* AURORA_SMD_L2_R3_CLOSE_V1_20260903
-     * B-RAM is the current Sega SRAM while SMD is active. Save before the
-     * bridge/device teardown. */
-    if (_pSystem == _pSega && _pSega && _pSega->IsSuperMagicDrive() &&
-        _pSystem->GetSRAMBytes() == 0x8000)
-    {
-        (void)_MainLoopForceCheckSRAM();
-        Bool bSaved = _MainLoopSaveSRAM(TRUE);
-        ConPrint("SMD B-RAM unload flush: %s\n", bSaved ? "saved" : "FAILED");
-        MainLoopStatusPrintf(bSaved ? 120 : 240,
-            bSaved ? "SMD B-RAM saved." : "WARNING: SMD B-RAM save failed!");
-    }
-
-_MainLoopSwcCartSRAMDetach();
+    _MainLoopSwcCartSRAMDetach();
 
     /* AURORA_V4_16_SAFE_GAME_SWITCH_FLUSH_20260830
      * BgmStop intentionally retains libxmp for fast menu reopen.
@@ -1850,29 +1836,6 @@ static Bool _MainLoopSwcFirmwareFileLooksValid(const char *pPath)
  * DSK.* is the canonical user override for classic copier autoboot. It wins over
  * every named BIOS. Determine classic model from payload, not filename.
  */
-
-/* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-static const char *_MainLoopSmdBaseName(const char*p){const char*a,*b;if(!p)return"";a=strrchr(p,'/');b=strrchr(p,'\\');if(!a||(b&&b>a))a=b;return a?a+1:p;}
-static Bool _MainLoopIsSmdBiosPath(const char*p){const char*n=_MainLoopSmdBaseName(p);return n&&strcasecmp(n,"mdpbios.bin")==0?TRUE:FALSE;}
-static Bool _MainLoopSmdBiosLooksValid(const char*p){struct stat st;if(!p||stat(p,&st)!=0||S_ISDIR(st.st_mode)||st.st_size!=0x2000)return FALSE;return TRUE;}
-static Bool _MainLoopExecuteSmdFirmware(const char*p,const char*orig,Bool loadSram){if(!_pSega||!_MainLoopIsSmdBiosPath(p)||!_MainLoopSmdBiosLooksValid(p))return FALSE;if(!MainLoopEnsureGameplayRasterWidth(256))return FALSE; /* AURORA_SMD_V1_7_RECOVERY_BOOT_20260903 */if(!_pSega->LoadSuperMagicDrive(p,NULL)){MainLoopModalPrintf(60*5,"SMD boot failed: %s",_pSega->GetSuperMagicDriveError());return FALSE;}_pSystem=_pSega;s_SmdExternalCartPath[0]=0;snprintf(_RomName,sizeof(_RomName),"%s","Super Magic Drive");snprintf(_RomPath,sizeof(_RomPath),"%s",orig&&*orig?orig:p);MainLoopStateOnRomChanged();_MainLoopSetSampleRate(_pSega->GetSampleRate());if(loadSram)_MainLoopLoadSRAM();MainLoopStatusPrintf(180,"Super Magic Drive V3: no disk / no cart");return TRUE;}
-static void _MainLoopSmdPut16(Uint8*p,Uint16 v){p[0]=(Uint8)v;p[1]=(Uint8)(v>>8);}static void _MainLoopSmdPut32(Uint8*p,Uint32 v){p[0]=(Uint8)v;p[1]=(Uint8)(v>>8);p[2]=(Uint8)(v>>16);p[3]=(Uint8)(v>>24);}
-static Bool _MainLoopSmdCreateD88(const char*p){
- enum{HB=0x2b0,TRACKS=80,HEADS=2,SPT=18,SLOTS=20,SEC=512,SH=16,SLOT=SLOTS*(SH+SEC)};Uint8 header[HB],*track=NULL,logical[SEC];FILE*fp=NULL;Uint32 total=HB+(Uint32)(TRACKS*HEADS)*SLOT,lba=0;Bool ok=FALSE;if(!p||!*p)return FALSE;fp=fopen(p,"wb");if(!fp)return FALSE;track=(Uint8*)malloc(SLOT);if(!track)goto done;memset(header,0,sizeof(header));memcpy(header,"AURORA SMD",10);header[0x1b]=0x20;_MainLoopSmdPut32(header+0x1c,total);for(Uint32 t=0;t<TRACKS*HEADS;t++)_MainLoopSmdPut32(header+0x20+t*4,HB+t*SLOT);if(fwrite(header,1,sizeof(header),fp)!=sizeof(header))goto done;
- for(Uint32 ti=0;ti<TRACKS*HEADS;ti++){Uint8 c=(Uint8)(ti>>1),h=(Uint8)(ti&1);Uint32 pos=0;memset(track,0,SLOT);for(Uint8 r=1;r<=SPT;r++,lba++){Uint8*sh=track+pos,*data=sh+SH;memset(logical,0,sizeof(logical));if(lba==0){logical[0]=0xeb;logical[1]=0x3c;logical[2]=0x90;memcpy(logical+3,"AURORASMD",9);_MainLoopSmdPut16(logical+11,512);logical[13]=1;_MainLoopSmdPut16(logical+14,1);logical[16]=2;_MainLoopSmdPut16(logical+17,224);_MainLoopSmdPut16(logical+19,2880);logical[21]=0xf0;_MainLoopSmdPut16(logical+22,9);_MainLoopSmdPut16(logical+24,18);_MainLoopSmdPut16(logical+26,2);logical[510]=0x55;logical[511]=0xaa;}else if(lba==1||lba==10){logical[0]=0xf0;logical[1]=logical[2]=0xff;}sh[0]=c;sh[1]=h;sh[2]=r;sh[3]=2;_MainLoopSmdPut16(sh+4,SPT);sh[13]=1;_MainLoopSmdPut16(sh+14,SEC);memcpy(data,logical,SEC);pos+=SH+SEC;}if(fwrite(track,1,SLOT,fp)!=SLOT)goto done;}ok=fflush(fp)==0?TRUE:FALSE;done:if(track)free(track);if(fp)fclose(fp);if(!ok)remove(p);return ok;}
-static Bool _MainLoopSmdStem(char*out,Int32 cap){const char*n,*dot;size_t z;if(!out||cap<=1)return FALSE;n=s_SmdExternalCartPath[0]?_MainLoopSmdBaseName(s_SmdExternalCartPath):"SMD";dot=strrchr(n,'.');z=dot?(size_t)(dot-n):strlen(n);if(!z||z>=(size_t)cap)return FALSE;memcpy(out,n,z);out[z]=0;for(size_t i=0;i<z;i++)if((unsigned char)out[i]<0x20||strchr("\\/:*?\"<>|",out[i]))out[i]='_';return TRUE;}
-static Bool _MainLoopSmdDiskPath(char*out,Int32 cap,unsigned idx){Char dir[512],stem[256];int n;if(!out||cap<=0||!idx||!_MainLoopSmdStem(stem,sizeof(stem))||!MainLoopEnsureSwcDirectory(dir,sizeof(dir)))return FALSE;n=snprintf(out,cap,"%s/%s_%u.d88",dir,stem,idx);return n>=0&&n<cap?TRUE:FALSE;}
-static Bool _MainLoopSmdNumberedIndex(const char*p,unsigned*out){const char*n=_MainLoopSmdBaseName(p),*dot=strrchr(n,'.'),*q;unsigned v=0,m=1;if(!dot||strcasecmp(dot,".d88")!=0||dot==n)return FALSE;q=dot;while(q>n&&q[-1]>='0'&&q[-1]<='9'){--q;v+=(unsigned)(*q-'0')*m;if(m>100000000u)return FALSE;m*=10;}if(q==dot||q==n||q[-1]!='_'||!v)return FALSE;if(out)*out=v;return TRUE;}
-static Bool _MainLoopSmdInsertDisk(const char*p){if(!_pSega||!_pSega->IsSuperMagicDrive()||!p||!*p)return FALSE;MainLoopStatusPrintf(180,"Inserting SMD disk...");MainLoopRender();MainLoopRender();if(!_pSega->SwapSuperMagicDriveDisk(p)){MainLoopStatusPrintf(240,"SMD disk failed: %s",_pSega->GetSuperMagicDriveError());return FALSE;}MainLoopStateOnRomChanged();MainLoopStatusPrintf(120,"SMD disk inserted: %s",_MainLoopSmdBaseName(p));return TRUE;}
-Bool MainLoopSmdCreateNextDisk(void){Char p[1024];struct stat st;if(!_pSega||!_pSega->IsSuperMagicDrive())return FALSE;for(unsigned i=1;i<1000;i++){if(!_MainLoopSmdDiskPath(p,sizeof(p),i))return FALSE;if(stat(p,&st)!=0){MainLoopStatusPrintf(180,"Creating SMD disk %u...",i);MainLoopRender();MainLoopRender();if(!_MainLoopSmdCreateD88(p)){MainLoopStatusPrintf(240,"Could not create SMD D88");return FALSE;}return _MainLoopSmdInsertDisk(p);}}return FALSE;}
-Bool MainLoopSmdSwapNextDisk(void){Char p[1024];struct stat st;unsigned cur=0,next;(void)_MainLoopSmdNumberedIndex(_pSega&&_pSega->IsSuperMagicDrive()?_pSega->GetSuperMagicDriveDiskPath():NULL,&cur);if(!_pSega||!_pSega->IsSuperMagicDrive())return FALSE;next=cur?cur+1:1;if(_MainLoopSmdDiskPath(p,sizeof(p),next)&&stat(p,&st)==0&&!S_ISDIR(st.st_mode))return _MainLoopSmdInsertDisk(p);if(_MainLoopSmdDiskPath(p,sizeof(p),1)&&stat(p,&st)==0&&!S_ISDIR(st.st_mode))return _MainLoopSmdInsertDisk(p);MainLoopStatusPrintf(120,"No numbered SMD disk found");return FALSE;}
-static Bool _MainLoopSmdInsertCartridge(const char*p){
- Int32 nBytes;size_t req;Emu::Rom::LoadErrorE er;Uint32 crc;if(!_pSega||!_pSegaRom||!_pSega->IsSuperMagicDrive()||!_pSega->IsSuperMagicDriveFirmwareMode()||!p||!*p)return FALSE;nBytes=_MainLoopGetBinarySize(p);if(nBytes<=0)return FALSE;req=PicoDriveBridge_RequiredRomCapacity((size_t)nBytes);if(!req||req>0xffffffffU)return FALSE;
- if(_pSega->HasSuperMagicDriveCartridge()){_pSega->EjectSuperMagicDriveCartridge();_pSegaRom->Unload();_MainLoopFreeRomBuffer();}
- if(!_MainLoopAllocRomBuffer((Uint32)req)){MainLoopStatusPrintf(240,"Not enough memory for SMD cartridge");return FALSE;}if(_MainLoopReadBinaryData(_RomData,(Int32)_RomDataCapacity,p)!=nBytes){_MainLoopFreeRomBuffer();return FALSE;}crc=(Uint32)mz_crc32(MZ_CRC32_INIT,_RomData,(size_t)nBytes);er=_pSegaRom->AttachBuffer(_RomData,(Uint32)nBytes,_RomDataCapacity);if(er!=Emu::Rom::LOADERROR_NONE){_MainLoopFreeRomBuffer();return FALSE;}_pSegaRom->SetSourceName(p);if(!_pSega->InsertSuperMagicDriveCartridge(_pSegaRom)){_pSegaRom->Unload();_MainLoopFreeRomBuffer();MainLoopStatusPrintf(240,"SMD cartridge insertion failed: %s",_pSega->GetSuperMagicDriveError());return FALSE;}snprintf(s_SmdExternalCartPath,sizeof(s_SmdExternalCartPath),"%s",p);MainLoopStateOnRomChanged();MainLoopStatePrimeRomIdentityCRC(crc);
- if(!_pSega->HasSuperMagicDriveDisk()){Char d1[1024];struct stat st;if(_MainLoopSmdDiskPath(d1,sizeof(d1),1)){if(stat(d1,&st)!=0&&!_MainLoopSmdCreateD88(d1)){MainLoopStatusPrintf(210,"SMD cart inserted; could not create disk 1");return TRUE;}(void)_MainLoopSmdInsertDisk(d1);}}
- MainLoopStatusPrintf(180,"SMD cartridge inserted: %s",_MainLoopSmdBaseName(p));return TRUE;}
-
 static Bool _MainLoopDskMagicomPayloadLooksValid(const char *pPath)
 {
     FILE *fp;
@@ -3127,20 +3090,6 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     if (eType == MAINLOOP_ENTRYTYPE_NESPALETTE)
         return _MainLoopLoadNesPalette(pFileName); /* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827 */
 
-    /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-    if (_pSega && _pSega->IsSuperMagicDrive())
-    {
-        if (eType == MAINLOOP_ENTRYTYPE_SNESWCDISK)
-            return _MainLoopSmdInsertDisk(pFileName);
-        if (eType == MAINLOOP_ENTRYTYPE_SEGAROM && !_MainLoopIsSmdBiosPath(pFileName) && _pSega->IsSuperMagicDriveFirmwareMode())
-            return _MainLoopSmdInsertCartridge(pFileName);
-    }
-    if (eType == MAINLOOP_ENTRYTYPE_SEGAROM && _MainLoopIsSmdBiosPath(pFileName) && !_MainLoopSmdBiosLooksValid(pFileName))
-    {
-        MainLoopModalPrintf(60*5,"mdpbios.bin must be the 8192-byte Super Magic Drive BIOS");
-        return FALSE;
-    }
-
     /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: identify copier before destructive unload. */
     if (eType == MAINLOOP_ENTRYTYPE_SNESWCBIOS)
     {
@@ -3248,10 +3197,6 @@ Bool _MainLoopExecuteFile(const char *pFileName, Bool bLoadSRAM)
     _MainLoopResetHistory();
 #endif
     _MainLoopResetInputChecksums();
-
-    /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-    if (eType == MAINLOOP_ENTRYTYPE_SEGAROM && _MainLoopIsSmdBiosPath(pFileName))
-        return _MainLoopExecuteSmdFirmware(pFileName, OriginalPath, bLoadSRAM);
 
     /* AURORA_FCEUMM_FDS_V0_5_PATH_BOOT: only a plain .fds full path enters FCEUmm. */
     /* AURORA_V6_MAGICOM_FRONT_FAREAST_20260831: explicit loader ROM selects its hardware model. */

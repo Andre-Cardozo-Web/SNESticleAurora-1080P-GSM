@@ -1671,7 +1671,6 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
 {
     // increment cycle counter
     SNCPUAddCycles( &m_Cpu, nCycles );
-    Int32 nSA1Synced = 0; /* AURORA_SA1_INTERLEAVED_CHUNK_SCHEDULER_V7_2_20260903 */
 
     while (m_Cpu.Cycles > 0)
     {
@@ -1805,54 +1804,8 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
 
         assert(m_DMAC.GetMDMAEnable() == 0);
 
-        /* AURORA_SA1_INTERLEAVED_CHUNK_SCHEDULER_V7_2_20260903
-         * WAI stops instruction issue, not physical time or the SA-1. */
-        if (m_SA1.IsActive() && (m_Cpu.uSignal & SNCPU_SIGNAL_WAI))
-        {
-            Int32 nWait = m_Cpu.Cycles;
-            if (nWait > 64) nWait = 64;
-            if (nWait > 0)
-            {
-                SNCPUConsumeCycles(&m_Cpu, nWait);
-                m_SA1.Run(nWait);
-                nSA1Synced += nWait;
-            }
-            continue;
-        }
-
         // run CPU!
-        if (m_SA1.IsActive())
-        {
-            /* AURORA_SA1_BOUNDED_CHUNK_EXECUTOR_V7_20260903
-             * AURORA_SA1_INTERLEAVED_CHUNK_SCHEDULER_V7_2_20260903 */
-            Int32 before = m_Cpu.Cycles;
-            Int32 nSpent;
-
-            (void)SNCPUExecuteBounded(&m_Cpu, 64);
-
-            if (m_Cpu.Cycles >= before)
-            {
-                Int32 nForce = before;
-                if (nForce > SNCPU_CYCLE_FAST)
-                    nForce = SNCPU_CYCLE_FAST;
-                if (nForce > 0)
-                    SNCPUConsumeCycles(&m_Cpu, nForce);
-            }
-
-            nSpent = before - m_Cpu.Cycles;
-            if (nSpent < 0) nSpent = 0;
-            if (nSpent > before) nSpent = before;
-
-            if (nSpent > 0)
-            {
-                m_SA1.Run(nSpent);
-                nSA1Synced += nSpent;
-            }
-        }
-        else
-        {
-            SNCPUExecute(&m_Cpu);
-        }
+        SNCPUExecute(&m_Cpu);
 #if SNES_HVIRQ_RESCHEDULE
         if (m_bLineIRQActive && m_bLineIRQReschedule)
             break;
@@ -1866,9 +1819,6 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
         if (m_bLineIRQActive && m_bLineIRQReschedule && m_Cpu.Cycles > 0)
             nElapsed -= m_Cpu.Cycles;
 #endif
-        /* AURORA_SA1_INTERLEAVED_CHUNK_SCHEDULER_V7_2_20260903
-         * Opcode/WAI chunks already handed nSA1Synced master clocks to SA-1. */
-        nElapsed -= nSA1Synced;
         if (nElapsed > 0)
             m_SA1.Run(nElapsed);
     }

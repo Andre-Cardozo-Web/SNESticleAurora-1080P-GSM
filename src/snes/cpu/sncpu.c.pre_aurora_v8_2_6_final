@@ -819,44 +819,6 @@ Bool SNCPUExecuteOne(SNCpuT *pCpu)
     }
 }
 
-Bool SNCPUExecuteBounded(SNCpuT *pCpu, Int32 nMaxCycles)
-{
-    /* AURORA_SA1_BOUNDED_CHUNK_EXECUTOR_V7_20260903 */
-    Int32 nRun, nReserved;
-    Bool bComplete;
-
-    if (!pCpu || pCpu->Cycles <= 0 || nMaxCycles <= 0)
-        return FALSE;
-
-    nRun = pCpu->Cycles;
-    if (nRun > nMaxCycles)
-        nRun = nMaxCycles;
-
-    nReserved = pCpu->Cycles - nRun;
-    if (nReserved > 0)
-    {
-        pCpu->Cycles -= nReserved;
-        pCpu->Counter[0] -= nReserved;
-        pCpu->Counter[1] -= nReserved;
-        pCpu->Counter[2] -= nReserved;
-        pCpu->Counter[3] -= nReserved;
-    }
-
-    bComplete = SNCPUExecute(pCpu);
-
-    if (nReserved > 0)
-    {
-        pCpu->Cycles += nReserved;
-        pCpu->Counter[0] += nReserved;
-        pCpu->Counter[1] += nReserved;
-        pCpu->Counter[2] += nReserved;
-        pCpu->Counter[3] += nReserved;
-    }
-
-    return bComplete;
-}
-
-
 Int32 SNCPUExecuteDebug(SNCpuT *pCpu)
 {
     SNCPUSetDebug(0, 1);

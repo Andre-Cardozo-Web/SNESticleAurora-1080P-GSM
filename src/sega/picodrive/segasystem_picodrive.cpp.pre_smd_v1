@@ -90,20 +90,6 @@ Bool SegaSystem::LoadDisc(const Char *pPath, const Char *pSystemPath)
     return TRUE;
 }
 
-/* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
-Bool SegaSystem::LoadSuperMagicDrive(const Char *b,const Char *d){m_pSegaRom=NULL;m_bRomReady=FALSE;m_nCachedStateBytes=0;m_uFrame=m_uLine=0;PicoDriveBridge_UnloadGame();if(!PicoDriveBridge_LoadSuperMagicDrive(b,d))return FALSE;m_bRomReady=TRUE;return TRUE;}
-Bool SegaSystem::InsertSuperMagicDriveCartridge(SegaRom *r){if(!m_bRomReady||!r||!r->GetData()||!r->GetBytes())return FALSE;const Char*n=r->GetSourceName();if(!PicoDriveBridge_SmdInsertCartridge(r->GetData(),(size_t)r->GetBytes(),(size_t)r->GetCapacity(),(n&&*n)?n:"cartridge.md"))return FALSE;m_pSegaRom=r;m_nCachedStateBytes=0;return TRUE;}
-void SegaSystem::EjectSuperMagicDriveCartridge(){if(m_bRomReady&&PicoDriveBridge_IsSuperMagicDrive()){PicoDriveBridge_SmdEjectCartridge();m_pSegaRom=NULL;m_nCachedStateBytes=0;}}
-Bool SegaSystem::SwapSuperMagicDriveDisk(const Char*p){return m_bRomReady&&PicoDriveBridge_IsSuperMagicDrive()&&PicoDriveBridge_SmdSwapDisk(p)?TRUE:FALSE;}
-void SegaSystem::PowerCycleSuperMagicDrive(){if(m_bRomReady&&PicoDriveBridge_IsSuperMagicDrive()){PicoDriveBridge_SmdPowerCycle();m_nCachedStateBytes=0;}}
-Bool SegaSystem::IsSuperMagicDrive()const{return PicoDriveBridge_IsSuperMagicDrive()?TRUE:FALSE;}
-Bool SegaSystem::IsSuperMagicDriveFirmwareMode()const{return PicoDriveBridge_IsSuperMagicDriveFirmwareMode()?TRUE:FALSE;}
-Bool SegaSystem::HasSuperMagicDriveCartridge()const{return PicoDriveBridge_SmdHasCartridge()?TRUE:FALSE;}
-Bool SegaSystem::HasSuperMagicDriveDisk()const{return PicoDriveBridge_SmdHasDisk()?TRUE:FALSE;}
-const Char*SegaSystem::GetSuperMagicDriveDiskPath()const{return PicoDriveBridge_SmdDiskPath();}
-const Char*SegaSystem::GetSuperMagicDriveError()const{return PicoDriveBridge_SmdLastError();}
-
-
 
 void SegaSystem::Reset()
 {
@@ -138,17 +124,15 @@ Int32 SegaSystem::GetStateSize()
     if (!m_bRomReady)
         return 0;
 
-    if (!PicoDriveBridge_IsSuperMagicDrive() && m_nCachedStateBytes > 0)
+    if (m_nCachedStateBytes > 0)
         return m_nCachedStateBytes;
 
     Int32 payload = PicoDriveBridge_GetStateSize();
     if (payload <= 0 || payload > INT_MAX - (Int32)sizeof(SegaStateHeaderT))
         return 0;
 
-    Int32 totalBytes = (Int32)sizeof(SegaStateHeaderT) + payload;
-    if (!PicoDriveBridge_IsSuperMagicDrive())
-        m_nCachedStateBytes = totalBytes;
-    return totalBytes;
+    m_nCachedStateBytes = (Int32)sizeof(SegaStateHeaderT) + payload;
+    return m_nCachedStateBytes;
 }
 
 void SegaSystem::SaveState(void *pState, Int32 nStateBytes)
