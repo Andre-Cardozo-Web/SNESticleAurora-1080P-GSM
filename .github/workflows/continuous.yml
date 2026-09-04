@@ -93,6 +93,8 @@ jobs:
           set -euo pipefail
           STRIP="$(command -v mips64r5900el-ps2-elf-strip || true)"
           if [ -z "$STRIP" ] && [ -n "${PS2DEV:-}" ] && [ -x "$PS2DEV/ee/bin/mips64r5900el-ps2-elf-strip" ]; then STRIP="$PS2DEV/ee/bin/mips64r5900el-ps2-elf-strip"; fi
+          [ -n "$STRIP" ] || STRIP="$(command -v mips64r5900el-ps2-elf-strip 2>/dev/null || true)"
+          [ -n "$STRIP" ] || STRIP="$(find "${PS2DEV:-$HOME/.local/ps2dev}" "$HOME/.local/ps2dev" "$HOME/ps2dev" /usr/local/ps2dev /opt/ps2dev -type f -name mips64r5900el-ps2-elf-strip -print -quit 2>/dev/null || true)"
           test -n "$STRIP"
           "$STRIP" -o build/SNESticle.stripped.elf build/SNESticle.elf
           mv -f build/SNESticle.stripped.elf build/SNESticle.elf
