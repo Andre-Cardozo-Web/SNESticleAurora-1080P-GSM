@@ -20,7 +20,13 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      # AURORA_CONTINUOUS_BEETLE_PCE_FAST_V14
+      - name: Patch PicoDrive Duplicate Macro
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[ PATCH ] Removendo macro duplicada do famec.c..."
+          sed -i 's/#define FAMEC_NO_GOTOS/\/\/ #define FAMEC_NO_GOTOS/g' src/third_party/picodrive/cpu/fame/famec.c
+
       - name: Verify required emulator submodules
         shell: bash
         run: |
@@ -30,7 +36,6 @@ jobs:
           test -f src/third_party/picodrive/Makefile
           test -f src/third_party/beetle-pce-fast/Makefile
           test -f src/third_party/beetle-pce-fast/COPYING
-          # AURORA_FCEUMM_FDS_CONTINUOUS_V1
           test -f src/third_party/fceumm-fds/Makefile
           test -f src/third_party/fceumm-fds/Copying
           test -f src/third_party/fceumm-fds/src/fds.c
@@ -39,10 +44,10 @@ jobs:
           test -f tools/prepare_fceumm_fds_sources.py
           test -f tools/namespace_fceumm_fds_archive.py
 
-          test "$(git config -f .gitmodules --get submodule.src/third_party/beetle-pce-fast.url)" = "https://github.com/itsveenee/beetle-pce-fast-libretro.git"
+          test "$(git config -f .gitmodules --get submodule.src/third_party/beetle-pce-fast.url)" = "https://github.com"
           test "$(git config -f .gitmodules --get submodule.src/third_party/beetle-pce-fast.branch)" = "master"
 
-          test "$(git config -f .gitmodules --get submodule.src/third_party/fceumm-fds.url)" = "https://github.com/itsveenee/Fceumm-PS2.git"
+          test "$(git config -f .gitmodules --get submodule.src/third_party/fceumm-fds.url)" = "https://github.com"
           test "$(git config -f .gitmodules --get submodule.src/third_party/fceumm-fds.branch)" = "master"
 
           echo "Recursive submodules:"
@@ -52,18 +57,6 @@ jobs:
           echo "FCEUmm/FDS commit:"
           git -C src/third_party/fceumm-fds rev-parse HEAD
           test "$(git -C src/third_party/fceumm-fds rev-parse HEAD)" = "dc77e3ca4baad08f0023f61dba9846550735b74d"
-
-
-      # AURORA_CONTINUOUS_PICODRIVE_SOURCE_V4_2
-      #
-      # Continuous intentionally remains the COMPLETE build, including
-      # PicoDrive and Beetle PCE Fast. Package the exact checked-out source
-      # tree BEFORE building, while recursive submodules are populated.
-      # while the recursive submodules are populated, so the release carries
-      # the source corresponding to the linked binary.
-      #
-      # This packaging is a redistribution/compliance aid; it is not a claim
-      # that every license in the combined binary is mutually compatible.
       - name: Package checked-out source
         shell: bash
         run: |
@@ -78,13 +71,19 @@ jobs:
             git submodule status --recursive
           } > /tmp/SOURCE-MANIFEST.txt
 
-          tar             --exclude='./.git'             --exclude='*/.git'             --exclude='./build'             --exclude='./.aurora_picodrive_stage2_backup'             -czf "/tmp/${source_name}"             -C "$GITHUB_WORKSPACE" .             -C /tmp SOURCE-MANIFEST.txt
+          tar \
+            --exclude='./.git' \
+            --exclude='*/.git' \
+            --exclude='./build' \
+            --exclude='./.aurora_picodrive_stage2_backup' \
+            -czf "/tmp/${source_name}" \
+            -C "$GITHUB_WORKSPACE" . \
+            -C /tmp SOURCE-MANIFEST.txt
 
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
       - name: Build
-        # Limit only the final GCC LTO fan-out; normal compilation remains parallel.
         run: make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
 
       - name: Strip release ELF
@@ -117,6 +116,19 @@ jobs:
 
           gh release delete continuous --cleanup-tag --yes || true
 
-          # AURORA_BRANDING_RELEASE_ASSET_V9_20260821
-          gh release create continuous             build/SNESticle.elf             "$AURORA_SOURCE_BUNDLE"             /tmp/SOURCE-MANIFEST.txt             /tmp/SHA256SUMS.txt             LICENSE             BRANDING.md             LICENSES/PicoDrive-COPYING.txt             LICENSES/QuickNES-GPL-2.0.txt             LICENSES/Beetle-PCE-Fast-GPL-2.0.txt             LICENSES/FCEUmm-GPL-2.0.txt             THIRD_PARTY.md             --target "$GITHUB_SHA"             --title "Continuous Build"             --prerelease             --notes-file CONTINUOUS_RELEASE.md  # AURORA_CONTINUOUS_RELEASE_FILE_V8_20260821
-
+          gh release create continuous \
+            build/SNESticle.elf \
+            "$AURORA_SOURCE_BUNDLE" \
+            /tmp/SOURCE-MANIFEST.txt \
+            /tmp/SHA256SUMS.txt \
+            LICENSE \
+            BRANDING.md \
+            LICENSES/PicoDrive-COPYING.txt \
+            LICENSES/QuickNES-GPL-2.0.txt \
+            LICENSES/Beetle-PCE-Fast-GPL-2.0.txt \
+            LICENSES/FCEUmm-GPL-2.0.txt \
+            THIRD_PARTY.md \
+            --target "$GITHUB_SHA" \
+            --title "Continuous Build" \
+            --prerelease \
+            --notes-file CONTINUOUS_RELEASE.md
