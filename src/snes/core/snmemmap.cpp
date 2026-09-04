@@ -328,7 +328,7 @@ static Int32 _SnesSuperFXBoardType(const Char *pTitle)
 /* SNES ROM address lines do not mirror a non-power-of-two image with a
    simple modulo.  A 12-Mbit (1.5 MiB) cart, for example, mirrors its final
    4 Mbit into the next 4-Mbit window.  This is the recursive mirror used by
-   real cartridge decoders (and by bsnes/snes9x). */
+   real cartridge decoders (and by bsnes/reference emulator). */
 static Uint32 _SnesMirrorRomOffset(Uint32 uSize, Uint32 uPos)
 {
 	Uint32 uMask;
@@ -386,7 +386,7 @@ static void _MapSuperFXRom(SNCpuT *pCpu, Uint8 *pRom, Uint32 uRomBytes, Int32 nB
 	}
 
 
-    /* AURORA_GSU_SNES9X_REVIEW_V1_20260902: GSU2 CPU ROM
+    /* AURORA_GSU_REFERENCE_REVIEW_V1_20260902: GSU2 CPU ROM
      * GSU2 can expose CPU-only ROM beyond the 2 MiB shared GSU window.
      * Keep <=2 MiB carts byte-for-byte unchanged; only large GSU2/homebrew
      * images gain E0-FF -> ROM 2-4 MiB. The GSU's own CodeRead/ROMBR path
@@ -556,7 +556,7 @@ void SnesSystem::MapMem(SnesMemMapT *pMemMap)
 }
 
 
-/* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
+/* AURORA_SA1_V1_REFERENCE_LOGIC_20260902 */
 Uint8 SNCPU_TRAPFUNC SnesSystem::ReadSA1BWRAM(SNCpuT *pCpu, Uint32 uAddr)
 {
     SnesSystem *pSnes = (SnesSystem *)pCpu->pUserData;
@@ -733,7 +733,7 @@ void SnesSystem::MapSuperWildCardCoprocessor(void)
     ISNDSP *pOldDsp = m_pDsp;
 #endif
 
-    m_SA1.Detach(); /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
+    m_SA1.Detach(); /* AURORA_SA1_V1_REFERENCE_LOGIC_20260902 */
     m_bSA1IRQ = FALSE;
     m_bSDD1 = FALSE;
     m_bSRTC = FALSE;
@@ -832,8 +832,9 @@ void SnesSystem::MapSuperWildCardCoprocessor(void)
             nGameBytes = m_SWC.GetDRAMBytes();
         }
 
+        /* AURORA_SA1_PERF_V8_3_2_20260903 */
         if (m_SA1.Attach(this, pGameRom, nGameBytes, pBW, nBW,
-                         bMapMainRom, (uMode != 1) ? TRUE : FALSE))
+                         bMapMainRom, (uMode != 1) ? TRUE : FALSE, TRUE))
             m_SA1.MapMainCPU(&m_Cpu);
     }
 }
@@ -966,7 +967,7 @@ static SnesMemMapT _SnesMemMap_ExLoRom_Sys[]=
 
 /* Mapeia uma faixa de bancos no estilo LoROM (32KB por banco). Se
    fullBank, a metade baixa ($0000-7FFF) espelha a alta ($8000-FFFF) do
-   mesmo chunk. Replica o map_lorom_offset do snes9x. */
+   mesmo chunk. Replica o map_lorom_offset do reference emulator. */
 static void _MapExLoRomRegion(SNCpuT *pCpu, Uint8 *pRom, Uint32 romBytes,
                               Uint32 bankS, Uint32 bankE, Bool fullBank,
                               Uint32 baseOffset)
@@ -999,7 +1000,7 @@ void SnesSystem::MapMemExLoRom(void)
 	Uint8  *pRom     = m_pRom->GetData();
 	Uint32  romBytes = m_pRom->GetBytes();
 
-	// Bancos de ROM (replica snes9x Map_JumboLoROMMap, com as metades ja
+	// Bancos de ROM (replica reference emulator Map_JumboLoROMMap, com as metades ja
 	// normalizadas no loader: metade-com-header em 0x400000, 4MB em 0):
 	//   $00-$3F:8000 -> 0x400000  (metade com header/vetores -> $00 le aqui)
 	//   $40-$7F:0000 -> 0x600000  (full bank; em geral fora de range)
@@ -1118,11 +1119,12 @@ void SnesSystem::MapMem(SNRomMappingE eRomMapping, Uint32 uFlags)
 			}
 			if (uFlags & SNROM_FLAG_SA1)
 			{
-				/* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
+				/* AURORA_SA1_V1_REFERENCE_LOGIC_20260902 */
 				m_SA1.Detach();
 				m_bSA1IRQ = FALSE;
+				/* AURORA_SA1_PERF_V8_3_2_20260903 */
 				if (m_SA1.Attach(this, m_pRom->GetData(), m_pRom->GetBytes(),
-				                 m_SRam, m_uSramSize, TRUE, FALSE))
+				                 m_SRam, m_uSramSize, TRUE, FALSE, FALSE))
 					m_SA1.MapMainCPU(&m_Cpu);
 			}
 			break;

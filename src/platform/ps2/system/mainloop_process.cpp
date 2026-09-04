@@ -21,17 +21,15 @@
 #include "mainloop_state.h"
 #include "mainloop_exec.h"
 #include "mainloop_safe_frameskip.h" /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
-/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
 #include "snppurender.h"
 #include "mainloop_iop.h"
 #include "sega/picodrive/picodrive_bridge.h"
-/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
+/* AURORA_ALLCORES_PERF_V5_20260824 */
 #include "nes/quicknes/quicknes_bridge.h"
 #include "nes/fceumm/fceumm_fds_bridge.h" /* AURORA_FCEUMM_FDS_V0_5_PROCESS */
 /* AURORA_PCE_EXPERIMENTAL_V1 */
 #include "pce/beetle/pce_bridge.h"
-/* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
-#include "snes/snes9x2010/snes9x2010_bridge.h"
+/* AURORA_PS2_PERF_V4_20260824 */
 #include "gskit_backend.h"
 
 #include "types.h"
@@ -126,7 +124,6 @@ Bool MainLoopProcess()
              * <=960 host frames/tick at PAL50 worst case for these cores. */
             Aud_SetAsyncBurstLimit(
                 (_pSystem == _pSnes ||
-                 _pSystem == _pSnes9x2010 ||
                  _pSystem == _pFds ||
                  _pSystem == _pPce ||
                  _pSystem == _pSega ||
@@ -163,8 +160,6 @@ Bool MainLoopProcess()
 		 * Mouse replaces gameplay port 1 on SNES and non-8-bit Sega.
 		 * Pads remain polled for menus and frontend hotkeys. */
 		if ((_pSystem == _pSnes ||
-              /* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
-              _pSystem == _pSnes9x2010 ||
 		     (_pSystem == _pSega && !PicoDriveBridge_Is8Bit())) &&
 		    InputSnesMouseShouldUse())
 		{
@@ -341,7 +336,7 @@ Bool MainLoopProcess()
             }
 
             /* AURORA_SAFE_FRAMESKIP_PICODRIVE_AUTO_V1: one Auto decision per Aurora host tick,
-             * shared by SNES/Snes9x/QuickNES/PicoDrive/PCE. */
+             * shared by SNES/reference emulator/QuickNES/PicoDrive/PCE. */
             const Bool bSafeSkip =
                 MainLoopSafeFrameskipTake(bSafeFrameskipAllowed);
             if (!bSafeSkip)
@@ -609,29 +604,6 @@ Bool MainLoopProcess()
                     PROF_LEAVE("PceTexUploadFallback");
                 }
             }
-            else if (_pSystem == _pSnes9x2010)
-            {
-                /* AURORA_SNES9X2010_V1: do not enter SNESticle's SNCPU/PPU
-                 * helper. Snes9x renders into the ordinary Aurora surface.
-                 * Keep the shared mixer's host clock identical to native SNES. */
-                if (_AudMix)
-                {
-                    Uint32 uRateNum = 60, uRateDen = 1;
-                    GSK_GetRefreshRate(&uRateNum, &uRateDen);
-                    _AudMix->SetFrameRateRational(uRateNum, uRateDen);
-                }
-                PROF_ENTER("Snes9x2010ExecuteFrame");
-                _pSnes9x2010->ExecuteFrame(
-                    &Input, bSafeSkip ? NULL : pSurface, pMixBuffer, eMode);
-                PROF_LEAVE("Snes9x2010ExecuteFrame");
-                if (!bSafeSkip &&
-                    !Snes9x2010Bridge_CanDirectGsVideo())
-                {
-                    PROF_ENTER("Snes9x2010TexUpload");
-                    TextureUpload(&_OutTex, pSurface->GetLinePtr(0));
-                    PROF_LEAVE("Snes9x2010TexUpload");
-                }
-            }
             else
             {
                 /* AURORA_MEGA_V2_SNES_AUDIO_CLOCK
@@ -667,15 +639,6 @@ Bool MainLoopProcess()
          * the emulation/render deadline. */
     }
 
-    /* AURORA_RUNTIME_LEAN_V1_FRONTEND_20260824
-     * Native SNES already skips gameplay SRAM polling. NES/Sega/PCE can do
-     * the same because opening the in-game menu force-checks the full SRAM
-     * immediately before deciding whether it must be saved.
-     *
-     * SNES9x2010 is intentionally left on its old behavior: this patch does
-     * not optimize or otherwise change that core. */
-    if (_pSystem == _pSnes9x2010)
-        _MainLoopCheckSRAM();
 	/* Deferred menu work runs only after _MenuEnable has returned. In the
 	   L2+R2 path this leaves two complete frames for the menu/status to become
 	   visible before a synchronous SRAM write begins. */
@@ -692,8 +655,6 @@ Bool MainLoopProcess()
 		Bool bUsbGameplay =
 			(!_bMenu &&
 			 (_pSystem == _pSnes ||
-              /* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
-              _pSystem == _pSnes9x2010 ||
 			  (_pSystem == _pSega && !PicoDriveBridge_Is8Bit())) &&
 			 !_MainLoop_BlackScreen &&
 			 InputSnesMouseGetMode() == INPUT_SNES_MOUSE_USB) ? TRUE : FALSE;

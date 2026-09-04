@@ -97,53 +97,7 @@ FCEUMM_FDS_OBJCOPY ?= $(shell if command -v mips64r5900el-ps2-elf-objcopy >/dev/
 FCEUMM_FDS_RANLIB ?= $(shell if command -v mips64r5900el-ps2-elf-ranlib >/dev/null 2>&1; then command -v mips64r5900el-ps2-elf-ranlib; elif [ -x "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-ranlib" ]; then echo "$(PS2DEV)/ee/bin/mips64r5900el-ps2-elf-ranlib"; else echo ranlib; fi)
 FCEUMM_FDS_CORE_DEPS := $(FCEUMM_FDS_DIR)/src/fceu.c $(FCEUMM_FDS_DIR)/src/fds.c $(FCEUMM_FDS_DIR)/src/input.c $(FCEUMM_FDS_DIR)/src/input/pads.c $(FCEUMM_FDS_DIR)/src/state.c $(FCEUMM_FDS_DIR)/src/general.c $(FCEUMM_FDS_DIR)/src/video.c $(FCEUMM_FDS_DIR)/src/drivers/libretro/libretro.c $(FCEUMM_FDS_PS2_MAKEFILE) $(FCEUMM_FDS_PREPARE_TOOL)
 # AURORA_FCEUMM_FDS_V0_6_CONFIG_END
-
-# AURORA_SNES9X2010_V1
-# AURORA_SNES9X2010_V2_PS2LEAN_20260824: standalone PS2 lean core; no MSU/HD/Blargg/core-options UI.
-SNES9X2010_DIR ?= $(CURDIR)/src/third_party/snes9x2010
-SNES9X2010_RAW_LIB ?= $(SNES9X2010_DIR)/snes9x2010_libretro_ps2_raw.a
-SNES9X2010_LIB ?= $(SNES9X2010_DIR)/snes9x2010_libretro_ps2.a
-SNES9X2010_INC := $(SNES9X2010_DIR)/libretro/libretro-common/include
-SNES9X2010_PS2_MAKEFILE := $(CURDIR)/tools/Makefile.snes9x2010-ps2
-SNES9X2010_NAMESPACE_TOOL := $(CURDIR)/tools/namespace_snes9x2010_archive.py
-SNES9X2010_PYTHON ?= python3
-SNES9X2010_NM ?= $(PCE_NM)
-SNES9X2010_OBJCOPY ?= $(PCE_OBJCOPY)
-SNES9X2010_RANLIB ?= $(PCE_RANLIB)
-
-# AURORA_SNES9X2010_BUILD_OPTION_V1_20260824
-# AURORA_SNES9X2010_BUILD_OPTION_V2_20260824
-# Default is OFF. Only an explicit command-line assignment may enable the
-# large Snes9x2010 archive:
-#   make fast                 -> disabled
-#   make fast SNES9X2010=0    -> disabled
-#   make fast SNES9X2010=1    -> enabled
-#
-# Do NOT use ?= here: an exported environment value could otherwise enable
-# the core accidentally. GNU Make command-line variables outrank ordinary
-# Makefile assignments, so the explicit =1 case remains user-controllable.
-ifeq ($(origin SNES9X2010),command line)
-  ifeq ($(strip $(SNES9X2010)),1)
-    AURORA_SNES9X2010 := 1
-  else
-    AURORA_SNES9X2010 := 0
-  endif
-else
-  SNES9X2010 := 0
-  AURORA_SNES9X2010 := 0
-endif
-
-ifeq ($(AURORA_SNES9X2010),1)
-SNES9X2010_LINK_DEPS := $(SNES9X2010_LIB)
-SNES9X2010_LINK_ARGS := "$(SNES9X2010_LIB)"
-else
-SNES9X2010_LINK_DEPS :=
-SNES9X2010_LINK_ARGS :=
-endif
-# AURORA_SNES9X2010_V1_RUNTIMEFIX_20260824
-# Track core source changes without forcing a full core clean on every build.
-SNES9X2010_CORE_DEPS := $(shell find "$(SNES9X2010_DIR)/src" "$(SNES9X2010_DIR)/libretro" "$(SNES9X2010_DIR)/filter" -type f \( -name '*.c' -o -name '*.h' \) 2>/dev/null)
-SNES9X2010_CORE_DEPS += $(SNES9X2010_DIR)/build/Makefile.common
+# AURORA_V8_4_1_LEGACY_SNES_CORE_REMOVED_20260903
 
 # AURORA_PD_TRYAGAIN_V1_PS2_BUILD_PARITY
 # PicoDrive's standalone PS2 configure path explicitly uses -G0. Keep
@@ -322,10 +276,10 @@ CXXFLAGS := -G0 -O2 -pipe -fomit-frame-pointer -Wall $(CONSERVATIVE_FLAGS) -Wno-
 # Keep the project's global -O2 + CONSERVATIVE_FLAGS contract.  Only ask GCC
 # to inline more aggressively inside pure computational translation units;
 # do not enable -O3's loop transforms globally and do not touch GIF/GS/DMA I/O.
-# AURORA_SNES9X2010_V4_PS2_PERF_20260824
-# AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824
+# AURORA_PS2_PERF_V4_20260824
+# AURORA_ALLCORES_PERF_V5_20260824
 # Exact all-core hot paths; no timing or approximation switches.
-# Safe host-bridge inlining for PicoDrive, Beetle PCE Fast and SNES9x.
+# Safe host-bridge inlining for PicoDrive, Beetle PCE Fast and reference emulator.
 AURORA_SAFE_HOT_CXXFLAGS := -finline-functions -finline-small-functions -findirect-inlining
 AURORA_SAFE_HOT_OBJS = \
 	$(OBJ_DIR)/snes/ppu/snppurender8.o \
@@ -336,7 +290,6 @@ AURORA_SAFE_HOT_OBJS = \
 	$(OBJ_DIR)/nes/quicknes/quicknes_bridge.o \
 	$(OBJ_DIR)/sega/picodrive/picodrive_bridge.o \
 	$(OBJ_DIR)/pce/beetle/pce_bridge.o \
-	$(OBJ_DIR)/snes/snes9x2010/snes9x2010_bridge.o \
 	$(OBJ_DIR)/common/render/audmixbuffer.o \
 	$(OBJ_DIR)/snes/core/snes.o \
 	$(OBJ_DIR)/snes/core/sndma.o \
@@ -520,9 +473,7 @@ INCS := \
 	-I$(SRC_DIR)/sega/system \
 	-I$(SRC_DIR)/sega/picodrive \
 	-I$(SRC_DIR)/pce/system \
-	-I$(SRC_DIR)/pce/beetle \
-	-I$(SRC_DIR)/snes/snes9x2010 \
-	-I$(SNES9X2010_INC)
+	-I$(SRC_DIR)/pce/beetle
 
 LIBDIRS := \
 	-L$(PS2SDK)/ee/lib \
@@ -721,10 +672,7 @@ SRCS := \
 	src/sega/picodrive/segasystem_picodrive.cpp \
 	src/pce/system/pcerom.cpp \
 	src/pce/beetle/pce_bridge.cpp \
-	src/pce/beetle/pcesystem_beetle.cpp \
-	src/snes/snes9x2010/snes9x2010rom.cpp \
-	src/snes/snes9x2010/snes9x2010_bridge.cpp \
-	src/snes/snes9x2010/snes9x2010system.cpp
+	src/pce/beetle/pcesystem_beetle.cpp
 
 OBJS := \
 	$(patsubst src/%.c,$(OBJ_DIR)/%.o,$(filter %.c,$(SRCS))) \
@@ -1141,40 +1089,9 @@ fceumm-fds-clean:
 	@rm -rf "$(FCEUMM_FDS_BUILD_DIR)"
 # AURORA_FCEUMM_FDS_V0_6_RULES_END
 
-# AURORA_SNES9X2010_V1
-$(SNES9X2010_RAW_LIB): $(SNES9X2010_PS2_MAKEFILE) $(SNES9X2010_CORE_DEPS)
-	@printf '[ Snes9x 2010 ] updating raw PS2 static core\n'
-	@test -f "$(SNES9X2010_DIR)/build/Makefile.common" || { echo "ERROR: missing $(SNES9X2010_DIR)"; exit 1; }
-	@PATH="$(PS2DEV)/ee/bin:$(PS2DEV)/bin:$(PS2SDK)/bin:$$PATH" $(MAKE) -C "$(SNES9X2010_DIR)" -f "$(SNES9X2010_PS2_MAKEFILE)" CC="$(EE_CC)" AR="$(EE_AR)" all
-
-$(SNES9X2010_LIB): $(SNES9X2010_RAW_LIB) $(SNES9X2010_NAMESPACE_TOOL)
-	@printf '[ Snes9x 2010 ] namespacing embedded libretro core\n'
-	@$(SNES9X2010_PYTHON) "$(SNES9X2010_NAMESPACE_TOOL)" --nm "$(SNES9X2010_NM)" --objcopy "$(SNES9X2010_OBJCOPY)" --ranlib "$(SNES9X2010_RANLIB)" --raw "$(SNES9X2010_RAW_LIB)" --output "$(SNES9X2010_LIB)"
-
-.PHONY: snes9x2010-core snes9x2010-clean
-snes9x2010-core: $(SNES9X2010_LIB)
-	@echo "[ Snes9x 2010 ] core ready: $(SNES9X2010_LIB)"
-	@$(SNES9X2010_NM) -g --defined-only "$(SNES9X2010_LIB)" | grep -E 'S9X2010_retro_(init|load_game|run|serialize)' | head -20
-
-snes9x2010-clean:
-	@if [ -d "$(SNES9X2010_DIR)" ]; then PATH="$(PS2DEV)/ee/bin:$(PS2DEV)/bin:$(PS2SDK)/bin:$$PATH" $(MAKE) -C "$(SNES9X2010_DIR)" -f "$(SNES9X2010_PS2_MAKEFILE)" CC="$(EE_CC)" AR="$(EE_AR)" clean || true; fi
-	@rm -f "$(SNES9X2010_LIB)" "$(SNES9X2010_LIB).symbols.map"
-
-clean: snes9x2010-clean
-
-# AURORA_SNES9X2010_BUILD_OPTION_V1_20260824: compile-time gate; no runtime if/branch.
-SNES9X2010_FLAG_OBJS := $(filter %snes9x2010_bridge.o %mainloop_load.o,$(OBJS))
-SNES9X2010_MODE_STAMP := $(BUILD_META_DIR)/snes9x2010-mode-$(AURORA_SNES9X2010)
-$(SNES9X2010_FLAG_OBJS): CXXFLAGS += -DAURORA_SNES9X2010=$(AURORA_SNES9X2010)
-$(SNES9X2010_FLAG_OBJS): $(SNES9X2010_MODE_STAMP)
-$(SNES9X2010_MODE_STAMP):
-	@mkdir -p "$(BUILD_META_DIR)"
-	@rm -f "$(BUILD_META_DIR)/snes9x2010-mode-0" "$(BUILD_META_DIR)/snes9x2010-mode-1"
-	@touch "$@"
-
 # AURORA_FCEUMM_FDS_V0_5_RUNTIME_LINK
-$(TARGET): $(OBJS) $(PICODRIVE_LIB) $(QUICKNES_LIB) $(PCE_LIB) $(FCEUMM_FDS_LIB) $(SNES9X2010_LINK_DEPS) | $(OBJ_DIR)
-	$(call RUN_LINK,$@,$(EE_CXX) $(LTO_LINK_FLAGS) -Xlinker --gc-sections -Xlinker -Map -Xlinker "$(OBJ_DIR)/SNESticle.map" -o "$@" $(OBJS) "$(PICODRIVE_LIB)" "$(QUICKNES_LIB)" "$(PCE_LIB)" "$(FCEUMM_FDS_LIB)" $(SNES9X2010_LINK_ARGS) $(LIBDIRS) $(LIBS))
+$(TARGET): $(OBJS) $(PICODRIVE_LIB) $(QUICKNES_LIB) $(PCE_LIB) $(FCEUMM_FDS_LIB) | $(OBJ_DIR)
+	$(call RUN_LINK,$@,$(EE_CXX) $(LTO_LINK_FLAGS) -Xlinker --gc-sections -Xlinker -Map -Xlinker "$(OBJ_DIR)/SNESticle.map" -o "$@" $(OBJS) "$(PICODRIVE_LIB)" "$(QUICKNES_LIB)" "$(PCE_LIB)" "$(FCEUMM_FDS_LIB)" $(LIBDIRS) $(LIBS))
 
 $(TARGET_STRIPPED): $(TARGET)
 	@cp -f "$(TARGET)" "$@"

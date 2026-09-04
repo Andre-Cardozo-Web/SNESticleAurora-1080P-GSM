@@ -41,12 +41,6 @@ The component's GNU GPLv2 `COPYING` is mirrored verbatim at `LICENSES/Beetle-PCE
 
 Aurora V6 exposes HuCard and path-based PC Engine CD `.cue` loading. PC Engine CD requires the user-provided `syscard3.pce` in `SNESticle/SYSTEM`. No firmware is included.
 
-### Snes9x 2010
-
-Aurora optionally embeds the pinned `itsveenee/snes9x2010` submodule at `src/third_party/snes9x2010`, based on Snes9x 2010 and its libretro core. It does not require RetroArch at runtime.
-
-Snes9x carries separate license/copyright terms, including non-commercial and personal-use restrictions. They are not the same as Aurora's GPL-covered code. Preserve the submodule notices and review the verbatim mirror at `LICENSES/Snes9x2010-LICENSE.txt` before redistributing source or binaries containing this core. Publish modified submodule source before updating the parent gitlink.
-
 ### CD image scope and firmware
 
 The PS2 frontend exposes `.cue` only. CHD is deliberately not registered: enabling libchdr would also link compression libraries that have not been measured safely inside the EE's 32 MiB memory budget. CUE-referenced BIN/audio files remain on storage and are streamed by the cores. Sega CD and PC Engine CD BIOS files are copyrighted firmware supplied by the user and are not part of this repository.

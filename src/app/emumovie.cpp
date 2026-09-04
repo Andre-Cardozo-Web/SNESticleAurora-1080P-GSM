@@ -32,11 +32,11 @@ using namespace Emu;
 
 MovieClip::MovieClip(Uint32 uStateSize, Uint32 uMaxFrames)
 {
-    /* AURORA_SNES9X2010_V6_2_STABLEINIT_20260824
+    /* AURORA_STABLEINIT_V6_2_20260824
      * Movie capture is a DEBUG-only input feature, yet the old constructor
      * permanently reserved the largest emulator state plus 216,000 input
      * frames.  That consumed roughly 2.6 MiB before a ROM was selected and
-     * starved the embedded Snes9x renderer.  Keep the exact capacity and
+     * starved the embedded reference emulator renderer.  Keep the exact capacity and
      * allocate it only when recording actually begins. */
     m_uStateSize    = 0;
     m_uMaxStateSize = uStateSize;

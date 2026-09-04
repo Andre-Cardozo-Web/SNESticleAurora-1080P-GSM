@@ -29,7 +29,7 @@ bool QuicknesBridge_SetPalette(const Uint8 *rgb192);
 /* AURORA_CONTROLLER_OPTIONS_V2 */
 void QuicknesBridge_SetTurboSpeed(unsigned speedShift);
 void QuicknesBridge_SetSkipVideo(bool skip); /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
-/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
+/* AURORA_ALLCORES_PERF_V5_20260824 */
 void QuicknesBridge_InvalidateGsResources(void);
 bool QuicknesBridge_CanDirectGsVideo(void);
 bool QuicknesBridge_DrawDirectGs(Uint32 auroraOutBaseTBP,

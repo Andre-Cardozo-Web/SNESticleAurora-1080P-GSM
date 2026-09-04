@@ -12,7 +12,7 @@ extern "C" {
 };
 
 /* Output gain for the emulated game audio (SNES/NES). The SPU2/audsrv
-   volume is already at 100%, so to match players like Snes9x/RetroArch we
+   volume is already at 100%, so to match players like reference emulator/RetroArch we
    raise the PCM amplitude here, with int16 saturation (loud games clip
    rather than wrap around).
 
@@ -365,8 +365,8 @@ Int32 AudMixBuffer::ConvertSamplesStereo_Linear48(
     return out;
 }
 
-/* AURORA_SNES9X2010_V4_PS2_PERF_20260824
- * Direct libretro LRLR input for Beetle PCE Fast and Snes9x2010.
+/* AURORA_PS2_PERF_V4_20260824
+ * Direct libretro LRLR input for Beetle PCE Fast and retired alternate SNES core.
  * This is equation/state equivalent to OutputSamplesStereo(), but fuses the
  * bridge's deinterleave pass with output/resampling and avoids two 1024-frame
  * channel planes.  PicoDrive retains its specialised +50% paths below. */
@@ -763,7 +763,7 @@ Bool AudMixBuffer::OutputPicoDriveInterleaved32000(
         ((CH) == 0 ? pPrefixLeft[(IDX)] : pPrefixRight[(IDX)]) : \
         _AudMixPicoGain150(pStereo[((IDX) - nPrefixFrames) * 2 + (CH)]))
 
-    /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824
+    /* AURORA_ALLCORES_PERF_V5_20260824
      * The old loop gained sample i+2 as lookahead and gained it again as the
      * next pair's i+0. Carry that exact Int16 value forward instead. */
     {
@@ -1021,7 +1021,7 @@ Bool AudMixBuffer::OutputFceummMonoInt32(const Int32 *pSamples, Int32 nSamples)
 
 void AudMixBuffer::OutputSamplesMono(Int16 *pSamples, Int32 nSamples)
 {
-    /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824
+    /* AURORA_ALLCORES_PERF_V5_20260824
      * QuickNES is mono and the native SNES mixer can also select mono.  When
      * both histories match, the historical left/right cubic calls are
      * mathematically identical. Run one and byte-copy its exact Int16 result.

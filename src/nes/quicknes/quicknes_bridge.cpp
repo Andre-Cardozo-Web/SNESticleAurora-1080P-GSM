@@ -25,7 +25,7 @@
 #include "snppurender.h"
 #include "input.h" /* AURORA_QN_ARKANOID_ANALOG_V2_20260828 */
 
-/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
+/* AURORA_ALLCORES_PERF_V5_20260824 */
 extern "C" {
 #include "gs.h"
 #include "gpprim.h"
@@ -148,7 +148,7 @@ static void qGetRgb(unsigned ci, Uint8 *r, Uint8 *g, Uint8 *b)
 }
 
 
-/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824
+/* AURORA_ALLCORES_PERF_V5_20260824
  * Direct indexed-video state. Palette entries are kept in GS
  * CSM1 order; texture and CLUT live in Aurora's reserved output slab. */
 static Uint32 s_GsPalette[256] __attribute__((aligned(64)));

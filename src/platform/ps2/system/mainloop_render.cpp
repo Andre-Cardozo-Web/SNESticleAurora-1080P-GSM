@@ -17,14 +17,13 @@
 #include "mainloop_bgm.h"
 #include "mainloop_safe_frameskip.h" /* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2 */
 #include "sega/picodrive/picodrive_bridge.h"
-/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
+/* AURORA_ALLCORES_PERF_V5_20260824 */
 #include "nes/quicknes/quicknes_bridge.h"
 /* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827 */
 #include "nes/fceumm/fceumm_fds_bridge.h"
 #include "pce/beetle/pce_bridge.h"
 
-/* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
-#include "snes/snes9x2010/snes9x2010_bridge.h"
+/* AURORA_PS2_PERF_V4_20260824 */
 #include "types.h"
 #include "console.h"
 #include "snes.h"
@@ -455,7 +454,6 @@ void MainLoopRender()
              (_pSystem == _pNes ||
               _pSystem == _pFds || /* AURORA_FCEUMM_FDS_V0_5_RENDER */
               _pSystem == _pSnes ||
-              _pSystem == _pSnes9x2010 ||
               (_pSystem == _pSega &&
                (PicoDriveBridge_IsMegaDriveVideo() ||
                 PicoDriveBridge_IsMasterSystem()))) &&
@@ -605,12 +603,6 @@ void MainLoopRender()
                 g_GskVideoMode == GSK_VIDMODE_240P ? 2 : 4,
                 fColor);
         }
-        else if (_pSystem == _pSnes9x2010 &&
-                 Snes9x2010Bridge_CanDirectGsVideo())
-        {
-            Snes9x2010Bridge_DrawDirectGs(
-                _MainLoop_uOutTexTBP, fColor);
-        }
         else if (_pSystem == _pPce &&
                  PceBridge_CanDirectGsVideo())
         {
@@ -652,7 +644,7 @@ void MainLoopRender()
      * raster. Present that raster 1:1; PCRTC handles the CRT pixel aspect. */
     PolyRect(0.0f, 0.0f, 256.0f, 240.0f);
             }
-            else if (_pSystem == _pSnes || _pSystem == _pSnes9x2010)
+            else if (_pSystem == _pSnes)
             {
     PolyRect(0.0f, 8.0f, 256.0f, 240.0f);
             }

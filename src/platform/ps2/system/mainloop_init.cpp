@@ -40,13 +40,12 @@
 #include "snppucolor.h"
 #include "snppurender.h"
 #include "sega/picodrive/picodrive_bridge.h"
-/* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 */
+/* AURORA_ALLCORES_PERF_V5_20260824 */
 #include "nes/quicknes/quicknes_bridge.h"
 /* AURORA_FCEUMM_FDS_PERF_DIRECT_T8_V3_20260827 */
 #include "nes/fceumm/fceumm_fds_bridge.h"
 #include "pce/beetle/pce_bridge.h"
-/* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
-#include "snes/snes9x2010/snes9x2010_bridge.h"
+/* AURORA_PS2_PERF_V4_20260824 */
 #include "emumovie.h"
 
 #include <sifrpc.h>
@@ -182,7 +181,6 @@ static Bool _MainLoopAllocVideoVram(void)
     FceummFdsBridge_InvalidateGsResources();
     PicoDriveBridge_InvalidateGsResources();
     PceBridge_InvalidateGsResources();
-    Snes9x2010Bridge_InvalidateGsResources();
 
 	outTBP = GSK_VramAllocTBP(
 		_MainLoopAlignVramBytes(MAINLOOP_OUT_TEX_BYTES));
@@ -435,7 +433,6 @@ Bool MainLoopInit()
 	ScrPrintf("FCEUmm FDS WIP: FCE Ultra / libretro");
 	ScrPrintf("PicoDrive: notaz / irixxxx / contributors");
 	ScrPrintf("Beetle PCE Fast: Mednafen / libretro contributors");
-	ScrPrintf("Snes9x 2010: Snes9x / libretro contributors");
 	ScrPrintf("Licenses/notices: repository LICENSES/");
 	ScrPrintf("Copyright (c) 1997-2004 Icer Addis");
 
@@ -473,7 +470,7 @@ Bool MainLoopInit()
     /* state.cfg can live on USB/MX4SIO/MMCE as well as a memory card. Load it
        only after the configured removable-storage backend is available. */
     MainLoopStateSettingsLoad();
-    /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: mkdir -p the active SNESticle/SYSTEM tree after storage init. */
+    /* AURORA_CD_SRAM_NOTICES_20260824: mkdir -p the active SNESticle/SYSTEM tree after storage init. */
     {
         Char SystemDirectory[512];
         if (MainLoopEnsureSystemDirectory(
@@ -562,12 +559,6 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	_pSnes->Reset();
 
 	_pSnesRom = new SnesRom();
-	/* AURORA_SNES9X2010_V1: second SNES implementation shares the browser
-	 * entry type. The runtime Core selector decides which wrapper receives
-	 * a selected SNES image. */
-	_pSnes9x2010 = new Snes9x2010System();
-	_pSnes9x2010->Reset();
-	_pSnes9x2010Rom = new Snes9x2010Rom();
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"sfc");
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"smc");
 	PathExtAdd(MAINLOOP_ENTRYTYPE_SNESROM, (char *)"fig");
@@ -624,7 +615,7 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 		PathExtAdd(MAINLOOP_ENTRYTYPE_PCEROM, _pPceRom->GetExtName(iExt));
 	}
 
-	/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: CUE is classified by first-track signature at launch. */
+	/* AURORA_CD_SRAM_NOTICES_20260824: CUE is classified by first-track signature at launch. */
 	PathExtAdd(MAINLOOP_ENTRYTYPE_CDIMAGE, (char *)"cue");
 	/* AURORA_PCE_CDRDAO_TOC_SUPPORT_V4_8_20260830
 	 * Beetle PCE Fast natively supports cdrdao TOC. */
@@ -655,7 +646,7 @@ TextureUpload(&_OutTex, _fbTexture[0]->GetLinePtr(0));
 	}
 
 	// init menu
-	/* AURORA_SNES9X2010_V6_2_STABLEINIT_20260824
+	/* AURORA_STABLEINIT_V6_2_20260824
 	 * Browser storage already grows geometrically. Reserving 6000 records at
 	 * boot held about 1.55 MiB even in a small directory; 256 keeps identical
 	 * capacity semantics while paying only for entries that actually exist. */

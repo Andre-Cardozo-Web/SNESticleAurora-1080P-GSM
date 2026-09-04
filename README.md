@@ -11,7 +11,6 @@ Mega Drive, Master System, Game Gear, 32X and Sega CD emulation through **PicoDr
 
 PC Engine / TurboGrafx-16 emulation through **Beetle PC Engine Fast** is based on the libretro port/fork of **Mednafen PCE Fast**, maintained by libretro and Mednafen contributors. Aurora uses `itsveenee/beetle-pce-fast-libretro` with PS2-specific integration and optimization. HuCard (`.pce`, including ZIP/GZ paths) and experimental PC Engine CD `.cue` loading are exposed; CD firmware is user-supplied in `SNESticle/SYSTEM`. See [THIRD_PARTY.md](THIRD_PARTY.md) and `LICENSES/Beetle-PCE-Fast-GPL-2.0.txt`.
 
-There is currently an **experimental, NON-WORKING build** of **Snes9x 2010**, based on Snes9x and its libretro core contributors, from the pinned `itsveenee/snes9x2010` submodule. Its license is separate from Aurora's GPL-covered code and is mirrored at `LICENSES/Snes9x2010-LICENSE.txt`; preserve and review those terms before redistribution.
 
 <!-- AURORA_FCEUMM_FDS_CHECKPOINT_V1 -->
 <!-- AURORA_FCEUMM_FDS_DOCS_V8_1_20260827 -->
@@ -97,7 +96,9 @@ CD firmware and images **(experimental)**
 
 **TO BE FIXED:**
 
-* PC Engine CD and Sega CD audio playback performance *(a lot has been improved, though)*
+* SNES SA-1 Emulation (experimental state)
+* SNES FX1 and FX2 emulation (experimental state)
+* PC Engine CD and Sega CD performance
 * SMB (ethernet crossover cable) connection
 * Krazy Creatures (NES) minor graphical glitches
 * Super Mario World 2 (SNES) performance
@@ -109,8 +110,6 @@ CD firmware and images **(experimental)**
 
 **TO BE ADDED:**
 
-* SNES SA-1 Emulation
-* Improve FX1 and FX2 emulation
 * Other stupid (or not-so-stupid) ideas I might come up with. Thanks!
 
 

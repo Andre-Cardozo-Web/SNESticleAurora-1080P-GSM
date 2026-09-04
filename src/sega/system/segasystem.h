@@ -24,7 +24,7 @@ public:
     virtual ~SegaSystem();
 
     virtual void SetRom(Emu::Rom *pRom);
-    /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
+    /* AURORA_CD_SRAM_NOTICES_20260824 */
     Bool LoadDisc(const Char *pPath, const Char *pSystemPath);
     /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
     Bool LoadSuperMagicDrive(const Char *pBiosPath, const Char *pDiskPath);

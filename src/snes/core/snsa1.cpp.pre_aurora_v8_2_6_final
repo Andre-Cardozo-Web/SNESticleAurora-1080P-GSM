@@ -4,11 +4,11 @@
 #include "snes.h"
 #include "sncpudefs.h"
 
-/* AURORA_SA1_V1_SNES9X_LOGIC_20260902
- * Behavioural reference: Snes9x sa1.cpp / sa1cpu.cpp.
+/* AURORA_SA1_V1_REFERENCE_LOGIC_20260902
+ * Behavioural reference: reference emulator sa1.cpp / sa1cpu.cpp.
  * CPU execution itself is NOT copied: the Aurora SNCpuT core is instantiated
  * a second time.  One S-CPU master-clock slice gives SA-1 a 3x cycle budget,
- * matching Snes9x's SA1.Cycles < CPU.Cycles * 3 scheduler relationship.
+ * matching reference emulator's SA1.Cycles < CPU.Cycles * 3 scheduler relationship.
  */
 
 static Uint16 _SA1LE16(const Uint8 *p)
@@ -75,7 +75,7 @@ void SNSA1::Reset()
     memset(m_IRAM, 0, sizeof(m_IRAM));
     memset(m_CharData, 0, sizeof(m_CharData));
 
-    /* Same power-on values used by Snes9x SA-1 init. */
+    /* Same power-on values used by reference emulator SA-1 init. */
     m_Reg[0x00] = 0x20; /* CCNT: SA-1 held in reset */
     m_Reg[0x20] = 0x00;
     m_Reg[0x21] = 0x01;
@@ -194,7 +194,7 @@ void SNSA1::MapRomPage(SNCpuT *pCpu, Uint32 uBus, Bool bMainCpu)
     }
 
     /* SA-1 ROM fetches use the fast 10.74 MHz execution domain in this V1;
-       BW-RAM separately receives the 2-cycle penalty used by Snes9x. */
+       BW-RAM separately receives the 2-cycle penalty used by reference emulator. */
     SNCPUSetMemSpeed(pCpu, uBus, 0x2000, SNCPU_CYCLE_FAST);
 }
 
@@ -223,7 +223,7 @@ void SNSA1::MapSA1CPU()
 
     MapRomWindows(&m_Cpu, FALSE);
 
-    /* BW-RAM is a two-SA-1-cycle region in Snes9x. */
+    /* BW-RAM is a two-SA-1-cycle region in reference emulator. */
     for (uBank = 0x40; uBank <= 0x5F; ++uBank)
         SNCPUSetMemSpeed(&m_Cpu, uBank << 16, 0x10000, 12);
     for (uBank = 0x60; uBank <= 0x7F; ++uBank)
@@ -414,7 +414,7 @@ void SNSA1::WriteBitmap(Uint32 uPixelAddr, Uint8 uData)
         m_pBWRAM[byteOff] = (Uint8)((m_pBWRAM[byteOff] & ~mask) |
                               ((uData & 15u) << shift));
     }
-    /* Snes9x/ares protection applies to linear BW-RAM, not bitmap writes. */
+    /* reference emulator/ares protection applies to linear BW-RAM, not bitmap writes. */
     MarkBWRAMDirty();
 }
 

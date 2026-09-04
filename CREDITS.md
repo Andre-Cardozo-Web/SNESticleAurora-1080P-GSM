@@ -76,16 +76,6 @@ The experimental PC Engine / TurboGrafx-16 HuCard and PC Engine CD integration u
 
 PC Engine CD is exposed through path-only `.cue` loading and a user-provided `syscard3.pce`. See `LICENSES/Beetle-PCE-Fast-GPL-2.0.txt`.
 
-### Snes9x 2010
-
-The optional SNES core uses the pinned `itsveenee/snes9x2010` submodule at `src/third_party/snes9x2010`, based on Snes9x 2010 and its libretro integration.
-
-- **Snes9x emulator:** the Snes9x authors and contributors listed in its license
-- **Snes9x 2010 libretro core:** libretro contributors
-- **Aurora PS2 bridge, menu integration and optimization:** Vinícius Nunes (`@itsveenee`)
-
-Its terms are separate from Aurora's GPL-covered code. Preserve the authoritative submodule notices and the verbatim top-level mirror at `LICENSES/Snes9x2010-LICENSE.txt`.
-
 ## Third-party components
 
 SNESticle Aurora also contains or integrates InfoNES, FCEUmm, miniz, libxmp-lite, PS2SDK-related code and other inherited components. Their original copyright, authorship, license and source-file notices remain authoritative and must be preserved. See `LICENSE`, `THIRD_PARTY.md`, and each component's bundled notices.

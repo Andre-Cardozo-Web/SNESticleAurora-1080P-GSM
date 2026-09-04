@@ -40,12 +40,8 @@ extern AudMixBuffer *_AudMix;
 
 void MainResetEmulator(void);
 Bool MainLoopReinitVideoMode(Int32 mode);
-/* AURORA_SNES9X2010_V1 */
-const Char *MainLoopSnesCoreGetName();
-void MainLoopSnesCoreCycleDir(Int32 dir);
-/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
-Int32 MainLoopSnesCoreGetPersisted();
-void MainLoopSnesCoreSetPersisted(Int32 value);
+/* AURORA_LEGACYCORE_V1 */
+/* AURORA_LEGACYCORE_V3_MENU_BRIDGE_20260824 */
 
 /* ------------------------------------------------------------------ */
 /* Persistence                                                         */
@@ -124,7 +120,7 @@ typedef struct
 	Int32  smscolorborder; /* 0=black, 1=SMS VDP backdrop */
 	Int32  smsfm;          /* 0=off, 1=Master System YM2413/OPLL */
 	Int32  pcevol;         /* v37: Beetle PCE Fast gain 0..400; UI /2 */
-	Int32  snescore;       /* v38: persisted SNES core selector */
+	Int32  reserved38;     /* v38 compatibility slot; always zero */
 	Int32  safeframeskip;  /* v41: 0=Off, 1..9=max auto skips; default 1 */
 	Int32  ggzoom;         /* v39: GG 160x144 -> 240x216, uniform 3:2 */
 	Int32  lightgun;       /* v42: CRC-known NES/Famicom gun; 1=On */
@@ -421,7 +417,7 @@ void VideoSettingsSave(void)
 	cfg.massenable = MassStorageIsEnabled() ? 1 : 0;
 	cfg.smbenable  = SmbSupportIsEnabled() ? 1 : 0;
 	cfg.mx4sioenable = Mx4sioIsEnabled() ? 1 : 0;
-		/* AURORA_SNES9X2010_V2_PS2LEAN_20260824: retain the v37 field/layout, but always persist default. */
+		/* AURORA_PS2LEAN_V2_20260824: retain the v37 field/layout, but always persist default. */
 		cfg.colorprofile = SNPPU_COLOR_PROFILE_ORIGINAL;
 	cfg.famicloneaudio = g_FamicloneAudio ? 1 : 0;
 	cfg.fakesramsize = g_FakeSRAMSize;
@@ -451,8 +447,8 @@ void VideoSettingsSave(void)
 	cfg.segaaudiorate = (Int32)PicoDriveBridge_GetAudioRate();
 	cfg.smscolorborder = PicoDriveBridge_GetSmsColorBorder() ? 1 : 0;
 	cfg.smsfm = PicoDriveBridge_GetSmsFm() ? 1 : 0;
-	/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
-	cfg.snescore = MainLoopSnesCoreGetPersisted();
+	/* AURORA_LEGACYCORE_V3_MENU_BRIDGE_20260824 */
+	cfg.reserved38 = 0;
 	/* AURORA_SAFE_FRAMESKIP_GG_ZOOM_V2_2: v39 append-only fields. */
 	cfg.safeframeskip = MainLoopSafeFrameskipGetLevel();
 	cfg.ggzoom = PicoDriveBridge_GetGgZoom() ? 1 : 0;
@@ -473,8 +469,7 @@ void VideoSettingsLoad(void)
 	Bool      loaded = FALSE;
 
 
-	/* AURORA_SNES9X2010_V3_MENU_BRIDGE_20260824 */
-	MainLoopSnesCoreSetPersisted(0);
+	/* AURORA_LEGACYCORE_V3_MENU_BRIDGE_20260824 */
 	/* AURORA_FAMICOM_MIC_CFG41_20260828: conservative Aurora default. */
 	MainLoopSafeFrameskipSetLevel(1);
 	PicoDriveBridge_SetGgZoom(false);
@@ -527,7 +522,7 @@ void VideoSettingsLoad(void)
 		}
 		else if (header.version == 37)
 		{
-			/* v37 is the exact prefix before snescore. */
+			/* v37 is the exact prefix before the reserved v38 slot. */
 			loaded = MemCardReadFile(path, (Uint8 *)&cfg, VIDEOCFG_V37_BYTES);
 			if (loaded) cfg.version = VIDEOCFG_VERSION;
 		}
@@ -799,8 +794,6 @@ void VideoSettingsLoad(void)
 
 	if (loaded && cfg.magic == VIDEOCFG_MAGIC)
 	{
-		if (cfg.snescore >= 0 && cfg.snescore < 2)
-			MainLoopSnesCoreSetPersisted(cfg.snescore);
 		/* v1.0.2 allowed both SIO2 storage hooks to be saved at once.
 		   Prefer MMCE when importing such a legacy config; all new changes
 		   are mutually exclusive in the setters below. */
@@ -852,7 +845,7 @@ void VideoSettingsLoad(void)
 		if (cfg.massenable == 0 || cfg.massenable == 1) MassStorageSetEnabled(cfg.massenable);
 		if (cfg.smbenable == 0 || cfg.smbenable == 1) SmbSupportSetEnabled(cfg.smbenable);
 		if (cfg.mx4sioenable == 0 || cfg.mx4sioenable == 1) Mx4sioSetEnabled(cfg.mx4sioenable);
-		/* AURORA_SNES9X2010_V2_PS2LEAN_20260824: ignore legacy Composite configs; default is fixed. */
+		/* AURORA_PS2LEAN_V2_20260824: ignore legacy Composite configs; default is fixed. */
 		SNPPUColorSetProfile(SNPPU_COLOR_PROFILE_ORIGINAL);
 if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1)
 {
@@ -1166,14 +1159,14 @@ void CVideoScreen::Draw()
 	const char *pMode = _VideoModes[m].name;
 	/* AURORA_V85_SOFTWARE_HACKS_PAGE
 	 * AURORA_MD_MENU_MAPPING_SRAM_FIX_V4: controller page dedicada.
-	 * Display order: 0..9, 30..36, 40..44, 20..29, 10..19. */
+	 * Display order: 0..9, 31..37, 40..44, 20..29, 10..19. */
 	int   iPage = (m_iSelect >= 50) ? 1 :
 	              ((m_iSelect >= 40) ? 3 :
 	              ((m_iSelect >= 31) ? 2 :
 	              ((m_iSelect >= 20) ? 4 :
 	              ((m_iSelect >= 10) ? 5 : 0))));
 	const char *pWide = "Off";
-	/* AURORA_SNES9X2010_V2_PS2LEAN_20260824: SNES colour profile is intentionally fixed to
+	/* AURORA_PS2LEAN_V2_20260824: SNES colour profile is intentionally fixed to
 	 * the original/default palette on PS2; no menu row is exposed. */
 
 	if (g_GskWidescreen)
@@ -1269,9 +1262,6 @@ _VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;
 	else if (iPage == 4)
 	{
 		_VideoHeader(vy, "SNES Hacks"); vy += 14;
-		/* AURORA_SNES9X2010_V1_RUNTIMEFIX_20260824 -- runtime-only in V1. */
-		_VideoRow(vy, 30, m_iSelect, "SNES Core",
-			MainLoopSnesCoreGetName()); vy += 12;
 		_VideoRow(vy, 20, m_iSelect, "BG1 Layer",
 			_VideoHackLayerStatus(SNESPPU_MASK_BG1)); vy += 12;
 		_VideoRow(vy, 21, m_iSelect, "BG2 Layer",
@@ -1353,7 +1343,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 	{
 		if (m_iSelect < 10)        m_iSelect = 50;
 		else if (m_iSelect < 20)   m_iSelect = 0;
-		else if (m_iSelect <= 30)  m_iSelect = 10;
+		else if (m_iSelect <= 29)  m_iSelect = 10;
 		else if (m_iSelect < 40)   m_iSelect = 40;
 		else if (m_iSelect < 50)   m_iSelect = 20;
 		else                       m_iSelect = 31;
@@ -1363,7 +1353,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 		int lo, hi;
 		if (m_iSelect < 10)       { lo = 0;  hi = 8;  }
 		else if (m_iSelect < 20)  { lo = 10; hi = 19; }
-		else if (m_iSelect <= 30) { lo = 20; hi = 30; }
+		else if (m_iSelect <= 29) { lo = 20; hi = 29; }
 		else if (m_iSelect < 40)  { lo = 31; hi = 37; }
 		else if (m_iSelect < 50)  { lo = 40; hi = 44; }
 		else                      { lo = 50; hi = 58; } /* AURORA_CD_MUSIC_REDBOOK_V3_20260830 */
@@ -1620,9 +1610,6 @@ case 17: /* Famiclone Audio */
 				if (mode >= SNPPU_OBJ_LIMIT_MODE_NUM) mode = 0;
 				SNPPURenderSetObjLimitMode((Uint8)mode);
 			}
-			break;
-		case 30: /* AURORA_SNES9X2010_V1_RUNTIMEFIX_20260824 -- applies on next SNES launch. */
-			MainLoopSnesCoreCycleDir(dir);
 			break;
 		case 31:
 			_VideoApplyCompatFlags(

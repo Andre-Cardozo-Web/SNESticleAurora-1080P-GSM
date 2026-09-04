@@ -9,10 +9,12 @@ class CMixBuffer;
 bool PceBridge_Init(void);
 void PceBridge_Shutdown(void);
 bool PceBridge_LoadGame(const void *pData, size_t nBytes, size_t nCapacity, const char *pName);
-/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 -- path-only PC Engine CD CUE. */
+/* AURORA_CD_SRAM_NOTICES_20260824 -- path-only PC Engine CD CUE. */
 bool PceBridge_LoadDisc(const char *pPath, const char *pSystemPath);
 /* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */
 bool PceBridge_IsDiscLoaded(void);
+/* AURORA_CD_STATE_V1_SAFE_20260903: stable identity path for frontend CD states. */
+const char *PceBridge_GetDiscPath(void);
 /* AURORA_PCE_CD_MENU_IO_QUIESCE_V1_20260901 */
 bool PceBridge_QuiesceDiscIO(void);
 void PceBridge_ResumeDiscIO(void);

@@ -14,7 +14,7 @@
  *     $1F5E  leitura -> sempre 0 (status "pronto")
  *
  * Notas de bit-exatidao:
- *   - SAR16/SAR32/SAR64 do snes9x sao deslocamentos ARITMETICOS que NAO
+ *   - SAR16/SAR32/SAR64 do reference emulator sao deslocamentos ARITMETICOS que NAO
  *     truncam o operando; portanto usamos ">>" direto com o tipo certo.
  *   - C4CosTable[i] == C4SinTable[(i+128) & 0x1FF] (cos = sin deslocado de
  *     90 graus); derivamos o cosseno da tabela de seno.

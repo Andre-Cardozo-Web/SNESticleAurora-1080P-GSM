@@ -26,7 +26,7 @@ bool PicoDriveBridge_SmdHasCartridge(void);
 bool PicoDriveBridge_SmdHasDisk(void);
 const char *PicoDriveBridge_SmdDiskPath(void);
 const char *PicoDriveBridge_SmdLastError(void);
-/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: CUE stays on storage; only its tracks stream through the core. */
+/* AURORA_CD_SRAM_NOTICES_20260824: CUE stays on storage; only its tracks stream through the core. */
 int  PicoDriveBridge_ProbeSegaCd(const char *pPath);
 bool PicoDriveBridge_LoadDisc(const char *pPath, const char *pSystemPath);
 void PicoDriveBridge_UnloadGame(void);
@@ -65,6 +65,8 @@ void PicoDriveBridge_Set32xAudioSacrifice(bool sacrifice);
 bool PicoDriveBridge_Is32X(void);
 /* AURORA_V4_11_CD_REALTIME_PACING_PCE_TOC_OFFSETS_20260830 */
 bool PicoDriveBridge_IsSegaCD(void);
+/* AURORA_CD_STATE_V1_SAFE_20260903: stable identity path for frontend CD states. */
+const char *PicoDriveBridge_GetDiscPath(void);
 /* AURORA_V4_17_SAFE_CD_GAME_SWITCH_QUIESCE_20260830
  * Bounded preflight before destroying a live Sega CD core. */
 bool PicoDriveBridge_PrepareGameSwitch(void);

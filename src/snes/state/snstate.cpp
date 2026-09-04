@@ -70,7 +70,7 @@ Bool SnesSystem::CanSerializeCX4State()
 #define SNSPECIAL_STATE_SUPPORTED_FLAGS \
     (SNROM_FLAG_DSP1 | SNROM_FLAG_DSP2 | SNROM_FLAG_DSP4 | \
      SNROM_FLAG_OBC1 | SNROM_FLAG_SUPERFX | SNROM_FLAG_SDD1 | \
-     SNROM_FLAG_SRTC)
+     SNROM_FLAG_SRTC | SNROM_FLAG_SA1) /* AURORA_SA1_SPECIAL_STATE_V8_3_20260903 */
 
 struct SNSpecialStateEnvelopeT
 {
@@ -115,6 +115,10 @@ static const SNSpecialStateEnvelopeT *_SNSpecialStateEnvelope(
 typedef char SNSpecialStateEnvelopeMustFit[
     (sizeof(SNSpecialStateEnvelopeT) + sizeof(SNCX4StateEnvelopeT)
         < SNES_SRAMSIZE) ? 1 : -1];
+
+/* AURORA_SA1_SPECIAL_STATE_V8_3_20260903 */
+typedef char SNSA1StateMustFitSpecialPayload[
+    (sizeof(SNSA1StateT) <= SNSPECIAL_STATE_PAYLOAD_BYTES) ? 1 : -1];
 
 Bool SnesSystem::CanSerializeSpecialChipState()
 {
@@ -179,6 +183,10 @@ Bool SnesSystem::CanSerializeSpecialChipState()
             nStateBytes = (Uint32)
                 (((const Uint8 *)&m_SRTC.m_Index + sizeof(m_SRTC.m_Index))
                  - (const Uint8 *)&m_SRTC.m_Reg[0]);
+            break;
+
+        case SNROM_FLAG_SA1:
+            nStateBytes = (Uint32)sizeof(SNSA1StateT);
             break;
 
         default:
@@ -433,6 +441,14 @@ void SnesSystem::SaveState(SnesStateT *pState)
                 break;
             }
 
+            case SNROM_FLAG_SA1:
+            {
+                SNSA1StateT *pSA1 = (SNSA1StateT *)pSpecial->Data;
+                if (m_SA1.SaveState(pSA1))
+                    nStateBytes = (Uint32)sizeof(*pSA1);
+                break;
+            }
+
             default:
                 break;
         }
@@ -523,6 +539,9 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
                 nExpectedBytes = (Uint32)
                     (((const Uint8 *)&m_SRTC.m_Index + sizeof(m_SRTC.m_Index))
                      - (const Uint8 *)&m_SRTC.m_Reg[0]);
+                break;
+            case SNROM_FLAG_SA1:
+                nExpectedBytes = (Uint32)sizeof(SNSA1StateT);
                 break;
             default:
                 return FALSE;
@@ -649,6 +668,12 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
                        pSpecial->DataBytes);
                 break;
 
+            case SNROM_FLAG_SA1:
+                if (!m_SA1.RestoreState(
+                        (const SNSA1StateT *)pSpecial->Data))
+                    return FALSE;
+                break;
+
             default:
                 return FALSE;
         }
@@ -678,7 +703,13 @@ Bool SnesSystem::RestoreState(SnesStateT *pState)
         m_SDD1.ClearMapDirty();
     }
 
-	return TRUE;
+    /* AURORA_SA1_SPECIAL_STATE_V8_3_20260903
+     * SetFastRom/SetSlowRom runs after the special-state payload. Reassert
+     * the restored SA-1 cartridge windows last, using live host pointers. */
+    if (m_pRom && (m_pRom->m_Flags & SNROM_FLAG_SA1))
+        m_SA1.MapMainCPU(&m_Cpu);
+
+    return TRUE;
 }
 
 

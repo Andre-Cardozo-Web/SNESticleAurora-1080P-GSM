@@ -29,7 +29,7 @@ extern "C" {
 #include "snsdd1.h"
 #include "snsrtc.h"
 #include "snswc.h" /* AURORA_SWC_FLOPPY_V1_20260831 */
-#include "snsa1.h" /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
+#include "snsa1.h" /* AURORA_SA1_V1_REFERENCE_LOGIC_20260902 */
 
 #define SNES_RAMSIZE  0x20000
 #define SNES_SRAMSIZE (256 * 1024)
@@ -169,7 +169,7 @@ private:
 	Bool		m_bSRTC;
 	Bool		m_bSuperFX;   // cartucho usa SuperFX/GSU -> rotear $3000-34FF
 
-	SNSA1       m_SA1;      /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
+	SNSA1       m_SA1;      /* AURORA_SA1_V1_REFERENCE_LOGIC_20260902 */
 	Bool        m_bSA1IRQ;
 
 	/* AURORA_SWC_FLOPPY_V1_20260831 */

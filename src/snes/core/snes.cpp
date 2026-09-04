@@ -1185,7 +1185,7 @@ SnesSystem::SnesSystem()
 	m_DMAC.SetSDD1(&m_SDD1);
 
 	m_bSDD1 = FALSE;
-	m_bSA1IRQ = FALSE; /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
+	m_bSA1IRQ = FALSE; /* AURORA_SA1_V1_REFERENCE_LOGIC_20260902 */
 	m_bSuperWildCard = FALSE; /* AURORA_SWC_FLOPPY_V1_20260831 */
 
 	// setup ppu
@@ -1394,7 +1394,7 @@ void SnesSystem::SetSnesRom(SnesRom *pRom)
 		m_SWC.Shutdown();
 		m_bSuperWildCard = FALSE;
 	}
-	m_SA1.Detach(); /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
+	m_SA1.Detach(); /* AURORA_SA1_V1_REFERENCE_LOGIC_20260902 */
 	m_bSA1IRQ = FALSE;
 	if (m_pRom)
 	{
@@ -1645,7 +1645,7 @@ void SnesSystem::RescheduleLineIRQ(Bool bAllowImmediate)
 }
 #endif
 
-/* AURORA_SA1_V1_SNES9X_LOGIC_20260902
+/* AURORA_SA1_V1_REFERENCE_LOGIC_20260902
  * Preserve all existing IRQ sources when one device clears its own latch. */
 void SnesSystem::UpdateMainIRQLine(void)
 {
@@ -1806,11 +1806,14 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
         assert(m_DMAC.GetMDMAEnable() == 0);
 
         /* AURORA_SA1_INTERLEAVED_CHUNK_SCHEDULER_V7_2_20260903
-         * WAI stops instruction issue, not physical time or the SA-1. */
+         * AURORA_SA1_SCHEDULER_V8_3_20260903
+         * WAI stops instruction issue, not physical time or the SA-1.
+         * V8.3 uses the conservative 128-master-clock public SA-1 quantum. */
         if (m_SA1.IsActive() && (m_Cpu.uSignal & SNCPU_SIGNAL_WAI))
         {
             Int32 nWait = m_Cpu.Cycles;
-            if (nWait > 64) nWait = 64;
+            if (nWait > SNSA1::MAIN_INTERLEAVE_QUANTUM)
+                nWait = SNSA1::MAIN_INTERLEAVE_QUANTUM;
             if (nWait > 0)
             {
                 SNCPUConsumeCycles(&m_Cpu, nWait);
@@ -1828,7 +1831,7 @@ void SnesSystem::ExecuteCPU(Int32 nCycles)
             Int32 before = m_Cpu.Cycles;
             Int32 nSpent;
 
-            (void)SNCPUExecuteBounded(&m_Cpu, 64);
+            (void)SNCPUExecuteBounded(&m_Cpu, SNSA1::MAIN_INTERLEAVE_QUANTUM);
 
             if (m_Cpu.Cycles >= before)
             {
@@ -1901,7 +1904,7 @@ void SnesSystem::ExecuteWithIRQ(Int32 nCycles, Int32 &nIRQCycles)
 			if (!m_bLineIRQFired && m_nLineIRQCycle >= 0 &&
 				m_nLineIRQCycle <= nNow)
 			{
-				/* Current Snes9x only permits an instant IRQ when IRQ mode is
+				/* Current reference emulator only permits an instant IRQ when IRQ mode is
 				 * toggled. A plain HTIME/VTIME rewrite to a position already
 				 * behind the beam is stale for this scanline. */
 				m_bLineIRQFired = TRUE;

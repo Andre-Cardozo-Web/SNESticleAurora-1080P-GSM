@@ -72,10 +72,9 @@ license files and source notices remain controlling for their code:
   QuickNES             LICENSES/QuickNES-GPL-2.0.txt
   PicoDrive            LICENSES/PicoDrive-COPYING.txt
   Beetle PCE Fast      LICENSES/Beetle-PCE-Fast-GPL-2.0.txt
-  Snes9x 2010          LICENSES/Snes9x2010-LICENSE.txt
 
 Those files do not replace the authoritative notices inside each pinned
-submodule. PicoDrive and Snes9x terms are not identical to this project's
+submodule. PicoDrive terms are not identical to this project's
 GPLv2 terms; review all applicable conditions before distributing a combined
 binary. Sega CD and PC Engine CD firmware is not included in this project.
 ----------------------------------------------------------------------------

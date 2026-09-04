@@ -4,11 +4,11 @@
 #include "snes.h"
 #include "sncpudefs.h"
 
-/* AURORA_SA1_V1_SNES9X_LOGIC_20260902
- * Behavioural reference: Snes9x sa1.cpp / sa1cpu.cpp.
+/* AURORA_SA1_V1_REFERENCE_LOGIC_20260902
+ * Behavioural reference: reference emulator sa1.cpp / sa1cpu.cpp.
  * CPU execution itself is NOT copied: the Aurora SNCpuT core is instantiated
  * a second time.  One S-CPU master-clock slice gives SA-1 a 3x cycle budget,
- * matching Snes9x's SA1.Cycles < CPU.Cycles * 3 scheduler relationship.
+ * matching reference emulator's SA1.Cycles < CPU.Cycles * 3 scheduler relationship.
  */
 
 static Uint16 _SA1LE16(const Uint8 *p)
@@ -31,7 +31,8 @@ SNSA1::~SNSA1()
 Bool SNSA1::Attach(SnesSystem *pOwner,
                    const Uint8 *pRom, Uint32 nRomBytes,
                    Uint8 *pBWRAM, Uint32 nBWRAMBytes,
-                   Bool bMapMainRom, Bool bDonorBWRAM)
+                   Bool bMapMainRom, Bool bDonorBWRAM,
+                   Bool bTrackBWRAMDirty)
 {
     if (!pOwner || !pRom || !nRomBytes)
         return FALSE;
@@ -43,8 +44,15 @@ Bool SNSA1::Attach(SnesSystem *pOwner,
     m_nBWRAMBytes = nBWRAMBytes;
     if (m_nBWRAMBytes > 0x40000u)
         m_nBWRAMBytes = 0x40000u;
+    /* AURORA_SA1_PERF_V8_3_2_20260903
+     * SA-1 SRAM/BW-RAM sizes are normally powers of two. Avoid MIPS div/mod
+     * in byte-granular hot paths while retaining exact fallback semantics. */
+    m_uBWRAMMask = (m_nBWRAMBytes > 1u &&
+                     !(m_nBWRAMBytes & (m_nBWRAMBytes - 1u)))
+        ? (m_nBWRAMBytes - 1u) : 0u;
     m_bMapMainRom = bMapMainRom;
     m_bDonorBWRAM = bDonorBWRAM;
+    m_bTrackBWRAMDirty = bTrackBWRAMDirty;
     m_bActive = TRUE;
 
     Reset();
@@ -59,11 +67,13 @@ void SNSA1::Detach()
     m_bActive = FALSE;
     m_bMapMainRom = FALSE;
     m_bDonorBWRAM = FALSE;
+    m_bTrackBWRAMDirty = FALSE;
     m_pOwner = NULL;
     m_pRom = NULL;
     m_nRomBytes = 0;
     m_pBWRAM = NULL;
     m_nBWRAMBytes = 0;
+    m_uBWRAMMask = 0;
 }
 
 void SNSA1::Reset()
@@ -75,7 +85,7 @@ void SNSA1::Reset()
     memset(m_IRAM, 0, sizeof(m_IRAM));
     memset(m_CharData, 0, sizeof(m_CharData));
 
-    /* Same power-on values used by Snes9x SA-1 init. */
+    /* Same power-on values used by reference emulator SA-1 init. */
     m_Reg[0x00] = 0x20; /* CCNT: SA-1 held in reset */
     m_Reg[0x20] = 0x00;
     m_Reg[0x21] = 0x01;
@@ -106,6 +116,99 @@ void SNSA1::Reset()
     m_Cpu.uMDR = 0;
 
     UpdateMainIRQ();
+}
+
+/* AURORA_SA1_PERF_STATE_V8_3_20260903 */
+static const Uint8 _SNSA1StateTag[8] =
+    { 'A', 'U', 'S', 'A', '1', 'S', '1', 0 };
+
+Bool SNSA1::SaveState(SNSA1StateT *pState) const
+{
+    Int32 i;
+
+    if (!m_bActive || !pState)
+        return FALSE;
+
+    memset(pState, 0, sizeof(*pState));
+    memcpy(pState->Tag, _SNSA1StateTag, sizeof(pState->Tag));
+    pState->Version = 1;
+
+    pState->CpuRegs = m_Cpu.Regs;
+    pState->CpuCycles = m_Cpu.Cycles;
+    for (i = 0; i < SNCPU_COUNTER_NUM; ++i)
+        pState->CpuCounter[i] = m_Cpu.Counter[i];
+    pState->CpuSignal = m_Cpu.uSignal;
+    pState->CpuNmiDmaDelay = m_Cpu.uNmiDmaDelay;
+    pState->CpuMDR = m_Cpu.uMDR;
+
+    memcpy(pState->Reg, m_Reg, sizeof(m_Reg));
+    memcpy(pState->IRAM, m_IRAM, sizeof(m_IRAM));
+    memcpy(pState->CharData, m_CharData, sizeof(m_CharData));
+
+    pState->Sum = m_uSum;
+    pState->HCounter = m_uHCounter;
+    pState->VCounter = m_uVCounter;
+    pState->PrevHCounter = m_uPrevHCounter;
+    pState->LatchedHCounter = m_uLatchedHCounter;
+    pState->LatchedVCounter = m_uLatchedVCounter;
+    pState->Op1 = m_uOp1;
+    pState->Op2 = m_uOp2;
+    pState->ArithmeticOp = m_uArithmeticOp;
+    pState->ArithmeticOverflow = m_bArithmeticOverflow ? 1 : 0;
+    pState->VariableBitPos = m_uVariableBitPos;
+    pState->CharIndex = m_uCharIndex;
+    pState->CharDMA = m_bCharDMA ? 1 : 0;
+    pState->BitmapFormat = m_uBitmapFormat;
+    pState->TimerLastState = m_bTimerLastState ? 1 : 0;
+
+    return TRUE;
+}
+
+Bool SNSA1::RestoreState(const SNSA1StateT *pState)
+{
+    Int32 i;
+
+    if (!m_bActive || !pState ||
+        memcmp(pState->Tag, _SNSA1StateTag, sizeof(pState->Tag)) != 0 ||
+        pState->Version != 1)
+        return FALSE;
+
+    memcpy(m_Reg, pState->Reg, sizeof(m_Reg));
+    memcpy(m_IRAM, pState->IRAM, sizeof(m_IRAM));
+    memcpy(m_CharData, pState->CharData, sizeof(m_CharData));
+
+    m_uSum = pState->Sum;
+    m_uHCounter = pState->HCounter;
+    m_uVCounter = pState->VCounter;
+    m_uPrevHCounter = pState->PrevHCounter;
+    m_uLatchedHCounter = pState->LatchedHCounter;
+    m_uLatchedVCounter = pState->LatchedVCounter;
+    m_uOp1 = pState->Op1;
+    m_uOp2 = pState->Op2;
+    m_uArithmeticOp = pState->ArithmeticOp;
+    m_bArithmeticOverflow = pState->ArithmeticOverflow ? TRUE : FALSE;
+    m_uVariableBitPos = pState->VariableBitPos;
+    m_uCharIndex = pState->CharIndex;
+    m_bCharDMA = pState->CharDMA ? TRUE : FALSE;
+    m_uBitmapFormat = pState->BitmapFormat;
+    m_bTimerLastState = pState->TimerLastState ? TRUE : FALSE;
+
+    m_Cpu.Regs = pState->CpuRegs;
+    m_Cpu.Cycles = pState->CpuCycles;
+    for (i = 0; i < SNCPU_COUNTER_NUM; ++i)
+        m_Cpu.Counter[i] = pState->CpuCounter[i];
+    m_Cpu.nAbortCycles = 0;
+    m_Cpu.bRunning = FALSE;
+    m_Cpu.uSignal = pState->CpuSignal;
+    m_Cpu.uNmiDmaDelay = pState->CpuNmiDmaDelay;
+    m_Cpu.uMDR = pState->CpuMDR;
+    m_Cpu.pUserData = this;
+
+    /* Bank[] contains live host pointers and must be reconstructed from the
+     * restored MMC/BW-RAM registers, never copied out of a state file. */
+    MapSA1CPU();
+    UpdateMainIRQ();
+    return TRUE;
 }
 
 Uint32 SNSA1::MirrorRomOffset(Uint32 uPos) const
@@ -194,27 +297,103 @@ void SNSA1::MapRomPage(SNCpuT *pCpu, Uint32 uBus, Bool bMainCpu)
     }
 
     /* SA-1 ROM fetches use the fast 10.74 MHz execution domain in this V1;
-       BW-RAM separately receives the 2-cycle penalty used by Snes9x. */
+       BW-RAM separately receives the 2-cycle penalty used by reference emulator. */
     SNCPUSetMemSpeed(pCpu, uBus, 0x2000, SNCPU_CYCLE_FAST);
 }
 
-void SNSA1::MapRomWindows(SNCpuT *pCpu, Bool bMainCpu)
+/* AURORA_SA1_PERF_V8_3_2_20260903 */
+void SNSA1::MapRomGroup(SNCpuT *pCpu, Uint32 uGroup, Bool bMainCpu)
 {
     Uint32 uBank, uAddr;
-    for (uBank = 0; uBank <= 0x3F; ++uBank)
+    Uint32 uLoStart;
+    Uint32 uHiStart;
+
+    if (!pCpu || uGroup > 3u)
+        return;
+
+    uLoStart = (uGroup < 2u)
+        ? (uGroup << 5)
+        : (0x80u + ((uGroup - 2u) << 5));
+    for (uBank = uLoStart; uBank < uLoStart + 0x20u; ++uBank)
         for (uAddr = 0x8000; uAddr < 0x10000; uAddr += 0x2000)
             MapRomPage(pCpu, (uBank << 16) | uAddr, bMainCpu);
-    for (uBank = 0x80; uBank <= 0xBF; ++uBank)
-        for (uAddr = 0x8000; uAddr < 0x10000; uAddr += 0x2000)
-            MapRomPage(pCpu, (uBank << 16) | uAddr, bMainCpu);
-    for (uBank = 0xC0; uBank <= 0xFF; ++uBank)
+
+    uHiStart = 0xC0u + (uGroup << 4);
+    for (uBank = uHiStart; uBank < uHiStart + 0x10u; ++uBank)
         for (uAddr = 0; uAddr < 0x10000; uAddr += 0x2000)
             MapRomPage(pCpu, (uBank << 16) | uAddr, bMainCpu);
 }
 
-void SNSA1::MapSA1CPU()
+void SNSA1::MapRomWindows(SNCpuT *pCpu, Bool bMainCpu)
+{
+    Uint32 uGroup;
+    for (uGroup = 0; uGroup < 4u; ++uGroup)
+        MapRomGroup(pCpu, uGroup, bMainCpu);
+}
+
+void SNSA1::MapSA1BWRAMWindow()
 {
     Uint32 uBank;
+    Uint32 uOff = 0;
+    Bool bDirect = FALSE;
+
+    if (m_pBWRAM && m_nBWRAMBytes >= 0x2000u && !(m_Reg[0x25] & 0x80))
+    {
+        uOff = WrapBWRAMOffset((Uint32)(m_Reg[0x25] & 0x1F) * 0x2000u);
+        bDirect = (uOff + 0x2000u <= m_nBWRAMBytes) ? TRUE : FALSE;
+    }
+
+    for (uBank = 0; uBank <= 0x3F; ++uBank)
+    {
+        Uint32 a = (uBank << 16) | 0x6000;
+        Uint32 b = ((uBank | 0x80) << 16) | 0x6000;
+        SNCPUSetTrap(&m_Cpu, a, 0x2000, ReadCPU, WriteCPU);
+        SNCPUSetTrap(&m_Cpu, b, 0x2000, ReadCPU, WriteCPU);
+        SNCPUSetMemSpeed(&m_Cpu, a, 0x2000, 12);
+        SNCPUSetMemSpeed(&m_Cpu, b, 0x2000, 12);
+        if (bDirect)
+        {
+            SNCPUSetBank(&m_Cpu, a, 0x2000, m_pBWRAM + uOff, FALSE);
+            SNCPUSetBank(&m_Cpu, b, 0x2000, m_pBWRAM + uOff, FALSE);
+        }
+    }
+}
+
+void SNSA1::MapMainBWRAMWindow(SNCpuT *pMainCpu)
+{
+    Uint32 uBank;
+    Uint32 uOff = 0;
+    Bool bDirect = FALSE;
+
+    if (!pMainCpu)
+        return;
+    if (!m_bCharDMA && m_pBWRAM && m_nBWRAMBytes >= 0x2000u)
+    {
+        uOff = WrapBWRAMOffset((Uint32)(m_Reg[0x24] & 0x1F) * 0x2000u);
+        bDirect = (uOff + 0x2000u <= m_nBWRAMBytes) ? TRUE : FALSE;
+    }
+
+    for (uBank = 0; uBank <= 0x3F; ++uBank)
+    {
+        Uint32 a = (uBank << 16) | 0x6000;
+        Uint32 b = ((uBank | 0x80) << 16) | 0x6000;
+        SNCPUSetTrap(pMainCpu, a, 0x2000,
+                     SnesSystem::ReadSA1BWRAM, SnesSystem::WriteSA1BWRAM);
+        SNCPUSetTrap(pMainCpu, b, 0x2000,
+                     SnesSystem::ReadSA1BWRAM, SnesSystem::WriteSA1BWRAM);
+        SNCPUSetMemSpeed(pMainCpu, a, 0x2000, SNCPU_CYCLE_SLOW);
+        SNCPUSetMemSpeed(pMainCpu, b, 0x2000, SNCPU_CYCLE_SLOW);
+        if (bDirect)
+        {
+            SNCPUSetBank(pMainCpu, a, 0x2000, m_pBWRAM + uOff, FALSE);
+            SNCPUSetBank(pMainCpu, b, 0x2000, m_pBWRAM + uOff, FALSE);
+        }
+    }
+}
+
+void SNSA1::MapSA1CPU()
+{
+    Uint32 uBank, uAddr;
     if (!m_bActive)
         return;
 
@@ -223,16 +402,38 @@ void SNSA1::MapSA1CPU()
 
     MapRomWindows(&m_Cpu, FALSE);
 
-    /* BW-RAM is a two-SA-1-cycle region in Snes9x. */
+    /* BW-RAM is a two-SA-1-cycle region in reference emulator. */
     for (uBank = 0x40; uBank <= 0x5F; ++uBank)
         SNCPUSetMemSpeed(&m_Cpu, uBank << 16, 0x10000, 12);
     for (uBank = 0x60; uBank <= 0x7F; ++uBank)
         SNCPUSetMemSpeed(&m_Cpu, uBank << 16, 0x10000, 12);
-    for (uBank = 0; uBank <= 0x3F; ++uBank)
+    MapSA1BWRAMWindow();
+
+    /* AURORA_SA1_PERF_STATE_V8_3_20260903
+     *
+     * $40-$5F is always linear BW-RAM. Give the native 65816 executor a
+     * direct READ pointer for every contiguous 8 KiB page. bRAM=FALSE is
+     * intentional: writes still take the pre-installed WriteCPU trap, so
+     * BWPA protection and dirty tracking remain exact.
+     *
+     * Bitmap $60-$7F and programmable $6000-$7FFF stay trapped.
+     */
+    if (m_pBWRAM && m_nBWRAMBytes >= 0x2000u)
     {
-        SNCPUSetMemSpeed(&m_Cpu, (uBank << 16) | 0x6000, 0x2000, 12);
-        SNCPUSetMemSpeed(&m_Cpu, ((uBank | 0x80) << 16) | 0x6000, 0x2000, 12);
+        for (uBank = 0x40; uBank <= 0x5F; ++uBank)
+        {
+            for (uAddr = 0; uAddr < 0x10000; uAddr += 0x2000)
+            {
+                Uint32 bus = (uBank << 16) | uAddr;
+                Uint32 off = ((((Uint32)uBank & 3u) << 16) | uAddr)
+                           % m_nBWRAMBytes;
+                if (off + 0x2000u <= m_nBWRAMBytes)
+                    SNCPUSetBank(&m_Cpu, bus, 0x2000,
+                                 m_pBWRAM + off, FALSE);
+            }
+        }
     }
+
     SNCPUMirror24BitBus(&m_Cpu);
 }
 
@@ -245,18 +446,9 @@ void SNSA1::MapMainCPU(SNCpuT *pMainCpu)
     if (m_bMapMainRom)
         MapRomWindows(pMainCpu, TRUE);
 
-    /* S-CPU BW-RAM window $6000-$7FFF. CC1 needs trapped reads. */
-    for (uBank = 0; uBank <= 0x3F; ++uBank)
-    {
-        Uint32 a = (uBank << 16) | 0x6000;
-        Uint32 b = ((uBank | 0x80) << 16) | 0x6000;
-        SNCPUSetTrap(pMainCpu, a, 0x2000,
-                     SnesSystem::ReadSA1BWRAM, SnesSystem::WriteSA1BWRAM);
-        SNCPUSetTrap(pMainCpu, b, 0x2000,
-                     SnesSystem::ReadSA1BWRAM, SnesSystem::WriteSA1BWRAM);
-        SNCPUSetMemSpeed(pMainCpu, a, 0x2000, SNCPU_CYCLE_SLOW);
-        SNCPUSetMemSpeed(pMainCpu, b, 0x2000, SNCPU_CYCLE_SLOW);
-    }
+    /* V8.3.2: direct reads when BMAP is linear and CC1 is idle;
+     * MapMainBWRAMWindow restores traps immediately for character DMA. */
+    MapMainBWRAMWindow(pMainCpu);
 
     /* Linear BW-RAM $40-$4F. Keep writes trapped for protection/dirty state. */
     for (uBank = 0x40; uBank <= 0x4F; ++uBank)
@@ -292,13 +484,13 @@ Uint32 SNSA1::MainBWRAMOffset(Uint32 uAddr, Bool *pOK) const
         Uint32 off = (Uint32)(m_Reg[0x24] & 0x1F) * 0x2000u +
                      (addr - 0x6000u);
         if (pOK) *pOK = TRUE;
-        return off % m_nBWRAMBytes;
+        return WrapBWRAMOffset(off);
     }
     if (bank >= 0x40 && bank <= 0x4F)
     {
         Uint32 off = ((Uint32)(bank & 3) << 16) | addr;
         if (pOK) *pOK = TRUE;
-        return off % m_nBWRAMBytes;
+        return WrapBWRAMOffset(off);
     }
     return 0;
 }
@@ -331,7 +523,7 @@ Uint32 SNSA1::SA1BWRAMOffset(Uint32 uAddr, Bool *pOK, Bool *pBitmap) const
     if (bank >= 0x40 && bank <= 0x5F)
     {
         if (pOK) *pOK = TRUE;
-        return ((((Uint32)bank & 3u) << 16) | addr) % m_nBWRAMBytes;
+        return WrapBWRAMOffset((((Uint32)bank & 3u) << 16) | addr);
     }
 
     if (bank >= 0x60 && bank <= 0x7F)
@@ -347,7 +539,7 @@ Uint8 SNSA1::ReadBWRAMLinear(Uint32 uOffset, Uint8 uOpenBus) const
 {
     if (!m_pBWRAM || !m_nBWRAMBytes)
         return uOpenBus;
-    return m_pBWRAM[uOffset % m_nBWRAMBytes];
+    return m_pBWRAM[WrapBWRAMOffset(uOffset)];
 }
 
 Bool SNSA1::BWRAMWriteProtected(Uint32 uOffset) const
@@ -361,7 +553,11 @@ Bool SNSA1::BWRAMWriteProtected(Uint32 uOffset) const
 
 void SNSA1::MarkBWRAMDirty()
 {
-    if (m_pOwner)
+    /* AURORA_SA1_PERF_V8_3_2_20260903
+     * Normal SA-1 .srm persistence is discovered by the existing menu
+     * checksum/flush path, so it does not need the copier external-cart
+     * dirty callback on every byte write. SWC attach paths opt in. */
+    if (m_bTrackBWRAMDirty && m_pOwner)
         m_pOwner->MarkSA1BWRAMDirty();
 }
 
@@ -369,7 +565,7 @@ void SNSA1::WriteBWRAMLinear(Uint32 uOffset, Uint8 uData)
 {
     if (!m_pBWRAM || !m_nBWRAMBytes)
         return;
-    uOffset %= m_nBWRAMBytes;
+    uOffset = WrapBWRAMOffset(uOffset);
     if (BWRAMWriteProtected(uOffset))
         return;
     m_pBWRAM[uOffset] = uData;
@@ -383,11 +579,11 @@ Uint8 SNSA1::ReadBitmap(Uint32 uPixelAddr, Uint8 uOpenBus) const
         return uOpenBus;
     if (m_uBitmapFormat == 2)
     {
-        byteOff = (uPixelAddr >> 2) % m_nBWRAMBytes;
+        byteOff = WrapBWRAMOffset(uPixelAddr >> 2);
         shift = (uPixelAddr & 3) << 1;
         return (m_pBWRAM[byteOff] >> shift) & 3;
     }
-    byteOff = (uPixelAddr >> 1) % m_nBWRAMBytes;
+    byteOff = WrapBWRAMOffset(uPixelAddr >> 1);
     shift = (uPixelAddr & 1) << 2;
     return (m_pBWRAM[byteOff] >> shift) & 15;
 }
@@ -400,7 +596,7 @@ void SNSA1::WriteBitmap(Uint32 uPixelAddr, Uint8 uData)
         return;
     if (m_uBitmapFormat == 2)
     {
-        byteOff = (uPixelAddr >> 2) % m_nBWRAMBytes;
+        byteOff = WrapBWRAMOffset(uPixelAddr >> 2);
         shift = (uPixelAddr & 3) << 1;
         mask = (Uint8)(3u << shift);
         m_pBWRAM[byteOff] = (Uint8)((m_pBWRAM[byteOff] & ~mask) |
@@ -408,13 +604,13 @@ void SNSA1::WriteBitmap(Uint32 uPixelAddr, Uint8 uData)
     }
     else
     {
-        byteOff = (uPixelAddr >> 1) % m_nBWRAMBytes;
+        byteOff = WrapBWRAMOffset(uPixelAddr >> 1);
         shift = (uPixelAddr & 1) << 2;
         mask = (Uint8)(15u << shift);
         m_pBWRAM[byteOff] = (Uint8)((m_pBWRAM[byteOff] & ~mask) |
                               ((uData & 15u) << shift));
     }
-    /* Snes9x/ares protection applies to linear BW-RAM, not bitmap writes. */
+    /* reference emulator/ares protection applies to linear BW-RAM, not bitmap writes. */
     MarkBWRAMDirty();
 }
 
@@ -460,7 +656,7 @@ Uint8 SNSA1::ReadCC1(Uint32 bwoffset)
     {
         bpp = 2u << (2 - dmacb);
         bpl = (8u << dmasize) >> dmacb;
-        tile = ((bwoffset - dsa) % m_nBWRAMBytes) >> (6 - dmacb);
+        tile = WrapBWRAMOffset(bwoffset - dsa) >> (6 - dmacb);
         ty = tile >> dmasize;
         tx = tile & ((1u << dmasize) - 1u);
         bwaddr = dsa + ty * 8u * bpl + tx * bpp;
@@ -845,30 +1041,75 @@ void SNSA1::DoDMA()
     Uint32 dst = (Uint32)m_Reg[0x35] | ((Uint32)m_Reg[0x36] << 8) |
                  ((Uint32)m_Reg[0x37] << 16);
     Uint32 len = (Uint32)m_Reg[0x38] | ((Uint32)m_Reg[0x39] << 8);
-    Uint32 n;
+    Uint32 n = 0;
+    Uint8 uSrcType = (Uint8)(m_Reg[0x30] & 3);
+    Bool bDstBWRAM = (m_Reg[0x30] & 4) ? TRUE : FALSE;
+    Bool bBulkDone = FALSE;
 
-    for (n = 0; n < len; ++n)
+    /* AURORA_SA1_PERF_V8_3_2_20260903
+     * Cross-space copies are between distinct arrays, so chunked memcpy
+     * preserves byte order and wrap. Same-space copies keep the original
+     * forward loop because overlap can deliberately feed newly-written data. */
+    if (len && m_pBWRAM && m_nBWRAMBytes)
     {
-        Uint8 v = 0;
-        switch (m_Reg[0x30] & 3)
+        if (uSrcType == 1 && !bDstBWRAM)
         {
-            case 0: v = ReadBus((src + n) & 0xFFFFFFu, 0); break;
-            case 1: v = ReadBWRAMLinear(src + n, 0); break;
-            default:
-            case 2: v = m_IRAM[(src + n) & 0x7FF]; break;
+            while (n < len)
+            {
+                Uint32 sOff = WrapBWRAMOffset(src + n);
+                Uint32 dOff = (dst + n) & 0x7FFu;
+                Uint32 chunk = len - n;
+                Uint32 a = m_nBWRAMBytes - sOff;
+                Uint32 b = 0x800u - dOff;
+                if (chunk > a) chunk = a;
+                if (chunk > b) chunk = b;
+                memcpy(m_IRAM + dOff, m_pBWRAM + sOff, chunk);
+                n += chunk;
+            }
+            bBulkDone = TRUE;
         }
-
-        if (m_Reg[0x30] & 4)
+        else if ((uSrcType == 2 || uSrcType == 3) && bDstBWRAM)
         {
-            if (m_pBWRAM && m_nBWRAMBytes)
-                m_pBWRAM[(dst + n) % m_nBWRAMBytes] = v;
+            while (n < len)
+            {
+                Uint32 sOff = (src + n) & 0x7FFu;
+                Uint32 dOff = WrapBWRAMOffset(dst + n);
+                Uint32 chunk = len - n;
+                Uint32 a = 0x800u - sOff;
+                Uint32 b = m_nBWRAMBytes - dOff;
+                if (chunk > a) chunk = a;
+                if (chunk > b) chunk = b;
+                memcpy(m_pBWRAM + dOff, m_IRAM + sOff, chunk);
+                n += chunk;
+            }
+            bBulkDone = TRUE;
         }
-        else
-            m_IRAM[(dst + n) & 0x7FF] = v;
     }
-    if ((m_Reg[0x30] & 4) && len)
-        MarkBWRAMDirty();
 
+    if (!bBulkDone)
+    {
+        for (n = 0; n < len; ++n)
+        {
+            Uint8 v = 0;
+            switch (uSrcType)
+            {
+                case 0: v = ReadBus((src + n) & 0xFFFFFFu, 0); break;
+                case 1: v = ReadBWRAMLinear(src + n, 0); break;
+                default:
+                case 2: v = m_IRAM[(src + n) & 0x7FF]; break;
+            }
+            if (bDstBWRAM)
+            {
+                if (m_pBWRAM && m_nBWRAMBytes)
+                    m_pBWRAM[WrapBWRAMOffset(dst + n)] = v;
+            }
+            else
+                m_IRAM[(dst + n) & 0x7FF] = v;
+        }
+    }
+
+    if (bDstBWRAM && len)
+        MarkBWRAMDirty();
     m_Reg[0x101] |= 0x20;
     if (m_Reg[0x0A] & 0x20)
         m_Reg[0x0B] &= (Uint8)~0x20;
@@ -963,16 +1204,38 @@ void SNSA1::WriteRegister(Uint16 uAddr, Uint8 uData)
                 return;
 
             m_Reg[i] = uData;
-            MapRomWindows(&m_Cpu, FALSE);
+            MapRomGroup(&m_Cpu, (Uint32)(i - 0x20), FALSE);
+
+            /* V8.3: if CXB/DB/EB/FB was written by the SA-1 itself, the
+             * second native 65816 has the same cached-fetch hazard as the
+             * S-CPU. SNCPUAbort is a no-op when that CPU is not executing. */
+            SNCPUAbort(&m_Cpu);
 
             if (m_bMapMainRom && m_pOwner)
             {
                 SNCpuT *pMainCpu = m_pOwner->GetCpu();
-                MapRomWindows(pMainCpu, TRUE);
+                MapRomGroup(pMainCpu, (Uint32)(i - 0x20), TRUE);
                 SNCPUAbort(pMainCpu);
             }
             return;
-        case 0x2224: case 0x2225:
+        case 0x2224: /* BMAP: S-CPU $6000-$7FFF */
+            if (old == uData)
+                return;
+            m_Reg[i] = uData;
+            if (m_pOwner)
+            {
+                SNCpuT *pMainCpu = m_pOwner->GetCpu();
+                MapMainBWRAMWindow(pMainCpu);
+                SNCPUAbort(pMainCpu);
+            }
+            return;
+        case 0x2225: /* BMAPS: SA-1 $6000-$7FFF / bitmap select */
+            if (old == uData)
+                return;
+            m_Reg[i] = uData;
+            MapSA1BWRAMWindow();
+            SNCPUAbort(&m_Cpu);
+            return;
         case 0x2226: case 0x2227: case 0x2228:
         case 0x2229: case 0x222A:
         case 0x2230:
@@ -980,7 +1243,17 @@ void SNSA1::WriteRegister(Uint16 uAddr, Uint8 uData)
             return;
         case 0x2231:
             m_Reg[i] = uData;
-            if (uData & 0x80) m_bCharDMA = FALSE;
+            if (uData & 0x80)
+            {
+                Bool bWasCharDMA = m_bCharDMA;
+                m_bCharDMA = FALSE;
+                if (bWasCharDMA && m_pOwner)
+                {
+                    SNCpuT *pMainCpu = m_pOwner->GetCpu();
+                    MapMainBWRAMWindow(pMainCpu);
+                    SNCPUAbort(pMainCpu);
+                }
+            }
             return;
         case 0x2232: case 0x2233: case 0x2234:
         case 0x2235:
@@ -992,8 +1265,15 @@ void SNSA1::WriteRegister(Uint16 uAddr, Uint8 uData)
                 DoDMA();
             else if ((m_Reg[0x30] & 0xB0) == 0xB0)
             {
+                Bool bWasCharDMA = m_bCharDMA;
                 m_Reg[0x100] |= 0x20;
                 m_bCharDMA = TRUE;
+                if (!bWasCharDMA && m_pOwner)
+                {
+                    SNCpuT *pMainCpu = m_pOwner->GetCpu();
+                    MapMainBWRAMWindow(pMainCpu);
+                    SNCPUAbort(pMainCpu);
+                }
                 UpdateMainIRQ();
             }
             return;
@@ -1164,11 +1444,10 @@ void SNSA1::ServiceInterrupts()
 
 void SNSA1::UpdateTimer(Uint32 nSA1Cycles)
 {
+    Uint8 uTimer = m_Reg[0x10];
     Bool thisIRQ;
-    Uint32 hMax = (m_Reg[0x10] & 0x80) ? 0x800u : 1364u;
-    Uint32 vMax = (m_Reg[0x10] & 0x80) ? 0x200u : 262u;
-    Uint32 hTarget = ((Uint32)m_Reg[0x12] | ((Uint32)m_Reg[0x13] << 8)) * 4u;
-    Uint32 vTarget = (Uint32)m_Reg[0x14] | ((Uint32)m_Reg[0x15] << 8);
+    Uint32 hMax = (uTimer & 0x80) ? 0x800u : 1364u;
+    Uint32 vMax = (uTimer & 0x80) ? 0x200u : 262u;
 
     m_uPrevHCounter = m_uHCounter;
     m_uHCounter += nSA1Cycles;
@@ -1178,16 +1457,31 @@ void SNSA1::UpdateTimer(Uint32 nSA1Cycles)
         if (++m_uVCounter >= vMax) m_uVCounter = 0;
     }
 
-    thisIRQ = (m_Reg[0x10] & 3) ? TRUE : FALSE;
-    if (m_Reg[0x10] & 1)
+    /* AURORA_SA1_PERF_V8_3_2_20260903
+     * Counter reads remain live, but most code leaves timer IRQ compare off. */
+    if (!(uTimer & 3))
     {
-        Bool crossed = (m_uPrevHCounter <= hTarget && m_uHCounter >= hTarget) ||
-                       (m_uHCounter < m_uPrevHCounter &&
-                        (hTarget >= m_uPrevHCounter || hTarget <= m_uHCounter));
-        if (!crossed) thisIRQ = FALSE;
+        m_bTimerLastState = FALSE;
+        return;
     }
-    if ((m_Reg[0x10] & 2) && m_uVCounter != vTarget)
-        thisIRQ = FALSE;
+
+    {
+        Uint32 hTarget = ((Uint32)m_Reg[0x12] |
+                          ((Uint32)m_Reg[0x13] << 8)) * 4u;
+        Uint32 vTarget = (Uint32)m_Reg[0x14] |
+                         ((Uint32)m_Reg[0x15] << 8);
+        thisIRQ = TRUE;
+        if (uTimer & 1)
+        {
+            Bool crossed =
+                (m_uPrevHCounter <= hTarget && m_uHCounter >= hTarget) ||
+                (m_uHCounter < m_uPrevHCounter &&
+                 (hTarget >= m_uPrevHCounter || hTarget <= m_uHCounter));
+            if (!crossed) thisIRQ = FALSE;
+        }
+        if ((uTimer & 2) && m_uVCounter != vTarget)
+            thisIRQ = FALSE;
+    }
 
     if (!m_bTimerLastState && thisIRQ)
     {
@@ -1217,8 +1511,11 @@ void SNSA1::Run(Int32 nMainMasterCycles)
     /* CPU overclock is an S-CPU user option; do not leak it into SA-1. */
     oldInternal = g_SnesCpuInternalCycle;
     oldSlow = g_SnesCpuSlowCycle;
-    g_SnesCpuInternalCycle = SNCPU_CYCLE_FAST;
-    g_SnesCpuSlowCycle = SNCPU_CYCLE_SLOW;
+    /* AURORA_SA1_PERF_V8_3_2_20260903 */
+    if (oldInternal != SNCPU_CYCLE_FAST)
+        g_SnesCpuInternalCycle = SNCPU_CYCLE_FAST;
+    if (oldSlow != SNCPU_CYCLE_SLOW)
+        g_SnesCpuSlowCycle = SNCPU_CYCLE_SLOW;
 
     SNCPUAddCycles(&m_Cpu, nSA1);
 
@@ -1236,12 +1533,14 @@ void SNSA1::Run(Int32 nMainMasterCycles)
             break;
         }
 
-        (void)SNCPUExecuteBounded(&m_Cpu, 64);
+        (void)SNCPUExecuteBounded(&m_Cpu, CPU_EXEC_QUANTUM);
 
         if (m_Cpu.Cycles >= before)
             SNCPUConsumeCycles(&m_Cpu, SNCPU_CYCLE_FAST);
     }
 
-    g_SnesCpuInternalCycle = oldInternal;
-    g_SnesCpuSlowCycle = oldSlow;
+    if (g_SnesCpuInternalCycle != oldInternal)
+        g_SnesCpuInternalCycle = oldInternal;
+    if (g_SnesCpuSlowCycle != oldSlow)
+        g_SnesCpuSlowCycle = oldSlow;
 }

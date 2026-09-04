@@ -12,7 +12,7 @@
 #include "rendersurface.h"
 #include "pixelformat.h"
 #include "mixbuffer.h"
-/* AURORA_SNES9X2010_V4_PS2_PERF_20260824 */
+/* AURORA_PS2_PERF_V4_20260824 */
 #include "audmixbuffer.h"
 extern AudMixBuffer *_AudMix;
 #include "snio.h"
@@ -93,7 +93,7 @@ static char s_ContentBaseName[1024] = "game";
 static char s_ContentExt[16] = "pce";
 static struct retro_game_info_ext s_ContentInfoExt;
 static const char s_DotPath[] = ".";
-/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 -- user firmware under SNESticle/SYSTEM. */
+/* AURORA_CD_SRAM_NOTICES_20260824 -- user firmware under SNESticle/SYSTEM. */
 static char s_SystemPath[1024] = ".";
 static char s_ContentDir[1024] = ".";
 enum { PCE_AUDIO_CHUNK = 1024 };
@@ -523,7 +523,7 @@ bool PceBridge_LoadGame(const void *data, size_t bytes, size_t capacity, const c
     printf("[PCE] loaded %s; SRAM=%d; audio=%u Hz\n",s_ContentName,(int)s_SramBytes,s_SampleRate); return true;
 }
 
-/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
+/* AURORA_CD_SRAM_NOTICES_20260824 */
 bool PceBridge_LoadDisc(const char *path, const char *systemPath)
 {
     struct retro_game_info info;
@@ -591,6 +591,12 @@ void PceBridge_UnloadGame(void)
 bool PceBridge_IsDiscLoaded(void)
 {
     return s_GameLoaded && s_DiscLoaded;
+}
+
+/* AURORA_CD_STATE_V1_SAFE_20260903 */
+const char *PceBridge_GetDiscPath(void)
+{
+    return PceBridge_IsDiscLoaded() ? s_ContentName : NULL;
 }
 
 /* AURORA_PCE_CD_MENU_IO_QUIESCE_V1_20260901
@@ -706,7 +712,7 @@ bool PceBridge_DrawDirectGs(Uint32 auroraOutBaseTBP, Float32 intensity)
     int dstX, dstY, dstW, dstH;
     Uint32 black, modColor, mod;
 
-    /* AURORA_SNES9X2010_V5_ALLCORES_PERF_20260824 -- PCE reuses Aurora's reserved base slab. */
+    /* AURORA_ALLCORES_PERF_V5_20260824 -- PCE reuses Aurora's reserved base slab. */
     if (!auroraOutBaseTBP)
         return false;
 

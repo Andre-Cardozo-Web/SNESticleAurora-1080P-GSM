@@ -85,7 +85,7 @@ public:
 private:
     // RAM interna (C4RAM), visivel em $6000-$7FFF (0x2000 bytes). Reserva-se
     // uma folga extra de scratch para que escalas/rotacoes de sprites grandes
-    // nao estourem o buffer no PS2 (o snes9x usa a folga do FillRAM, 0x8000).
+    // nao estourem o buffer no PS2 (o reference emulator usa a folga do FillRAM, 0x8000).
     enum { CX4_VISIBLE = 0x2000, CX4_RAMSIZE = 0x8000 };
     Uint8 m_Ram[CX4_RAMSIZE];
 

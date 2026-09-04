@@ -498,7 +498,7 @@ void SnesDMAC::SetHDMAEnable(Uint8 uData)
 	// ghouls and ghosts enabled hdma mid-frame
 	/* $420C keeps the programmed enable bits.  A channel that already read
 	   its zero terminator stays stopped until the next frame, even if $420C
-	   is written again (Mesen/Snes9x keep a separate ended-channel mask). */
+	   is written again (Mesen/reference emulator keep a separate ended-channel mask). */
 	m_HDMAEnable = uData;
 }
 
@@ -787,7 +787,7 @@ void SnesDMAC::ProcessMDMAChFast(Uint32 uChan)
 	}
 
 	// S-DD1: descomprime quando o DMA tem endereco-A fixo (dmapx bit 0x08) e
-	// $4801 != 0 (mesma condicao do snes9x). Antes eu so' checava o bit do
+	// $4801 != 0 (mesma condicao do reference emulator). Antes eu so' checava o bit do
 	// canal em $4801, o que podia disparar num DMA normal por engano.
 	if (m_pSDD1 && (pChan->dmapx & 0x08) && m_pSDD1->DmaActive())
 	{

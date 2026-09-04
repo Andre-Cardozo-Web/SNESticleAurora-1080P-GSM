@@ -7,7 +7,7 @@
  */
 #include <stdio.h>
 #include <string.h>
-#include <strings.h> /* strncasecmp; AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
+#include <strings.h> /* strncasecmp; AURORA_CD_SRAM_NOTICES_20260824 */
 #include <stdint.h>
 #include <stdarg.h>
 
@@ -35,7 +35,7 @@ extern "C" {
 #include <malloc.h> /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
 #include <pico/smd.h> /* AURORA_SUPER_MAGIC_DRIVE_V1_20260902 */
 
-#include <pico/cd/cd_parse.h> /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
+#include <pico/cd/cd_parse.h> /* AURORA_CD_SRAM_NOTICES_20260824 */
 /* AURORA_PD_BORROW_AURORA_ROM_V1 */
 void PicoCartSetExternalRomBuffer(const unsigned char *rom,
                                   unsigned int capacity);
@@ -144,7 +144,7 @@ static char s_ContentExt[16] = "md";
 static struct retro_game_info_ext s_ContentInfoExt;
 static const char s_DotPath[] = ".";
 
-/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: firmware directory is selected by Aurora's SRAM policy. */
+/* AURORA_CD_SRAM_NOTICES_20260824: firmware directory is selected by Aurora's SRAM policy. */
 static char s_SystemPath[1024] = ".";
 static char s_ContentDir[1024] = ".";
 enum { PD_AUDIO_CHUNK = 1024 };
@@ -1262,7 +1262,7 @@ bool PicoDriveBridge_SmdHasDisk(void){return PicoDriveAurora_SmdHasDisk()!=0;}
 const char*PicoDriveBridge_SmdDiskPath(void){return PicoDriveAurora_SmdDiskPath();}
 const char*PicoDriveBridge_SmdLastError(void){return PicoDriveAurora_SmdLastError();}
 
-/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824
+/* AURORA_CD_SRAM_NOTICES_20260824
  * Both Sega CD and PC Engine CD use .cue. Parse the CUE with PicoDrive's
  * own resolver and classify only the canonical Sega boot signature. */
 int PicoDriveBridge_ProbeSegaCd(const char *pPath)
@@ -1441,7 +1441,7 @@ void PicoDriveBridge_UnloadGame(void)
          * Our routed systems are cartridge based (MD/SMS/GG/32X), so this
          * native cleanup is the missing ownership boundary. It frees the
          * copied cartridge before Aurora can start SNES. */
-        /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: libretro's unload is empty; release CD tracks and MCD RAM. */
+        /* AURORA_CD_SRAM_NOTICES_20260824: libretro's unload is empty; release CD tracks and MCD RAM. */
         if ((PicoIn.AHW & PAHW_MCD) || Pico_mcd)
             PicoExitMCD();
         if (PicoDriveAurora_SmdIsActive())
@@ -1847,6 +1847,12 @@ bool PicoDriveBridge_Is32X(void)
 bool PicoDriveBridge_IsSegaCD(void)
 {
     return s_GameLoaded && ((PicoIn.AHW & PAHW_MCD) != 0);
+}
+
+/* AURORA_CD_STATE_V1_SAFE_20260903 */
+const char *PicoDriveBridge_GetDiscPath(void)
+{
+    return PicoDriveBridge_IsSegaCD() ? s_ContentName : NULL;
 }
 
 /* AURORA_V4_17_SAFE_CD_GAME_SWITCH_QUIESCE_20260830

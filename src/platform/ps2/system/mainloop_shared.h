@@ -26,9 +26,6 @@
 /* AURORA_PCE_EXPERIMENTAL_V1 */
 #include "pcesystem.h"
 #include "pcerom.h"
-/* AURORA_SNES9X2010_V1 */
-#include "snes9x2010system.h"
-#include "snes9x2010rom.h"
 #include "emusys.h"
 #include "emumovie.h"
 #include "rendersurface.h"
@@ -124,9 +121,6 @@ extern SegaSystem     *_pSega;
 extern SegaRom        *_pSegaRom;
 extern PceSystem      *_pPce;
 extern PceRom         *_pPceRom;
-/* AURORA_SNES9X2010_V1 */
-extern Snes9x2010System *_pSnes9x2010;
-extern Snes9x2010Rom    *_pSnes9x2010Rom;
 
 /* ---- ROM / framebuffer / audio buffers ---------------------------- */
 
@@ -200,20 +194,6 @@ void _MenuRuntimeUpdate(void);
    menu-runtime were split into separate translation units. */
 void _MenuDraw();
 
-/* AURORA_SNES9X2010_V1 -- runtime-only in V1; persistence is V2. */
-enum MainLoopSnesCoreE
-{
-    MAINLOOP_SNESCORE_SNESTICLE = 0,
-    MAINLOOP_SNESCORE_SNES9X2010,
-    MAINLOOP_SNESCORE_NUM
-};
-
-MainLoopSnesCoreE MainLoopSnesCoreGet();
-void MainLoopSnesCoreSet(MainLoopSnesCoreE eCore);
-void MainLoopSnesCoreCycleDir(Int32 dir);
-const Char *MainLoopSnesCoreGetName();
-
-
 enum
 {
 	MAINLOOP_ENTRYTYPE_GZ          ,
@@ -226,7 +206,7 @@ enum
 	MAINLOOP_ENTRYTYPE_SEGAROM      ,
 	MAINLOOP_ENTRYTYPE_PCEROM       ,
 
-	MAINLOOP_ENTRYTYPE_CDIMAGE      , /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: .cue, routed by content signature */
+	MAINLOOP_ENTRYTYPE_CDIMAGE      , /* AURORA_CD_SRAM_NOTICES_20260824: .cue, routed by content signature */
 	/* AURORA_FCEUMM_FDS_V4_TURBO_PAL_PERF_20260827; AURORA_FCEUMM_FDS_V5_CI_SMB_UPSTREAM_PERF_20260827: append-only so old entry numeric values stay stable. */
 	MAINLOOP_ENTRYTYPE_NESPALETTE  ,
 	MAINLOOP_ENTRYTYPE_SNESWCDISK   , /* AURORA_SWC_FLOPPY_V1_20260831: raw floppy .img */

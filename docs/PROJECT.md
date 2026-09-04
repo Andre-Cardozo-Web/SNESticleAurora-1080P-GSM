@@ -30,13 +30,13 @@ Renaming the project to SNESticle Aurora does not rename existing configuration,
 ## Runtime data and firmware
 
 <!-- AURORA_RUNTIME_SYSTEM_V6_20260824 -->
-The historical `SNESticle` data-directory name remains the compatibility root. Native SNESticle and Snes9x 2010 share raw SNES SRAM under `SNESticle/SNES`. Aurora creates `SNESticle/SYSTEM` on the active SRAM storage for user-supplied Sega CD and PC Engine CD firmware; no BIOS is included.
+The historical `SNESticle` data-directory name remains the compatibility root. Native SNESticle stores raw SNES SRAM under `SNESticle/SNES`. Aurora creates `SNESticle/SYSTEM` on the active SRAM storage for user-supplied Sega CD and PC Engine CD firmware; no BIOS is included.
 
 The PS2 frontend exposes `.cue` CD images only. CHD remains disabled until its additional libraries and runtime memory can be validated safely on real 32 MiB hardware.
 
 ## Core credits and licenses
 
-Core lineage and redistribution terms are documented in [`../CREDITS.md`](../CREDITS.md) and [`../THIRD_PARTY.md`](../THIRD_PARTY.md). Top-level notice mirrors are stored in `../LICENSES/`, including the separate Snes9x 2010 license.
+Core lineage and redistribution terms are documented in [`../CREDITS.md`](../CREDITS.md) and [`../THIRD_PARTY.md`](../THIRD_PARTY.md). Top-level notice mirrors are stored in `../LICENSES/`.
 
 ## Development relationship
 SNESticle Aurora and SNESticle Revive can exchange useful changes through normal Git workflows such as cherry-picking, patches or pull requests.

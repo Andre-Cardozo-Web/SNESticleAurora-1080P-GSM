@@ -69,7 +69,7 @@ void SegaSystem::SetRom(Emu::Rom *pRom)
            PicoDriveBridge_GetSRAMBytes());
 }
 
-/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824 */
+/* AURORA_CD_SRAM_NOTICES_20260824 */
 Bool SegaSystem::LoadDisc(const Char *pPath, const Char *pSystemPath)
 {
     m_pSegaRom = NULL;

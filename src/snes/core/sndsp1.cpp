@@ -14,7 +14,7 @@
  *
  * O codigo aqui foi escrito do zero seguindo a documentacao e usando
  * as mesmas formulas matematicas — nao foram copiados blocos de codigo
- * de bsnes, snes9x ou similares.
+ * de bsnes, reference emulator ou similares.
  *
  * Otimizado para PS2:  apenas inteiros 16/32 bits, multiplicacao
  * com shift, sem alocacao dinamica, sem ponto-flutuante.
@@ -814,7 +814,7 @@ void SNDSP1::Execute(Uint8 uCmd)
 
         // Clipa o angulo de zenite ao limite MaxAZS.  A condicao do
         // bloco de Vof abaixo usa "(Azs != AZS) || (Azs == MaxAZS)",
-        // exatamente como a implementacao de referencia (snes9x /
+        // exatamente como a implementacao de referencia (reference emulator /
         // Overload dsp1.cpp).  NAO usar uma flag de clamp aqui: o
         // comportamento correto compara o angulo original com o limite.
         Int16 MaxAZS = g_MaxAZS_Exp[-E];

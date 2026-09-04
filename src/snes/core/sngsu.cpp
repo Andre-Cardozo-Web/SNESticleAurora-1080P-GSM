@@ -664,7 +664,7 @@ Uint16 SNGSU::Rpix()
 // Pipeline de escrita de COLOR (usado por COLOR e GETC), com POR.2/POR.3.
 void SNGSU::ColorWrite(Uint8 src)
 {
-    /* AURORA_GSU_SNES9X_REVIEW_V1_20260902
+    /* AURORA_GSU_REFERENCE_REVIEW_V1_20260902
      * POR.2 transforms the incoming byte first; POR.3 then optionally
      * preserves the old high nibble. Shared by COLOR and GETC. */
     Uint8 c = src;

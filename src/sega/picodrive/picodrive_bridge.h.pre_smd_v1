@@ -14,7 +14,7 @@ void PicoDriveBridge_Shutdown(void);
 size_t PicoDriveBridge_RequiredRomCapacity(size_t nBytes);
 bool PicoDriveBridge_LoadGame(const void *pData, size_t nBytes,
                               size_t nCapacity, const char *pName);
-/* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: CUE stays on storage; only its tracks stream through the core. */
+/* AURORA_CD_SRAM_NOTICES_20260824: CUE stays on storage; only its tracks stream through the core. */
 int  PicoDriveBridge_ProbeSegaCd(const char *pPath);
 bool PicoDriveBridge_LoadDisc(const char *pPath, const char *pSystemPath);
 void PicoDriveBridge_UnloadGame(void);

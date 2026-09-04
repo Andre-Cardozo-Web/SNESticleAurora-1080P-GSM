@@ -23,6 +23,8 @@ extern "C" {
 #include "mainloop_shared.h"
 #include "mainloop_state.h"
 #include "nes/quicknes/quicknes_bridge.h" /* AURORA_QN_TURBOFILE_SAVE_V2_20260828 */
+#include "sega/picodrive/picodrive_bridge.h" /* AURORA_CD_STATE_V1_SAFE_20260903 */
+#include "pce/beetle/pce_bridge.h" /* AURORA_CD_STATE_V1_SAFE_20260903 */
 
 /* AURORA_PCE_EXPERIMENTAL_V1 */
 
@@ -1241,8 +1243,8 @@ static Bool _MainLoopLoadSRAMFrom(MainLoopSramDeviceE eDevice,
         }
     }
 
-    /* AURORA_SNES9X2010_V6_CD_SRAM_NOTICES_20260824: both SNES cores also import the original root-level save. */
-    if (_pSystem == _pSnes || _pSystem == _pSnes9x2010)
+    /* AURORA_CD_SRAM_NOTICES_20260824: both SNES cores also import the original root-level save. */
+    if (_pSystem == _pSnes)
     {
         _MainLoopSramBuildPath(Path, sizeof(Path), pRoot, TRUE);
         if (_MainLoopSramReadFile(Path, pSRAM, (Uint32)nSramBytes))
@@ -1526,9 +1528,10 @@ Bool _MainLoopCheckSRAM()
 #define MAINLOOP_STATE_SYSTEM_NES       1
 #define MAINLOOP_STATE_SYSTEM_SEGA      2
 #define MAINLOOP_STATE_SYSTEM_PCE       3
-#define MAINLOOP_STATE_SYSTEM_SNES9X2010 4 /* AURORA_SNES9X2010_V1 */
 #define MAINLOOP_STATE_SYSTEM_FDS       5 /* AURORA_FCEUMM_FDS_V0_6_STATE */
 #define MAINLOOP_STATE_SYSTEM_SWC       6 /* AURORA_SWC_FLOPPY_V4_20260831 */
+#define MAINLOOP_STATE_SYSTEM_SEGACD    7 /* AURORA_CD_STATE_V1_SAFE_20260903 */
+#define MAINLOOP_STATE_SYSTEM_PCECD     8 /* AURORA_CD_STATE_V1_SAFE_20260903 */
 #define MAINLOOP_STATE_RAW_BYTES \
     (sizeof(SnesStateT) > sizeof(NesStateT) \
         ? sizeof(SnesStateT) \
@@ -1647,7 +1650,6 @@ public:
     MainLoopSegaStateScratchGuard()
         : m_bActive((_pSystem == _pSega || _pSystem == _pPce ||
                      _pSystem == _pFds || /* AURORA_FCEUMM_FDS_V0_6_STATE */
-                     _pSystem == _pSnes9x2010 ||
                      _MainLoopStateIsSwc()) ? TRUE : FALSE)
     {
     }
@@ -1686,7 +1688,7 @@ static Uint32 _MainLoopStateCompressedLimit(Uint32 nRawBytes)
 {
     if (_pSystem != _pSega && _pSystem != _pPce &&
         _pSystem != _pFds && /* AURORA_FCEUMM_FDS_V0_6_STATE */
-        _pSystem != _pSnes9x2010 && !_MainLoopStateIsSwc())
+        !_MainLoopStateIsSwc())
         return (Uint32)sizeof(_MainLoop_StateCompressed);
 
     unsigned long long n =
@@ -1698,7 +1700,7 @@ static Uint8 *_MainLoopStateGetCompressedBuffer(Uint32 nNeed, Uint32 *pCapacity)
 {
     if (_pSystem != _pSega && _pSystem != _pPce &&
         _pSystem != _pFds && /* AURORA_FCEUMM_FDS_V0_6_STATE */
-        _pSystem != _pSnes9x2010 && !_MainLoopStateIsSwc())
+        !_MainLoopStateIsSwc())
     {
         if (pCapacity) *pCapacity = (Uint32)sizeof(_MainLoop_StateCompressed);
         return _MainLoop_StateCompressed;
@@ -1727,10 +1729,13 @@ static void _MainLoopStateLoadSettingsFromRomDevice();
 static Uint32 _MainLoopStateGetSystemId()
 {
     if (_pSystem == _pNes)  return MAINLOOP_STATE_SYSTEM_NES;
+    if (_pSystem == _pSega && PicoDriveBridge_IsSegaCD())
+        return MAINLOOP_STATE_SYSTEM_SEGACD;
+    if (_pSystem == _pPce && PceBridge_IsDiscLoaded())
+        return MAINLOOP_STATE_SYSTEM_PCECD;
     if (_pSystem == _pSega) return MAINLOOP_STATE_SYSTEM_SEGA;
     if (_pSystem == _pPce)  return MAINLOOP_STATE_SYSTEM_PCE;
     if (_pSystem == _pFds)  return MAINLOOP_STATE_SYSTEM_FDS; /* AURORA_FCEUMM_FDS_V0_6_STATE */
-    if (_pSystem == _pSnes9x2010) return MAINLOOP_STATE_SYSTEM_SNES9X2010;
     if (_MainLoopStateIsSwc()) return MAINLOOP_STATE_SYSTEM_SWC;
     return MAINLOOP_STATE_SYSTEM_SNES;
 }
@@ -1757,11 +1762,6 @@ static Uint32 _MainLoopStateGetPayloadBytes()
     if (_pSystem == _pPce)
     {
         Int32 nBytes = _pPce ? _pPce->GetStateSize() : 0;
-        return nBytes > 0 ? (Uint32)nBytes : 0;
-    }
-    if (_pSystem == _pSnes9x2010)
-    {
-        Int32 nBytes = _pSnes9x2010 ? _pSnes9x2010->GetStateSize() : 0;
         return nBytes > 0 ? (Uint32)nBytes : 0;
     }
     if (_pSystem == _pNes)
@@ -1794,8 +1794,7 @@ static Uint8 *_MainLoopStateGetPayloadData()
     if (_pSystem == _pNes)
         return (Uint8 *)&_NesState;
     if (_pSystem == _pSega || _pSystem == _pPce ||
-        _pSystem == _pFds || /* AURORA_FCEUMM_FDS_V0_6_STATE */
-        _pSystem == _pSnes9x2010)
+        _pSystem == _pFds) /* AURORA_FCEUMM_FDS_V0_6_STATE */
         return _MainLoopStateEnsureSegaStateData(
             _MainLoopStateGetPayloadBytes());
     return (Uint8 *)&_SnesState;
@@ -2411,12 +2410,15 @@ static void _MainLoopStateDeleteSettings()
 static const Char *_MainLoopStateGetUnsupportedChip(Uint32 uFlags)
 {
     /* AURORA_SPECIAL_CHIP_STATE_V1
-     * DSP-1/2/4, OBC1, SuperFX, S-DD1 and S-RTC have a tagged snapshot in
-     * the unused SRAM-state tail. Keep refusing them only if the current
+     * AURORA_SA1_FRONTEND_STATE_V8_3_20260903
+     * DSP-1/2/4, OBC1, SuperFX, S-DD1, S-RTC and SA-1 have a tagged snapshot
+     * in the unused SRAM-state tail. Keep refusing them only if the current
      * cartridge cannot fit that envelope safely. */
     if (uFlags & SNROM_FLAG_GAMEBOY) return "Super Game Boy";
     if (uFlags & SNROM_FLAG_DSP3)    return "DSP-3";
-    if (uFlags & SNROM_FLAG_SA1)     return "SA-1"; /* AURORA_SA1_V1_SNES9X_LOGIC_20260902 */
+    if ((uFlags & SNROM_FLAG_SA1) &&
+        (!_pSnes || !_pSnes->CanSerializeSpecialChipState()))
+        return "SA-1";
 
     if ((uFlags & SNROM_FLAG_SUPERFX) &&
         (!_pSnes || !_pSnes->CanSerializeSpecialChipState()))
@@ -2461,8 +2463,7 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
 
     if (_pSystem != _pSnes && _pSystem != _pNes &&
         _pSystem != _pSega && _pSystem != _pPce &&
-        _pSystem != _pFds && /* AURORA_FCEUMM_FDS_V0_6_STATE */
-        _pSystem != _pSnes9x2010)
+        _pSystem != _pFds) /* AURORA_FCEUMM_FDS_V0_6_STATE */
     {
         snprintf(pReason, nReasonBytes, "This system cannot save states.");
         return FALSE;
@@ -2490,8 +2491,19 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
     else if (_pSystem == _pSega)
     {
         /* AURORA_PICODRIVE_STAGE2_STATE_AVAILABLE */
-        if (!_pSegaRom || !_pSegaRom->IsLoaded() ||
-            !_pSega || !_pSega->IsRomReady())
+        if (PicoDriveBridge_IsSegaCD())
+        {
+            if (!_pSega || !_pSega->IsRomReady() ||
+                _pSega->GetStateSize() <= 0 ||
+                !PicoDriveBridge_GetDiscPath())
+            {
+                snprintf(pReason, nReasonBytes,
+                         "Sega CD state unavailable.");
+                return FALSE;
+            }
+        }
+        else if (!_pSegaRom || !_pSegaRom->IsLoaded() ||
+                 !_pSega || !_pSega->IsRomReady())
         {
             snprintf(pReason, nReasonBytes, "PicoDrive state unavailable.");
             return FALSE;
@@ -2499,18 +2511,22 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
     }
     else if (_pSystem == _pPce)
     {
-        if (!_pPceRom || !_pPceRom->IsLoaded() || !_pPce || !_pPce->IsRomReady())
+        if (PceBridge_IsDiscLoaded())
         {
-            snprintf(pReason, nReasonBytes, "Beetle PCE Fast state unavailable.");
-            return FALSE;
+            if (!_pPce || !_pPce->IsRomReady() ||
+                _pPce->GetStateSize() <= 0 ||
+                !PceBridge_GetDiscPath())
+            {
+                snprintf(pReason, nReasonBytes,
+                         "PC Engine CD state unavailable.");
+                return FALSE;
+            }
         }
-    }
-    else if (_pSystem == _pSnes9x2010)
-    {
-        if (!_pSnes9x2010Rom || !_pSnes9x2010Rom->IsLoaded() ||
-            !_pSnes9x2010 || !_pSnes9x2010->IsRomReady())
+        else if (!_pPceRom || !_pPceRom->IsLoaded() ||
+                 !_pPce || !_pPce->IsRomReady())
         {
-            snprintf(pReason, nReasonBytes, "Snes9x 2010 state unavailable.");
+            snprintf(pReason, nReasonBytes,
+                     "Beetle PCE Fast state unavailable.");
             return FALSE;
         }
     }
@@ -2578,13 +2594,19 @@ static Bool _MainLoopStateCheckAvailability(Char *pReason, Int32 nReasonBytes)
     if (_MainLoopStateIsSwc())
         snprintf(pReason, nReasonBytes, "Ready: Super Wild Card + DRAM/FDC state.");
     else if (_pSystem == _pSega)
-        snprintf(pReason, nReasonBytes, "Ready: PicoDrive cartridge state.");
+        snprintf(
+            pReason, nReasonBytes,
+            PicoDriveBridge_IsSegaCD()
+                ? "Ready: Sega CD full-core state."
+                : "Ready: PicoDrive cartridge state.");
     else if (_pSystem == _pPce)
-        snprintf(pReason, nReasonBytes, "Ready: PC Engine HuCard state.");
+        snprintf(
+            pReason, nReasonBytes,
+            PceBridge_IsDiscLoaded()
+                ? "Ready: PC Engine CD full-core state."
+                : "Ready: PC Engine HuCard state.");
     else if (_pSystem == _pFds)
         snprintf(pReason, nReasonBytes, "Ready: Famicom Disk System state."); /* AURORA_FCEUMM_FDS_V0_6_STATE */
-    else if (_pSystem == _pSnes9x2010)
-        snprintf(pReason, nReasonBytes, "Ready: Snes9x 2010 SNES state.");
     else
         snprintf(
             pReason,
@@ -2644,6 +2666,347 @@ static Bool _MainLoopStateGetSwcBaseName(Char *pOut, Int32 nOutBytes)
     return pOut[0] ? TRUE : FALSE;
 }
 
+
+/* AURORA_CD_STATE_V1_SAFE_20260903
+ *
+ * Save-state ROM identity for path-backed optical media.
+ *
+ * Do not use the CUE/TOC filename as identity: it is too weak and breaks
+ * when a game directory is renamed.  Instead hash descriptor semantics and
+ * bounded samples from every referenced physical track file.  FILE-path
+ * text itself is intentionally excluded, so moving a complete game folder
+ * does not invalidate a state.
+ *
+ * The helper is deliberately fail-closed.  If the descriptor or any
+ * referenced file cannot be resolved/read, the frontend refuses the state
+ * operation rather than creating a weakly identified bank.
+ */
+static Bool _MainLoopStateDiscPrefixNoCase(
+    const Char *pText, const Char *pWord)
+{
+    if (!pText || !pWord)
+        return FALSE;
+
+    while (*pWord)
+    {
+        Char a = *pText++;
+        Char b = *pWord++;
+        if (a >= 'a' && a <= 'z') a = (Char)(a - ('a' - 'A'));
+        if (b >= 'a' && b <= 'z') b = (Char)(b - ('a' - 'A'));
+        if (a != b)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static Bool _MainLoopStateDiscExtractFileToken(
+    const Char *pLine, Char *pOut, Int32 nOutBytes)
+{
+    const Char *p;
+    Int32 nKeyword = 0;
+    Int32 n = 0;
+    Bool bQuoted = FALSE;
+
+    if (!pLine || !pOut || nOutBytes <= 1)
+        return FALSE;
+
+    p = pLine;
+    while (*p == ' ' || *p == '\t')
+        ++p;
+
+    if (_MainLoopStateDiscPrefixNoCase(p, "FILE") &&
+        (p[4] == ' ' || p[4] == '\t'))
+        nKeyword = 4;
+    else if (_MainLoopStateDiscPrefixNoCase(p, "DATAFILE") &&
+             (p[8] == ' ' || p[8] == '\t'))
+        nKeyword = 8;
+    else if (_MainLoopStateDiscPrefixNoCase(p, "AUDIOFILE") &&
+             (p[9] == ' ' || p[9] == '\t'))
+        nKeyword = 9;
+    else
+        return FALSE;
+
+    p += nKeyword;
+    while (*p == ' ' || *p == '\t')
+        ++p;
+
+    if (*p == '"')
+    {
+        bQuoted = TRUE;
+        ++p;
+    }
+
+    while (*p)
+    {
+        if (bQuoted)
+        {
+            if (*p == '"')
+                break;
+        }
+        else if (*p == ' ' || *p == '\t' ||
+                 *p == '\r' || *p == '\n')
+            break;
+
+        if (n + 1 >= nOutBytes)
+            return FALSE;
+        pOut[n++] = *p++;
+    }
+
+    if (bQuoted && *p != '"')
+        return FALSE;
+    if (!n)
+        return FALSE;
+
+    pOut[n] = 0;
+    return TRUE;
+}
+
+static Bool _MainLoopStateDiscResolveFile(
+    const Char *pDescriptorPath,
+    const Char *pToken,
+    Char *pOut,
+    Int32 nOutBytes)
+{
+    const Char *pSlash;
+    const Char *pBackslash;
+    const Char *pColon;
+    Int32 nDir;
+    Int32 nWritten;
+    Char *p;
+
+    if (!pDescriptorPath || !*pDescriptorPath ||
+        !pToken || !*pToken || !pOut || nOutBytes <= 1)
+        return FALSE;
+
+    if (strchr(pToken, ':') || pToken[0] == '/' || pToken[0] == '\\')
+    {
+        nWritten = snprintf(pOut, nOutBytes, "%s", pToken);
+    }
+    else
+    {
+        pSlash = strrchr(pDescriptorPath, '/');
+        pBackslash = strrchr(pDescriptorPath, '\\');
+        if (!pSlash || (pBackslash && pBackslash > pSlash))
+            pSlash = pBackslash;
+
+        if (pSlash)
+        {
+            nDir = (Int32)(pSlash - pDescriptorPath) + 1;
+            nWritten = snprintf(
+                pOut, nOutBytes, "%.*s%s",
+                nDir, pDescriptorPath, pToken);
+        }
+        else
+        {
+            pColon = strrchr(pDescriptorPath, ':');
+            if (pColon)
+            {
+                nDir = (Int32)(pColon - pDescriptorPath) + 1;
+                nWritten = snprintf(
+                    pOut, nOutBytes, "%.*s/%s",
+                    nDir, pDescriptorPath, pToken);
+            }
+            else
+                nWritten = snprintf(pOut, nOutBytes, "%s", pToken);
+        }
+    }
+
+    if (nWritten < 0 || nWritten >= nOutBytes)
+        return FALSE;
+
+    for (p = pOut; *p; ++p)
+        if (*p == '\\')
+            *p = '/';
+
+    return TRUE;
+}
+
+static Uint32 _MainLoopStateDiscCrcU32(Uint32 uCRC, Uint32 uValue)
+{
+    Uint8 Bytes[4];
+    Bytes[0] = (Uint8)uValue;
+    Bytes[1] = (Uint8)(uValue >> 8);
+    Bytes[2] = (Uint8)(uValue >> 16);
+    Bytes[3] = (Uint8)(uValue >> 24);
+    return (Uint32)mz_crc32(
+        uCRC, (const unsigned char *)Bytes, sizeof(Bytes));
+}
+
+static Bool _MainLoopStateDiscHashPhysicalFile(
+    const Char *pPath,
+    Uint32 *puCRC,
+    Uint32 *puSizeSignature)
+{
+    enum { SAMPLE_BYTES = 1024 };
+    struct stat Status;
+    FILE *pFile = NULL;
+    Uint8 Sample[SAMPLE_BYTES];
+    Uint32 nFileBytes;
+    long Offset[3];
+    Int32 i;
+    Int32 j;
+
+    if (!pPath || !*pPath || !puCRC || !puSizeSignature)
+        return FALSE;
+
+    if (stat(pPath, &Status) != 0 || S_ISDIR(Status.st_mode) ||
+        Status.st_size <= 0 || Status.st_size > 0x7fffffffL)
+        return FALSE;
+
+    nFileBytes = (Uint32)Status.st_size;
+    pFile = fopen(pPath, "rb");
+    if (!pFile)
+        return FALSE;
+
+    *puCRC = _MainLoopStateDiscCrcU32(*puCRC, nFileBytes);
+    *puSizeSignature ^= nFileBytes;
+    *puSizeSignature *= 16777619u;
+
+    Offset[0] = 0;
+    Offset[1] = Status.st_size > SAMPLE_BYTES
+        ? (long)((Status.st_size - SAMPLE_BYTES) / 2) : 0;
+    Offset[2] = Status.st_size > SAMPLE_BYTES
+        ? (long)(Status.st_size - SAMPLE_BYTES) : 0;
+
+    for (i = 0; i < 3; ++i)
+    {
+        size_t nWant;
+        size_t nRead;
+        Bool bDuplicate = FALSE;
+
+        for (j = 0; j < i; ++j)
+            if (Offset[j] == Offset[i])
+                bDuplicate = TRUE;
+        if (bDuplicate)
+            continue;
+
+        if (fseek(pFile, Offset[i], SEEK_SET) != 0)
+        {
+            fclose(pFile);
+            return FALSE;
+        }
+
+        nWant = (size_t)(Status.st_size - Offset[i]);
+        if (nWant > SAMPLE_BYTES)
+            nWant = SAMPLE_BYTES;
+
+        nRead = fread(Sample, 1, nWant, pFile);
+        if (nRead != nWant)
+        {
+            fclose(pFile);
+            return FALSE;
+        }
+
+        *puCRC = _MainLoopStateDiscCrcU32(
+            *puCRC, (Uint32)Offset[i]);
+        *puCRC = (Uint32)mz_crc32(
+            *puCRC, (const unsigned char *)Sample, nRead);
+    }
+
+    fclose(pFile);
+    return TRUE;
+}
+
+static Bool _MainLoopStateGetDiscIdentity(
+    const Char *pDescriptorPath,
+    Uint32 uFamilyFlags,
+    Uint32 *puCRC,
+    Uint32 *pnBytes,
+    Uint32 *puFlags)
+{
+    enum { MAX_DISC_FILES = 99 };
+    FILE *pDescriptor;
+    Char Line[2048];
+    Char Token[1024];
+    Char Resolved[1024];
+    Char LastToken[1024];
+    Uint32 uCRC = MZ_CRC32_INIT;
+    Uint32 uSizeSignature = 2166136261u;
+    Int32 nFiles = 0;
+
+    if (!pDescriptorPath || !*pDescriptorPath ||
+        !puCRC || !pnBytes || !puFlags)
+        return FALSE;
+
+    pDescriptor = fopen(pDescriptorPath, "rb");
+    if (!pDescriptor)
+        return FALSE;
+
+    LastToken[0] = 0;
+
+    while (fgets(Line, sizeof(Line), pDescriptor))
+    {
+        size_t nLine = strlen(Line);
+
+        /* A truncated descriptor line could hide part of a track path. */
+        if (nLine == sizeof(Line) - 1 &&
+            Line[nLine - 1] != '\n' && !feof(pDescriptor))
+        {
+            fclose(pDescriptor);
+            return FALSE;
+        }
+
+        Token[0] = 0;
+        if (_MainLoopStateDiscExtractFileToken(
+                Line, Token, sizeof(Token)))
+        {
+            /* Canonical FILE semantic marker; do NOT hash its path text. */
+            uCRC = _MainLoopStateDiscCrcU32(uCRC, 0x46494c45u);
+
+            /* CUEs may repeat one FILE for several contiguous TRACK entries. */
+            if (strcmp(Token, LastToken))
+            {
+                if (nFiles >= MAX_DISC_FILES ||
+                    !_MainLoopStateDiscResolveFile(
+                        pDescriptorPath, Token,
+                        Resolved, sizeof(Resolved)) ||
+                    !_MainLoopStateDiscHashPhysicalFile(
+                        Resolved, &uCRC, &uSizeSignature))
+                {
+                    fclose(pDescriptor);
+                    return FALSE;
+                }
+
+                snprintf(LastToken, sizeof(LastToken), "%s", Token);
+                ++nFiles;
+            }
+        }
+        else
+        {
+            static const Uint8 Newline = '\n';
+
+            /* Normalize only line endings. Structural CUE/TOC text remains
+               part of identity, including TRACK/INDEX/PREGAP metadata. */
+            while (nLine &&
+                   (Line[nLine - 1] == '\r' || Line[nLine - 1] == '\n'))
+                --nLine;
+
+            uCRC = (Uint32)mz_crc32(
+                uCRC, (const unsigned char *)Line, nLine);
+            uCRC = (Uint32)mz_crc32(
+                uCRC, (const unsigned char *)&Newline, 1);
+        }
+    }
+
+    if (ferror(pDescriptor) || nFiles <= 0)
+    {
+        fclose(pDescriptor);
+        return FALSE;
+    }
+    fclose(pDescriptor);
+
+    uSizeSignature ^= (Uint32)nFiles;
+    uSizeSignature *= 16777619u;
+    if (!uSizeSignature)
+        uSizeSignature = 1;
+
+    *puCRC = uCRC;
+    *pnBytes = uSizeSignature;
+    *puFlags = uFamilyFlags;
+    return TRUE;
+}
+
+
 static Bool _MainLoopStateGetRomIdentity(
     Uint32 *puCRC,
     Uint32 *pnBytes,
@@ -2670,6 +3033,25 @@ static Bool _MainLoopStateGetRomIdentity(
         *pnBytes = 0x4000u;
         *puFlags = 0x53574304u;
         return TRUE;
+    }
+
+
+    if (_pSystem == _pSega && PicoDriveBridge_IsSegaCD())
+    {
+        const Char *pDiscPath = PicoDriveBridge_GetDiscPath();
+        return pDiscPath &&
+            _MainLoopStateGetDiscIdentity(
+                pDiscPath, 0x53434401u,
+                puCRC, pnBytes, puFlags);
+    }
+
+    if (_pSystem == _pPce && PceBridge_IsDiscLoaded())
+    {
+        const Char *pDiscPath = PceBridge_GetDiscPath();
+        return pDiscPath &&
+            _MainLoopStateGetDiscIdentity(
+                pDiscPath, 0x50434401u,
+                puCRC, pnBytes, puFlags);
     }
 
 
@@ -2707,13 +3089,6 @@ static Bool _MainLoopStateGetRomIdentity(
         if (!_pPceRom || !_pPceRom->IsLoaded()) return FALSE;
         pRomData = _pPceRom->GetData(); nRomBytes = _pPceRom->GetBytes();
     }
-    else if (_pSystem == _pSnes9x2010)
-    {
-        if (!_pSnes9x2010Rom || !_pSnes9x2010Rom->IsLoaded()) return FALSE;
-        /* AURORA_SNES9X2010_V2_PS2LEAN_20260824: frontend backing is intentionally released. */
-        pRomData = _pSnes9x2010Rom->GetData();
-        nRomBytes = _pSnes9x2010Rom->GetBytes();
-    }
     else if (_pSnesRom && _pSnesRom->IsLoaded())
     {
         pRomData = _pSnesRom->GetData();
@@ -2730,7 +3105,7 @@ static Bool _MainLoopStateGetRomIdentity(
 
     if (!_MainLoop_StateRomCRCValid)
     {
-        /* AURORA_SNES9X2010_V2_PS2LEAN_20260824: only a non-primed fallback CRC needs raw bytes. */
+        /* AURORA_PS2LEAN_V2_20260824: only a non-primed fallback CRC needs raw bytes. */
         if (!pRomData)
             return FALSE;
         _MainLoop_StateRomCRC = (Uint32)mz_crc32(
@@ -2746,8 +3121,7 @@ static Bool _MainLoopStateGetRomIdentity(
     if (_pSystem == _pNes)
         *puFlags = _pNesRom->GetMapperNumber();
     else if (_pSystem == _pSega || _pSystem == _pPce ||
-             _pSystem == _pFds || /* AURORA_FCEUMM_FDS_V0_6_STATE */
-             _pSystem == _pSnes9x2010)
+             _pSystem == _pFds) /* AURORA_FCEUMM_FDS_V0_6_STATE */
         *puFlags = 0;
     else
         *puFlags = _pSnesRom->m_Flags;
@@ -3078,6 +3452,21 @@ static Bool _MainLoopStateEnsureRoot(const MainLoopStateRootT *pRoot)
     return TRUE;
 }
 
+/* AURORA_CD_STATE_V1_SAFE_20260903
+ * One-character bank class remains compatible with the existing filename
+ * layout while preventing CD banks from colliding with cartridge banks. */
+static Char _MainLoopStateGetBankClass()
+{
+    if (_pSystem == _pNes) return 'n';
+    if (_pSystem == _pFds) return 'f';
+    if (_pSystem == _pSega)
+        return PicoDriveBridge_IsSegaCD() ? 'c' : 'g';
+    if (_pSystem == _pPce && PceBridge_IsDiscLoaded())
+        return 'p';
+    if (_MainLoopStateIsSwc()) return 'w';
+    return 's';
+}
+
 static void _MainLoopStateBuildBankPath(
     const MainLoopStateRootT *pRoot,
     Int32 iSlot,
@@ -3116,10 +3505,7 @@ static void _MainLoopStateBuildBankPath(
         "%s/%s.%c%d%c",
         Directory,
         SaveName,
-        _pSystem == _pNes ? 'n' :
-            (_pSystem == _pFds ? 'f' : /* AURORA_FCEUMM_FDS_V0_6_STATE */
-             (_pSystem == _pSega ? 'g' :
-              (_pSystem == _pSnes9x2010 ? 'x' : (_MainLoopStateIsSwc() ? 'w' : 's')))),
+        _MainLoopStateGetBankClass(),
         iSlot + 1,
         iBank ? 'b' : 'a'
     );
@@ -3464,14 +3850,6 @@ Bool _MainLoopLoadState()
                 bRestoreOK = pPceStateData && nPceStateBytes &&
                     _pPce->RestoreStateChecked(pPceStateData, (Int32)nPceStateBytes);
             }
-            else if (_pSystem == _pSnes9x2010)
-            {
-                Uint8 *pS9xStateData = _MainLoopStateGetPayloadData();
-                Uint32 nS9xStateBytes = _MainLoopStateGetPayloadBytes();
-                bRestoreOK = pS9xStateData && nS9xStateBytes &&
-                    _pSnes9x2010->RestoreStateChecked(
-                        pS9xStateData, (Int32)nS9xStateBytes);
-            }
             else if (_MainLoopStateIsSwc())
             {
                 Uint8 *pSwcStateData = _MainLoopStateGetPayloadData();
@@ -3667,14 +4045,6 @@ Bool _MainLoopSaveState()
         if (!_pPce->SaveStateChecked(pStateData, (Int32)nStateBytes))
         {
             _MainLoopStateSetMessage("Could not snapshot the Beetle PCE Fast state.");
-            return FALSE;
-        }
-    }
-    else if (_pSystem == _pSnes9x2010)
-    {
-        if (!_pSnes9x2010->SaveStateChecked(pStateData, (Int32)nStateBytes))
-        {
-            _MainLoopStateSetMessage("Could not snapshot the Snes9x 2010 state.");
             return FALSE;
         }
     }

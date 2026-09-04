@@ -97,7 +97,7 @@ static Uint32 _SNRomHK97CRC32(const Uint8 *pData, Uint32 nBytes)
  * Sources represented here:
  *   - SNESAdvance SuperDAT ordinary-byte patches for Lost Vikings 1 (USA)
  *     and The Addams Family (USA).
- *   - GameHacking.org-generated Lost Vikings 2 cheat data; Snes9x's standard
+ *   - GameHacking.org-generated Lost Vikings 2 cheat data; reference emulator's standard
  *     SNES Game Genie decoder maps E1E7-CFD4 -> $80FA34=F6 and
  *     DDE7-CF04 -> $80FA35=00. For normal LoROM $80:FA34 maps to file $7A34.
  *   - No-Intro 2026-08-01 CRC32 values identify clean regional layouts.
@@ -282,7 +282,7 @@ static const SNRomCompatEntryT _SNRomCompatEntries[] =
 /* Pontua um header LoROM candidato em 'base' (deslocamento do $FFC0 da
    metade). Usado para descobrir QUAL metade de uma ROM ExLoROM contem o
    header/vetores reais, para normalizar a ordem (igual ao scoring do
-   snes9x, porem simplificado). */
+   reference emulator, porem simplificado). */
 static int _ExLoRomHeaderScore(const Uint8 *pRom, Uint32 base, Uint32 romBytes)
 {
 	if ((base + 0x40) > romBytes) return -1000;
@@ -832,8 +832,8 @@ void SnesRom::SetCartInfo(SNRomInfoT *pCartInfo)
 		{
 			m_uSRAMSize = 0;
 		}
-		/* AURORA_SA1_V1_SNES9X_LOGIC_20260902
-	 * Snes9x's cartridge classifier uses IDs $3423/$3523.  Do this before
+		/* AURORA_SA1_V1_REFERENCE_LOGIC_20260902
+	 * reference emulator's cartridge classifier uses IDs $3423/$3523.  Do this before
 	 * the legacy RomType-only switch so $34/$35 are not mistaken for a
 	 * generic RAM layout. */
 	if (pCartInfo->RomMakeup == 0x23 &&
@@ -1470,7 +1470,7 @@ if (m_pRomData && m_uRomBytes)
 	// ---- ExLoROM (Jumbo LoROM): LoROM maior que 4MB ----
 	// Hacks grandes (ex.: SMW expandida pelo Lunar Magic) usam ExLoROM:
 	// a metade de cima dos bancos ($80-$FF) deixa de ser espelho e passa a
-	// conter dados extras, chegando a 8MB. Seguimos o snes9x
+	// conter dados extras, chegando a 8MB. Seguimos o reference emulator
 	// (Map_JumboLoROMMap): a ROM e' normalizada para que a metade que tem o
 	// header/vetores fique em offset 0x400000 (mapeada em $00-$3F, de onde a
 	// CPU le os vetores) e os outros 4MB em offset 0 ($80-$FF).
@@ -1484,7 +1484,7 @@ if (m_pRomData && m_uRomBytes)
 		int score4M = _ExLoRomHeaderScore(m_pRomData, 0x407FC0, m_uRomBytes);
 
 		// header na frente do arquivo -> trocar as metades para coloca-lo
-		// em 0x400000 (caso "SMALLFIRST" do snes9x).
+		// em 0x400000 (caso "SMALLFIRST" do reference emulator).
 		if (score0 > score4M)
 		{
 			Uint32 smallBytes = m_uRomBytes - 0x400000;

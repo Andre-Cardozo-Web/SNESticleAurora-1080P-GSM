@@ -7,7 +7,7 @@
  *   - SNES Development Manual Book II, Cap. 3-5 (referencias citadas)
  *   - Matematica de projecao por pinhole / Mode-7 (textbook 3D graphics)
  *
- * Nada deste arquivo foi copiado de bsnes / snes9x / Snes9xGX / etc.
+ * Nada deste arquivo foi copiado de bsnes / reference emulator / reference emulatorGX / etc.
  */
 #ifndef _SNDSP1_H
 #define _SNDSP1_H

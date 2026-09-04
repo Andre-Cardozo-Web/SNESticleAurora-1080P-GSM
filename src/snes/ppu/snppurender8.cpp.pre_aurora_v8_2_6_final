@@ -1612,7 +1612,7 @@ void SnesPPURender::RenderLine8(Int32 iLine, SnesRender8pInfoT *pRenderInfo)
 		Int32 count=m_nObjLine[iLine];
 		Int32 budget=SNPPURenderGetObjTileBudget();
 		/* AURORA_SUNSET_RIDERS_CRC_OBJ128_V2_BUDGET_20260825
-		 * Diagnostic equivalent to Snes9x's raised MaxSpriteTilesPerLine:
+		 * Diagnostic equivalent to reference emulator's raised MaxSpriteTilesPerLine:
 		 * bypass time-over only for the two exact Sunset Riders CRCs.
 		 * The existing m_ObjLine list still enforces max 32 OBJ/scanline. */
 		if (g_SnesCompatSunsetRidersObj128)

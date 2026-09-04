@@ -462,7 +462,7 @@ void SnesPPURender::UpdateOBJVisibility(Uint8 *pObjY, Uint8 *pObjSize, Int32 iOb
 		memset(m_nObjTilePotential,0,sizeof(m_nObjTilePotential));
 
 	/* AURORA_ACCURACY_OAM_FIRSTSPRITE_Y_V1_VIS_20260825
-	 * Snes9x's special priority-rotation case is:
+	 * reference emulator's special priority-rotation case is:
 	 *     OAMPriorityRotation && OAMFlip && (OAMAddr & 1)
 	 *
 	 * Aurora stores the internal OAM address in BYTE phases, therefore
