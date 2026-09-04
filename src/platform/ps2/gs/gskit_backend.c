@@ -141,7 +141,10 @@ void GSK_Init(int width, int height,
     _gsk_arg_psm   = psm;    _gsk_arg_psmz     = psmz;
     _gsk_arg_mode  = mode;   _gsk_arg_interlace = interlace;
 
-    _pGsGlobal = gsKit_init_global();
+     gsGlobal->Mode = 82; // 82 é o número secreto que força o PS2 a rodar em 1080p a 60Hz
+     gsGlobal->Interlace = 0; // 0 desativa o entrelaçado e força o modo Progressivo (P)
+     gsGlobal->Field = 1; // Ajusta o quadro de imagem corretamente para TVs modernas
+
     if (!_pGsGlobal) {
         return;
     }
@@ -150,12 +153,20 @@ void GSK_Init(int width, int height,
        The original code uses GS_NTSC=2 / GS_PAL=3 which happen to
        match GS_MODE_NTSC / GS_MODE_PAL exactly, but go through the
        check anyway in case a caller passes something else. */
-    _pGsGlobal->Mode = (mode == GS_PAL) ? GS_MODE_PAL : GS_MODE_NTSC;
+        // Forçando o emulador a iniciar estritamente em 1080p Progressivo
+   
+    _pGsGlobal->Mode      = 82; // Código secreto do 1080p a 60Hz no PS2
+    _pGsGlobal->Interlace = 0;  // Desativa o entrelaçado (força o modo Progressivo)
+    _pGsGlobal->Field     = 1;  // Ajusta o quadro para telas modernas
+    _gsk_fb_width         = 640;
+    _gsk_fb_height        = 480;
+    _gsk_vck              = 1;
+    g_GskVideoMode        = GSK_VIDMODE_1080I; // Engana o menu interno para manter o tamanho correto
 
     /* The legacy caller still passes its old interlace argument, but the
        backend now exposes interlaced modes only and owns this choice. */
     (void)interlace;
-    switch (g_GskVideoMode)
+    switch (g_GskV    switch (GSK_VIDMODE_1080I)
     {
     case GSK_VIDMODE_1080I:
         /* A full 1920x1080 RGBA framebuffer cannot fit in the PS2's 4 MiB
@@ -163,9 +174,9 @@ void GSK_Init(int width, int height,
            After gsKit computes the mode registers below, the horizontal
            display is reduced to 1280 pixels and centred: 1280x960 is 4:3,
            so the default no longer stretches the game across 16:9. */
-        _pGsGlobal->Mode      = GS_MODE_DTV_1080I;
-        _pGsGlobal->Interlace = GS_INTERLACED;
-        _pGsGlobal->Field     = GS_FIELD;
+       gsGlobal->Mode = GS_MODE_1080P;
+       gsGlobal->Interlace = GS_NONINTERLACED; // Força o modo Progressivo (P)
+       gsGlobal->Field = GS_FRAME;
         _gsk_fb_width         = 640;
         _gsk_fb_height        = 480;
         _gsk_vck              = 1;
