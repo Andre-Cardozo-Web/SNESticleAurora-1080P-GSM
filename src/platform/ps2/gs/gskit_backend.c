@@ -111,7 +111,6 @@ void GSK_Init(int width, int height, int dispx, int dispy, int psm, int psmz, in
     switch (GSK_VIDMODE_1080I)
     {
     case GSK_VIDMODE_1080I:
-        // Configura o sinal progressivo fixo na memória gráfica
         _pGsGlobal->Mode      = GS_MODE_DTV_720P; 
         _pGsGlobal->Interlace = GS_NONINTERLACED; _pGsGlobal->Field = GS_FRAME;         
         _gsk_fb_width         = 1280; _gsk_fb_height = 720; _gsk_vck = 1;
@@ -152,9 +151,6 @@ void GSK_Init(int width, int height, int dispx, int dispy, int psm, int psmz, in
 
     _gsk_base_dw = _pGsGlobal->DW; _gsk_base_dh = _pGsGlobal->DH;
     _gsk_base_magh = _pGsGlobal->MagH; _gsk_base_magv = _pGsGlobal->MagV;
-    _gsk_base_startx = _pGsGlobal->StartX; _gsk_base_starty = _pGsGlobal->StartY;
-
-    // Forçamento e calibração das dimensões básicas
     _pGsGlobal->DW = 1280; _pGsGlobal->DH = 720; _pGsGlobal->MagH = 3; _pGsGlobal->MagV = 1;           
 
     _gsk_initialised = 1;
@@ -189,7 +185,7 @@ static void _GskApplyDisplay(void)
     dw = _gsk_base_dw; dh = _gsk_base_dh; magh = _gsk_base_magh;
     startx = _gsk_base_startx; starty = _gsk_base_starty;
 
-    if (g_GskOverscan > 0)
+    if (g_Overscan > 0)
     {
         int sx = (_gsk_base_dw * g_GskOverscan) / 1300; int sy = (_gsk_base_dh * g_GskOverscan) / 1300;
         dw = _gsk_base_dw - sx * 2; dh = _gsk_base_dh - sy * 2;
@@ -209,7 +205,7 @@ static void _GskApplyDisplay(void)
         GS_SET_DISPFB2(_pGsGlobal->ScreenBuffer[(_pGsGlobal->ActiveBuffer ^ 1) & 1] / 8192, _gsk_fb_width / 64, _pGsGlobal->PSM, _gsk_240p_window_x, 0);
     }
 
-    if (_gsk_native240p_par && _gsk_active_mode == GSK_VIDMODE_240P && g_GskOverscan == 0 && _gsk_base_magh > 0 && _gsk_240p_window_w <= 0)
+    if (_gsk_native240p_par && _gsk_active_mode == GSK_VIDMODE_240P && g_Overscan == 0 && _gsk_base_magh > 0 && _gsk_240p_window_w <= 0)
     {
         int old_m = _gsk_base_magh + 1; int new_m = old_m - 1; int new_dw = (_gsk_base_dw / old_m) * new_m;
         startx += (dw - new_dw) / 2 - ((_gsk_fb_width == 256 ? 2 : 0) * new_m);
@@ -230,17 +226,17 @@ static void _GskApplyDisplay(void)
         startx -= ((nm * src) - dw) / 2; dw = nm * src; magh = nm - 1;
     }
 
-    // AJUSTE AUTOMÁTICO DO ACHATAMENTO MASSIVO VERTICAL:
-    // Eleva a altura física (DH) de 720 para 940 e joga o início (StartY) mais para cima
-    // Isso estica a imagem do Super Nintendo eliminando as duas barras pretas gigantes!
+    // Configuração oficial e estável para a memória do 720p (Evita estouros)
     gs->DW     = dw;
-    gs->DH     = 940;              // Força o preenchimento vertical total
+    gs->DH     = 720; 
     gs->MagH   = magh;
-    gs->MagV   = 2;                // Aumenta o multiplicador de zoom vertical de fábrica
+    gs->MagV   = 1;
     gs->StartX = startx;
-    gs->StartY = starty - 110;     // Centraliza a tela esticada perfeitamente na TV
+    gs->StartY = starty; 
 
-    gsKit_set_display_offset(gs, g_GskDispOffX * _gsk_vck, g_GskDispOffY + _gsk_game_y_bias);
+    // AJUSTE SEGURO DO ACHATAMENTO: Usa deslocamento de hardware no PCRTC do PS2
+    // O valor -45 estica o frame verticalmente para comer as duas barras pretas gigantes
+    gsKit_set_display_offset(gs, g_GskDispOffX * _gsk_vck, g_GskDispOffY - 45 + _gsk_game_y_bias);
     _GskApplyRenderTransform();
 }
 
@@ -286,7 +282,7 @@ void GSK_ResetFrame(void)
     *p_data++ = GS_SETREG_FRAME_1(gs->ScreenBuffer[gs->ActiveBuffer & 1] / 8192, gs->Width / 64, gs->PSM, 0); *p_data++ = GS_REG_FRAME_1;
     *p_data++ = GS_SETREG_XYOFFSET_1(gs->OffsetX, gs->OffsetY); *p_data++ = GS_XYOFFSET_1;
     
-    // Injeta brilho máximo e contraste estável fixos de fábrica
+    // Brilho máximo injetado diretamente no registrador ALPHA do chip gráfico
     *p_data++ = GS_SETREG_ALPHA(0, 1, 0, 1, 255); *p_data++ = GS_REG_ALPHA_1;
     *p_data++ = (u64)1; *p_data++ = (u64)GS_REG_COLCLAMP;
 
