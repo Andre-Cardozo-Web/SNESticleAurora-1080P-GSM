@@ -1573,8 +1573,6 @@ $(OBJ_DIR)/snes/apu/snspcmix.o: src/snes/apu/snspcmix.cpp | $(OBJ_DIR)
 fast:
 	@reset=""; cyan=""; if [ "$(COLOR)" = "1" ]; then reset="\033[0m"; cyan="\033[36m"; fi; printf "$${cyan}[ FAST ]$${reset} build: JOBS=$(JOBS), LOAD_LIMIT=$(LOAD_LIMIT)\n"
 	+@$(MAKE) --no-print-directory build-begin
-	@printf "[ PATCH ] Removendo macro duplicada do famec.c...\n"
-	@sed -i 's/#define FAMEC_NO_GOTOS/\/\/ #define FAMEC_NO_GOTOS/g' "$(CURDIR)/src/third_party/picodrive/cpu/fame/famec.c" || true
 	+@$(MAKE) --no-print-directory check-env
 	+@$(MAKE) --no-print-directory $(OUTPUT_SYNC) -j$(JOBS) -l$(LOAD_LIMIT) $(TARGET)
 	+@$(MAKE) --no-print-directory copy-output
