@@ -150,12 +150,19 @@ void GSK_Init(int width, int height,
        The original code uses GS_NTSC=2 / GS_PAL=3 which happen to
        match GS_MODE_NTSC / GS_MODE_PAL exactly, but go through the
        check anyway in case a caller passes something else. */
-    _pGsGlobal->Mode = (mode == GS_PAL) ? GS_MODE_PAL : GS_MODE_NTSC;
+        // Forçando o emulador a iniciar estritamente em 1080p Progressivo
+    _pGsGlobal->Mode      = 82; // Código secreto do 1080p a 60Hz no PS2
+    _pGsGlobal->Interlace = 0;  // Desativa o entrelaçado (força o modo Progressivo)
+    _pGsGlobal->Field     = 1;  // Ajusta o quadro para telas modernas
+    _gsk_fb_width         = 640;
+    _gsk_fb_height        = 480;
+    _gsk_vck              = 1;
+    g_GskVideoMode        = GSK_VIDMODE_1080I; // Engana o menu interno para manter o tamanho correto
 
     /* The legacy caller still passes its old interlace argument, but the
        backend now exposes interlaced modes only and owns this choice. */
     (void)interlace;
-    switch (g_GskVideoMode)
+        switch (GSK_VIDMODE_1080I)
     {
     case GSK_VIDMODE_1080I:
         /* A full 1920x1080 RGBA framebuffer cannot fit in the PS2's 4 MiB
