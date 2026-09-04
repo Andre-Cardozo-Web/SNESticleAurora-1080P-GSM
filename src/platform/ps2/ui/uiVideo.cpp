@@ -1,1 +1,293 @@
-else if (header.version <= 36){loaded = MemCardReadFile(path, (Uint8 *)&cfg, sizeof(VideoCfgV20T));if (loaded) { cfg.version = VIDEOCFG_VERSION; cfg.brightness = 100; }}}if (loaded){g_VideoBrightnessGain = cfg.brightness;if (g_VideoBrightnessGain < 50 || g_VideoBrightnessGain > 200) g_VideoBrightnessGain = 100;}if (loaded && header.version <= 27) cfg.bgmenable = 0;if (loaded && header.version <= 26 && cfg.gamevol >= 0 && cfg.gamevol <= 100) cfg.gamevol *= 2;if (loaded && header.version <= 28 && cfg.bgmvol >= 0 && cfg.bgmvol <= 100) cfg.bgmvol *= 2;if (loaded && header.version <= 30) cfg.bgmvol = 200;if (loaded && header.version <= 32) { cfg.bgmtrack = 1; cfg.mdrendering = 1; }if (loaded && header.version <= 35) cfg.segavol = cfg.gamevol;if (loaded && header.version <= 36) cfg.pcevol = cfg.gamevol;if (loaded && header.version <= 33) cfg.segaaudiorate = 16000;if (loaded && header.version <= 34) { cfg.smscolorborder = 1; cfg.smsfm = 0; }if (loaded) cfg.sneshackflags &= ~SNPPU_HACK_FRAME_SKIP;if (loaded && header.version < 42) cfg.safeframeskip = 1;if (loaded && header.version < 22) cfg.sneshackflags |= SNPPU_HACK_MODE7_HALF;if (loaded && cfg.magic == VIDEOCFG_MAGIC){if (cfg.mmceenable == 1 && cfg.mx4sioenable == 1) cfg.mx4sioenable = 0;if (cfg.mode == GSK_VIDMODE_240P || cfg.mode == GSK_VIDMODE_480I || cfg.mode == GSK_VIDMODE_1080I) g_GskVideoMode = cfg.mode;else g_GskVideoMode = GSK_VIDMODE_480I;if (cfg.offx >= -64 && cfg.offx <= 64) g_GskDispOffX = cfg.offx;if (cfg.offy >= -64 && cfg.offy <= 64) g_GskDispOffY = cfg.offy;if (cfg.overscan >= 0 && cfg.overscan <= 100) g_GskOverscan = cfg.overscan;if (cfg.widescreen == 0 || cfg.widescreen == 1) g_GskWidescreen = cfg.widescreen;if (cfg.covers == 0 || cfg.covers == 1) CoverSetEnabled(cfg.covers ? TRUE : FALSE);if (cfg.smscolorborder == 0 || cfg.smscolorborder == 1) PicoDriveBridge_SetSmsColorBorder(cfg.smscolorborder != 0);if (cfg.safeframeskip >= 0 && cfg.safeframeskip <= 9) MainLoopSafeFrameskipSetLevel(cfg.safeframeskip);if (cfg.ggzoom == 0 || cfg.ggzoom == 1) PicoDriveBridge_SetGgZoom(cfg.ggzoom != 0);if (cfg.lightgun == 0 || cfg.lightgun == 1) QuicknesBridge_SetLightGunEnabled(cfg.lightgun != 0);if (cfg.cdmusic == 0 || cfg.cdmusic == 1) _VideoSetCdMusicEnabled(cfg.cdmusic ? TRUE : FALSE);if (cfg.smsfm == 0 || cfg.smsfm == 1) PicoDriveBridge_SetSmsFm(cfg.smsfm != 0);if (cfg.bgmvol >= 0 && cfg.bgmvol <= 400) BgmSetVolume(cfg.bgmvol);if (cfg.bgmenable == 0 || cfg.bgmenable == 1) BgmSetEnabled(cfg.bgmenable);if (cfg.bgmrate >= 8000 && cfg.bgmrate <= 48000) BgmSetRate(cfg.bgmrate);SnesAudioSetRate(SNSPCDSP_SAMPLERATE);if (cfg.segaaudiorate >= 8000 && cfg.segaaudiorate <= 48000) PicoDriveBridge_SetAudioRate(cfg.segaaudiorate);if (cfg.gamevol >= 0 && cfg.gamevol <= 400) AudMixGameSetVolume(cfg.gamevol);if (cfg.segavol >= 0 && cfg.segavol <= 400) AudMixSegaSetVolume(cfg.segavol);if (cfg.pcevol >= 0 && cfg.pcevol <= 400) AudMixPceSetVolume(cfg.pcevol);if (cfg.bgmtrack >= 1 && cfg.bgmtrack <= 64) BgmSetTrackIndex(cfg.bgmtrack);if (cfg.mdrendering >= 0 && cfg.mdrendering <= 2) PicoDriveBridge_SetRenderingMode(cfg.mdrendering);if (cfg.hddenable == 0 || cfg.hddenable == 1) HddSupportSetEnabled(cfg.hddenable);if (cfg.mmceenable == 0 || cfg.mmceenable == 1) MmceSupportSetEnabled(cfg.mmceenable);if (cfg.massenable == 0 || cfg.massenable == 1) MassStorageSetEnabled(cfg.massenable);if (cfg.smbenable == 0 || cfg.smbenable == 1) SmbSupportSetEnabled(cfg.smbenable);if (cfg.mx4sioenable == 0 || cfg.mx4sioenable == 1) Mx4sioSetEnabled(cfg.mx4sioenable);SNPPUColorSetProfile(SNPPU_COLOR_PROFILE_ORIGINAL);if (cfg.famicloneaudio == 0 || cfg.famicloneaudio == 1) { g_FamicloneAudio = cfg.famicloneaudio ? TRUE : FALSE; QuicknesBridge_SetDutySwap(g_FamicloneAudio ? true : false); }g_FakeSRAMSize = 0;if (cfg.forceregion >= 0 && cfg.forceregion <= 3) { g_SnesForceRegion = cfg.forceregion; PicoDriveBridge_SetRegion(g_SnesForceRegion); }if ((cfg.sneshacklayersoff & ~0x1F) == 0) SNPPURenderSetSoftwareLayerMask((Uint8)(0x1F & ~cfg.sneshacklayersoff));if ((cfg.sneshackflags & ~SNPPU_HACK_ALL) == 0) SNPPURenderSetSoftwareHackFlags((Uint8)cfg.sneshackflags);if (cfg.objlimit >= 0 && cfg.objlimit < SNPPU_OBJ_LIMIT_NUM) SNPPURenderSetObjLimitLevel((Uint8)cfg.objlimit);if (cfg.objlimitmode >= 0 && cfg.objlimitmode < SNPPU_OBJ_LIMIT_MODE_NUM) SNPPURenderSetObjLimitMode((Uint8)cfg.objlimitmode);if (cfg.sramdevice >= 0 && cfg.sramdevice < MAINLOOP_SRAMDEVICE_NUM) MainLoopSramSetDevice((MainLoopSramDeviceE)cfg.sramdevice);if ((cfg.compatflags & ~VIDEO_COMPAT_ALL) == 0) _VideoApplyCompatFlags(cfg.compatflags);if (cfg.snesmousemode >= 0 && cfg.snesmousemode < INPUT_SNES_MOUSE_MODE_NUM) InputSnesMouseSetMode((InputSnesMouseModeE)cfg.snesmousemode);if (cfg.turbospeed >= 0 && cfg.turbospeed < INPUT_SNES_MOUSE_MODE_NUM) MainLoopTurboSetSpeed((MainLoopTurboSpeedE)cfg.turbospeed);if (cfg.md6button >= 0 && cfg.md6button <= 3) { PicoDriveBridge_Set6Button((cfg.md6button & 1) != 0); MainLoopMdPadSetLayout((cfg.md6button & 2) ? MAINLOOP_MD_PAD_BCA : MAINLOOP_MD_PAD_ABC); }SNCPUSetOverclockLevel(_pSnes ? _pSnes->GetCpu() : NULL, SNCPU_OVERCLOCK_OFF);}}CVideoScreen::CVideoScreen(){m_iSelect = 0;}void CVideoScreen::Process(){}static void _VideoCenter(int x, int y, const char *pStr){FontPuts(x - FontGetStrWidth(pStr) / 2, y, pStr);}static void _VideoRow(int vy, int idx, int sel, const char *pLabel, const char *pValue){if (idx == sel){PolyColor4f(0.0f, 0.5f, 0.0f, 0.5f);PolyRect(48, vy - 1, 160, FontGetHeight() + 2);}FontColor4f(0.5f, 0.5f, 0.5f, 1.0f);FontPuts(56, vy, pLabel);FontColor4f(1.0f, 1.0f, 1.0f, 1.0f);FontPuts(150, vy, pValue);}static void _VideoHeader(int vy, const char *pStr){PolyColor4f(0.0f, 0.2f, 0.2f, 0.5f);PolyRect(32, vy, 256 - 64, 9);FontColor4f(0.0f, 0.8f, 0.8f, 1.0f);_VideoCenter(128, vy, pStr);}static const char *_VideoMmceStatus(void){int slots;if (!MmceSupportIsEnabled()) return "Off";if (MmceNeedsRestart()) return "Restart";if (MmceGetLastError() < 0) return "Driver Error";if (!MmceIsLoaded()) return "On";slots = MmceGetAvailableSlots();if (slots == 1) return "Slot 1";if (slots == 2) return "Slot 2";if (slots == 3) return "Slots 1+2";return "Not Found";}static const char *_VideoSafeFrameskipStatus(void){static const char *const names[10] = { "Off", "1", "2", "3", "4", "5", "6", "7", "8", "9" };Int32 level = MainLoopSafeFrameskipGetLevel();if (level < 0 || level > 9) level = 1;return names[level];}static const char *_VideoForceRegionStatus(void){switch (g_SnesForceRegion){case SNES_FORCE_REGION_NTSC_U: return "NTSC-U";case SNES_FORCE_REGION_NTSC_J: return "NTSC-J";case SNES_FORCE_REGION_PAL: return "PAL";default: return "Auto";}}static const char *_VideoFamicloneAudioStatus(void){return g_FamicloneAudio ? "On" : "Off";}static const char *_VideoHackLayerStatus(Uint8 uLayer){return (SNPPURenderGetSoftwareLayerMask() & uLayer) ? "On" : "Off";}static const char *_VideoHackAccurateStatus(Uint8 uFlag){return (SNPPURenderGetSoftwareHackFlags() & uFlag) ? "Off" : "Accurate";}static const char *_VideoHackMode7Status(void){return (SNPPURenderGetSoftwareHackFlags() & SNPPU_HACK_MODE7_HALF) ? "Half" : "Full";}static const char *_VideoHackSpriteLimiterStatus(void){const Bool bSnesUnits = (_pSystem == _pSnes) ? TRUE : FALSE;switch (SNPPURenderGetObjLimitLevel()){case SNPPU_OBJ_LIMIT_LIGHT: return bSnesUnits ? "Light (28)" : "Light";case SNPPU_OBJ_LIMIT_MEDIUM: return bSnesUnits ? "Medium (24)" : "Medium";case SNPPU_OBJ_LIMIT_STRONG: return bSnesUnits ? "Strong (20)" : "Strong";case SNPPU_OBJ_LIMIT_EXTREME: return bSnesUnits ? "Extreme (16)" : "Extreme";case SNPPU_OBJ_LIMIT_HEAVY: return bSnesUnits ? "Heavy (12)" : "Heavy";case SNPPU_OBJ_LIMIT_INSANE: return bSnesUnits ? "Insane (8)" : "Insane";default: return bSnesUnits ? "Off (34)" : "Off";}}static const char *_VideoHackSpriteLimiterModeStatus(void){return SNPPURenderGetObjLimitMode() == SNPPU_OBJ_LIMIT_MODE_SCREEN ? "Per Screen" : "Per Scanline";}static const char *_VideoCompatProfileStatus(void){if (g_VideoCompatFlags == 0) return "Standard";if (g_VideoCompatFlags == VIDEO_COMPAT_ALL) return "Conservative";return "Custom";}static const char *_VideoCompatGsCacheStatus(void){return (g_VideoCompatFlags & VIDEO_COMPAT_GS_FULL_CACHE) ? "Full" : "Range";}static const char *_VideoCompatGifWaitStatus(void){return (g_VideoCompatFlags & VIDEO_COMPAT_GIF_LONG_WAIT) ? "Long" : "Normal";}static const char *_VideoCompatAudioRpcStatus(void){return (g_VideoCompatFlags & VIDEO_COMPAT_AUDIO_SMALL_RPC) ? "1 KB" : "4 KB";}static const char *_VideoCompatAudioQueueStatus(void){return (g_VideoCompatFlags & VIDEO_COMPAT_AUDIO_DEEP_Q) ? "Deep" : "Normal";}static Int32 _VideoCycleSystemAudioRate(Int32 hz, int dir){static const Int32 rates[7] = { 16000, 22050, 24000, 32000, 38000, 44100, 48000 };const Int32 count = 7;Int32 i, idx = 0;for (i = 0; i < count; ++i){if (rates[i] == hz){idx = i;break;}}idx += (dir < 0) ? -1 : 1;if (idx < 0) idx = count - 1;if (idx >= count) idx = 0;return rates[idx];}static const char *_VideoMdRenderingStatus(void){if (PicoDriveBridge_GetRenderingMode() == 0) return "Fast";if (PicoDriveBridge_GetRenderingMode() == 1) return "Good";return "Accurate";}static const char *_VideoMx4sioStatus(void){if (!Mx4sioIsEnabled()) return "Off";if (Mx4sioNeedsRestart()) return "Restart";if (Mx4sioGetLastError() < 0) return "Driver Error";return Mx4sioIsLoaded() ? "On" : "Enabled";}static const VideoModeChoiceT _VideoModes[3] = {{ GSK_VIDMODE_240P, "240p/288p (CRT)" },{ GSK_VIDMODE_480I, "480i (default)" },{ GSK_VIDMODE_1080I, "1080i" }};static Int32 _VideoModeIndex(Int32 mode){Int32 i;for (i = 0; i < 3; i++){if (_VideoModes[i].mode == mode) return i;}return 0;}void CVideoScreen::Draw(){Int32 vy = 15;char buf[64];int m = _VideoModeIndex(g_GskVideoMode);const char *pMode = _VideoModes[m].name;int iPage = (m_iSelect >= 50) ? 1 : ((m_iSelect >= 40) ? 3 : ((m_iSelect >= 31) ? 2 : ((m_iSelect >= 20) ? 4 : ((m_iSelect >= 10) ? 5 : 0))));const char *pWide = g_GskWidescreen ? "On" : "Off";FontSelect(0);_VideoHeader(vy, iPage == 0 ? "Settings Menu (1/6)" : (iPage == 1 ? "Settings Menu (2/6)" : (iPage == 2 ? "Settings Menu (3/6)" : (iPage == 3 ? "Settings Menu (4/6)" : (iPage == 4 ? "Settings Menu (5/6)" : "Settings Menu (6/6)")))));vy += 18;if (iPage == 0){_VideoHeader(vy, "Screen"); vy += 14;_VideoRow(vy, 0, m_iSelect, "Video Mode", pMode); vy += 12;_VideoRow(vy, 1, m_iSelect, "Widescreen", pWide); vy += 12;snprintf(buf, sizeof(buf), "%d", g_GskOverscan); _VideoRow(vy, 2, m_iSelect, "Overscan", buf); vy += 12;snprintf(buf, sizeof(buf), "%d", g_GskDispOffX); _VideoRow(vy, 3, m_iSelect, "Offset X", buf); vy += 12;snprintf(buf, sizeof(buf), "%d", g_GskDispOffY); _VideoRow(vy, 4, m_iSelect, "Offset Y", buf); vy += 12;_VideoRow(vy, 5, m_iSelect, "Cover Art", CoverIsEnabled() ? "On" : "Off"); vy += 12;_VideoRow(vy, 6, m_iSelect, "SMS VDP border", PicoDriveBridge_GetSmsColorBorder() ? "On" : "Off"); vy += 12;_VideoRow(vy, 7, m_iSelect, "GG Zoom", PicoDriveBridge_GetGgZoom() ? "On" : "Off"); vy += 12;_VideoRow(vy, 8, m_iSelect, "Safe Frameskip", _VideoSafeFrameskipStatus()); vy += 12;snprintf(buf, sizeof(buf), "%d%%", g_VideoBrightnessGain); _VideoRow(vy, 9, m_iSelect, "Brightness Gain", buf); vy += 12;}else if (iPage == 1){_VideoHeader(vy, "Audio"); vy += 14;_VideoRow(vy, 50, m_iSelect, "Menu Music", BgmIsEnabled() ? "ON" : "OFF"); vy += 12;snprintf(buf, sizeof(buf), "%d", BgmGetVolume() / 2); _VideoRow(vy, 51, m_iSelect, "Menu volume", buf); vy += 12;snprintf(buf, sizeof(buf), "%d", AudMixGameGetVolume() / 2); _VideoRow(vy, 52, m_iSelect, "SNES volume", buf); vy += 12;snprintf(buf, sizeof(buf), "%d", AudMixSegaGetVolume() / 2); _VideoRow(vy, 53, m_iSelect, "SEGA volume", buf); vy += 12;snprintf(buf, sizeof(buf), "%d", AudMixPceGetVolume() / 2); _VideoRow(vy, 54, m_iSelect, "PCE volume", buf); vy += 12;_VideoRow(vy, 55, m_iSelect, "SNES audio", "32 kHz native"); vy += 12;snprintf(buf, sizeof(buf), "%d kHz", (PicoDriveBridge_GetAudioRate() + 500) / 1000); _VideoRow(vy, 56, m_iSelect, "SEGA audio", buf); vy += 12;_VideoRow(vy, 57, m_iSelect, "SMS FM audio", PicoDriveBridge_GetSmsFm() ? "Enable" : "Disable"); vy += 12;_VideoRow(vy, 58, m_iSelect, "CD music", g_CdMusicEnabled ? "ON" : "OFF"); vy += 12;}else if (iPage == 5){_VideoHeader(vy, "Storage / Devices"); vy += 14;_VideoRow(vy, 10, m_iSelect, "Mass / USB", MassStorageIsEnabled() ? "On" : "Off"); vy += 12;_VideoRow(vy, 11, m_iSelect, "HDD Support", HddSupportIsEnabled() ? "On" : "Off"); vy += 12;_VideoRow(vy, 12, m_iSelect, "MMCE Cards", _VideoMmceStatus()); vy += 12;_VideoRow(vy, 13, m_iSelect, "SMB (Network)", SmbGetStatusText()); vy += 12;_VideoRow(vy, 14, m_iSelect, "MX4SIO (SD)", _VideoMx4sioStatus()); vy += 12;_VideoHeader(vy, "Misc."); vy += 14;_VideoRow(vy, 16, m_iSelect, "Force Region", _VideoForceRegionStatus()); vy += 12;_VideoRow(vy, 17, m_iSelect, "Famiclone Audio", _VideoFamicloneAudioStatus()); vy += 12;_VideoRow(vy, 18, m_iSelect, "Reset emulator", ""); vy += 12;_VideoRow(vy, 19, m_iSelect, "Exit to OSD", ""); vy += 12;}else if (iPage == 4){_VideoHeader(vy, "SNES Hacks"); vy += 14;_VideoRow(vy, 20, m_iSelect, "BG1 Layer", _VideoHackLayerStatus(0x01)); vy += 12;_VideoRow(vy, 21, m_iSelect, "BG2 Layer", _VideoHackLayerStatus(0x02)); vy += 12;_VideoRow(vy, 22, m_iSelect, "BG3 Layer", _VideoHackLayerStatus(0x04)); vy += 12;_VideoRow(vy, 23, m_iSelect, "BG4 Layer", _VideoHackLayerStatus(0x08)); vy += 12;_VideoRow(vy, 24, m_iSelect, "Sprites / OBJ", _VideoHackLayerStatus(0x10)); vy += 12;_VideoRow(vy, 25, m_iSelect, "Color Math", _VideoHackAccurateStatus(0x10)); vy += 12;_VideoRow(vy, 26, m_iSelect, "Window Effects", _VideoHackAccurateStatus(0x20)); vy += 12;_VideoRow(vy, 27, m_iSelect, "Mode 7 Quality", _VideoHackMode7Status()); vy += 12;_VideoRow(vy, 28, m_iSelect, "Sprite Limiter", _VideoHackSpriteLimiterStatus()); vy += 12;_VideoRow(vy, 29, m_iSelect, "Limiter Mode", _VideoHackSpriteLimiterModeStatus()); vy += 12;}else if (iPage == 2){_VideoHeader(vy, "Performance"); vy += 14;_VideoRow(vy, 31, m_iSelect, "Profile", _VideoCompatProfileStatus()); vy += 12;_VideoRow(vy, 32, m_iSelect, "GS Cache Sync", _VideoCompatGsCacheStatus()); vy += 12;_VideoRow(vy, 33, m_iSelect, "GIF DMA Wait", _VideoCompatGifWaitStatus()); vy += 12;_VideoRow(vy, 34, m_iSelect, "Audio RPC Chunk", _VideoCompatAudioRpcStatus()); vy += 12;_VideoRow(vy, 35, m_iSelect, "Audio Queue", _VideoCompatAudioQueueStatus()); vy += 12;_VideoRow(vy, 37, m_iSelect, "MD rendering", _VideoMdRenderingStatus()); vy += 12;}else if (iPage == 3){_VideoHeader(vy, "Controller options"); vy += 14;_VideoRow(vy, 40, m_iSelect, "Use mouse", InputSnesMouseGetModeName()); vy += 12;_VideoRow(vy, 41, m_iSelect, "MD pad", PicoDriveBridge_Get6Button() ? "6-button" : "3-button"); vy += 12;_VideoRow(vy, 42, m_iSelect, "MD mapping", MainLoopMdPadGetLayoutName()); vy += 12;_VideoRow(vy, 43, m_iSelect, "Turbo Speed", MainLoopTurboGetSpeedName()); vy += 12;_VideoRow(vy, 44, m_iSelect, "Light Gun", QuicknesBridge_GetLightGunEnabled() ? "On" : "Off"); vy += 12;}vy = 184;FontColor4f(0.6f, 0.6f, 0.6f, 1.0f);_VideoCenter(128, vy, "Up/Dn: select   L/R: change   X: save"); vy += 12;_VideoCenter(128, vy, "O: next   Square: previous"); vy += 12;if (g_GskVideoMode != GSK_GetActiveVideoMode()) { FontColor4f(1.0f, 0.88f, 0.46f, 1.0f); _VideoCenter(128, vy, "mode applies after reboot"); }else if (MmceNeedsRestart() || Mx4sioNeedsRestart()) { FontColor4f(1.0f, 0.88f, 0.46f, 1.0f); _VideoCenter(128, vy, "storage applies after reboot"); }}void CVideoScreen::Input(Uint32 buttons, Uint32 trigger){int dir = 0;if (trigger & PAD_CIRCLE){if (m_iSelect < 10) m_iSelect = 50; else if (m_iSelect < 20) m_iSelect = 0; else if (m_iSelect <= 29) m_iSelect = 10;else if (m_iSelect < 40) m_iSelect = 40; else if (m_iSelect < 50) m_iSelect = 20; else m_iSelect = 31;}{int lo, hi;if (m_iSelect <= 9) { lo = 0; hi = 9; }else if (m_iSelect < 20) { lo = 10; hi = 19; } else if (m_iSelect <= 29) { lo = 20; hi = 29; }else if (m_iSelect < 40) { lo = 31; hi = 37; } else if (m_iSelect < 50) { lo = 40; hi = 44; }else { lo = 50; hi = 58; }if (trigger & PAD_UP) { m_iSelect--; if (m_iSelect < lo) m_iSelect = hi; if (m_iSelect == 36) m_iSelect = 35; if (m_iSelect == 15) m_iSelect = 14; }if (trigger & PAD_DOWN) { m_iSelect++; if (m_iSelect > hi) m_iSelect = lo; if (m_iSelect == 36) m_iSelect = 37; if (m_iSelect == 15) m_iSelect = 16; }}if (trigger & PAD_LEFT) dir = -1; if (trigger & PAD_RIGHT) dir = +1;if (dir != 0){switch (m_iSelect){case 0: { Int32 count = 3; Int32 modeIndex = _VideoModeIndex(g_GskVideoMode) + dir; if (modeIndex < 0) modeIndex = count - 1; if (modeIndex >= count) modeIndex = 0; MainLoopReinitVideoMode(_VideoModes[modeIndex].mode); } break;case 1: g_GskWidescreen = !g_GskWidescreen; GSK_SetWidescreen(g_GskWidescreen); break;case 2: g_GskOverscan += dir * 5; if (g_GskOverscan < 0) g_GskOverscan = 0; if (g_GskOverscan > 100) g_GskOverscan = 100; GSK_SetOverscan(g_GskOverscan); break;case 3: g_GskDispOffX += dir; if (g_GskDispOffX < -64) g_GskDispOffX = -64; if (g_GskDispOffX > 64) g_GskDispOffX = 64; GSK_SetDisplayOffset(g_GskDispOffX, g_GskDispOffY); break;case 4: g_GskDispOffY += dir; if (g_GskDispOffY < -64) g_GskDispOffY = -64; if (g_GskDispOffY > 64) g_GskDispOffY = 64; GSK_SetDisplayOffset(g_GskDispOffX, g_GskDispOffY); break;case 5: CoverToggle(); break;case 6: PicoDriveBridge_SetSmsColorBorder(!PicoDriveBridge_GetSmsColorBorder()); break;case 7: PicoDriveBridge_SetGgZoom(!PicoDriveBridge_GetGgZoom()); break;case 8: { Int32 level = MainLoopSafeFrameskipGetLevel() + dir; if (level > 9) level = 0; if (level < 0) level = 9; MainLoopSafeFrameskipSetLevel(level); } break;case 9: g_VideoBrightnessGain += dir * 10; if (g_VideoBrightnessGain < 50) g_VideoBrightnessGain = 50; if (g_VideoBrightnessGain > 200) g_VideoBrightnessGain = 200; break;case 50: BgmSetEnabled(!BgmIsEnabled()); break;case 51: { int v = BgmGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; BgmSetVolume(v); } break;case 52: { int v = AudMixGameGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; AudMixGameSetVolume(v); } break;case 53: { int v = AudMixSegaGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; AudMixSegaSetVolume(v); } break;case 54: { int v = AudMixPceGetVolume() + dir * 2; if (v < 0) v = 0; if (v > 400) v = 400; AudMixPceSetVolume(v); } break;case 55: SnesAudioSetRate(SNSPCDSP_SAMPLERATE); if (_pSystem == _pSnes && _AudMix) _AudMix->SetSampleRate(SNSPCDSP_SAMPLERATE); break;case 56: PicoDriveBridge_SetAudioRate(_VideoCycleSystemAudioRate(PicoDriveBridge_GetAudioRate(), dir)); break;case 57: PicoDriveBridge_SetSmsFm(!PicoDriveBridge_GetSmsFm()); break;case 58: _VideoSetCdMusicEnabled(!g_CdMusicEnabled); break;case 10: MassStorageSetEnabled(!MassStorageIsEnabled()); break;case 11: HddSupportSetEnabled(!HddSupportIsEnabled()); break;case 12: MmceSupportSetEnabled(!MmceSupportIsEnabled()); if (MmceSupportIsEnabled()) { BgmIOBegin(); MmceProbeAvailableSlots(); BgmIOEnd(); } break;case 13: if (SmbSupportIsEnabled()) { BgmIOBegin(); SmbDisconnect(); BgmIOEnd(); SmbSupportSetEnabled(0); } else { SmbSupportSetEnabled(1); } break;case 14: Mx4sioSetEnabled(!Mx4sioIsEnabled()); if (Mx4sioIsEnabled()) { BgmIOBegin(); Mx4sioLoadIfEnabled(); BgmIOEnd(); } break;case 15: g_FakeSRAMSize = 0; break;case 16: g_SnesForceRegion += (dir > 0) ? 1 : -1; if (g_SnesForceRegion > 3) g_SnesForceRegion = 0; if (g_SnesForceRegion < 0) g_SnesForceRegion = 3; PicoDriveBridge_SetRegion(g_SnesForceRegion); break;case 17: g_FamicloneAudio = !g_FamicloneAudio; QuicknesBridge_SetDutySwap(g_FamicloneAudio ? true : false); break;case 20: case 21: case 22: case 23: case 24: { static const Uint8 kLayers[5] = { 0x01, 0x02, 0x04, 0x08, 0x10 }; Uint8 uMask = SNPPURenderGetSoftwareLayerMask() ^ kLayers[m_iSelect - 20]; SNPPURenderSetSoftwareLayerMask(uMask); } break;case 25: SNPPURenderSetSoftwareHackFlags(SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_COLOR_MATH_OFF); break;case 26: SNPPURenderSetSoftwareHackFlags(SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_WINDOWS_OFF); break;case 27: SNPPURenderSetSoftwareHackFlags(SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_MODE7_HALF); break;case 28: { Int32 level = (Int32)SNPPURenderGetObjLimitLevel() + dir; if (level < 0) level = SNPPU_OBJ_LIMIT_NUM - 1; if (level >= SNPPU_OBJ_LIMIT_NUM) level = 0; SNPPURenderSetObjLimitLevel((Uint8)level); } break;case 29: { Int32 mode = (Int32)SNPPURenderGetObjLimitMode() + dir; if (mode < 0) mode = SNPPU_OBJ_LIMIT_MODE_NUM - 1; if (mode >= SNPPU_OBJ_LIMIT_MODE_NUM) mode = 0; SNPPURenderSetObjLimitMode((Uint8)mode); } break;case 31: _VideoApplyCompatFlags(g_VideoCompatFlags == VIDEO_COMPAT_ALL ? 0 : VIDEO_COMPAT_ALL); break;case 32: _VideoApplyCompatFlags(g_VideoCompatFlags ^ VIDEO_COMPAT_GS_FULL_CACHE); break;case 33: _VideoApplyCompatFlags(g_VideoCompatFlags ^ VIDEO_COMPAT_GIF_LONG_WAIT); break;case 34: _VideoApplyCompatFlags(g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_SMALL_RPC); break;case 35: _VideoApplyCompatFlags(g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_DEEP_Q); break;case 37: { int v = PicoDriveBridge_GetRenderingMode() + dir; if (v < 0) v = 2; if (v > 2) v = 0; PicoDriveBridge_SetRenderingMode(v); } break;case 40: InputSnesMouseCycleModeDir(dir); break;case 41: PicoDriveBridge_Set6Button(!PicoDriveBridge_Get6Button()); break;case 42: MainLoopMdPadCycleLayoutDir(dir); break;case 43: MainLoopTurboCycleSpeedDir(dir); break;case 44: QuicknesBridge_SetLightGunEnabled(!QuicknesBridge_GetLightGunEnabled()); break;}}if (trigger & PAD_SQUARE){if (m_iSelect >= 50) m_iSelect = 0;else if (m_iSelect >= 40) m_iSelect = 31;else if (m_iSelect >= 31) m_iSelect = 50;else if (m_iSelect >= 20) m_iSelect = 40;else if (m_iSelect >= 10) m_iSelect = 20;else m_iSelect = 10;}if (trigger & (PAD_CROSS | PAD_START)){if (m_iSelect == 18) { if (Aud_IsInitialized()) Aud_Setvol(0); MainResetEmulator(); }else if (m_iSelect == 19) { if (Aud_IsInitialized()) Aud_Setvol(0); ExecOSD(0, NULL); }else VideoSettingsSave();}}
+#include <libpad.h>
+#include <stdio.h>
+
+#include "types.h"
+#include "input.h"
+#include "font.h"
+#include "gskit_backend.h"
+#include "mainloop_shared.h"
+#include "mainloop_menu.h"
+#include "mainloop_ui.h"
+
+void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
+{
+    int dir = 0;
+
+    if (trigger & PAD_CIRCLE)
+    {
+        if (m_iSelect < 10)       m_iSelect = 50; 
+        else if (m_iSelect < 20)  m_iSelect = 0; 
+        else if (m_iSelect <= 29) m_iSelect = 10;
+        else if (m_iSelect < 40)  m_iSelect = 40; 
+        else if (m_iSelect < 50)  m_iSelect = 20; 
+        else                      m_iSelect = 31;
+    }
+
+    {
+        int lo, hi;
+        if (m_iSelect <= 9)       { lo = 0; hi = 9; }
+        else if (m_iSelect < 20)  { lo = 10; hi = 19; } 
+        else if (m_iSelect <= 29) { lo = 20; hi = 29; }
+        else if (m_iSelect < 40)  { lo = 31; hi = 37; } 
+        else if (m_iSelect < 50)  { lo = 40; hi = 44; }
+        else                      { lo = 50; hi = 58; }
+
+        if (trigger & PAD_UP) 
+        { 
+            m_iSelect--; 
+            if (m_iSelect < lo)  m_iSelect = hi; 
+            if (m_iSelect == 36) m_iSelect = 35; 
+            if (m_iSelect == 15) m_iSelect = 14; 
+        }
+        if (trigger & PAD_DOWN) 
+        { 
+            m_iSelect++; 
+            if (m_iSelect > hi)  m_iSelect = lo; 
+            if (m_iSelect == 36) m_iSelect = 37; 
+            if (m_iSelect == 15) m_iSelect = 16; 
+        }
+    }
+
+    if (trigger & PAD_LEFT)  dir = -1; 
+    if (trigger & PAD_RIGHT) dir = +1;
+    if (dir != 0)
+    {
+        switch (m_iSelect)
+        {
+        case 0: 
+            { 
+                Int32 count = 3; 
+                Int32 modeIndex = _VideoModeIndex(g_GskVideoMode) + dir; 
+                if (modeIndex < 0) modeIndex = count - 1; 
+                if (modeIndex >= count) modeIndex = 0; 
+                MainLoopReinitVideoMode(_VideoModes[modeIndex].mode); 
+            } 
+            break;
+        case 1: 
+            g_GskWidescreen = !g_GskWidescreen; 
+            GSK_SetWidescreen(g_GskWidescreen); 
+            break;
+        case 2: 
+            g_GskOverscan += dir * 5; 
+            if (g_GskOverscan < 0) g_GskOverscan = 0; 
+            if (g_GskOverscan > 100) g_GskOverscan = 100; 
+            GSK_SetOverscan(g_GskOverscan); 
+            break;
+        case 3: 
+            g_GskDispOffX += dir; 
+            if (g_GskDispOffX < -64) g_GskDispOffX = -64; 
+            if (g_GskDispOffX > 64) g_GskDispOffX = 64; 
+            GSK_SetDisplayOffset(g_GskDispOffX, g_GskDispOffY); 
+            break;
+        case 4: 
+            g_GskDispOffY += dir; 
+            if (g_GskDispOffY < -64) g_GskDispOffY = -64; 
+            if (g_GskDispOffY > 64) g_GskDispOffY = 64; 
+            GSK_SetDisplayOffset(g_GskDispOffX, g_GskDispOffY); 
+            break;
+        case 5: 
+            CoverToggle(); 
+            break;
+        case 6: 
+            PicoDriveBridge_SetSmsColorBorder(!PicoDriveBridge_GetSmsColorBorder()); 
+            break;
+        case 7: 
+            PicoDriveBridge_SetGgZoom(!PicoDriveBridge_GetGgZoom()); 
+            break;
+        case 8: 
+            { 
+                Int32 level = MainLoopSafeFrameskipGetLevel() + dir; 
+                if (level > 9) level = 0; 
+                if (level < 0) level = 9; 
+                MainLoopSafeFrameskipSetLevel(level); 
+            } 
+            break;
+        case 9: 
+            g_VideoBrightnessGain += dir * 10; 
+            if (g_VideoBrightnessGain < 50) g_VideoBrightnessGain = 50; 
+            if (g_VideoBrightnessGain > 200) g_VideoBrightnessGain = 200; 
+            break;
+        case 50: 
+            BgmSetEnabled(!BgmIsEnabled()); 
+            break;
+        case 51: 
+            { 
+                int v = BgmGetVolume() + dir * 2; 
+                if (v < 0) v = 0; 
+                if (v > 400) v = 400; 
+                BgmSetVolume(v); 
+            } 
+            break;
+        case 52: 
+            { 
+                int v = AudMixGameGetVolume() + dir * 2; 
+                if (v < 0) v = 0; 
+                if (v > 400) v = 400; 
+                AudMixGameGetVolume(v); 
+            } 
+            break;
+        case 53: 
+            { 
+                int v = AudMixSegaGetVolume() + dir * 2; 
+                if (v < 0) v = 0; 
+                if (v > 400) v = 400; 
+                AudMixSegaSetVolume(v); 
+            } 
+            break;
+        case 54: 
+            { 
+                int v = AudMixPceGetVolume() + dir * 2; 
+                if (v < 0) v = 0; 
+                if (v > 400) v = 400; 
+                AudMixPceGetVolume(v); 
+            } 
+            break;
+        case 55: 
+            SnesAudioSetRate(SNSPCDSP_SAMPLERATE); 
+            if (_pSystem == _pSnes && _AudMix) _AudMix->SetSampleRate(SNSPCDSP_SAMPLERATE); 
+            break;
+        case 56: 
+            PicoDriveBridge_SetAudioRate(_VideoCycleSystemAudioRate(PicoDriveBridge_GetAudioRate(), dir)); 
+            break;
+        case 57: 
+            PicoDriveBridge_SetSmsFm(!PicoDriveBridge_GetSmsFm()); 
+            break;
+        case 58: 
+            _VideoSetCdMusicEnabled(!g_CdMusicEnabled); 
+            break;
+        case 10: 
+            MassStorageSetEnabled(!MassStorageIsEnabled()); 
+            break;
+        case 11: 
+            HddSupportSetEnabled(!HddSupportIsEnabled()); 
+            break;
+        case 12: 
+            MmceSupportSetEnabled(!MmceSupportIsEnabled()); 
+            if (MmceSupportIsEnabled()) { BgmIOBegin(); MmceProbeAvailableSlots(); BgmIOEnd(); } 
+            break;
+        case 13: 
+            if (SmbSupportIsEnabled()) { BgmIOBegin(); SmbDisconnect(); BgmIOEnd(); SmbSupportSetEnabled(0); } 
+            else { SmbSupportSetEnabled(1); } 
+            break;
+        case 14: 
+            Mx4sioSetEnabled(!Mx4sioIsEnabled()); 
+            if (Mx4sioIsEnabled()) { BgmIOBegin(); Mx4sioLoadIfEnabled(); BgmIOEnd(); } 
+            break;
+        case 15: 
+            g_FakeSRAMSize = 0; 
+            break;
+        case 16: 
+            g_SnesForceRegion += (dir > 0) ? 1 : -1; 
+            if (g_SnesForceRegion > 3) g_SnesForceRegion = 0; 
+            if (g_SnesForceRegion < 0) g_SnesForceRegion = 3; 
+            PicoDriveBridge_SetRegion(g_SnesForceRegion); 
+            break;
+        case 17: 
+            g_FamicloneAudio = !g_FamicloneAudio; 
+            QuicknesBridge_SetDutySwap(g_FamicloneAudio ? true : false); 
+            break;
+        case 20: 
+        case 21: 
+        case 22: 
+        case 23: 
+        case 24: 
+            { 
+                static const Uint8 kLayers[5] = { 0x01, 0x02, 0x04, 0x08, 0x10 }; 
+                Uint8 uMask = SNPPURenderGetSoftwareLayerMask() ^ kLayers[m_iSelect - 20]; 
+                SNPPURenderSetSoftwareLayerMask(uMask); 
+            } 
+            break;
+        case 25: 
+            SNPPURenderSetSoftwareHackFlags(SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_COLOR_MATH_OFF); 
+            break;
+        case 26: 
+            SNPPURenderSetSoftwareHackFlags(SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_WINDOWS_OFF); 
+            break;
+        case 27: 
+            SNPPURenderSetSoftwareHackFlags(SNPPURenderGetSoftwareHackFlags() ^ SNPPU_HACK_MODE7_HALF); 
+            break;
+        case 28: 
+            { 
+                Int32 level = (Int32)SNPPURenderGetObjLimitLevel() + dir; 
+                if (level < 0) level = SNPPU_OBJ_LIMIT_NUM - 1; 
+                if (level >= SNPPU_OBJ_LIMIT_NUM) level = 0; 
+                SNPPURenderSetObjLimitLevel((Uint8)level); 
+            } 
+            break;
+        case 29: 
+            { 
+                Int32 mode = (Int32)SNPPURenderGetObjLimitMode() + dir; 
+                if (mode < 0) mode = SNPPU_OBJ_LIMIT_MODE_NUM - 1; 
+                if (mode >= SNPPU_OBJ_LIMIT_MODE_NUM) mode = 0; 
+                SNPPURenderSetObjLimitMode((Uint8)mode); 
+            } 
+            break;
+        case 31: 
+            _VideoApplyCompatFlags(g_VideoCompatFlags == VIDEO_COMPAT_ALL ? 0 : VIDEO_COMPAT_ALL); 
+            break;
+        case 32: 
+            _VideoApplyCompatFlags(g_VideoCompatFlags ^ VIDEO_COMPAT_GS_FULL_CACHE); 
+            break;
+        case 33: 
+            _VideoApplyCompatFlags(g_VideoCompatFlags ^ VIDEO_COMPAT_GIF_LONG_WAIT); 
+            break;
+        case 34: 
+            _VideoApplyCompatFlags(g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_SMALL_RPC); 
+            break;
+        case 35: 
+            _VideoApplyCompatFlags(g_VideoCompatFlags ^ VIDEO_COMPAT_AUDIO_DEEP_Q); 
+            break;
+        case 37: 
+            { 
+                int v = PicoDriveBridge_GetRenderingMode() + dir; 
+                if (v < 0) v = 2; 
+                if (v > 2) v = 0; 
+                PicoDriveBridge_SetRenderingMode(v); 
+            } 
+            break;
+        case 40: 
+            InputSnesMouseCycleModeDir(dir); 
+            break;
+        case 41: 
+            PicoDriveBridge_Set6Button(!PicoDriveBridge_Get6Button()); 
+            break;
+        case 42: 
+            MainLoopMdPadCycleLayoutDir(dir); 
+            break;
+        case 43: 
+            MainLoopTurboCycleSpeedDir(dir); 
+            break;
+        case 44: 
+            QuicknesBridge_SetLightGunEnabled(!QuicknesBridge_GetLightGunEnabled()); 
+            break;
+        }
+    }
+
+    if (trigger & PAD_SQUARE)
+    {
+        if (m_iSelect >= 50)      m_iSelect = 0;
+        else if (m_iSelect >= 40) m_iSelect = 31;
+        else if (m_iSelect >= 31) m_iSelect = 50;
+        else if (m_iSelect >= 20) m_iSelect = 40;
+        else if (m_iSelect >= 10) m_iSelect = 20;
+        else                      m_iSelect = 10;
+    }
+
+    if (trigger & (PAD_CROSS | PAD_START))
+    {
+        if (m_iSelect == 18) 
+        { 
+            if (Aud_IsInitialized()) Aud_Setvol(0); 
+            MainResetEmulator(); 
+        }
+        else if (m_iSelect == 19) 
+        { 
+            if (Aud_IsInitialized()) Aud_Setvol(0); 
+            ExecOSD(0, NULL); 
+        }
+        else 
+        {
+            VideoSettingsSave();
+        }
+    }
+}
