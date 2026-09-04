@@ -1,7 +1,178 @@
+/* gskit_backend.c
+ *
+ * gsKit-based replacement for the original direct-GS pipeline.
+ * See gskit_backend.h for the public API.
+ *
+ * Fase 1 GS->gsKit migration.
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <assert.h>
+
+#include <gsKit.h>
+#include <dmaKit.h>
+#include <gsInline.h>
+#include <gsToolkit.h>
+
+#include "types.h"
+#include "ps2dma.h"
+#include "gs.h"
+#include "gskit_backend.h"
+#include "gpprim.h"
+
+/* Legacy logical coordinate space the entire UI was written in. Both
+   supported outputs use a 640x480 physical framebuffer; 1080i is scaled by
+   the PCRTC into a centred 1280x960 4:3 window. */
+#define GSK_LOGICAL_W   256
+#define GSK_LOGICAL_H   240
+
+/* The original headers use these constants for mode / interlace. They
+   live in gs.h but we want this TU to compile without dragging the
+   register-level header in, so re-declare the values that match. */
+#ifndef GS_NTSC
+#define GS_NTSC          2
+#define GS_PAL           3
+#define GS_INTERLACE     1
+#define GS_NONINTERLACED  0
+#endif
+
+static GSGLOBAL *_pGsGlobal = NULL;
+static int       _gsk_initialised = 0;
+static int       _gsk_invalidate_pending = 0;
+
+/* AURORA_GS_LATENCY_V1
+ * Off by default: every caller that does not explicitly opt into the gameplay
+ * fast-clear path retains the exact historical full-frame clear. */
+static Bool      _gsk_gameplay_fast_clear = FALSE;
+/* AURORA_PD_DIRECT_MD_SKIP_CLEAR_V3_C_20260821 */
+static Bool      _gsk_gameplay_skip_clear = FALSE;
+
+/* Video mode + display offset (selectable in the Settings screen).
+   480i is the safe default and 1080i is the only alternate output. */
+int g_GskVideoMode = GSK_VIDMODE_480I;
+int g_GskDispOffX  = 0;
+int g_GskDispOffY  = 0;
+int g_GskOverscan  = 0;   /* 0..100 shrink of display area */
+int g_GskWidescreen = 0;  /* 0 = 4:3, 1 = safe 16:9 presentation */
+static int _gsk_vck         = 4;   /* display-offset VCK units            */
+static int _gsk_fb_width    = 640; /* active FB width                     */
+static int _gsk_fb_height   = 480; /* active FB height                    */
+static int _gsk_active_mode = GSK_VIDMODE_480I; /* mode the GS is in now   */
+static int _gsk_native240p_par = 0;
+static int _gsk_240p_fb_width = 256;
+static int _gsk_240p_window_x = -1;
+static int _gsk_240p_window_w = 0;
+static int _gsk_ui256_on_320fb = 0;
+static int _gsk_game_y_bias = 0;
+
+static int _gsk_base_dw, _gsk_base_dh, _gsk_base_magh, _gsk_base_magv;
+static int _gsk_base_startx, _gsk_base_starty;
+
+static void _GskApplyDisplay(void);   
+static void _GskApplyRenderTransform(void);
+
+static int _gsk_arg_w, _gsk_arg_h, _gsk_arg_dispx, _gsk_arg_dispy;
+static int _gsk_arg_psm, _gsk_arg_psmz, _gsk_arg_mode, _gsk_arg_interlace;
+
+GSGLOBAL *GSK_GetGlobal(void) { return _pGsGlobal; }
+
+void GSK_GetRefreshRate(Uint32 *pNumerator, Uint32 *pDenominator)
+{
+    if (!pNumerator || !pDenominator) return;
+    if (_pGsGlobal && _pGsGlobal->Mode == GS_MODE_PAL) {
+        *pNumerator = 50; *pDenominator = 1;
+    } else {
+        *pNumerator = 60000; *pDenominator = 1001;
+    }
+}
+
+static int _gsk_DetectTvMode(void)
+{
+    volatile char region = *(volatile char *)0x1FC7FF52;
+    return (region == 'E') ? GS_MODE_PAL : GS_MODE_NTSC;
+}
+
+void GSK_Init(int width, int height, int dispx, int dispy, int psm, int psmz, int mode, int interlace)
+{
+    if (_gsk_initialised) return;
+
+    _gsk_arg_w = width; _gsk_arg_h = height; _gsk_arg_dispx = dispx; _gsk_arg_dispy = dispy;
+    _gsk_arg_psm = psm; _gsk_arg_psmz = psmz; _gsk_arg_mode = mode; _gsk_arg_interlace = interlace;
+
+    _pGsGlobal = gsKit_init_global();
+    if (!_pGsGlobal) return;
+
+    _pGsGlobal->Mode      = 82; _pGsGlobal->Interlace = 0; _pGsGlobal->Field = 1;  
+    _gsk_fb_width         = 640; _gsk_fb_height = 480; _gsk_vck = 1;
+    g_GskVideoMode        = GSK_VIDMODE_1080I; 
+
+    (void)interlace;
+    switch (GSK_VIDMODE_1080I)
+    {
+    case GSK_VIDMODE_1080I:
+        _pGsGlobal->Mode      = GS_MODE_DTV_720P; 
+        _pGsGlobal->Interlace = GS_NONINTERLACED; _pGsGlobal->Field = GS_FRAME;         
+        _gsk_fb_width         = 1280; _gsk_fb_height = 720; _gsk_vck = 1;
+        break;
+
+    case GSK_VIDMODE_240P:
+        _pGsGlobal->Mode = _gsk_DetectTvMode(); _pGsGlobal->Interlace = GS_NONINTERLACED; _pGsGlobal->Field = GS_FRAME;
+        _gsk_fb_width = _gsk_240p_fb_width; _gsk_fb_height = 240; _gsk_vck = 4;
+        break;
+
+    case GSK_VIDMODE_480I:
+    default:
+        g_GskVideoMode = GSK_VIDMODE_480I; _pGsGlobal->Mode = _gsk_DetectTvMode();
+        _pGsGlobal->Interlace = GS_INTERLACED; _pGsGlobal->Field = GS_FIELD;
+        _gsk_fb_width = 640; _gsk_fb_height = 480; _gsk_vck = 4;
+        break;
+    }
+    _gsk_active_mode = g_GskVideoMode;
+
+    _pGsGlobal->Width = _gsk_fb_width; _pGsGlobal->Height = _gsk_fb_height;
+    _pGsGlobal->PSM = psm; _pGsGlobal->PSMZ = psmz;
+    _pGsGlobal->ZBuffering = GS_SETTING_OFF; _pGsGlobal->DoubleBuffering = GS_SETTING_ON;
+    _pGsGlobal->PrimAAEnable = GS_SETTING_OFF; _pGsGlobal->PrimAlphaEnable = GS_SETTING_ON;
+    _pGsGlobal->Dithering = GS_SETTING_OFF; _pGsGlobal->DrawOrder = GS_PER_OS;
+
+    dmaKit_init(D_CTRL_RELE_OFF, D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC, D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
+    dmaKit_chan_init(DMA_CHANNEL_GIF);
+
+    gsKit_vram_clear(_pGsGlobal);
+    gsKit_init_screen(_pGsGlobal);
+
+    if (_gsk_active_mode == GSK_VIDMODE_1080I)
+    {
+        const int aspect_dw = 1280;
+        _pGsGlobal->StartX += (_pGsGlobal->DW - aspect_dw) / 2;
+        _pGsGlobal->MagH = 1; _pGsGlobal->DW = aspect_dw;
+    }
+
+    _gsk_base_dw = _pGsGlobal->DW; _gsk_base_dh = _pGsGlobal->DH;
+    _gsk_base_magh = _pGsGlobal->MagH; _gsk_base_magv = _pGsGlobal->MagV;
+    _pGsGlobal->DW = 1280; _pGsGlobal->DH = 720; _pGsGlobal->MagH = 3; _pGsGlobal->MagV = 1;           
+
+    _gsk_initialised = 1;
+    _GskApplyDisplay();
+
+    (void)dispx; (void)dispy; (void)width; (void)height;
+
+    gsKit_set_test(_pGsGlobal, GS_ZTEST_OFF);
+    gsKit_set_clamp(_pGsGlobal, GS_CMODE_REPEAT);
+    gsKit_set_primalpha(_pGsGlobal, GS_SETREG_ALPHA(0, 1, 0, 1, 0x80), 0); 
+
+    gsKit_TexManager_init(_pGsGlobal);
+    gsKit_mode_switch(_pGsGlobal, GS_ONESHOT);
+
+    gsKit_clear(_pGsGlobal, 0); gsKit_queue_exec(_pGsGlobal); gsKit_finish(); gsKit_sync_flip(_pGsGlobal);
+    gsKit_clear(_pGsGlobal, 0); gsKit_queue_exec(_pGsGlobal); gsKit_finish(); gsKit_sync_flip(_pGsGlobal);
+}
 static void _GskApplyRenderTransform(void)
 {
     float sx = (float)_gsk_fb_width / (float)GSK_LOGICAL_W;
     float sy = (float)_gsk_fb_height / (float)GSK_LOGICAL_H;
+    if (_gsk_ui256_on_320fb && _gsk_active_mode == GSK_VIDMODE_240P && _gsk_fb_width == 320) sx = 1.0f;
     GPPrimSetTransform(sx, sy, 0.0f, 0.0f);
 }
 
@@ -56,11 +227,11 @@ static void _GskApplyDisplay(void)
     }
 
     gs->DW     = dw;
-    gs->DH     = dh;
+    gs->DH     = dh; 
     gs->MagH   = magh;
     gs->MagV   = _gsk_base_magv;
     gs->StartX = startx;
-    gs->StartY = starty;
+    gs->StartY = starty; 
 
     gsKit_set_display_offset(gs, g_GskDispOffX * _gsk_vck, g_GskDispOffY + _gsk_game_y_bias);
     _GskApplyRenderTransform();
