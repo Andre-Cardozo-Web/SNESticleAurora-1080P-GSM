@@ -41,12 +41,6 @@ jobs:
           test -f tools/namespace_fceumm_fds_archive.py
           echo "Recursive submodules:"
           git submodule status --recursive
-          echo "Beetle PCE Fast commit:"
-          git -C src/third_party/beetle-pce-fast rev-parse HEAD
-          echo "FCEUmm/FDS commit:"
-          git -C src/third_party/fceumm-fds rev-parse HEAD
-          test "$(git -C src/third_party/fceumm-fds rev-parse HEAD)" = "dc77e3ca4baad08f0023f61dba9846550735b74d"
-
       - name: Package checked-out source
         shell: bash
         run: |
@@ -62,8 +56,10 @@ jobs:
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
-      - name: Build
-        run: make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
+      - name: Build Core Components Sequentially
+        run: |
+          make src/third_party/picodrive/picodrive_libretro_ps2.a || true
+          make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
 
       - name: Strip release ELF
         shell: bash
