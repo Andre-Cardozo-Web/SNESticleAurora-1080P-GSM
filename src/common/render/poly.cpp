@@ -9,10 +9,10 @@ extern "C" {
 #include "gpprim.h"
 };
 
-static Float32 _Poly_Color;
+static Float32 _Poly_Color[4];
 static Uint32 _Poly_Color32;
 static Float32 _Poly_Z = 10.0f;
-static Vec2FT  _Poly_UV;
+static Vec2FT  _Poly_UV[2];
 static TextureT *_Poly_pTexture = NULL;
 static Uint32  _Poly_uMode;
 static Uint32  _Poly_uBlend = 0;
@@ -52,14 +52,14 @@ static void _PolyRect_tc(Float32 x0, Float32 y0, Float32 w, Float32 h)
         FIXED4(x0),
         FIXED4(y0),
 
-        FIXED4(_Poly_UV.vx) + 8,
-        FIXED4(_Poly_UV.vy) + 8,
+        FIXED4(_Poly_UV[0].vx) + 8,
+        FIXED4(_Poly_UV[0].vy) + 8,
 
         FIXED4(x1),
         FIXED4(y1),
 
-        FIXED4(_Poly_UV.vx) + 8,
-        FIXED4(_Poly_UV.vy) + 8,
+        FIXED4(_Poly_UV[1].vx) + 8,
+        FIXED4(_Poly_UV[1].vy) + 8,
 
         FIXED4(_Poly_Z),
 
