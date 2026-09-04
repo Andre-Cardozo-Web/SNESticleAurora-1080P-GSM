@@ -109,7 +109,6 @@ void GSK_Init(int width, int height,
 
     (void)interlace;
 
-    /* Sincronizacao e correcao do Framebuffer interno para 1080p nativo */
     switch (g_GskVideoMode)
     {
     case GSK_VIDMODE_1080I:
@@ -372,7 +371,7 @@ void GSK_SetOverscan(int percent)
 {
     if (percent < 0)   percent = 0;
     if (percent > 100) percent = 100;
-    g_GskOverscan = percent;
+    g_Overscan = percent;
     _GskApplyDisplay();
 }
 
@@ -497,7 +496,7 @@ void GSK_ResetFrame(void)
     *p_data++ = GS_REG_FRAME_1;
     *p_data++ = GS_SETREG_XYOFFSET_1(gs->OffsetX, gs->OffsetY);
     *p_data++ = GS_XYOFFSET_1;
-    *p_data++ = GS_SETREG_ALPHA(0, 1, 0, 1, current_alpha); // Correcao linear de brilho nos poligonos
+    *p_data++ = GS_SETREG_ALPHA(0, 1, 0, 1, current_alpha); // Correcao de brilho nos poligonos
     *p_data++ = GS_REG_ALPHA_1;
     *p_data++ = (u64)1;
     *p_data++ = (u64)GS_REG_COLCLAMP;
