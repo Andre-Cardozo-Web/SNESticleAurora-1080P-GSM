@@ -228,7 +228,7 @@ static void _GskApplyDisplay(void)
     startx = _gsk_base_startx;
     starty = _gsk_base_starty;
 
-    if (g_GskOverscan > 0)
+     if (g_GskOverscan > 0)
     {
         int sx = (_gsk_base_dw * g_GskOverscan) / 1300;
         int sy = (_gsk_base_dh * g_GskOverscan) / 1300;
@@ -237,6 +237,7 @@ static void _GskApplyDisplay(void)
         startx = _gsk_base_startx + sx;
         starty = _gsk_base_starty + sy;
     }
+
 
     if (_gsk_active_mode == GSK_VIDMODE_240P && _gsk_240p_window_x >= 0 && _gsk_240p_window_w > 0 && g_GskOverscan == 0)
     {
@@ -371,7 +372,7 @@ void GSK_SetOverscan(int percent)
 {
     if (percent < 0)   percent = 0;
     if (percent > 100) percent = 100;
-    g_Overscan = percent;
+    g_GskOverscan = percent;
     _GskApplyDisplay();
 }
 
