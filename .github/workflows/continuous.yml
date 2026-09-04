@@ -50,6 +50,7 @@ jobs:
           echo "FCEUmm/FDS commit:"
           git -C src/third_party/fceumm-fds rev-parse HEAD
           test "$(git -C src/third_party/fceumm-fds rev-parse HEAD)" = "dc77e3ca4baad08f0023f61dba9846550735b74d"
+
       - name: Package checked-out source
         shell: bash
         run: |
