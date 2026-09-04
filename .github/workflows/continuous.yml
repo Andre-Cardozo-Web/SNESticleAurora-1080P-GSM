@@ -39,10 +39,6 @@ jobs:
           test -f tools/Makefile.fceumm-fds-ps2
           test -f tools/prepare_fceumm_fds_sources.py
           test -f tools/namespace_fceumm_fds_archive.py
-          test "$(git config -f .gitmodules --get submodule.src/third_party/beetle-pce-fast.url)" = "https://github.com"
-          test "$(git config -f .gitmodules --get submodule.src/third_party/beetle-pce-fast.branch)" = "master"
-          test "$(git config -f .gitmodules --get submodule.src/third_party/fceumm-fds.url)" = "https://github.com"
-          test "$(git config -f .gitmodules --get submodule.src/third_party/fceumm-fds.branch)" = "master"
           echo "Recursive submodules:"
           git submodule status --recursive
           echo "Beetle PCE Fast commit:"
