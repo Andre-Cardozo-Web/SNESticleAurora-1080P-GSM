@@ -15,9 +15,6 @@
 #include <gsInline.h>
 #include <gsToolkit.h>
 
-// Biblioteca oficial para ler o controle do PS2 em tempo real
-#include <libpad.h>
-
 #include "types.h"
 #include "ps2dma.h"
 #include "gs.h"
@@ -45,8 +42,10 @@ static int       _gsk_initialised = 0;
 static int       _gsk_invalidate_pending = 0;
 
 // Variáveis personalizadas para o Ajustador Fantasma por Botões
-static int _my_gsk_brightness = 255;    // Inicia no brilho máximo padrão (0 a 255)
-static int _my_gsk_height_modifier = 0; // Guardará o esticamento vertical para sumir com as barras pretas
+static int _my_gsk_brightness = 255;      // Inicia no brilho máximo padrão (0 a 255)
+static int _my_gsk_height_modifier = 0;   // Modificador de tamanho vertical (Barras horizontais)
+static int _my_gsk_width_modifier = 0;    // Modificador de tamanho horizontal (Estouro lateral)
+static int _my_gsk_input_delay = 0;       // Trava de suavização de cliques do controle
 
 /* AURORA_GS_LATENCY_V1
  * Off by default: every caller that does not explicitly opt into the gameplay
@@ -235,12 +234,13 @@ static void _GskApplyDisplay(void)
         startx -= ((nm * src) - dw) / 2; dw = nm * src; magh = nm - 1;
     }
 
-    gs->DW     = dw;
-    gs->DH     = dh + _my_gsk_height_modifier; // Aplica o esticamento vertical escolhido
+    // Aplica as distorções personalizadas e mantém o jogo centralizado na TV
+    gs->DW     = dw + _my_gsk_width_modifier;   // Modificação Horizontal Dinâmica
+    gs->DH     = dh + _my_gsk_height_modifier;  // Modificação Vertical Dinâmica
     gs->MagH   = magh;
     gs->MagV   = _gsk_base_magv;
-    gs->StartX = startx;
-    gs->StartY = starty - (_my_gsk_height_modifier / 2); // Mantém o jogo centralizado na TV
+    gs->StartX = startx - (_my_gsk_width_modifier / 2); 
+    gs->StartY = starty - (_my_gsk_height_modifier / 2); 
 
     gsKit_set_display_offset(gs, g_GskDispOffX * _gsk_vck, g_GskDispOffY + _gsk_game_y_bias);
     _GskApplyRenderTransform();
@@ -281,23 +281,38 @@ void GSK_ResetFrame(void)
     if (!_gsk_initialised || !_pGsGlobal) return;
     gs = _pGsGlobal;
 
-    // Escaneia os botões do controle do PS2 em tempo real durante a execução
-    struct padButtonStatus buttons;
-    if (padRead(0, 0, &buttons) > 0) {
-        Uint32 objs = 0xFFFF ^ buttons.btns;
-        
-        // Brilho Inteligente (Segure L1 + Cima/Baixo)
-        if (objs & PAD_L1) {
-            if ((objs & PAD_UP) && _my_gsk_brightness < 255) _my_gsk_brightness += 15;
-            if ((objs & PAD_DOWN) && _my_gsk_brightness > 30) _my_gsk_brightness -= 15;
+    // Leitura direta na memória física das portas do Joystick do PS2
+    volatile u32 *pad_reg = (volatile u32 *)0x1F802004; 
+    u32 raw_buttons = *pad_reg; 
+
+    // Mapeamento dos bits físicos dos Analógicos e Direcionais
+    int btn_l3    = !(raw_buttons & (1 << 1));  // Clique firme no Analógico Esquerdo
+    int btn_r3    = !(raw_buttons & (1 << 2));  // Clique firme no Analógico Direito
+    int btn_sel   = !(raw_buttons & (1 << 0));  // Botão SELECT
+    int dpad_up   = !(raw_buttons & (1 << 4));  
+    int dpad_down = !(raw_buttons & (1 << 6));  
+
+    // Filtro de tempo para suavizar a velocidade dos cliques (Evita disparos frenéticos)
+    if (_my_gsk_input_delay > 0) {
+        _my_gsk_input_delay--;
+    } else {
+        // 1. AJUSTE DE BRILHO: Segurar L3 Apertado + Setas Cima / Baixo
+        if (btn_l3) {
+            if (dpad_up && _my_gsk_brightness < 255)  { _my_gsk_brightness += 10; _my_gsk_input_delay = 8; }
+            if (dpad_down && _my_gsk_brightness > 30) { _my_gsk_brightness -= 10; _my_gsk_input_delay = 8; }
             if (_my_gsk_brightness > 255) _my_gsk_brightness = 255;
         }
-        
-        // Ajuste de Esticamento Vertical (Segure L2 + Cima/Baixo para remover as barras)
-        if (objs & PAD_L2) {
-            if (objs & PAD_UP)   _my_gsk_height_modifier += 8; 
-            if (objs & PAD_DOWN) _my_gsk_height_modifier -= 8; 
-            _GskApplyDisplay(); // Reaplica as proporções esticadas imediatamente
+
+        // 2. AJUSTE VERTICAL (Sumir barras de cima/baixo): Segurar R3 Apertado + Setas Cima / Baixo
+        if (btn_r3) {
+            if (dpad_up)   { _my_gsk_height_modifier += 4; _GskApplyDisplay(); _my_gsk_input_delay = 5; }
+            if (dpad_down) { _my_gsk_height_modifier -= 4; _GskApplyDisplay(); _my_gsk_input_delay = 5; }
+        }
+
+        // 3. AJUSTE HORIZONTAL (Estouro lateral nas bordas): Segurar SELECT Apertado + Setas Cima / Baixo
+        if (btn_sel) {
+            if (dpad_up)   { _my_gsk_width_modifier += 4; _GskApplyDisplay(); _my_gsk_input_delay = 5; }
+            if (dpad_down) { _my_gsk_width_modifier -= 4; _GskApplyDisplay(); _my_gsk_input_delay = 5; }
         }
     }
 
@@ -308,7 +323,7 @@ void GSK_ResetFrame(void)
     *p_data++ = GS_SETREG_FRAME_1(gs->ScreenBuffer[gs->ActiveBuffer & 1] / 8192, gs->Width / 64, gs->PSM, 0); *p_data++ = GS_REG_FRAME_1;
     *p_data++ = GS_SETREG_XYOFFSET_1(gs->OffsetX, gs->OffsetY); *p_data++ = GS_XYOFFSET_1;
     
-    // Injeta a variável controlada pelo controle físico no registrador de brilho do PS2
+    // Injeta o valor do brilho dinâmico escolhido por você no chip gráfico do console
     *p_data++ = GS_SETREG_ALPHA(0, 1, 0, 1, _my_gsk_brightness); *p_data++ = GS_REG_ALPHA_1;
     *p_data++ = (u64)1; *p_data++ = (u64)GS_REG_COLCLAMP;
 
