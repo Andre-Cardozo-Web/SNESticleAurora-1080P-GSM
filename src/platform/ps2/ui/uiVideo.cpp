@@ -23,6 +23,7 @@ extern struct { int mode; } _VideoModes[];
 extern int _VideoCycleSystemAudioRate(int rate, int dir);
 extern void _VideoSetCdMusicEnabled(int enabled);
 extern void _VideoApplyCompatFlags(int flags);
+
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
     int dir = 0;
@@ -193,8 +194,8 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
             break;
         case 16: 
             g_SnesForceRegion += (dir > 0) ? 1 : -1; 
-            if (g_SnesForceRegion > 3) g_SnesForceRegion = 0; 
-            if (g_SnesForceRegion < 0) g_SnesForceRegion = 3; 
+            if (g_SnesForceRegion > 3) g_SnesForceRegion = (SnesForceRegionE)0; 
+            if (g_SnesForceRegion < 0) g_SnesForceRegion = (SnesForceRegionE)3; 
             PicoDriveBridge_SetRegion(g_SnesForceRegion); 
             break;
         case 17: 
