@@ -185,7 +185,7 @@ static void _GskApplyDisplay(void)
     dw = _gsk_base_dw; dh = _gsk_base_dh; magh = _gsk_base_magh;
     startx = _gsk_base_startx; starty = _gsk_base_starty;
 
-    if (g_Overscan > 0)
+    if (g_GskOverscan > 0)
     {
         int sx = (_gsk_base_dw * g_GskOverscan) / 1300; int sy = (_gsk_base_dh * g_GskOverscan) / 1300;
         dw = _gsk_base_dw - sx * 2; dh = _gsk_base_dh - sy * 2;
@@ -205,7 +205,7 @@ static void _GskApplyDisplay(void)
         GS_SET_DISPFB2(_pGsGlobal->ScreenBuffer[(_pGsGlobal->ActiveBuffer ^ 1) & 1] / 8192, _gsk_fb_width / 64, _pGsGlobal->PSM, _gsk_240p_window_x, 0);
     }
 
-    if (_gsk_native240p_par && _gsk_active_mode == GSK_VIDMODE_240P && g_Overscan == 0 && _gsk_base_magh > 0 && _gsk_240p_window_w <= 0)
+    if (_gsk_native240p_par && _gsk_active_mode == GSK_VIDMODE_240P && g_GskOverscan == 0 && _gsk_base_magh > 0 && _gsk_240p_window_w <= 0)
     {
         int old_m = _gsk_base_magh + 1; int new_m = old_m - 1; int new_dw = (_gsk_base_dw / old_m) * new_m;
         startx += (dw - new_dw) / 2 - ((_gsk_fb_width == 256 ? 2 : 0) * new_m);
