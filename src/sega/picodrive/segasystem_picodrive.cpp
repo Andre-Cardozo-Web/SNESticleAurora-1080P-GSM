@@ -39,7 +39,21 @@ void SegaSystem::SetRom(Emu::Rom *pRom)
         return;
     }
 
-    PicoDriveBridge_UnloadGame();
+    /* AURORA_PD_FRESH_CART_SESSION_V1_20260903
+     *
+     * PicoDrive's libretro retro_unload_game() is empty. Reusing one core
+     * lifetime across cartridge-to-cartridge switches can preserve libretro
+     * session/timing state between games. On PS2 that is especially risky for
+     * frame pacing: audio underruns are heard as brief glitches and delayed
+     * emulated frames are also perceived as controller input lag.
+     *
+     * Normal cartridge SetRom() therefore gets a true lifetime boundary.
+     * PicoDriveBridge_LoadGame() below reinitializes the core automatically.
+     *
+     * Keep Sega CD and Super Magic Drive media paths untouched: those do not
+     * use this normal cartridge SetRom() transition.
+     */
+    PicoDriveBridge_Shutdown();
 
     if (pRom != _pSegaRom)
     {
