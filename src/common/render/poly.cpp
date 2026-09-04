@@ -9,10 +9,10 @@ extern "C" {
 #include "gpprim.h"
 };
 
-static Float32 _Poly_Color[4];
+static Float32 _Poly_Color;
 static Uint32 _Poly_Color32;
 static Float32 _Poly_Z = 10.0f;
-static Vec2FT  _Poly_UV[2];
+static Vec2FT  _Poly_UV;
 static TextureT *_Poly_pTexture = NULL;
 static Uint32  _Poly_uMode;
 static Uint32  _Poly_uBlend = 0;
@@ -52,14 +52,14 @@ static void _PolyRect_tc(Float32 x0, Float32 y0, Float32 w, Float32 h)
         FIXED4(x0),
         FIXED4(y0),
 
-        FIXED4(_Poly_UV[0].vx) + 8,
-        FIXED4(_Poly_UV[0].vy) + 8,
+        FIXED4(_Poly_UV.vx) + 8,
+        FIXED4(_Poly_UV.vy) + 8,
 
         FIXED4(x1),
         FIXED4(y1),
 
-        FIXED4(_Poly_UV[1].vx) + 8,
-        FIXED4(_Poly_UV[1].vy) + 8,
+        FIXED4(_Poly_UV.vx) + 8,
+        FIXED4(_Poly_UV.vy) + 8,
 
         FIXED4(_Poly_Z),
 
@@ -75,7 +75,6 @@ void PolyInit()
 void PolyShutdown()
 {
 }
-
 void PolyTexture(TextureT *pTexture)
 {
     _Poly_pTexture = pTexture;
@@ -115,28 +114,28 @@ void PolyColor4f(Float32 r, Float32 g, Float32 b, Float32 a)
     uB = FIXED7(mod_b);
     uA = FIXED7(a);
 
-    _Poly_Color[0] = mod_r;
-    _Poly_Color[1] = mod_g;
-    _Poly_Color[2] = mod_b;
-    _Poly_Color[3] = a;
+    _Poly_Color = mod_r;
+    _Poly_Color = mod_g;
+    _Poly_Color = mod_b;
+    _Poly_Color = a;
 
     _Poly_Color32 = GS_SET_RGBA(uR, uG, uB, uA);
 }
 
 void PolyST(Float32 s0, Float32 t0, Float32 s1, Float32 t1)
 {
-    _Poly_UV[0].vx = s0 * _Poly_pTexture->uWidth;
-    _Poly_UV[0].vy = t0 * _Poly_pTexture->uHeight;
-    _Poly_UV[1].vx = s1 * _Poly_pTexture->uWidth;
-    _Poly_UV[1].vy = t1 * _Poly_pTexture->uHeight;
+    _Poly_UV.vx = s0 * _Poly_pTexture->uWidth;
+    _Poly_UV.vy = t0 * _Poly_pTexture->uHeight;
+    _Poly_UV.vx = s1 * _Poly_pTexture->uWidth;
+    _Poly_UV.vy = t1 * _Poly_pTexture->uHeight;
 }
 
 void PolyUV(Int32 u0, Int32 v0, Int32 w, Int32 h)
 {
-    _Poly_UV[0].vx = ((Float32)u0);
-    _Poly_UV[0].vy = ((Float32)v0);
-    _Poly_UV[1].vx = ((Float32)(u0+w));
-    _Poly_UV[1].vy = ((Float32)(v0+h));
+    _Poly_UV.vx = ((Float32)u0);
+    _Poly_UV.vy = ((Float32)v0);
+    _Poly_UV.vx = ((Float32)(u0+w));
+    _Poly_UV.vy = ((Float32)(v0+h));
 }
 
 void PolyMode(Uint32 uMode)
