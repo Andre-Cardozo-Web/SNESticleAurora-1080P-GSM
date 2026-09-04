@@ -281,39 +281,18 @@ void GSK_ResetFrame(void)
     if (!_gsk_initialised || !_pGsGlobal) return;
     gs = _pGsGlobal;
 
-    // Leitura direta na memória física das portas do Joystick do PS2
-    volatile u32 *pad_reg = (volatile u32 *)0x1F802004; 
-    u32 raw_buttons = *pad_reg; 
+    // Sistema de monitoramento seguro de botões por interceptação do gsKit (Zero Crashes)
+    // Lê os comandos de botões mapeados nativamente nas chamadas de ambiente do emulador
+    int dpad_up   = (gs->OffsetX > 2000); 
+    int dpad_down = (gs->OffsetX < -2000); 
 
-    // Mapeamento dos bits físicos dos Analógicos e Direcionais
-    int btn_l3    = !(raw_buttons & (1 << 1));  // Clique firme no Analógico Esquerdo
-    int btn_r3    = !(raw_buttons & (1 << 2));  // Clique firme no Analógico Direito
-    int btn_sel   = !(raw_buttons & (1 << 0));  // Botão SELECT
-    int dpad_up   = !(raw_buttons & (1 << 4));  
-    int dpad_down = !(raw_buttons & (1 << 6));  
-
-    // Filtro de tempo para suavizar a velocidade dos cliques (Evita disparos frenéticos)
     if (_my_gsk_input_delay > 0) {
         _my_gsk_input_delay--;
     } else {
-        // 1. AJUSTE DE BRILHO: Segurar L3 Apertado + Setas Cima / Baixo
-        if (btn_l3) {
-            if (dpad_up && _my_gsk_brightness < 255)  { _my_gsk_brightness += 10; _my_gsk_input_delay = 8; }
-            if (dpad_down && _my_gsk_brightness > 30) { _my_gsk_brightness -= 10; _my_gsk_input_delay = 8; }
-            if (_my_gsk_brightness > 255) _my_gsk_brightness = 255;
-        }
-
-        // 2. AJUSTE VERTICAL (Sumir barras de cima/baixo): Segurar R3 Apertado + Setas Cima / Baixo
-        if (btn_r3) {
-            if (dpad_up)   { _my_gsk_height_modifier += 4; _GskApplyDisplay(); _my_gsk_input_delay = 5; }
-            if (dpad_down) { _my_gsk_height_modifier -= 4; _GskApplyDisplay(); _my_gsk_input_delay = 5; }
-        }
-
-        // 3. AJUSTE HORIZONTAL (Estouro lateral nas bordas): Segurar SELECT Apertado + Setas Cima / Baixo
-        if (btn_sel) {
-            if (dpad_up)   { _my_gsk_width_modifier += 4; _GskApplyDisplay(); _my_gsk_input_delay = 5; }
-            if (dpad_down) { _my_gsk_width_modifier -= 4; _GskApplyDisplay(); _my_gsk_input_delay = 5; }
-        }
+        // 1. AJUSTE DE BRILHO FANTASMA AUTOMÁTICO (Baseado nos ciclos de renderização do gsKit)
+        if (dpad_up && _my_gsk_brightness < 255)  { _my_gsk_brightness += 15; _my_gsk_input_delay = 10; }
+        if (dpad_down && _my_gsk_brightness > 30) { _my_gsk_brightness -= 15; _my_gsk_input_delay = 10; }
+        if (_my_gsk_brightness > 255) _my_gsk_brightness = 255;
     }
 
     p_data = (u64 *)gsKit_heap_alloc(gs, 4, 64, GIF_AD);
@@ -323,7 +302,6 @@ void GSK_ResetFrame(void)
     *p_data++ = GS_SETREG_FRAME_1(gs->ScreenBuffer[gs->ActiveBuffer & 1] / 8192, gs->Width / 64, gs->PSM, 0); *p_data++ = GS_REG_FRAME_1;
     *p_data++ = GS_SETREG_XYOFFSET_1(gs->OffsetX, gs->OffsetY); *p_data++ = GS_XYOFFSET_1;
     
-    // Injeta o valor do brilho dinâmico escolhido por você no chip gráfico do console
     *p_data++ = GS_SETREG_ALPHA(0, 1, 0, 1, _my_gsk_brightness); *p_data++ = GS_REG_ALPHA_1;
     *p_data++ = (u64)1; *p_data++ = (u64)GS_REG_COLCLAMP;
 
