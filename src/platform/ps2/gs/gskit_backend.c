@@ -167,7 +167,7 @@ void GSK_Init(int width, int height,
     {
    case GSK_VIDMODE_1080I:
         // Forçando o hardware do PS2 a emitir o 1080p Progressivo real com brilho total
-        _pGsGlobal->Mode      = 82;               // Força o ID do 1080p_60Hz nativo
+        _pGsGlobal->Mode      = GS_MODE_DTV_1080P; // Força o 1080p Progressivo real do PS2
         _pGsGlobal->Interlace = GS_NONINTERLACED; // Garante o modo Progressivo (P) para não escurecer
         _pGsGlobal->Field     = GS_FRAME;         // Força renderização em quadro cheio (Frame)
         _gsk_fb_width         = 1920;             // Altera a largura interna para 1080p real
@@ -270,8 +270,8 @@ void GSK_Init(int width, int height,
        // Correção de proporção e esticamento para 1080p Progressivo real
     _pGsGlobal->DW = 1920;          // Preenche toda a largura da sua TV
     _pGsGlobal->DH = 1080;          // Preenche toda a altura da sua TV
-    _pGsGlobal->MagH = 1;           // Ajusta o multiplicador horizontal para não achatar
-    _pGsGlobal->MagV = 0;           // Ajusta o multiplicador vertical para imagem cristalina
+    _pGsGlobal->MagH = 3;           // Multiplicador correto para 720p expandido
+    _pGsGlobal->MagV = 1;
     
     // Injeção de Brilho Máximo (Anula a tela escura no modo progressivo)
     _pGsGlobal->PrimAlphaEnable = GS_SETTING_OFF; // Desativa filtros de sombreamento antigos
