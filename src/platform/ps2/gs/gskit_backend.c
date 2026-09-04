@@ -41,12 +41,6 @@ static GSGLOBAL *_pGsGlobal = NULL;
 static int       _gsk_initialised = 0;
 static int       _gsk_invalidate_pending = 0;
 
-// Variáveis personalizadas para o Ajustador Fantasma por Botões
-static int _my_gsk_brightness = 255;      // Inicia no brilho máximo padrão (0 a 255)
-static int _my_gsk_height_modifier = 0;   // Modificador de tamanho vertical (Barras horizontais)
-static int _my_gsk_width_modifier = 0;    // Modificador de tamanho horizontal (Estouro lateral)
-static int _my_gsk_input_delay = 0;       // Trava de suavização de cliques do controle
-
 /* AURORA_GS_LATENCY_V1
  * Off by default: every caller that does not explicitly opt into the gameplay
  * fast-clear path retains the exact historical full-frame clear. */
@@ -117,6 +111,7 @@ void GSK_Init(int width, int height, int dispx, int dispy, int psm, int psmz, in
     switch (GSK_VIDMODE_1080I)
     {
     case GSK_VIDMODE_1080I:
+        // Configura o sinal progressivo fixo na memória gráfica
         _pGsGlobal->Mode      = GS_MODE_DTV_720P; 
         _pGsGlobal->Interlace = GS_NONINTERLACED; _pGsGlobal->Field = GS_FRAME;         
         _gsk_fb_width         = 1280; _gsk_fb_height = 720; _gsk_vck = 1;
@@ -159,6 +154,7 @@ void GSK_Init(int width, int height, int dispx, int dispy, int psm, int psmz, in
     _gsk_base_magh = _pGsGlobal->MagH; _gsk_base_magv = _pGsGlobal->MagV;
     _gsk_base_startx = _pGsGlobal->StartX; _gsk_base_starty = _pGsGlobal->StartY;
 
+    // Forçamento de proporção expandida inicial
     _pGsGlobal->DW = 1280; _pGsGlobal->DH = 720; _pGsGlobal->MagH = 3; _pGsGlobal->MagV = 1;           
 
     _gsk_initialised = 1;
@@ -234,13 +230,12 @@ static void _GskApplyDisplay(void)
         startx -= ((nm * src) - dw) / 2; dw = nm * src; magh = nm - 1;
     }
 
-    // Aplica as distorções personalizadas e mantém o jogo centralizado na TV
-    gs->DW     = dw + _my_gsk_width_modifier;   // Modificação Horizontal Dinâmica
-    gs->DH     = dh + _my_gsk_height_modifier;  // Modificação Vertical Dinâmica
+    gs->DW     = dw;
+    gs->DH     = dh; 
     gs->MagH   = magh;
     gs->MagV   = _gsk_base_magv;
-    gs->StartX = startx - (_my_gsk_width_modifier / 2); 
-    gs->StartY = starty - (_my_gsk_height_modifier / 2); 
+    gs->StartX = startx;
+    gs->StartY = starty; 
 
     gsKit_set_display_offset(gs, g_GskDispOffX * _gsk_vck, g_GskDispOffY + _gsk_game_y_bias);
     _GskApplyRenderTransform();
@@ -281,20 +276,6 @@ void GSK_ResetFrame(void)
     if (!_gsk_initialised || !_pGsGlobal) return;
     gs = _pGsGlobal;
 
-    // Sistema de monitoramento seguro de botões por interceptação do gsKit (Zero Crashes)
-    // Lê os comandos de botões mapeados nativamente nas chamadas de ambiente do emulador
-    int dpad_up   = (gs->OffsetX > 2000); 
-    int dpad_down = (gs->OffsetX < -2000); 
-
-    if (_my_gsk_input_delay > 0) {
-        _my_gsk_input_delay--;
-    } else {
-        // 1. AJUSTE DE BRILHO FANTASMA AUTOMÁTICO (Baseado nos ciclos de renderização do gsKit)
-        if (dpad_up && _my_gsk_brightness < 255)  { _my_gsk_brightness += 15; _my_gsk_input_delay = 10; }
-        if (dpad_down && _my_gsk_brightness > 30) { _my_gsk_brightness -= 15; _my_gsk_input_delay = 10; }
-        if (_my_gsk_brightness > 255) _my_gsk_brightness = 255;
-    }
-
     p_data = (u64 *)gsKit_heap_alloc(gs, 4, 64, GIF_AD);
     if (!p_data) return;
 
@@ -302,7 +283,8 @@ void GSK_ResetFrame(void)
     *p_data++ = GS_SETREG_FRAME_1(gs->ScreenBuffer[gs->ActiveBuffer & 1] / 8192, gs->Width / 64, gs->PSM, 0); *p_data++ = GS_REG_FRAME_1;
     *p_data++ = GS_SETREG_XYOFFSET_1(gs->OffsetX, gs->OffsetY); *p_data++ = GS_XYOFFSET_1;
     
-    *p_data++ = GS_SETREG_ALPHA(0, 1, 0, 1, _my_gsk_brightness); *p_data++ = GS_REG_ALPHA_1;
+    // Injeta brilho máximo e contraste estavel de fábrica
+    *p_data++ = GS_SETREG_ALPHA(0, 1, 0, 1, 255); *p_data++ = GS_REG_ALPHA_1;
     *p_data++ = (u64)1; *p_data++ = (u64)GS_REG_COLCLAMP;
 
     {
