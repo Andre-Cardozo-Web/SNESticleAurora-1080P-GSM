@@ -20,18 +20,11 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Patch PicoDrive Duplicate Macro
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "[ PATCH ] Modificando o arquivo bloqueado famec.c..."
-          sed -i 's/#define FAMEC_NO_GOTOS/\/\/ #define FAMEC_NO_GOTOS/g' src/third_party/picodrive/cpu/fame/famec.c
-
+      # AURORA_CONTINUOUS_BEETLE_PCE_FAST_V14
       - name: Verify required emulator submodules
         shell: bash
         run: |
           set -euo pipefail
-
           test -f src/third_party/quicknes/Makefile
           test -f src/third_party/picodrive/Makefile
           test -f src/third_party/beetle-pce-fast/Makefile
@@ -43,13 +36,10 @@ jobs:
           test -f tools/Makefile.fceumm-fds-ps2
           test -f tools/prepare_fceumm_fds_sources.py
           test -f tools/namespace_fceumm_fds_archive.py
-
           test "$(git config -f .gitmodules --get submodule.src/third_party/beetle-pce-fast.url)" = "https://github.com"
           test "$(git config -f .gitmodules --get submodule.src/third_party/beetle-pce-fast.branch)" = "master"
-
           test "$(git config -f .gitmodules --get submodule.src/third_party/fceumm-fds.url)" = "https://github.com"
           test "$(git config -f .gitmodules --get submodule.src/third_party/fceumm-fds.branch)" = "master"
-
           echo "Recursive submodules:"
           git submodule status --recursive
           echo "Beetle PCE Fast commit:"
@@ -58,22 +48,22 @@ jobs:
           git -C src/third_party/fceumm-fds rev-parse HEAD
           test "$(git -C src/third_party/fceumm-fds rev-parse HEAD)" = "dc77e3ca4baad08f0023f61dba9846550735b74d"
 
+      - name: Patch PicoDrive Redundancy Before Pack
+        run: "sed -i 's/#define FAMEC_NO_GOTOS/\\/\\/ #define FAMEC_NO_GOTOS/g' src/third_party/picodrive/cpu/fame/famec.c"
+
+      # AURORA_CONTINUOUS_PICODRIVE_SOURCE_V4_2
       - name: Package checked-out source
         shell: bash
         run: |
           set -euo pipefail
-
           short_sha="${GITHUB_SHA:0:12}"
           source_name="SNESticleAurora-${short_sha}-source.tar.gz"
-
           {
             printf 'SNESticleAurora commit: %s\n' "$GITHUB_SHA"
             printf 'Recursive submodules:\n'
             git submodule status --recursive
           } > /tmp/SOURCE-MANIFEST.txt
-
           tar --exclude='./.git' --exclude='*/.git' --exclude='./build' --exclude='./.aurora_picodrive_stage2_backup' -czf "/tmp/${source_name}" -C "$GITHUB_WORKSPACE" . -C /tmp SOURCE-MANIFEST.txt
-
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
@@ -107,7 +97,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           gh release delete continuous --cleanup-tag --yes || true
-
           gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" /tmp/SOURCE-MANIFEST.txt /tmp/SHA256SUMS.txt LICENSE BRANDING.md LICENSES/PicoDrive-COPYING.txt LICENSES/QuickNES-GPL-2.0.txt LICENSES/Beetle-PCE-Fast-GPL-2.0.txt LICENSES/FCEUmm-GPL-2.0.txt THIRD_PARTY.md --target "$GITHUB_SHA" --title "Continuous Build" --prerelease --notes-file CONTINUOUS_RELEASE.md
