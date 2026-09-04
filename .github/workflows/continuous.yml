@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "[ PATCH ] Removendo macro duplicada do famec.c..."
+          echo "[ PATCH ] Modificando o arquivo bloqueado famec.c..."
           sed -i 's/#define FAMEC_NO_GOTOS/\/\/ #define FAMEC_NO_GOTOS/g' src/third_party/picodrive/cpu/fame/famec.c
 
       - name: Verify required emulator submodules
@@ -57,6 +57,7 @@ jobs:
           echo "FCEUmm/FDS commit:"
           git -C src/third_party/fceumm-fds rev-parse HEAD
           test "$(git -C src/third_party/fceumm-fds rev-parse HEAD)" = "dc77e3ca4baad08f0023f61dba9846550735b74d"
+
       - name: Package checked-out source
         shell: bash
         run: |
@@ -71,14 +72,7 @@ jobs:
             git submodule status --recursive
           } > /tmp/SOURCE-MANIFEST.txt
 
-          tar \
-            --exclude='./.git' \
-            --exclude='*/.git' \
-            --exclude='./build' \
-            --exclude='./.aurora_picodrive_stage2_backup' \
-            -czf "/tmp/${source_name}" \
-            -C "$GITHUB_WORKSPACE" . \
-            -C /tmp SOURCE-MANIFEST.txt
+          tar --exclude='./.git' --exclude='*/.git' --exclude='./build' --exclude='./.aurora_picodrive_stage2_backup' -czf "/tmp/${source_name}" -C "$GITHUB_WORKSPACE" . -C /tmp SOURCE-MANIFEST.txt
 
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
@@ -116,19 +110,4 @@ jobs:
 
           gh release delete continuous --cleanup-tag --yes || true
 
-          gh release create continuous \
-            build/SNESticle.elf \
-            "$AURORA_SOURCE_BUNDLE" \
-            /tmp/SOURCE-MANIFEST.txt \
-            /tmp/SHA256SUMS.txt \
-            LICENSE \
-            BRANDING.md \
-            LICENSES/PicoDrive-COPYING.txt \
-            LICENSES/QuickNES-GPL-2.0.txt \
-            LICENSES/Beetle-PCE-Fast-GPL-2.0.txt \
-            LICENSES/FCEUmm-GPL-2.0.txt \
-            THIRD_PARTY.md \
-            --target "$GITHUB_SHA" \
-            --title "Continuous Build" \
-            --prerelease \
-            --notes-file CONTINUOUS_RELEASE.md
+          gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" /tmp/SOURCE-MANIFEST.txt /tmp/SHA256SUMS.txt LICENSE BRANDING.md LICENSES/PicoDrive-COPYING.txt LICENSES/QuickNES-GPL-2.0.txt LICENSES/Beetle-PCE-Fast-GPL-2.0.txt LICENSES/FCEUmm-GPL-2.0.txt THIRD_PARTY.md --target "$GITHUB_SHA" --title "Continuous Build" --prerelease --notes-file CONTINUOUS_RELEASE.md
