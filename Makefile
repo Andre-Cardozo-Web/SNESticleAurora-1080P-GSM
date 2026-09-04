@@ -115,6 +115,7 @@ PICODRIVE_PS2_SAFE_FLAGS := -G0
 # time. The macros affect PicoDrive only because they are injected through the
 # PicoDrive sub-make CC command.
 PICODRIVE_OPLL_NS_FLAGS := \
+	-UFAMEC_NO_GOTOS \
 	-DOPLL_RateConv_new=PD_OPLL_RateConv_new \
 	-DOPLL_RateConv_reset=PD_OPLL_RateConv_reset \
 	-DOPLL_RateConv_putData=PD_OPLL_RateConv_putData \
