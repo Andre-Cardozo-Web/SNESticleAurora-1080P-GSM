@@ -141,7 +141,10 @@ void GSK_Init(int width, int height,
     _gsk_arg_psm   = psm;    _gsk_arg_psmz     = psmz;
     _gsk_arg_mode  = mode;   _gsk_arg_interlace = interlace;
 
-    _pGsGlobal = gsKit_init_global();
+    gsGlobal->Mode = 82; // 82 é o número secreto que força o PS2 a rodar em 1080p a 60Hz
+    gsGlobal->Interlace = 0; // 0 desativa o entrelaçado e força o modo Progressivo (P)
+    gsGlobal->Field = 1; // Ajusta o quadro de imagem corretamente para TVs modernas
+
     if (!_pGsGlobal) {
         return;
     }
