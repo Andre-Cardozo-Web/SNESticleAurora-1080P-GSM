@@ -165,16 +165,14 @@ void GSK_Init(int width, int height,
     switch (GSK_VIDMODE_1080I)
 
     {
-   case GSK_VIDMODE_1080I:
-        // Forçando o hardware do PS2 a emitir o 1080p Progressivo real com brilho total
-        _pGsGlobal->Mode      = GS_MODE_DTV_1080P; // Força o 1080p Progressivo real do PS2
-        _pGsGlobal->Interlace = GS_NONINTERLACED; // Garante o modo Progressivo (P) para não escurecer
-        _pGsGlobal->Field     = GS_FRAME;         // Força renderização em quadro cheio (Frame)
-        _gsk_fb_width         = 1920;             // Altera a largura interna para 1080p real
-        _gsk_fb_height        = 1080;             // Altera a altura interna para 1080p real
+       case GSK_VIDMODE_1080I:
+        _pGsGlobal->Mode      = GS_MODE_DTV_720P; // Força o 720p Progressivo real do PS2
+        _pGsGlobal->Interlace = GS_NONINTERLACED; 
+        _pGsGlobal->Field     = GS_FRAME;         
+        _gsk_fb_width         = 1280;             // Largura correta do 720p
+        _gsk_fb_height        = 720;              // Altura correta do 720p
         _gsk_vck              = 1;
         break;
-
 
     case GSK_VIDMODE_240P:
         /*
@@ -260,22 +258,13 @@ void GSK_Init(int width, int height,
 
     /* Capture gsKit's computed DISPLAY params as the baseline for the
        overscan / widescreen transform. */
-    _gsk_base_dw     = _pGsGlobal->DW;
-    _gsk_base_dh     = _pGsGlobal->DH;
-    _gsk_base_magh   = _pGsGlobal->MagH;
-    _gsk_base_magv   = _pGsGlobal->MagV;
-    _gsk_base_startx = _pGsGlobal->StartX;
-    _gsk_base_starty = _pGsGlobal->StartY;
-
-       // Correção de proporção e esticamento para 1080p Progressivo real
-    _pGsGlobal->DW = 1920;          // Preenche toda a largura da sua TV
-    _pGsGlobal->DH = 1080;          // Preenche toda a altura da sua TV
+        _pGsGlobal->DW = 1280;          
+    _pGsGlobal->DH = 720;           
     _pGsGlobal->MagH = 3;           // Multiplicador correto para 720p expandido
-    _pGsGlobal->MagV = 1;
+    _pGsGlobal->MagV = 1;           
     
-    // Injeção de Brilho Máximo (Anula a tela escura no modo progressivo)
-    _pGsGlobal->PrimAlphaEnable = GS_SETTING_OFF; // Desativa filtros de sombreamento antigos
-    gsKit_set_primalpha(_pGsGlobal, GS_SETREG_ALPHA(0, 1, 0, 1, 0xFF), 0); // Brilho e contraste no máximo
+    _pGsGlobal->PrimAlphaEnable = GS_SETTING_OFF; 
+    gsKit_set_primalpha(_pGsGlobal, GS_SETREG_ALPHA(0, 1, 0, 1, 0xFF), 0); 
 
     /* GSK_Init is now usable. Mark it before applying the saved display
        transform: _GskApplyDisplay used to return early here, so offsets,
