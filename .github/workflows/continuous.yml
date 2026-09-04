@@ -20,7 +20,10 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      # AURORA_CONTINUOUS_BEETLE_PCE_FAST_V14
+      - name: Patch PicoDrive Duplicate Macro
+        run: |
+          sed -i 's/#define FAMEC_NO_GOTOS/\/\/ #define FAMEC_NO_GOTOS/g' src/third_party/picodrive/cpu/fame/famec.c
+
       - name: Verify required emulator submodules
         shell: bash
         run: |
@@ -48,10 +51,6 @@ jobs:
           git -C src/third_party/fceumm-fds rev-parse HEAD
           test "$(git -C src/third_party/fceumm-fds rev-parse HEAD)" = "dc77e3ca4baad08f0023f61dba9846550735b74d"
 
-      - name: Patch PicoDrive Redundancy Before Pack
-        run: "sed -i 's/#define FAMEC_NO_GOTOS/\\/\\/ #define FAMEC_NO_GOTOS/g' src/third_party/picodrive/cpu/fame/famec.c"
-
-      # AURORA_CONTINUOUS_PICODRIVE_SOURCE_V4_2
       - name: Package checked-out source
         shell: bash
         run: |
