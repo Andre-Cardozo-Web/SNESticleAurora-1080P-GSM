@@ -88,7 +88,6 @@ static int _gsk_DetectTvMode(void)
     volatile char region = *(volatile char *)0x1FC7FF52;
     return (region == 'E') ? GS_MODE_PAL : GS_MODE_NTSC;
 }
-
 void GSK_Init(int width, int height,
               int dispx, int dispy,
               int psm, int psmz,
@@ -110,7 +109,7 @@ void GSK_Init(int width, int height,
 
     (void)interlace;
 
-    /* Sincronização e correção real do Framebuffer interno em 1080p */
+    /* Sincronizacao e correcao do Framebuffer interno para 1080p nativo */
     switch (g_GskVideoMode)
     {
     case GSK_VIDMODE_1080I:
@@ -202,7 +201,6 @@ void GSK_Init(int width, int height,
     gsKit_finish();
     gsKit_sync_flip(_pGsGlobal);
 }
-
 static void _GskApplyRenderTransform(void)
 {
     float sx = (float)_gsk_fb_width / (float)GSK_LOGICAL_W;
@@ -353,7 +351,127 @@ void GSK_SetDisplayOffset(int x, int y)
     g_GskDispOffY = y;
     _GskApplyDisplay();
 }
-void GSK_SetGameplayYOffsetBias(int y){if (_gsk_game_y_bias == y) return;_gsk_game_y_bias = y;_GskApplyDisplay();}void GSK_SetUi256On320Framebuffer(int on){on = on ? 1 : 0;if (_gsk_ui256_on_320fb == on) return;_gsk_ui256_on_320fb = on;_GskApplyDisplay();}void GSK_Set240pFramebufferWidth(int width){if (width != 256 && width != 320 && width != 512) width = 256;_gsk_240p_fb_width = width;}int GSK_Get240pFramebufferWidth(void){return _gsk_240p_fb_width;}int GSK_GetActiveFramebufferWidth(void){if (!_gsk_initialised || !_pGsGlobal) return 0;return _pGsGlobal->Width;}void GSK_GetPceDebugState(int *fbw, int *winw, int *dw, int *magh, int *startx, int *overscan, int *wide){if (fbw)      *fbw = _gsk_fb_width;if (winw)     *winw = _gsk_240p_window_w;if (dw)       *dw = _pGsGlobal ? _pGsGlobal->DW : -1;if (magh)     *magh = _pGsGlobal ? _pGsGlobal->MagH : -1;if (startx)   *startx = _pGsGlobal ? _pGsGlobal->StartX : -1;if (overscan) *overscan = g_GskOverscan;if (wide)     *wide = g_GskWidescreen;}void GSK_SetOverscan(int percent){if (percent < 0)   percent = 0;if (percent > 100) percent = 100;g_Overscan = percent;_GskApplyDisplay();}void GSK_SetWidescreen(int on){g_GskWidescreen = on ? 1 : 0;_GskApplyDisplay();}void GSK_SetNative240pPar(int on){on = on ? 1 : 0;if (_gsk_native240p_par == on) return;_gsk_native240p_par = on;_GskApplyDisplay();}void GSK_ReinitVideo(void){GSGLOBAL *oldGlobal;if (!_gsk_initialised || !_pGsGlobal) {return;}GSK_DrainAndWait();oldGlobal = _pGsGlobal;_gsk_initialised = 0;_pGsGlobal = NULL;gsKit_deinit_global(oldGlobal);GSK_Init(_gsk_arg_w, _gsk_arg_h, _gsk_arg_dispx, _gsk_arg_dispy,_gsk_arg_psm, _gsk_arg_psmz, _gsk_arg_mode, _gsk_arg_interlace);}int GSK_GetActiveVideoMode(void){return _gsk_active_mode;}Uint32 GSK_VramAllocTBP(Uint32 nBytes){u32 addr;if (!_gsk_initialised || !_pGsGlobal) {return 0;}addr = gsKit_vram_alloc(_pGsGlobal, nBytes, GSKIT_ALLOC_USERBUFFER);if (addr == GSKIT_ALLOC_ERROR) {return 0;}return addr / 256;}void GSK_DrainAndWait(void){if (!_gsk_initialised) {return;}gsKit_queue_exec(_pGsGlobal);gsKit_finish();DmaSyncGIF();}void GSK_DrainForRawGif(void){if (!_gsk_initialised) {return;}gsKit_queue_exec(_pGsGlobal);DmaSyncGIF();}void GSK_SetGameplayFastClear(Bool enabled){_gsk_gameplay_fast_clear = enabled ? TRUE : FALSE;}void GSK_SetGameplaySkipClear(Bool enabled){_gsk_gameplay_skip_clear = enabled ? TRUE : FALSE;}void GSK_FlushFrame(void){if (!_gsk_initialised) {return;}gsKit_queue_exec(_pGsGlobal);gsKit_finish();}void GSK_SyncFlip(void){if (!_gsk_initialised) {return;}gsKit_sync_flip(_pGsGlobal);if (_gsk_240p_window_x >= 0)_GskApplyDisplay();void GSK_ResetFrame(void)
+void GSK_SetGameplayYOffsetBias(int y) { if (_gsk_game_y_bias == y) return; _gsk_game_y_bias = y; _GskApplyDisplay(); }
+void GSK_SetUi256On320Framebuffer(int on) { on = on ? 1 : 0; if (_gsk_ui256_on_320fb == on) return; _gsk_ui256_on_320fb = on; _GskApplyDisplay(); }
+void GSK_Set240pFramebufferWidth(int width) { if (width != 256 && width != 320 && width != 512) width = 256; _gsk_240p_fb_width = width; }
+int GSK_Get240pFramebufferWidth(void) { return _gsk_240p_fb_width; }
+int GSK_GetActiveFramebufferWidth(void) { if (!_gsk_initialised || !_pGsGlobal) return 0; return _pGsGlobal->Width; }
+
+void GSK_GetPceDebugState(int *fbw, int *winw, int *dw, int *magh, int *startx, int *overscan, int *wide)
+{
+    if (fbw)      *fbw = _gsk_fb_width;
+    if (winw)     *winw = _gsk_240p_window_w;
+    if (dw)       *dw = _pGsGlobal ? _pGsGlobal->DW : -1;
+    if (magh)     *magh = _pGsGlobal ? _pGsGlobal->MagH : -1;
+    if (startx)   *startx = _pGsGlobal ? _pGsGlobal->StartX : -1;
+    if (overscan) *overscan = g_GskOverscan;
+    if (wide)     *wide = g_GskWidescreen;
+}
+
+void GSK_SetOverscan(int percent)
+{
+    if (percent < 0)   percent = 0;
+    if (percent > 100) percent = 100;
+    g_GskOverscan = percent;
+    _GskApplyDisplay();
+}
+
+void GSK_SetWidescreen(int on)
+{
+    g_GskWidescreen = on ? 1 : 0;
+    _GskApplyDisplay();
+}
+
+void GSK_SetNative240pPar(int on)
+{
+    on = on ? 1 : 0;
+    if (_gsk_native240p_par == on) return;
+    _gsk_native240p_par = on;
+    _GskApplyDisplay();
+}
+
+void GSK_ReinitVideo(void)
+{
+    GSGLOBAL *oldGlobal;
+    if (!_gsk_initialised || !_pGsGlobal) {
+        return;
+    }
+    GSK_DrainAndWait();
+    oldGlobal = _pGsGlobal;
+    _gsk_initialised = 0;
+    _pGsGlobal = NULL;
+    gsKit_deinit_global(oldGlobal);
+    GSK_Init(_gsk_arg_w, _gsk_arg_h, _gsk_arg_dispx, _gsk_arg_dispy,
+             _gsk_arg_psm, _gsk_arg_psmz, _gsk_arg_mode, _gsk_arg_interlace);
+}
+
+int GSK_GetActiveVideoMode(void)
+{
+    return _gsk_active_mode;
+}
+
+Uint32 GSK_VramAllocTBP(Uint32 nBytes)
+{
+    u32 addr;
+    if (!_gsk_initialised || !_pGsGlobal) {
+        return 0;
+    }
+    addr = gsKit_vram_alloc(_pGsGlobal, nBytes, GSKIT_ALLOC_USERBUFFER);
+    if (addr == GSKIT_ALLOC_ERROR) {
+        return 0;
+    }
+    return addr / 256;
+}
+
+void GSK_DrainAndWait(void)
+{
+    if (!_gsk_initialised) {
+        return;
+    }
+    gsKit_queue_exec(_pGsGlobal);
+    gsKit_finish();
+    DmaSyncGIF();
+}
+
+void GSK_DrainForRawGif(void)
+{
+    if (!_gsk_initialised) {
+        return;
+    }
+    gsKit_queue_exec(_pGsGlobal);
+    DmaSyncGIF();
+}
+
+void GSK_SetGameplayFastClear(Bool enabled)
+{
+    _gsk_gameplay_fast_clear = enabled ? TRUE : FALSE;
+}
+
+void GSK_SetGameplaySkipClear(Bool enabled)
+{
+    _gsk_gameplay_skip_clear = enabled ? TRUE : FALSE;
+}
+
+void GSK_FlushFrame(void)
+{
+    if (!_gsk_initialised) {
+        return;
+    }
+    gsKit_queue_exec(_pGsGlobal);
+    gsKit_finish();
+}
+
+void GSK_SyncFlip(void)
+{
+    if (!_gsk_initialised) {
+        return;
+    }
+    gsKit_sync_flip(_pGsGlobal);
+    if (_gsk_240p_window_x >= 0)
+        _GskApplyDisplay();
+}
+
+void GSK_ResetFrame(void)
 {
     GSGLOBAL *gs;
     u64 *p_data;
@@ -411,3 +529,24 @@ void GSK_SetGameplayYOffsetBias(int y){if (_gsk_game_y_bias == y) return;_gsk_ga
     }
 }
 
+void GSK_InvalidateTextureCache(void)
+{
+    _gsk_invalidate_pending = 1;
+}
+
+int GSK_TakeInvalidatePending(void)
+{
+    int p = _gsk_invalidate_pending;
+    _gsk_invalidate_pending = 0;
+    return p;
+}
+
+void *GSK_AsUncached(void *ptr)
+{
+    Uint32 addr = (Uint32)ptr;
+    if (!addr) {
+        return ptr;
+    }
+    assert((addr & 0xF0000000) == 0 && "GSK_AsUncached: pointer is outside physical RAM (<256MB)");
+    return (void *)(addr | 0x20000000);
+}
