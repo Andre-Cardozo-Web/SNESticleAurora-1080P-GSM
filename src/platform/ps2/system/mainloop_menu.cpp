@@ -36,7 +36,6 @@ int _MainLoopMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
                 snprintf(mc1, sizeof(mc1), "mc1:/%s", exploit_dir);
 
                 ppInstallFiles[0] = (char *)"BOOT.ELF";
-                
                 switch (Parm1)
                 {
                     case 0:
@@ -118,7 +117,7 @@ void MainLoopMenuInput(Uint32 buttons, Uint32 trigger, Int32 dir)
                 int v = AudMixGameGetVolume() + dir * 2;
                 if (v < 0) v = 0;
                 if (v > 400) v = 400;
-                AudMixGameSetVolume(v);
+                AudMixGameGetVolume(v);
             }
             break;
         case 53:
