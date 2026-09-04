@@ -163,14 +163,6 @@ void GSK_Init(int width, int height,
     gsKit_vram_clear(_pGsGlobal);
     gsKit_init_screen(_pGsGlobal);
 
-    if (_gsk_active_mode == GSK_VIDMODE_1080I)
-    {
-        const int aspect_dw = 1280;
-        _pGsGlobal->StartX += (_pGsGlobal->DW - aspect_dw) / 2;
-        _pGsGlobal->MagH = 1;
-        _pGsGlobal->DW   = aspect_dw;
-    }
-
     _gsk_base_dw     = _pGsGlobal->DW;
     _gsk_base_dh     = _pGsGlobal->DH;
     _gsk_base_magh   = _pGsGlobal->MagH;
@@ -228,7 +220,7 @@ static void _GskApplyDisplay(void)
     startx = _gsk_base_startx;
     starty = _gsk_base_starty;
 
-     if (g_GskOverscan > 0)
+    if (g_GskOverscan > 0)
     {
         int sx = (_gsk_base_dw * g_GskOverscan) / 1300;
         int sy = (_gsk_base_dh * g_GskOverscan) / 1300;
@@ -237,7 +229,6 @@ static void _GskApplyDisplay(void)
         startx = _gsk_base_startx + sx;
         starty = _gsk_base_starty + sy;
     }
-
 
     if (_gsk_active_mode == GSK_VIDMODE_240P && _gsk_240p_window_x >= 0 && _gsk_240p_window_w > 0 && g_GskOverscan == 0)
     {
@@ -407,7 +398,7 @@ void GSK_ReinitVideo(void)
 
 int GSK_GetActiveVideoMode(void)
 {
-    return _gsk_active_mode;
+    return _pGsGlobal ? _gsk_active_mode : GSK_VIDMODE_480I;
 }
 
 Uint32 GSK_VramAllocTBP(Uint32 nBytes)
