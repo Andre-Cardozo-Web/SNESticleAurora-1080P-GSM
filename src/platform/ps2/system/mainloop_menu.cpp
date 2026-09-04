@@ -264,17 +264,18 @@ void MainLoopMenuInput(Uint32 buttons, Uint32 trigger, Int32 dir)
         case 41:
             PicoDriveBridge_Set6Button(!PicoDriveBridge_Get6Button());
             break;
-        case 42:
-            MainLoopMdPadCycleLayoutDir(dir);
+                case 42: 
+            MainLoopMdPadCycleLayoutDir(dir); 
             break;
-        case 43:
-            MainLoopTurboCycleSpeedDir(dir);
+        case 43: 
+            MainLoopTurboCycleSpeedDir(dir); 
             break;
-        case 44:
-            QuicknesBridge_SetLightGunEnabled(!QuicknesBridge_GetLightGunEnabled());
+        case 44: 
+            QuicknesBridge_SetLightGunEnabled(!QuicknesBridge_GetLightGunEnabled()); 
             break;
         }
     }
+
     if (trigger & PAD_SQUARE)
     {
         if (m_iSelect >= 50)      m_iSelect = 0;
@@ -287,17 +288,17 @@ void MainLoopMenuInput(Uint32 buttons, Uint32 trigger, Int32 dir)
 
     if (trigger & (PAD_CROSS | PAD_START))
     {
-        if (m_iSelect == 18)
-        {
-            if (Aud_IsInitialized()) Aud_Setvol(0);
-            MainResetEmulator();
+        if (m_iSelect == 18) 
+        { 
+            if (Aud_IsInitialized()) Aud_Setvol(0); 
+            MainResetEmulator(); 
         }
-        else if (m_iSelect == 19)
-        {
-            if (Aud_IsInitialized()) Aud_Setvol(0);
-            ExecOSD(0, NULL);
+        else if (m_iSelect == 19) 
+        { 
+            if (Aud_IsInitialized()) Aud_Setvol(0); 
+            ExecOSD(0, NULL); 
         }
-        else
+        else 
         {
             VideoSettingsSave();
         }
