@@ -162,17 +162,39 @@ void GSK_Init(int width, int height,
     /* The legacy caller still passes its old interlace argument, but the
        backend now exposes interlaced modes only and owns this choice. */
     (void)interlace;
-        switch (GSK_VIDMODE_1080I)
+            /* Força o hardware a aceitar as resoluções da interface em sincronia com o GS */
+    switch (g_GskVideoMode)
     {
     case GSK_VIDMODE_1080I:
-        // Forçando o hardware do PS2 a emitir o 1080p Progressivo real
-        _pGsGlobal->Mode      = 82;               // Força o ID do 1080p_60Hz
-        _pGsGlobal->Interlace = GS_NONINTERLACED; // Altera de GS_INTERLACED para NONINTERLACED (Progressivo)
-        _pGsGlobal->Field     = GS_FRAME;         // Altera de GS_FIELD para GS_FRAME (Obrigatório para Progressivo)
-        _gsk_fb_width         = 640;
-        _gsk_fb_height        = 480;
+        /* Ativando o modo 1080p real a 60Hz progressivo sem distorção de cores */
+        _pGsGlobal->Mode      = 82;               
+        _pGsGlobal->Interlace = GS_NONINTERLACED; 
+        _pGsGlobal->Field     = GS_FRAME;         
+        _gsk_fb_width         = 1280; /* Expande o tamanho interno para sumir com o travamento */
+        _gsk_fb_height        = 720;  /* Ajusta a viewport interna para o preenchimento correto */
         _gsk_vck              = 1;
         break;
+
+    case GSK_VIDMODE_240P:
+        _pGsGlobal->Mode      = _gsk_DetectTvMode();
+        _pGsGlobal->Interlace = GS_NONINTERLACED;
+        _pGsGlobal->Field     = GS_FRAME;
+        _gsk_fb_width         = _gsk_240p_fb_width;
+        _gsk_fb_height        = 240;
+        _gsk_vck              = 4;
+        break;
+
+    case GSK_VIDMODE_480I:
+    default:
+        g_GskVideoMode        = GSK_VIDMODE_480I;
+        _pGsGlobal->Mode      = _gsk_DetectTvMode();
+        _pGsGlobal->Interlace = GS_INTERLACED;
+        _pGsGlobal->Field     = GS_FIELD;
+        _gsk_fb_width         = 640;
+        _gsk_fb_height        = 480;
+        _gsk_vck              = 4;
+        break;
+    }
 
     case GSK_VIDMODE_240P:
         /*
@@ -829,6 +851,29 @@ void GSK_ResetFrame(void)
     p_data = (u64 *)gsKit_heap_alloc(gs, 4, 64, GIF_AD);
     if (!p_data) {
         return;
+
+           /* Aplica o ganho de brilho dinâmico vindo da barra uiVideo.cpp */
+    extern float VideoGetBrightnessFactor(void);
+    float f_gain = VideoGetBrightnessFactor();
+
+    *p_data++ = GIF_TAG_AD(4);
+    *p_data++ = GIF_AD;
+    *p_data++ = GS_SETREG_FRAME_1(
+        gs->ScreenBuffer[gs->ActiveBuffer & 1] / 8192,
+        gs->Width / 64,
+        gs->PSM,
+        0);
+    *p_data++ = GS_REG_FRAME_1;
+    *p_data++ = GS_SETREG_XYOFFSET_1(gs->OffsetX, gs->OffsetY);
+    *p_data++ = GS_XYOFFSET_1;
+    
+    /* Injeta o ganho linear nos multiplicadores alfa para clarear os polígonos escuros */
+    unsigned char current_alpha = (unsigned char)(0x80 * f_gain > 0xFF ? 0xFF : 0x80 * f_gain);
+    *p_data++ = GS_SETREG_ALPHA(0, 1, 0, 1, current_alpha);
+    *p_data++ = GS_REG_ALPHA_1;
+    
+    *p_data++ = (u64)1;
+    *p_data++ = (u64)GS_REG_COLCLAMP;
     }
 
     *p_data++ = GIF_TAG_AD(4);
