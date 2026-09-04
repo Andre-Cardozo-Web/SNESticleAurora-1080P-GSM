@@ -103,31 +103,15 @@ void GSK_Init(int width, int height, int dispx, int dispy, int psm, int psmz, in
     _pGsGlobal = gsKit_init_global();
     if (!_pGsGlobal) return;
 
-    _pGsGlobal->Mode      = 82; _pGsGlobal->Interlace = 0; _pGsGlobal->Field = 1;  
-    _gsk_fb_width         = 640; _gsk_fb_height = 480; _gsk_vck = 1;
+    // Desatravado: Configura o hardware do PS2 diretamente no ID de 720p Progressivo
+    _pGsGlobal->Mode      = GS_MODE_DTV_720P; 
+    _pGsGlobal->Interlace = GS_NONINTERLACED; 
+    _pGsGlobal->Field     = GS_FRAME;  
+    _gsk_fb_width         = 1280; 
+    _gsk_fb_height        = 720; 
+    _gsk_vck              = 1;
     g_GskVideoMode        = GSK_VIDMODE_1080I; 
 
-    (void)interlace;
-    switch (GSK_VIDMODE_1080I)
-    {
-    case GSK_VIDMODE_1080I:
-        _pGsGlobal->Mode      = GS_MODE_DTV_720P; 
-        _pGsGlobal->Interlace = GS_NONINTERLACED; _pGsGlobal->Field = GS_FRAME;         
-        _gsk_fb_width         = 1280; _gsk_fb_height = 720; _gsk_vck = 1;
-        break;
-
-    case GSK_VIDMODE_240P:
-        _pGsGlobal->Mode = _gsk_DetectTvMode(); _pGsGlobal->Interlace = GS_NONINTERLACED; _pGsGlobal->Field = GS_FRAME;
-        _gsk_fb_width = _gsk_240p_fb_width; _gsk_fb_height = 240; _gsk_vck = 4;
-        break;
-
-    case GSK_VIDMODE_480I:
-    default:
-        g_GskVideoMode = GSK_VIDMODE_480I; _pGsGlobal->Mode = _gsk_DetectTvMode();
-        _pGsGlobal->Interlace = GS_INTERLACED; _pGsGlobal->Field = GS_FIELD;
-        _gsk_fb_width = 640; _gsk_fb_height = 480; _gsk_vck = 4;
-        break;
-    }
     _gsk_active_mode = g_GskVideoMode;
 
     _pGsGlobal->Width = _gsk_fb_width; _pGsGlobal->Height = _gsk_fb_height;
@@ -142,15 +126,10 @@ void GSK_Init(int width, int height, int dispx, int dispy, int psm, int psmz, in
     gsKit_vram_clear(_pGsGlobal);
     gsKit_init_screen(_pGsGlobal);
 
-    if (_gsk_active_mode == GSK_VIDMODE_1080I)
-    {
-        const int aspect_dw = 1280;
-        _pGsGlobal->StartX += (_pGsGlobal->DW - aspect_dw) / 2;
-        _pGsGlobal->MagH = 1; _pGsGlobal->DW = aspect_dw;
-    }
-
     _gsk_base_dw = _pGsGlobal->DW; _gsk_base_dh = _pGsGlobal->DH;
     _gsk_base_magh = _pGsGlobal->MagH; _gsk_base_magv = _pGsGlobal->MagV;
+    _gsk_base_startx = _pGsGlobal->StartX; _gsk_base_starty = _pGsGlobal->StartY;
+
     _pGsGlobal->DW = 1280; _pGsGlobal->DH = 720; _pGsGlobal->MagH = 3; _pGsGlobal->MagV = 1;           
 
     _gsk_initialised = 1;
@@ -172,7 +151,6 @@ static void _GskApplyRenderTransform(void)
 {
     float sx = (float)_gsk_fb_width / (float)GSK_LOGICAL_W;
     float sy = (float)_gsk_fb_height / (float)GSK_LOGICAL_H;
-    if (_gsk_ui256_on_320fb && _gsk_active_mode == GSK_VIDMODE_240P && _gsk_fb_width == 320) sx = 1.0f;
     GPPrimSetTransform(sx, sy, 0.0f, 0.0f);
 }
 
@@ -192,33 +170,6 @@ static void _GskApplyDisplay(void)
         startx = _gsk_base_startx + sx; starty = _gsk_base_starty + sy;
     }
 
-    if (_gsk_active_mode == GSK_VIDMODE_240P && _gsk_240p_window_x >= 0 && _gsk_240p_window_w > 0 && g_GskOverscan == 0)
-    {
-        const int winw = _gsk_240p_window_w;
-        if (winw == 256) {
-            int cMag = 10; startx += (dw - (winw * cMag)) / 2; dw = winw * cMag; magh = cMag - 1;
-        } else if (winw == 352) {
-            int cMag = 7; startx += (dw - (winw * cMag)) / 2; dw = winw * cMag; magh = cMag - 1;
-        } else if (winw == 512) {
-            int cMag = 5; startx += (dw - (winw * cMag)) / 2; dw = winw * cMag; magh = cMag - 1;
-        }
-        GS_SET_DISPFB2(_pGsGlobal->ScreenBuffer[(_pGsGlobal->ActiveBuffer ^ 1) & 1] / 8192, _gsk_fb_width / 64, _pGsGlobal->PSM, _gsk_240p_window_x, 0);
-    }
-
-    if (_gsk_native240p_par && _gsk_active_mode == GSK_VIDMODE_240P && g_GskOverscan == 0 && _gsk_base_magh > 0 && _gsk_240p_window_w <= 0)
-    {
-        int old_m = _gsk_base_magh + 1; int new_m = old_m - 1; int new_dw = (_gsk_base_dw / old_m) * new_m;
-        startx += (dw - new_dw) / 2 - ((_gsk_fb_width == 256 ? 2 : 0) * new_m);
-        dw = new_dw; magh = new_m - 1; starty += 1;
-    }
-
-    if (_gsk_ui256_on_320fb && _gsk_active_mode == GSK_VIDMODE_240P && _gsk_fb_width == 320)
-    {
-        int nm = (dw + (GSK_LOGICAL_W / 2)) / GSK_LOGICAL_W;
-        if (nm < 1) nm = 1; if (nm > 16) nm = 16;
-        dw = GSK_LOGICAL_W * nm; startx += (dw - (GSK_LOGICAL_W * nm)) / 2; magh = nm - 1;
-    }
-
     if (g_GskWidescreen)
     {
         int m1 = magh + 1; int src = m1 ? dw / m1 : dw; int nm = (m1 * 4 + 1) / 3;
@@ -227,11 +178,11 @@ static void _GskApplyDisplay(void)
     }
 
     gs->DW     = dw;
-    gs->DH     = dh; 
+    gs->DH     = dh;
     gs->MagH   = magh;
     gs->MagV   = _gsk_base_magv;
     gs->StartX = startx;
-    gs->StartY = starty; 
+    gs->StartY = starty;
 
     gsKit_set_display_offset(gs, g_GskDispOffX * _gsk_vck, g_GskDispOffY + _gsk_game_y_bias);
     _GskApplyRenderTransform();
@@ -264,7 +215,7 @@ void GSK_DrainForRawGif(void) { if (!_gsk_initialised) return; gsKit_queue_exec(
 void GSK_SetGameplayFastClear(Bool e) { _gsk_gameplay_fast_clear = e ? TRUE : FALSE; }
 void GSK_SetGameplaySkipClear(Bool e) { _gsk_gameplay_skip_clear = e ? TRUE : FALSE; }
 void GSK_FlushFrame(void) { if (!_gsk_initialised) return; gsKit_queue_exec(_pGsGlobal); gsKit_finish(); }
-void GSK_SyncFlip(void) { if (!_gsk_initialised) return; gsKit_sync_flip(_pGsGlobal); if (_gsk_240p_window_x >= 0) _GskApplyDisplay(); }
+void GSK_SyncFlip(void) { if (!_gsk_initialised) return; gsKit_sync_flip(_pGsGlobal); }
 
 void GSK_ResetFrame(void)
 {
@@ -285,7 +236,7 @@ void GSK_ResetFrame(void)
         u8 previous_alpha = gs->PrimAlphaEnable; gs->PrimAlphaEnable = GS_SETTING_OFF;
         if (!_gsk_gameplay_skip_clear) {
             if (_gsk_gameplay_fast_clear && gs->Width > 0 && gs->Height > 0) {
-                int rows = (_gsk_active_mode == GSK_VIDMODE_240P) ? 8 : 16;
+                int rows = 16;
                 int c_rows = (gs->Height < rows) ? gs->Height : rows;
                 gsKit_set_scissor(gs, GS_SETREG_SCISSOR(0, gs->Width - 1, 0, c_rows - 1));
                 gsKit_clear(gs, 0);
