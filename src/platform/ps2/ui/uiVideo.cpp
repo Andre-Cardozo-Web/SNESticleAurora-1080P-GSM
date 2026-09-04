@@ -9,13 +9,13 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Cabeçalhos adicionados para as pontes de áudio, emuladores e sistemas
-#include "mainloop_exec.h"
-#include "picodrive_bridge.h"
-#include "quicknes_bridge.h"
+// Caminhos corrigidos subindo um nível para localizar a pasta system
+#include "../system/mainloop_exec.h"
+#include "../system/picodrive_bridge.h"
+#include "../system/quicknes_bridge.h"
+#include "../system/snes_bridge.h"
+#include "../system/storage.h"
 #include "audmixbuffer.h"
-#include "snes_bridge.h"
-#include "storage.h"
 
 // Declarações internas da tela de vídeo do emulador
 extern int _VideoModeIndex(int mode);
@@ -208,7 +208,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         case 23: 
         case 24: 
             { 
-                static const Uint8 kLayers[5] = { 0x01, 0x02, 0x04, 0x08, 0x10 }; 
+                static const Uint8 kLayers = { 0x01, 0x02, 0x04, 0x08, 0x10 }; 
                 Uint8 uMask = SNPPURenderGetSoftwareLayerMask() ^ kLayers[m_iSelect - 20]; 
                 SNPPURenderSetSoftwareLayerMask(uMask); 
             } 
