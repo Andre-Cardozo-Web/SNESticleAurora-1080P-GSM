@@ -21,26 +21,39 @@ extern "C" int list_title_db(char *pPath);
 
 int _MainLoopMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
 {
-        switch (Type)
+    switch (Type)
+    {
+        case 1:
+            {
+                char mc0[1024];
+                char mc1[1024];
+                char exploit_dir[256];
+                char **ppInstallFiles = _MainLoop_pInstallFiles;
+
+                _GetExploitDir(exploit_dir);
+
+                snprintf(mc0, sizeof(mc0), "mc0:/%s", exploit_dir);
+                snprintf(mc1, sizeof(mc1), "mc1:/%s", exploit_dir);
+
+                ppInstallFiles[0] = (char *)"BOOT.ELF";
+                
+                switch (Parm1)
+                {
+                    case 0:
+                        break;
+                }
+            }
+            break;
+    }
+    return 0;
+}
+void MainLoopMenuInput(Uint32 buttons, Uint32 trigger, Int32 dir)
+{
+    if (dir != 0)
+    {
+        switch (m_iSelect)
         {
-                case 1:
-                        {
-                                char mc0[1024];
-                                char mc1[1024];
-                                char exploit_dir[256];
-                                char **ppInstallFiles = _MainLoop_pInstallFiles;
-
-                                _GetExploitDir(exploit_dir);
-
-                                snprintf(mc0, sizeof(mc0), "mc0:/%s", exploit_dir);
-                                snprintf(mc1, sizeof(mc1), "mc1:/%s", exploit_dir);
-
-                                // hack in default destination name for elf
-                                ppInstallFiles[0] = (char *)"BOOT.ELF"; // dest
-                                switch (Parm1)
-                                {
-#if 0
-                                                case 0:
+        case 0:
             g_GskVideoMode += dir;
             if (g_GskVideoMode < 0) g_GskVideoMode = 2;
             if (g_GskVideoMode > 2) g_GskVideoMode = 0;
@@ -105,7 +118,7 @@ int _MainLoopMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
                 int v = AudMixGameGetVolume() + dir * 2;
                 if (v < 0) v = 0;
                 if (v > 400) v = 400;
-                AudMixGameGetVolume(v);
+                AudMixGameSetVolume(v);
             }
             break;
         case 53:
@@ -113,7 +126,7 @@ int _MainLoopMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
                 int v = AudMixSegaGetVolume() + dir * 2;
                 if (v < 0) v = 0;
                 if (v > 400) v = 400;
-                AudMixSegaGetVolume(v);
+                AudMixSegaSetVolume(v);
             }
             break;
         case 54:
@@ -263,7 +276,6 @@ int _MainLoopMenuEvent(Uint32 Type, Uint32 Parm1, void *Parm2)
             break;
         }
     }
-
     if (trigger & PAD_SQUARE)
     {
         if (m_iSelect >= 50)      m_iSelect = 0;
