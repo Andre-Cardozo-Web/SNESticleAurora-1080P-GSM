@@ -154,7 +154,7 @@ void GSK_Init(int width, int height, int dispx, int dispy, int psm, int psmz, in
     _gsk_base_magh = _pGsGlobal->MagH; _gsk_base_magv = _pGsGlobal->MagV;
     _gsk_base_startx = _pGsGlobal->StartX; _gsk_base_starty = _pGsGlobal->StartY;
 
-    // Forçamento de proporção expandida inicial
+    // Forçamento e calibração das dimensões básicas
     _pGsGlobal->DW = 1280; _pGsGlobal->DH = 720; _pGsGlobal->MagH = 3; _pGsGlobal->MagV = 1;           
 
     _gsk_initialised = 1;
@@ -230,12 +230,15 @@ static void _GskApplyDisplay(void)
         startx -= ((nm * src) - dw) / 2; dw = nm * src; magh = nm - 1;
     }
 
+    // AJUSTE AUTOMÁTICO DO ACHATAMENTO MASSIVO VERTICAL:
+    // Eleva a altura física (DH) de 720 para 940 e joga o início (StartY) mais para cima
+    // Isso estica a imagem do Super Nintendo eliminando as duas barras pretas gigantes!
     gs->DW     = dw;
-    gs->DH     = dh; 
+    gs->DH     = 940;              // Força o preenchimento vertical total
     gs->MagH   = magh;
-    gs->MagV   = _gsk_base_magv;
+    gs->MagV   = 2;                // Aumenta o multiplicador de zoom vertical de fábrica
     gs->StartX = startx;
-    gs->StartY = starty; 
+    gs->StartY = starty - 110;     // Centraliza a tela esticada perfeitamente na TV
 
     gsKit_set_display_offset(gs, g_GskDispOffX * _gsk_vck, g_GskDispOffY + _gsk_game_y_bias);
     _GskApplyRenderTransform();
@@ -283,7 +286,7 @@ void GSK_ResetFrame(void)
     *p_data++ = GS_SETREG_FRAME_1(gs->ScreenBuffer[gs->ActiveBuffer & 1] / 8192, gs->Width / 64, gs->PSM, 0); *p_data++ = GS_REG_FRAME_1;
     *p_data++ = GS_SETREG_XYOFFSET_1(gs->OffsetX, gs->OffsetY); *p_data++ = GS_XYOFFSET_1;
     
-    // Injeta brilho máximo e contraste estavel de fábrica
+    // Injeta brilho máximo e contraste estável fixos de fábrica
     *p_data++ = GS_SETREG_ALPHA(0, 1, 0, 1, 255); *p_data++ = GS_REG_ALPHA_1;
     *p_data++ = (u64)1; *p_data++ = (u64)GS_REG_COLCLAMP;
 
