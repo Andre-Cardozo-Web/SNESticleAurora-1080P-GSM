@@ -73,12 +73,17 @@ jobs:
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
           
-          echo "=== Reconstruindo mainloop_state.cpp com mapeamento estrito de tipo size_t ==="
+          echo "=== Reconstruindo mainloop_state.cpp com mapeamento mestre de tipos POSIX e C ==="
           cat << 'EOF' > "$TARGET_FILE"
-          // Carrega as referências de tipos básicas do compilador base do GCC
+          // Carrega size_t, ptrdiff_t e wchar_t de forma nativa e unificada pelo GCC interno
           #include <stddef.h>
 
-          // Definição nativa de fallback para que tanto stdio.h quanto string.h encontrem size_t sob qualquer condição
+          // Definições explícitas de fallback de tipos de sistema para satisfazer a Newlib e impedir erros no sys/_types.h
+          #ifndef _WINT_T
+          #define _WINT_T
+          typedef unsigned int wint_t;
+          #endif
+
           #ifndef _SIZE_T
           #define _SIZE_T
           typedef decltype(sizeof(0)) size_t;
@@ -158,7 +163,7 @@ jobs:
               return "mc0: pronto";
           }
           EOF
-          echo "=== Arquivo substituído e compatibilizado de forma global para size_t ==="
+          echo "=== Arquivo substituído e compatibilizado contra colisões no sys/_types.h ==="
 
       - name: Build Core Components Sequentially
         shell: bash
