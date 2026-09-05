@@ -59,7 +59,7 @@ jobs:
           pwd
           ls -la
           echo "====================================="
-          make -f Makefile -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 all
+          make -f "$GITHUB_WORKSPACE/Makefile" AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 all
 
       - name: Strip release ELF
         shell: bash
