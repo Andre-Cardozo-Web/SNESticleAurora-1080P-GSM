@@ -50,12 +50,9 @@ jobs:
           test -f tools/Makefile.fceumm-fds-ps2
           test -f tools/prepare_fceumm_fds_sources.py
           test -f tools/namespace_fceumm_fds_archive.py
-          echo "Recursive submodules:"
-          git submodule status --recursive
-
-      - name: Package checked-out source
-        shell: bash
-        run: |
+              - name: Package checked-out source
+            shell: bash
+    run: |
           set -euo pipefail
           short_sha="${GITHUB_SHA:0:12}"
           source_name="SNESticleAurora-${short_sha}-source.tar.gz"
@@ -64,6 +61,15 @@ jobs:
             printf 'Recursive submodules:\n'
             git submodule status --recursive
           } > /tmp/SOURCE-MANIFEST.txt
+          tar --exclude='./.git' --exclude='*/.git' --exclude='./build' --exclude='./.aurora_picodrive_stage2_backup' -czf "/tmp/${source_name}" -C "$GITHUB_WORKSPACE" . -C /tmp SOURCE-MANIFEST.txt
+          echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
+          echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
+
+      - name: Build Core Components Sequentially
+        working-directory: ${{ github.workspace }}
+        run: |
+          make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
+
           tar --exclude='./.git' --exclude='*/.git' --exclude='./build' --exclude='./.aurora_picodrive_stage2_backup' -czf "/tmp/${source_name}" -C "$GITHUB_WORKSPACE" . -C /tmp SOURCE-MANIFEST.txt
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
