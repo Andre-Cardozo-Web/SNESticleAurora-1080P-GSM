@@ -12,8 +12,8 @@ SRCS = $(wildcard src/*.c) $(wildcard src/*.cpp) $(wildcard src/*.s) $(wildcard 
 # Alvo padrão (Primeira regra que o make executará)
 all: $(OBJ_DIR) $(EE_BIN)
 
-# Lista completa de objetos (Seu código original enviado)
-OBJS := \
+# Lista completa de objetos (Adicionado o prefixo EE_ exigido pela SDK do PS2)
+EE_OBJS := \
 	$(patsubst src/%.c,$(OBJ_DIR)/%.o,$(filter %.c,$(SRCS))) \
 	$(patsubst src/%.cpp,$(OBJ_DIR)/%.o,$(filter %.cpp,$(SRCS))) \
 	$(patsubst src/%.s,$(OBJ_DIR)/%.o,$(filter %.s,$(SRCS))) \
@@ -64,7 +64,7 @@ $(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)
 $(OBJ_DIR)/%.o: src/%.c | $(OBJ_DIR)
 	$(EE_CC) $(EE_CFLAGS) $(EE_INCS) -c $< -o $@
 
-# Inclusão obrigatória das regras globais da SDK do PS2 (Gera o executável automaticamente)
+# Inclusão obrigatória das regras globais da SDK do PS2
 include $(PS2SDK)/samples/Makefile.pref
 include $(PS2SDK)/samples/Makefile.eeglobal
 
