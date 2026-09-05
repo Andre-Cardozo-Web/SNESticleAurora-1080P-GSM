@@ -9,12 +9,11 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Inclusões ajustadas combinando caminhos do PS2SDK e mapeamentos globais do Makefile
-#include "mainloop_exec.h"                         // Procura na pasta local/nativa do PS2
-#include "../../../nes/quicknes/quicknes_bridge.h"   // Já funciona! (Volta 3 níveis para ficar em src/nes/)
-#include "../../../../common/base/storage.h"           // Voltando 4 níveis para sair de src/ e achar a raiz comum
-#include "../../../../common/render/audmixbuffer.h"   // Voltando 4 níveis para sair de src/ e achar a raiz comum
-
+// Inclusões resolvidas de forma global através das diretivas de inclusão do Makefile
+#include "mainloop_exec.h"
+#include "../../../nes/quicknes/quicknes_bridge.h"   // Este já funciona bem relativo
+#include "storage.h"                                // O Makefile vai gerenciar esta pasta
+#include "audmixbuffer.h"                           // O Makefile vai gerenciar esta pasta
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
