@@ -6,8 +6,12 @@
 EE_BIN = build/SNESticle.elf
 OBJ_DIR = build/obj
 
-# Configuração de caminhos de inclusão de cabeçalhos (.h) do projeto
-EE_INCS := -Isrc -Isrc/platform/ps2 -Isrc/platform/ps2/system -Isrc/platform/ps2/ui $(EE_INCS)
+# Variável padrão da PS2SDK para incluir diretórios do projeto
+EE_INCLUDES := -I. -Isrc -Isrc/platform/ps2 -Isrc/platform/ps2/system -Isrc/platform/ps2/ui -Isrc/third_party
+
+# Força os caminhos a entrarem nas flags de compilação C e C++
+EE_CFLAGS   += $(EE_INCLUDES)
+EE_CXXFLAGS += $(EE_INCLUDES)
 
 # Coleta automática de arquivos de código na pasta src
 SRCS = $(wildcard src/*.c) $(wildcard src/*.cpp) $(wildcard src/*.s) $(wildcard src/*.S)
@@ -54,18 +58,18 @@ $(OBJ_DIR):
 
 # Regras explicitas para forcar a compilacao dos modulos internos do sistema PS2
 $(OBJ_DIR)/platform/ps2/system/%.o: src/platform/ps2/system/%.cpp | $(OBJ_DIR)
-	$(EE_CXX) $(EE_CXXFLAGS) $(EE_INCS) -c $< -o $@
+	$(EE_CXX) $(EE_CXXFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/platform/ps2/ui/%.o: src/platform/ps2/ui/%.cpp | $(OBJ_DIR)
-	$(EE_CXX) $(EE_CXXFLAGS) $(EE_INCS) -c $< -o $@
+	$(EE_CXX) $(EE_CXXFLAGS) -c $< -o $@
 
 # Regra genérica para compilar arquivos .cpp da raiz de src
 $(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)
-	$(EE_CXX) $(EE_CXXFLAGS) $(EE_INCS) -c $< -o $@
+	$(EE_CXX) $(EE_CXXFLAGS) -c $< -o $@
 
 # Regra genérica para compilar arquivos .c da raiz de src
 $(OBJ_DIR)/%.o: src/%.c | $(OBJ_DIR)
-	$(EE_CC) $(EE_CFLAGS) $(EE_INCS) -c $< -o $@
+	$(EE_CC) $(EE_CFLAGS) -c $< -o $@
 
 # Inclusão obrigatória das regras globais da SDK do PS2
 include $(PS2SDK)/samples/Makefile.pref
