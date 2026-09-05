@@ -81,10 +81,10 @@ jobs:
             sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            echo "🩹 Reativando sifrpc.h moderno para expor SifAllocIopHeap..."
+            echo "🩹 Redirecionando includes de RPC e Rede obsoletos..."
             sed -i -E 's/#include[[:space:]]*[<"]ps2ip.h[">]/\/\/ #include <ps2ip.h>/g' "$IOP_FILE"
             
-            echo "🩹 Redirecionando chamadas de Joystick e Cartao para arquivos locais copiados..."
+            echo "🩹 Redirecionando chamadas para arquivos locais copiados..."
             sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include "memcard.h"/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "libpad.h"/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include "loadfile.h"/g' "$IOP_FILE"
@@ -96,7 +96,18 @@ jobs:
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp nao encontrado para aplicacao do patch."
           fi
 
-          echo "🔗 Injetando cabecalhos oficiais modernos por proximidade fisica na pasta do sistema..."
+          echo "🔗 Unificando a árvore de arquivos de inclusão mestre da PS2SDK de forma local..."
+          # Vincula os diretórios comuns e de arquitetura diretamente nas duas pastas de rastreamento do SNESticle
+          # Isso blinda sifrpc-common.h, loadfile-common.h e tamtypes.h simultaneamente
+          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
+          
+          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
+
+          # Cópias redundantes adicionais de suporte físico
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
@@ -104,6 +115,7 @@ jobs:
           cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/tamtypes.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/loadfile-common.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/common/include/sifrpc-common.h ./src/platform/ps2/system/ || true
 
           echo "🩹 Aplicando definicao de tipos de suporte graficos em gpfifo.h..."
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
