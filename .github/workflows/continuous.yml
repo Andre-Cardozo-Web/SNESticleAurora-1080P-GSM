@@ -30,7 +30,6 @@ jobs:
         run: |
           git config --global --add safe.directory /github/workspace || true
           git config --global --add safe.directory /__w/SNESticleAurora-1080P-GSM/SNESticleAurora-1080P-GSM || true
-
       - name: Patch PicoDrive Duplicate Macro
         run: |
           sed -i 's/#define FAMEC_NO_GOTOS/\/\/ #define FAMEC_NO_GOTOS/g' ../src/third_party/picodrive/cpu/fame/famec.c || sed -i 's/#define FAMEC_NO_GOTOS/\/\/ #define FAMEC_NO_GOTOS/g' src/third_party/picodrive/cpu/fame/famec.c || true
@@ -57,6 +56,8 @@ jobs:
           set -euo pipefail
           mkdir -p src/platform/ps2/system
           curl -sL "https://githubusercontent.com" -o src/platform/ps2/system/mainloop_state.cpp
+          curl -sL "https://githubusercontent.com" -o src/platform/ps2/system/mainloop_state.cpp
+
 
       - name: Build Core Components Sequentially
         shell: bash
