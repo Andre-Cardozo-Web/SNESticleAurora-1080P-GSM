@@ -225,7 +225,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         case 28: 
             { 
                 Int32 level = (Int32)SNPPURenderGetObjLimitLevel() + dir; 
-                if (level < 0) level = SNPPURenderGetObjLimitLevel() - 1; 
+                if (level < 0) level = SNPPU_OBJ_LIMIT_NUM - 1; 
                 if (level >= SNPPU_OBJ_LIMIT_NUM) level = 0; 
                 SNPPURenderSetObjLimitLevel((Uint8)level); 
             } 
@@ -233,7 +233,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         case 29: 
             { 
                 Int32 mode = (Int32)SNPPURenderGetObjLimitMode() + dir; 
-                if (mode < 0) mode = SNPPURenderGetObjLimitMode() - 1; 
+                if (mode < 0) mode = SNPPU_OBJ_LIMIT_MODE_NUM - 1; 
                 if (mode >= SNPPU_OBJ_LIMIT_MODE_NUM) mode = 0; 
                 SNPPURenderSetObjLimitMode((Uint8)mode); 
             } 
