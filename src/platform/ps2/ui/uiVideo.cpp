@@ -9,12 +9,12 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Caminhos globais corrigidos direto a partir da pasta raiz do barramento
-#include "system/mainloop_exec.h"
-#include "system/picodrive_bridge.h"
-#include "system/quicknes_bridge.h"
-#include "system/snes_bridge.h"
-#include "system/storage.h"
+// Caminhos corrigidos subindo um nível para localizar a pasta pai system
+#include "../system/mainloop_exec.h"
+#include "../system/picodrive_bridge.h"
+#include "../system/quicknes_bridge.h"
+#include "../system/snes_bridge.h"
+#include "../system/storage.h"
 #include "audmixbuffer.h"
 
 // Declarações internas da tela de vídeo do emulador
