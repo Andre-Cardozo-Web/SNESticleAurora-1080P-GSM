@@ -72,26 +72,27 @@ jobs:
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
           if [ -f "$IOP_FILE" ]; then
-            echo "🩹 Fazendo patches cirúrgicos e forçando caminhos absolutos no mainloop_iop.cpp..."
+            echo "🩹 Fazendo patches cirúrgicos e restaurando caminhos limpos no mainloop_iop.cpp..."
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            # Força a injeção do caminho físico mestre absoluto para ignorar desconfigurações locais do sub-makefile
-            sed -i 's/#include <libpad.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libpad.h"/g' "$IOP_FILE"
-            sed -i 's/#include <libmc.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libmc.h"/g' "$IOP_FILE"
-          else
-            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
+            # Retorna para a sintaxe estável padrão de colchetes angulares exigidas pela árvore do make
+            sed -i 's/#include ".*libpad.h"/#include <libpad.h>/g' "$IOP_FILE"
+            sed -i 's/#include ".*libmc.h"/#include <libmc.h>/g' "$IOP_FILE"
+            sed -i 's/#include <libpad.h>/#include <libpad.h>/g' "$IOP_FILE"
+            sed -i 's/#include <libmc.h>/#include <libmc.h>/g' "$IOP_FILE"
           fi
 
-          echo "🩹 Hack de linkagem: Forçando caminho absoluto mestre dentro da libmc.h da SDK..."
+          echo "🩹 Corrigindo o redirecionamento interno de libmc.h para o nome moderno oficial da PS2SDK..."
           SDK_MC_FILE="/usr/local/ps2dev/ps2sdk/ee/include/libmc.h"
           if [ -f "$SDK_MC_FILE" ]; then
-            # Corrige a inclusão interna da SDK injetando a rota física direta completa para libmc-common.h
-            sed -i 's/#include "libmc-common.h"/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libmc-common.h"/g' "$SDK_MC_FILE"
-            sed -i 's/#include <libmc-common.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libmc-common.h"/g' "$SDK_MC_FILE"
+            # Altera a chamada interna da SDK para apontar para <mc-common.h>, que é o nome correto do arquivo no contêiner
+            sed -i 's/#include <libmc-common.h>/#include <mc-common.h>/g' "$SDK_MC_FILE"
+            sed -i 's/#include "libmc-common.h"/#include <mc-common.h>/g' "$SDK_MC_FILE"
+            sed -i 's/#include ".*libmc-common.h"/#include <mc-common.h>/g' "$SDK_MC_FILE"
           fi
 
-      - name: Rebuild mainloop_state.cpp Statically
+      - name: Rebuild mainloop_state.cpp Natively
         shell: bash
         run: |
           set -euo pipefail
@@ -148,12 +149,12 @@ jobs:
               }
               *pOut = 0;
               
+              // Codificação vetorial estrita aceita sem casts pelo mips64r5900el-g++
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
-                  char *p = (char *)pOut - 3;
-                  p[0] = '0' + (rem / 100);
-                  p[1] = '0' + ((rem / 10) % 10);
-                  p[2] = '0' + (rem % 10);
+                  pOut[-3] = '0' + (rem / 100);
+                  pOut[-2] = '0' + ((rem / 10) % 10);
+                  pOut[-1] = '0' + (rem % 10);
               }
           }
 
