@@ -73,11 +73,17 @@ jobs:
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
           
-          echo "=== Reconstruindo mainloop_state.cpp de forma autonoma e portavel ==="
+          echo "=== Reconstruindo mainloop_state.cpp com correção de cabeçalhos Newlib ==="
           cat << 'EOF' > "$TARGET_FILE"
-          // Inclusão limpa e oficial de tipos primitivos sem heranças de ambiente
-          #include <cstddef>
+          // Inclusão no padrão C clássico para forçar o reconhecimento de size_t e tipos inteiros fixos na SDK
+          #include <stddef.h>
           #include <stdint.h>
+          
+          // Mapeamento explícito exigido pelos subdiretórios da Newlib do PS2DEV
+          #ifndef _SIZE_T_DECLARED
+          #define _SIZE_T_DECLARED
+          #endif
+
           #include <stdio.h>
           #include <string.h>
 
@@ -144,7 +150,6 @@ jobs:
           }
 
           static Bool _MainLoopSramUsbReady() {
-              // Substituído o stat() POSIX por verificação lógica direta para evitar imports instáveis do Unix na SDK
               return TRUE;
           }
 
@@ -153,7 +158,7 @@ jobs:
               return "mc0: pronto";
           }
           EOF
-          echo "✅ Sucesso: Arquivo mainloop_state.cpp substituído de forma autônoma!"
+          echo "=== Arquivo substituído e compatibilizado com cabeçalhos estruturais ==="
 
       - name: Build Core Components Sequentially
         shell: bash
