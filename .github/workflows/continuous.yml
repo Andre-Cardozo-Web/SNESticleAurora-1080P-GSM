@@ -85,15 +85,11 @@ jobs:
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
           
-          echo "=== Reconstruindo mainloop_state.cpp com mapeamento unificado de size_t ==="
+          echo "=== Reconstruindo mainloop_state.cpp com correção abrangente de escopo wchar/POSIX ==="
           cat << 'EOF' > "$TARGET_FILE"
+          // Força o carregamento de tipos largos de caracteres do sistema (wint_t) para blindar a Newlib
+          #include <wchar.h>
           #include <stddef.h>
-
-          // Definição unificada para impedir que string.h ou stdio.h quebrem por falta de tipo
-          #ifndef _SIZE_T_DEFINED
-          #define _SIZE_T_DEFINED
-          typedef decltype(sizeof(0)) size_t;
-          #endif
 
           #include <stdio.h>
           #include <string.h>
@@ -169,7 +165,7 @@ jobs:
               return "mc0: pronto";
           }
           EOF
-          echo "=== Arquivo substituído e compatibilizado de forma global para size_t ==="
+          echo "=== Arquivo substituído e compatibilizado contra colisões no sys/_types.h ==="
 
       - name: Build Core Components Sequentially
         shell: bash
