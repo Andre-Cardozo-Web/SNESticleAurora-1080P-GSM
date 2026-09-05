@@ -1,3 +1,18 @@
+# =========================================================================
+# SNESticle Aurora - PlayStation 2 Makefile
+# =========================================================================
+
+# Nome do executável final e diretórios
+EE_BIN = build/SNESticle.elf
+OBJ_DIR = build/obj
+
+# Coleta automática de arquivos de código na pasta src
+SRCS = $(wildcard src/*.c) $(wildcard src/*.cpp) $(wildcard src/*.s) $(wildcard src/*.S)
+
+# Alvo padrão (Primeira regra que o make executará)
+all: $(OBJ_DIR) $(EE_BIN)
+
+# Lista completa de objetos (Seu código original enviado)
 OBJS := \
 	$(patsubst src/%.c,$(OBJ_DIR)/%.o,$(filter %.c,$(SRCS))) \
 	$(patsubst src/%.cpp,$(OBJ_DIR)/%.o,$(filter %.cpp,$(SRCS))) \
@@ -27,9 +42,32 @@ OBJS := \
 	$(OBJ_DIR)/platform/ps2/ui/uiLog.o \
 	$(OBJ_DIR)/platform/ps2/ui/uiMenu.o
 
+# Criação das pastas de build caso não existam
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+	mkdir -p $(OBJ_DIR)/platform/ps2/system
+	mkdir -p $(OBJ_DIR)/platform/ps2/ui
+	mkdir -p build
+
 # Regras explicitas para forcar a compilacao dos modulos internos do sistema PS2
 $(OBJ_DIR)/platform/ps2/system/%.o: src/platform/ps2/system/%.cpp | $(OBJ_DIR)
-	$(call RUN_COMPILE,CXX,$<,$(EE_CXX) $(CXXFLAGS) $(DEPFLAGS) $(INCS) -c "$<" -o "$@")
+	$(EE_CXX) $(EE_CXXFLAGS) $(EE_INCS) -c $< -o $@
 
 $(OBJ_DIR)/platform/ps2/ui/%.o: src/platform/ps2/ui/%.cpp | $(OBJ_DIR)
-	$(call RUN_COMPILE,CXX,$<,$(EE_CXX) $(CXXFLAGS) $(DEPFLAGS) $(INCS) -c "$<" -o "$@")
+	$(EE_CXX) $(EE_CXXFLAGS) $(EE_INCS) -c $< -o $@
+
+# Regra genérica para compilar arquivos .cpp da raiz de src
+$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)
+	$(EE_CXX) $(EE_CXXFLAGS) $(EE_INCS) -c $< -o $@
+
+# Regra genérica para compilar arquivos .c da raiz de src
+$(OBJ_DIR)/%.o: src/%.c | $(OBJ_DIR)
+	$(EE_CC) $(EE_CFLAGS) $(EE_INCS) -c $< -o $@
+
+# Inclusão obrigatória das regras globais da SDK do PS2 (Gera o executável automaticamente)
+include $(PS2SDK)/samples/Makefile.pref
+include $(PS2SDK)/samples/Makefile.eeglobal
+
+# Limpeza dos arquivos de build
+clean:
+	rm -rf build
