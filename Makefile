@@ -6,13 +6,16 @@
 EE_BIN = build/SNESticle.elf
 OBJ_DIR = build/obj
 
+# Configuração de caminhos de inclusão de cabeçalhos (.h) do projeto
+EE_INCS := -Isrc -Isrc/platform/ps2 -Isrc/platform/ps2/system -Isrc/platform/ps2/ui $(EE_INCS)
+
 # Coleta automática de arquivos de código na pasta src
 SRCS = $(wildcard src/*.c) $(wildcard src/*.cpp) $(wildcard src/*.s) $(wildcard src/*.S)
 
 # Alvo padrão (Primeira regra que o make executará)
 all: $(OBJ_DIR) $(EE_BIN)
 
-# Lista completa de objetos (Adicionado o prefixo EE_ exigido pela SDK do PS2)
+# Lista completa de objetos
 EE_OBJS := \
 	$(patsubst src/%.c,$(OBJ_DIR)/%.o,$(filter %.c,$(SRCS))) \
 	$(patsubst src/%.cpp,$(OBJ_DIR)/%.o,$(filter %.cpp,$(SRCS))) \
