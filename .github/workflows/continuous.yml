@@ -79,17 +79,18 @@ jobs:
             sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
+            echo "🩹 Desativando chamada obsoleta sifrpc.h ja coberta pelo kernel mestre..."
+            # Comenta de forma cirúrgica a linha 76 para impedir erros de busca por arquivos descontinuados
+            sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/\/\/ #include <sifrpc.h>/g' "$IOP_FILE"
+            
             echo "🩹 Atualizando chamadas legadas para a sintaxe unificada moderna..."
-            # Força o redirecionamento para buscar localmente por aspas duplas, pois as copiamos para a mesma pasta
-            sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "libpad.h"/g' "$IOP_FILE"
-            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include "memcard.h"/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include <memcard.h>/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include <libpad.h>/g' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
 
           echo "🔗 Injetando cabeçalhos oficiais modernos por proximidade física na pasta do sistema..."
-          # Copia fisicamente os arquivos mestre da SDK moderna para dentro do subdiretório de compilação da IOP.
-          # Isso anula qualquer limpeza de variável ou erro de caminho vindo dos sub-makefiles do SNESticle.
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
