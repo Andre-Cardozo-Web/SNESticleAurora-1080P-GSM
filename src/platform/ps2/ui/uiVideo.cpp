@@ -13,6 +13,7 @@
 #include "mainloop_exec.h"
 #include "../../../nes/quicknes/quicknes_bridge.h"   // Este já funciona bem relativo
 // Declarações externas das funções globais do sistema (Forward Declarations)
+// Declarações externas das funções globais do sistema (Forward Declarations)
 extern Bool HddSupportIsEnabled(void);
 extern void HddSupportSetEnabled(Bool enabled);
 extern Bool MmceSupportIsEnabled(void);
@@ -26,16 +27,16 @@ extern void ExecOSD(int core, void *params);
 extern void BgmSetVolume(int volume);               // Volume da música de fundo
 extern Bool MassStorageIsEnabled(void);             // Status do Pendrive USB
 extern void MassStorageSetEnabled(Bool enabled);    // Ativar/Desativar Pendrive USB
-extern Bool BgmIsEnabled(void);                     // Status da música de fundo (Faltando)
-extern void BgmSetEnabled(Bool enabled);            // Ativar/Desativar música de fundo (Faltando)
-extern int  BgmGetVolume(void);                     // Obter volume da música de fundo (Faltando)
-extern int  AudMixGameGetVolume(void);              // Obter volume do jogo (Faltando)
-extern void AudMixGameSetVolume(int volume);        // Definir volume do jogo (Faltando)
-extern void MainLoopReinitVideoMode(Int32 mode);    // Reinicializar Modo de Vídeo (Faltando)
-extern void GSK_SetWidescreen(Bool wide);           // Configurar Widescreen (Faltando)
-extern void GSK_SetOverscan(int overscan);          // Configurar Overscan (Faltando)
-extern void GSK_SetDisplayOffset(int x, int y);     // Configurar Deslocamento de Tela (Faltando)
-extern void VideoSettingsSave(void);                // Salvar Configurações de Vídeo (Faltando)
+extern Bool BgmIsEnabled(void);                     // Status da música de fundo
+extern void BgmSetEnabled(Bool enabled);            // Ativar/Desativar música de fundo
+extern int  BgmGetVolume(void);                     // Obter volume da música de fundo
+extern int  AudMixGameGetVolume(void);              // Obter volume do jogo
+extern void AudMixGameSetVolume(int volume);        // Definir volume do jogo
+extern void GSK_SetWidescreen(Bool wide);           // Configurar Widescreen
+extern void GSK_SetOverscan(int overscan);          // Configurar Overscan
+extern void GSK_SetDisplayOffset(int x, int y);     // Configurar Deslocamento de Tela
+extern void VideoSettingsSave(void);                // Salvar Configurações de Vídeo
+extern Int32 g_VideoBrightnessGain;                 // Adicionado para corrigir o escopo da variável de brilho
 #include "audmixbuffer.h"                           // O Makefile localiza este automaticamente em common
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
