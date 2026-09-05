@@ -576,9 +576,29 @@ static Uint32 _uInputFrame = 0;
 static Uint8 _uInputChecksum[512];
 
 void _MainLoopResetInputChecksums()
+/* ---- Definição externa das variáveis de sincronismo de entrada ---- */
+extern Uint32 _uInputFrame;
+extern Uint8  _uInputChecksum[];
+
+void _MainLoopResetInputChecksums()
+/* ---- Definição externa das variáveis de sincronismo de entrada ---- */
+extern Uint32 _uInputFrame;
+extern Uint8  _uInputChecksum[];
+
+void _MainLoopResetInputChecksums()
+/* ---- Definição externa das variáveis de sincronismo de entrada ---- */
+extern Uint32 _uInputFrame;
+extern Uint8  _uInputChecksum[];
+
+void _MainLoopResetInputChecksums()
+/* ---- Definição externa das variáveis de sincronismo de entrada ---- */
+extern Uint32 _uInputFrame;
+extern Uint8  _uInputChecksum[];
+
+void _MainLoopResetInputChecksums()
 {
-    _uInputFrame = 0;
-    memset(_uInputChecksum, 0, sizeof(_uInputChecksum));
+	_uInputFrame = 0;
+	memset(_uInputChecksum, 0, 16); // Zera o buffer de checksum de forma segura
 }
 
 #if MAINLOOP_HISTORY
