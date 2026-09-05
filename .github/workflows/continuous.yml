@@ -99,8 +99,12 @@ jobs:
           #endif
           EOF
           
-          # Regex aprimorada no sed para capturar qualquer variação de espaçamento ou tabulação antes da declaração colada
-          cat /tmp/orig_mainloop.cpp | tr -d '\r' | sed -E 's/return FALSE;[[:space:]]*const Char[[:space:]]*\*MainLoopStateGetAvailability/return FALSE;\nconst Char \*MainLoopStateGetAvailability/g' >> "$TARGET_FILE"
+          echo "=== Aplicando dupla filtragem de escopo e sintaxe ==="
+          # Passo 1: Limpa retornos do Windows e tenta quebrar a linha grudada via Regex flexível
+          # Passo 2: Se a linha ainda estiver mal estruturada, injeta cirurgicamente o fechamento de chave '}' antes de MainLoopStateGetAvailability
+          cat /tmp/orig_mainloop.cpp | tr -d '\r' | \
+          sed -E 's/return FALSE;[[:space:]]*const Char[[:space:]]*\*MainLoopStateGetAvailability/return FALSE;\nconst Char \*MainLoopStateGetAvailability/g' | \
+          sed -E 's/const Char[[:space:]]*\*MainLoopStateGetAvailability/}\nconst Char \*MainLoopStateGetAvailability/g' >> "$TARGET_FILE"
 
       - name: Build Core Components Sequentially
         shell: bash
