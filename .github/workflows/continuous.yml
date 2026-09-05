@@ -55,10 +55,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Limpando flags globais e definindo apenas flags de compatibilidade ==="
+          echo "=== Criando arquivo de inclusao forcada global ==="
+          # Cria um arquivo de cabeçalho global autossuficiente para corrigir os tipos sem poluir o escopo com macros -D
+          cat << 'EOF' > /tmp/ps2_types_fix.h
+          #ifndef PS2_TYPES_FIX_H
+          #define PS2_TYPES_FIX_H
+          #include <stdint.h>
+          #include <stdio.h>
+          typedef int          Bool;
+          typedef uint32_t     Uint32;
+          typedef int32_t      Int32;
+          typedef char         Char;
+          #ifndef FALSE
+          #define FALSE 0
+          #endif
+          #ifndef TRUE
+          #define TRUE 1
+          #endif
+          #endif
+          EOF
+
+          echo "=== Ajustando as flags de compilacao no Makefile ==="
           if [ -f "Makefile" ]; then
-            # Removeu as macros -D globais que colidiam com tipos estruturais e manteve apenas a supressão de warnings
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -D_EE /g' Makefile
+            # Usa a flag -include para forçar o GCC a ler o nosso arquivo de tipos no inicio de QUALQUER arquivo .cpp compilado
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -include \/tmp\/ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -71,31 +91,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
           echo "=== Garantindo o arquivo local original ==="
-          git checkout src/platform/ps2/system/mainloop_state.cpp || true
+          git checkout "$TARGET_FILE" || true
           
-          echo "=== Corrigindo erro de indentacao/sintaxe colada da linha 85 ==="
-          sed -i 's/return FALSE;const Char \*MainLoopStateGetAvailability()/return FALSE;\nconst Char \*MainLoopStateGetAvailability()/g' src/platform/ps2/system/mainloop_state.cpp
-
-          echo "=== Injetando bloco de tipos locais isolados para evitar conflitos de macros ==="
-          # Criamos um arquivo temporário contendo as definições de tipo limpas usando tipos padrão do C
-          cat << 'EOF' > /tmp/types_patch.h
+          echo "=== Reconstruindo o arquivo para sanar erros estruturais e de sintaxe colada ==="
+          # Salva uma cópia temporária do arquivo original
+          cp "$TARGET_FILE" /tmp/orig_mainloop.cpp
+          
+          # Recria o arquivo injetando o cabeçalho stdint e aplicando uma correcao cirurgica de quebra de linha na linha 85
+          cat << 'EOF' > "$TARGET_FILE"
           #include <stdint.h>
-          typedef int          Bool;
-          typedef uint32_t     Uint32;
-          typedef int32_t      Int32;
-          typedef char         Char;
-          #ifndef FALSE
-          #define FALSE 0
-          #endif
-          #ifndef TRUE
-          #define TRUE 1
-          #endif
+          #include <stdio.h>
+          #include <string.h>
           EOF
-
-          # Injeta o bloco de tipos diretamente na linha 1 do arquivo para que todo o escopo interno o reconheça de forma segura
-          sed -i '1r /tmp/types_patch.h' src/platform/ps2/system/mainloop_state.cpp
+          
+          # Adiciona o conteúdo original, mas filtrando e corrigindo a expressão colada que quebrava o escopo da função
+          cat /tmp/orig_mainloop.cpp | sed 's/return FALSE;const Char \*MainLoopStateGetAvailability()/return FALSE;\nconst Char \*MainLoopStateGetAvailability()/g' >> "$TARGET_FILE"
 
       - name: Build Core Components Sequentially
         shell: bash
