@@ -9,10 +9,10 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Mantido apenas o barramento essencial para o funcionamento do NES e do sistema
-#include "../system/mainloop_exec.h"
-#include "../system/quicknes_bridge.h"
-#include "../system/storage.h"
+// Caminhos canônicos absolutos corrigidos para rodar direto pelo barramento raiz exigido pelo Makefile
+#include "system/mainloop_exec.h"
+#include "system/quicknes_bridge.h"
+#include "system/storage.h"
 #include "audmixbuffer.h"
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
