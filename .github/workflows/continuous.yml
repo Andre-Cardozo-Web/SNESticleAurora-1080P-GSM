@@ -66,7 +66,7 @@ jobs:
             sed -i 's/typedef signed char          SBYTE;/#ifndef _EE\ntypedef signed char          SBYTE;\n#endif/g' "$TYPES_FILE"
           fi
 
-      - name: Patch Obsolete IOP Headers and Link Core SDK
+      - name: Patch Obsolete IOP Headers
         shell: bash
         run: |
           set -euo pipefail
@@ -75,14 +75,15 @@ jobs:
             echo "🩹 Atualizando os cabeçalhos legados de IOP e Pad de controles no mainloop_iop.cpp..."
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
+            
+            # Mantém a sintaxe padrão limpa de colchetes angulares, pois forçaremos a rota correta via flags globais
+            sed -i 's/#include ".*libpad.h"/#include <libpad.h>/g' "$IOP_FILE"
+            sed -i 's/#include ".*libmc.h"/#include <libmc.h>/g' "$IOP_FILE"
             sed -i 's/#include <libpad.h>/#include <libpad.h>/g' "$IOP_FILE"
             sed -i 's/#include <libmc.h>/#include <libmc.h>/g' "$IOP_FILE"
+          else
+            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
-
-          echo "🔗 Criando links simbólicos diretos da SDK moderna na raiz do projeto para interceptar sub-makefiles..."
-          # Vincula os arquivos de cabeçalho da SDK de forma local para impedir falhas de caminhos de busca como o libmc-common.h
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h . || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h src/ || true
 
       - name: Rebuild mainloop_state.cpp Statically
         shell: bash
@@ -141,7 +142,6 @@ jobs:
               }
               *pOut = 0;
               
-              // Ajuste de sintaxe: Atribuição por índices de vetor para evitar erros de ponteiro char* no compilador
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
                   char *target = (char *)pOut - 3;
@@ -175,10 +175,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          echo "=== Exportando variaveis de ambiente globais com rotas unificadas da PS2SDK ==="
+          # Injeta os 3 caminhos fundamentais de cabeçalhos da SDK moderna diretamente no compilador por linha de comando.
+          # Isso resolve tamtypes.h, libmc-common.h e libpad.h de forma permanente em qualquer Makefile filho.
+          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -I/usr/local/ps2dev/ps2sdk/ee/include/libpad -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -I/usr/local/ps2dev/ps2sdk/ee/include/libpad -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -I/usr/local/ps2dev/ps2sdk/ee/include/libpad -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
