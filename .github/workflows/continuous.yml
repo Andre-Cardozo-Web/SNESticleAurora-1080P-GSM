@@ -56,9 +56,11 @@ jobs:
       - name: Package checked-out source
         shell: bash
         run: |
-          set -euo pipefail
-          short_sha="${GITHUB_SHA:0:12}"
-          source_name="SNESticleAurora-${short_sha}-source.tar.gz"
+      - name: Build Core Components Sequentially
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
+
           {
             printf 'SNESticleAurora commit: %s\n' "$GITHUB_SHA"
             printf 'Recursive submodules:\n'
