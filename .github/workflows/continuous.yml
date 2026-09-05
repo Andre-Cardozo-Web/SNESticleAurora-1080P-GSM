@@ -81,38 +81,35 @@ jobs:
             sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            echo "🩹 Redirecionando includes de RPC e Rede obsoletos..."
-            sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/\/\/ #include <sifrpc.h>/g' "$IOP_FILE"
+            echo "🩹 Reativando sifrpc.h moderno para expor SifAllocIopHeap..."
             sed -i -E 's/#include[[:space:]]*[<"]ps2ip.h[">]/\/\/ #include <ps2ip.h>/g' "$IOP_FILE"
             
             echo "🩹 Redirecionando chamadas de Joystick e Cartao para arquivos locais copiados..."
             sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include "memcard.h"/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "libpad.h"/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include "loadfile.h"/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include "sifrpc.h"/g' "$IOP_FILE"
 
-            echo "🩹 Injetando tipos primitivos customizados locais e redefinindo NULL de segurança..."
-            sed -i '1s/^/typedef int Bool;\ntypedef unsigned int Uint32;\ntypedef int Int32;\ntypedef char Char;\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr\n/' "$IOP_FILE"
+            echo "🩹 Injetando tipos primitivos customizados, climits e redefinindo NULL de segurança..."
+            sed -i '1s/^/#include <climits>\ntypedef int Bool;\ntypedef unsigned int Uint32;\ntypedef unsigned long long Uint64;\ntypedef __int128 Uint128;\ntypedef int Int32;\ntypedef char Char;\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr\n/' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp nao encontrado para aplicacao do patch."
           fi
 
-          echo "🔗 Unificando a árvore de arquivos de inclusão mestre da PS2SDK de forma local..."
-          # Vincula os diretórios comuns e de arquitetura diretamente nas duas pastas de rastreamento do Make do SNESticle
-          # Isso blinda tamtypes.h e loadfile-common.h de forma permanente contra limpezas de escopo locais
-          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
-          
-          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
-
-          # Garante cópias locais físicas redundantes na pasta do loop de estado para sustentar o avanço
+          echo "🔗 Injetando cabecalhos oficiais modernos por proximidade fisica na pasta do sistema..."
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/ee/include/sifrpc.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/tamtypes.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/common/include/loadfile-common.h ./src/platform/ps2/system/ || true
+
+          echo "🩹 Aplicando definicao de tipos de suporte graficos em gpfifo.h..."
+          FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
+          if [ -f "$FIFO_FILE" ]; then
+             sed -i '1s/^/typedef int Int32;\ntypedef unsigned int Uint32;\ntypedef unsigned long long Uint64;\ntypedef __int128 Uint128;\n/' "$FIFO_FILE"
+          fi
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
