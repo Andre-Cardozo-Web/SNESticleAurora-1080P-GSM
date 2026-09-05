@@ -51,13 +51,14 @@ jobs:
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
-      - name: Patch PS2SDK Typo Collisions and Mainfiles
+      - name: Patch PS2SDK Typo Collisions and Makefiles
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Aplicando flags de compatibilidade de tipos no Makefile ==="
+          echo "=== Aplicando flags de compatibilidade e suprimindo warnings de unused no Makefile ==="
           if [ -f "Makefile" ]; then
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -D_EE /g' Makefile
+            # Injeta flags para aceitar char assinado e desativar erros por variaveis/funcoes nao utilizadas (-Wno-unused)
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -74,8 +75,8 @@ jobs:
           echo "=== Garantindo o arquivo local original ==="
           git checkout src/platform/ps2/system/mainloop_state.cpp || true
           
-          echo "=== Injetando mapeamento de tipos isolados no cabecalho ==="
-          # Alterado para usar <stdint.h> nativo do GCC, garantindo que mapeamentos como Uint32 funcionem de forma autônoma
+          echo "=== Injetando mapeamento isolado de tipos no topo ==="
+          # Injeta os tipos basicos e inclui o cabeçalho stdint.h de forma limpa
           sed -i '1s/^/#include <stdint.h>\n#ifndef Bool\ntypedef int Bool;\n#endif\n#ifndef Uint32\ntypedef uint32_t Uint32;\n#endif\n#ifndef Int32\ntypedef int32_t Int32;\n#endif\n#ifndef Char\ntypedef char Char;\n#endif\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n/' src/platform/ps2/system/mainloop_state.cpp
 
       - name: Build Core Components Sequentially
