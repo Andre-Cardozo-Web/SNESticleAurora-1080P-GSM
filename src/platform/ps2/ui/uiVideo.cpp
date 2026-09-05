@@ -9,7 +9,7 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Relative layout includes pointing cleanly back to the system folder
+// Relative paths configured to target the system directory cleanly
 #include "../system/mainloop_exec.h"
 #include "../system/picodrive_bridge.h"
 #include "../system/quicknes_bridge.h"
