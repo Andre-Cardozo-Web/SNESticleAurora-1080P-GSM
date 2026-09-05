@@ -51,9 +51,13 @@ jobs:
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
-      - name: Build Core Components Sequentially
-        shell: bash
+      - name: Restore and Patch mainloop_state.cpp
         run: |
+          mkdir -p src/platform/ps2/system
+          curl -sL "https://githubusercontent.com" -o src/platform/ps2/system/mainloop_state.cpp
+
+        shell: bash
+       run: |
           set -euo pipefail
           echo "=== Executando compilacao padrão ==="
           # Executa o make limpando configurações antigas e chamando as definições locais
