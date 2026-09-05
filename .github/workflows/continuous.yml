@@ -59,7 +59,7 @@ jobs:
           pwd
           ls -la
           echo "====================================="
-          make -C .. -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -C . -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
+          make -f Makefile -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0
 
       - name: Strip release ELF
         shell: bash
