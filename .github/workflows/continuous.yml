@@ -148,8 +148,11 @@ jobs:
           echo "🩹 Forçando a inclusão física do patch de tipos diretamente via sed no topo do mainloop_iop.cpp..."
           sed -i '1i #include "ps2_types_fix.h"' "$IOP_FILE" || true
 
+          echo "🩹 Substituindo chamadas antigas de NULL por nullptr estrito em IOPLoadModule para desviar de tamtypes.h..."
+          # Substitui de forma literal as ocorrências na passagem de argumentos que colidiam na compilação do áudio e do ps2link
+          sed -i 's/IOPLoadModule(\([^,]*\), ppSearchPaths, 0, NULL)/IOPLoadModule(\1, ppSearchPaths, 0, nullptr)/g' "$IOP_FILE" || true
+
           echo "🩹 Resolvendo conflito de declaração duplicada e anônima da struct pal em FCEUmm de forma linear..."
-          # Reescreve o cabeçalho usando o operador lógico clássico do Linux, eliminando totalmente blocos if/fi instáveis
           [ -f "$PAL_FILE" ] && printf '#ifndef FCEU_PALETTE_H\n#define FCEU_PALETTE_H\nstruct pal { unsigned char r, g, b; };\nextern struct pal *palo;\nvoid FCEU_DrawNTSCControlBars(unsigned char *XBuf);\n#endif\n' > "$PAL_FILE" || true
 
           echo "🩹 Resolvendo conflito de re-declaração prévia da struct PaletteT em bmpfile.h..."
