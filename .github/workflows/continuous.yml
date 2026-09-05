@@ -67,7 +67,6 @@ jobs:
           fi
 
       - name: Patch Obsolete IOP Headers Natively
-        shell: bash
         run: |
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
@@ -154,7 +153,6 @@ jobs:
              sed -i '1i #include "ps2_types_fix.h"' "$FIFO_FILE"
           fi
       - name: Rebuild mainloop_state.cpp Natively
-        shell: bash
         run: |
           set -euo pipefail
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
@@ -240,10 +238,8 @@ jobs:
           echo "=== Módulo recriado em C puro e protegido contra falhas de cabeçalhos ==="
 
       - name: Build Core Components Sequentially
-        shell: bash
         run: |
           set -euo pipefail
-          echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
           export CFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
@@ -252,7 +248,6 @@ jobs:
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
-        shell: bash
         run: |
           set -euo pipefail
           STRIP="$(command -v mips64r5900el-ps2-elf-strip || true)"
@@ -262,7 +257,6 @@ jobs:
           mv -f ../build/SNESticle.stripped.elf ../build/SNESticle.elf || mv -f build/SNESticle.stripped.elf build/SNESticle.elf || true
 
       - name: Checksums
-        shell: bash
         run: |
           set -euo pipefail
           {
@@ -273,7 +267,6 @@ jobs:
       - name: Continuous release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
