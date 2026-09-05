@@ -15,7 +15,7 @@
 
 // Caminhos globais corrigidos com o prefixo canônico exigido pelo Makefile
 #include "system/mainloop_exec.h"
-#include "system/picodrive_bridge.h"
+#include "../../../md/picodrive/picodrive_bridge.h"
 #include "system/quicknes_bridge.h"
 
 extern "C" {
