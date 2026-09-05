@@ -9,7 +9,7 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Caminhos locais puros sincronizados com o barramento do Makefile principal
+// Caminhos locais nativos sincronizados com o barramento do Makefile principal
 #include "mainloop_exec.h"
 #include "picodrive_bridge.h"
 #include "quicknes_bridge.h"
