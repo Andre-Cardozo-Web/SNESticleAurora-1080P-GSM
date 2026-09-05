@@ -74,8 +74,6 @@ jobs:
           if [ -f "$IOP_FILE" ]; then
             echo "🩹 Atualizando o cabeçalho legado iopheap.h para o padrão moderno no mainloop_iop.cpp..."
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <alloc.h>/g' "$IOP_FILE"
-          else
-            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
 
       - name: Rebuild mainloop_state.cpp Statically
@@ -85,12 +83,10 @@ jobs:
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
           
-          echo "=== Reconstruindo mainloop_state.cpp de forma limpa ==="
+          echo "=== Reconstruindo mainloop_state.cpp de forma 100% isolada e sem includes ==="
           cat << 'EOF' > "$TARGET_FILE"
-          #include <stdio.h>
-          #include <string.h>
+          // Removidos todos os includes de cabeçalho padrão para impedir erros de size_t e wint_t na Newlib
 
-          // Definições nativas com tipos primitivos do GCC mips para evitar colisões com stdint.h externos
           typedef int          Bool;
           typedef unsigned int Uint32;
           typedef int          Int32;
@@ -138,8 +134,14 @@ jobs:
                   }
               }
               *pOut = 0;
+              
+              // Formatação cirúrgica manual em C puro substituindo o sprintf() para evitar o include de stdio.h
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
-                  sprintf((char *)pOut - 3, "%03u", (unsigned int)(hash % 1000));
+                  unsigned int rem = hash % 1000;
+                  char *target = (char *)pOut - 3;
+                  target[0] = '0' + (rem / 100);
+                  target[1] = '0' + ((rem / 10) % 10);
+                  target[2] = '0' + (rem % 10);
               }
           }
 
@@ -161,7 +163,7 @@ jobs:
               return "mc0: pronto";
           }
           EOF
-          echo "=== Arquivo substituído com sucesso! ==="
+          echo "=== Módulo recriado em C puro e protegido contra falhas de cabeçalhos ==="
 
       - name: Build Core Components Sequentially
         shell: bash
@@ -170,9 +172,7 @@ jobs:
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
           export CFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          
-          # Força a flag de inclusão nativa de cabeçalho stddef.h na chamada global do compilador EE do PS2 (-include stddef.h)
-          export EE_CFLAGS="-fsigned-char -include stddef.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          export EE_CFLAGS="-fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
