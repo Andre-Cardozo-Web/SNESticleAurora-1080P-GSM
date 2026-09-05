@@ -74,9 +74,9 @@ jobs:
           echo "=== Garantindo o arquivo local original ==="
           git checkout src/platform/ps2/system/mainloop_state.cpp || true
           
-          echo "=== Injetando mapeamento de tipos customizados no cabecalho ==="
-          # Cria um bloco de correção no topo do arquivo para resolver os erros de 'Bool', 'Uint32', 'Char' e 'Int32'
-          sed -i '1s/^/#include "common\/base\/types.h"\n#ifndef Bool\ntypedef int Bool;\n#endif\n#ifndef Uint32\ntypedef uint32_t Uint32;\n#endif\n#ifndef Int32\ntypedef int32_t Int32;\n#endif\n#ifndef Char\ntypedef char Char;\n#endif\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n/' src/platform/ps2/system/mainloop_state.cpp
+          echo "=== Injetando mapeamento de tipos isolados no cabecalho ==="
+          # Injeta diretamente as definições e inclui <stdint.h> do compilador, eliminando erros de caminho de arquivo de tipos
+          sed -i '1s/^/#include <stdint.h>\n#ifndef Bool\ntypedef int Bool;\n#endif\n#ifndef Uint32\ntypedef uint32_t Uint32;\n#endif\n#ifndef Int32\ntypedef int32_t Int32;\n#endif\n#ifndef Char\ntypedef char Char;\n#endif\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n/' src/platform/ps2/system/mainloop_state.cpp
 
       - name: Build Core Components Sequentially
         shell: bash
