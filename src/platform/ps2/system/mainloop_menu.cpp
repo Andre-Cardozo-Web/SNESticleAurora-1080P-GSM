@@ -14,9 +14,9 @@
 #include "memcard.h"
 
 // Caminhos globais corrigidos com o prefixo canônico exigido pelo Makefile
-#include "mainloop_exec.h"                         // Mantido o canônico local
-#include "../../../md/picodrive/picodrive_bridge.h"   // Já alterado por você! Perfeito.
-#include "../../../nes/quicknes/quicknes_bridge.h"   // Alterar linha 19 para usar o mesmo recuo funcional
+#include "mainloop_exec.h"
+#include "picodrive_bridge.h"                       // Removido o caminho longo para o Makefile localizar nativamente
+#include "../../../nes/quicknes/quicknes_bridge.h"   // Mantido o recuo funcional que passou no build anterior
 
 extern "C" {
 #include "audio.h"
