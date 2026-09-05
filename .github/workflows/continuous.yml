@@ -66,40 +66,41 @@ jobs:
             sed -i 's/typedef signed char          SBYTE;/#ifndef _EE\ntypedef signed char          SBYTE;\n#endif/g' "$TYPES_FILE"
           fi
 
-      - name: Patch Obsolete IOP Headers and Flatten SDK Includes
+      - name: Patch Obsolete IOP Headers Natively
         shell: bash
         run: |
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
           if [ -f "$IOP_FILE" ]; then
-            echo "🩹 Atualizando os cabeçalhos legados de IOP e Pad de controles no mainloop_iop.cpp..."
-            sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
-            sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
+            echo "🩹 Aplicando regex flexivel de caminhos absolutos no mainloop_iop.cpp..."
+            # Remove retornos de carro do Windows para higienizar o arquivo de stream
+            sed -i 's/\r//g' "$IOP_FILE"
             
-            # Limpa qualquer patch absoluto anterior para retornar à estrutura limpa de colchetes angulares exigidas pela árvore do make
-            sed -i 's/#include ".*libpad.h"/#include <libpad.h>/g' "$IOP_FILE"
-            sed -i 's/#include ".*libmc.h"/#include <libmc.h>/g' "$IOP_FILE"
-            sed -i 's/#include <libpad.h>/#include <libpad.h>/g' "$IOP_FILE"
-            sed -i 's/#include <libmc.h>/#include <libmc.h>/g' "$IOP_FILE"
+            # Substituições clássicas de heap obsoletas
+            sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
+            
+            # Regex robusta: Substitui o include por caminhos absolutos físicos do contêiner ignorando espaços ou tabulações
+            sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libpad.h"/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/memcard.h"/g' "$IOP_FILE"
+          else
+            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
 
-          echo "🔗 Unificando a árvore de arquivos de inclusão interna da PS2SDK de forma absoluta no contêiner..."
-          # Mapeia e espelha fisicamente todos os subarquivos internos (como mc-common.h, libpad.h) para dentro do diretório mestre de buscas da SDK
-          # Isso anula qualquer limpeza de variável ou erro de caminho vindo dos sub-makefiles do SNESticle
-          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h /usr/local/ps2dev/ps2sdk/ee/include/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h /usr/local/ps2dev/ps2sdk/ee/include/ || true
-          
-          # Garante compatibilidade caso o arquivo tente carregar o nome herdado mc-common como libmc-common
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h /usr/local/ps2dev/ps2sdk/ee/include/libmc-common.h || true
+          echo "🩹 Hack de compatibilidade Newlib: Forçando mapeamento interno em memcard.h..."
+          SDK_MC_FILE="/usr/local/ps2dev/ps2sdk/ee/include/memcard.h"
+          if [ -f "$SDK_MC_FILE" ]; then
+            sed -i -E 's/#include[[:space:]]*[<"]mc-common.h[">]/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/mc-common.h"/g' "$SDK_MC_FILE"
+          fi
 
-      - name: Rebuild mainloop_state.cpp Natively
+      - name: Rebuild mainloop_state.cpp Statically
         shell: bash
         run: |
           set -euo pipefail
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
           
-          echo "=== Reconstruindo mainloop_state.cpp de forma 100% isolada e estável ==="
+          echo "=== Reconstruindo mainloop_state.cpp de forma 100% isolada ==="
           cat << 'EOF' > "$TARGET_FILE"
           typedef int          Bool;
           typedef unsigned int Uint32;
@@ -149,12 +150,12 @@ jobs:
               }
               *pOut = 0;
               
-              // Sintaxe estável C++ utilizando indexação direta de array no ponteiro mapeado
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
-                  pOut[-3] = '0' + (rem / 100);
-                  pOut[-2] = '0' + ((rem / 10) % 10);
-                  pOut[-1] = '0' + (rem % 10);
+                  char *target = (char *)pOut;
+                  target[-3] = '0' + (rem / 100);
+                  target[-2] = '0' + ((rem / 10) % 10);
+                  target[-1] = '0' + (rem % 10);
               }
           }
 
@@ -183,9 +184,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
-          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
