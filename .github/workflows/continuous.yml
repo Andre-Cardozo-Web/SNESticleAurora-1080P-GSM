@@ -52,6 +52,7 @@ jobs:
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
       - name: Patch PS2SDK Typo Collisions and Mainfiles
+        shell: bash
         run: |
           set -euo pipefail
           echo "=== Injetando flags de compatibilidade e silenciando warnings no Makefile principal ==="
@@ -66,6 +67,7 @@ jobs:
           fi
 
       - name: Patch Obsolete IOP Headers Natively
+        shell: bash
         run: |
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
@@ -90,24 +92,20 @@ jobs:
             sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "libpad.h"/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include "loadfile.h"/g' "$IOP_FILE"
 
-            echo "🩹 Injetando tipos primitivos customizados locais faltantes no topo de mainloop_iop.cpp..."
-            sed -i '1s/^/typedef int Bool;\ntypedef unsigned int Uint32;\ntypedef int Int32;\ntypedef char Char;\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n/' "$IOP_FILE"
+            echo "🩹 Injetando tipos primitivos customizados locais e redefinindo NULL de segurança..."
+            sed -i '1s/^/typedef int Bool;\ntypedef unsigned int Uint32;\ntypedef int Int32;\ntypedef char Char;\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr\n/' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp nao encontrado para aplicacao do patch."
           fi
 
-          echo "🔗 Vinculando a árvore de arquivos de inclusão mestre da PS2SDK de forma local..."
-          # Cria links de todos os cabeçalhos de sistema e de barramento da SDK moderna diretamente na raiz local do loop
-          # Isso blinda tamtypes.h no loadfile.h e impede erros em sub-makefiles isolados do emulador
-          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
-          
-          # Fallback duplicado na raiz comum src/
-          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
+          echo "🔗 Injetando cabecalhos oficiais modernos por proximidade fisica na pasta do sistema..."
+          cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/common/include/tamtypes.h ./src/platform/ps2/system/ || true
       - name: Rebuild mainloop_state.cpp Natively
+        shell: bash
         run: |
           set -euo pipefail
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
@@ -193,6 +191,7 @@ jobs:
           echo "=== Modulo recriado em C puro e protegido contra falhas de cabecalhos ==="
 
       - name: Build Core Components Sequentially
+        shell: bash
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
@@ -204,6 +203,7 @@ jobs:
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
+        shell: bash
         run: |
           set -euo pipefail
           STRIP="$(command -v mips64r5900el-ps2-elf-strip || true)"
@@ -213,6 +213,7 @@ jobs:
           mv -f ../build/SNESticle.stripped.elf ../build/SNESticle.elf || mv -f build/SNESticle.stripped.elf build/SNESticle.elf || true
 
       - name: Checksums
+        shell: bash
         run: |
           set -euo pipefail
           {
@@ -223,6 +224,7 @@ jobs:
       - name: Continuous release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
