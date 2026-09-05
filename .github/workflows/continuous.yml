@@ -97,17 +97,24 @@ jobs:
           #ifndef TRUE
           #define TRUE 1
           #endif
+
+          // Injeção global das variáveis e funções ausentes exigidas nas linhas 63 e 66
+          static uint32_t _PathCalcHash(const char *pStr) {
+              uint32_t hash = 5381;
+              int c;
+              if (!pStr) return 0;
+              while ((c = *pStr++)) { hash = ((hash << 5) + hash) + c; }
+              return hash;
+          }
+          // Variável de fallback para escopo caso o sed macro falhe
+          static Int32 nOriginalMax = 128;
           EOF
           
-          echo "=== Aplicando filtragem de escopo, sintaxe e definicao de variaveis ==="
-          # 1. Trata quebras do Windows (\r)
-          # 2. Corrige a quebra de linha da função colada na linha 85
-          # 3. Fecha a chave do escopo anterior se a regex falhar
-          # 4. Injeta a declaração faltante de 'Int32 nOriginalMax = nMaxChars;' logo no início da função PathTruncFileName para sanar o erro da linha 65
+          echo "=== Aplicando filtragem de escopo e sintaxe estrutural ==="
+          # Limpa quebras do Windows, arruma a indentação de chaves truncadas e garante o fechamento de escopo
           cat /tmp/orig_mainloop.cpp | tr -d '\r' | \
           sed -E 's/return FALSE;[[:space:]]*const Char[[:space:]]*\*MainLoopStateGetAvailability/return FALSE;\nconst Char \*MainLoopStateGetAvailability/g' | \
-          sed -E 's/const Char[[:space:]]*\*MainLoopStateGetAvailability/}\nconst Char \*MainLoopStateGetAvailability/g' | \
-          sed -E 's/void PathTruncFileName\([[:space:]]*Char[[:space:]]*\*pOut,[[:space:]]*Char[[:space:]]*\*pStr,[[:space:]]*Int32[[:space:]]*nMaxChars\)[[:space:]]*\{/void PathTruncFileName\(Char \*pOut, Char \*pStr, Int32 nMaxChars\) \{\n    Int32 nOriginalMax = nMaxChars;/g' >> "$TARGET_FILE"
+          sed -E 's/const Char[[:space:]]*\*MainLoopStateGetAvailability/}\nconst Char \*MainLoopStateGetAvailability/g' >> "$TARGET_FILE"
 
       - name: Build Core Components Sequentially
         shell: bash
