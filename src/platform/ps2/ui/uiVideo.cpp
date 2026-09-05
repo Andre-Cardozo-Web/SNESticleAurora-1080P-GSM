@@ -142,24 +142,18 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         case 13: 
             SmbSupportSetEnabled(!SmbSupportIsEnabled()); 
             break;
-        }
-    }
-
-    if (trigger & (PAD_CROSS | PAD_START))
-    {
-        if (m_iSelect == 18) 
-        { 
-            if (Aud_IsInitialized()) Aud_Setvol(0); 
-            MainResetEmulator(); 
-        }
-        else if (m_iSelect == 19) 
-        { 
-            if (Aud_IsInitialized()) Aud_Setvol(0); 
-            ExecOSD(0, NULL); 
-        }
-        else 
-        {
-            VideoSettingsSave();
-        }
-    }
+        const Char *MainLoopStateGetAvailability() 
+{ 
+    return (const Char *)"Ready."; 
 }
+
+#if MAINLOOP_HISTORY
+Uint32 _History[16384 * 2]; 
+Uint32 _nHistory = 0;
+
+void _MainLoopSaveHistory() 
+{ 
+    FileWriteMem("host:game.hst", _History, _nHistory * sizeof(Uint32)); 
+    printf("History written\n"); 
+}
+#endif
