@@ -75,7 +75,7 @@ jobs:
           sed -i 's/\r//g' "$IOP_FILE" || true
 
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade absoluta no diretório raiz de buscas..."
-          # Escreve um arquivo de inclusão isolado injetando a compatibilidade completa exigida pela Newlib/g++ moderna
+          # Escreve um arquivo de inclusão isolado injetando a compatibilidade completa exigida pela Newlib/g++ moderna e os tipos de som/UI faltantes
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
@@ -90,9 +90,12 @@ jobs:
           typedef unsigned long long Uint64;
           typedef __int128           Uint128;
           typedef int                Int32;
+          typedef short              Int16;
+          typedef char               Int8;
           typedef char               Char;
           typedef float              Float32;
           
+          typedef unsigned int       uint32;
           typedef unsigned short     uint16;
           typedef unsigned long long uint64;
           
@@ -139,7 +142,7 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
           echo "🩹 Forçando a inclusão física do patch de tipos diretamente via sed no topo do mainloop_iop.cpp..."
-          sed -i '1i #include "ps2_types_fix.h"' "$IOP_FILE" || true
+          sed -i '1i #include "ps2_types_fix.h"\n#include <climits>' "$IOP_FILE" || true
 
           echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK de forma plana no repositório..."
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
@@ -255,8 +258,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente de barramento de busca nativas do GCC ==="
-          # Exportamos CPATH e as variantes de C_INCLUDE para forçar o GCC a rastrear a pasta corrente do workspace.
-          # Isso faz o compilador injetar de forma transparente o fix e as rotas da SDK em qualquer sub-pasta, ignorando bloqueios de Makefiles.
           export CPATH="/github/workspace:/github/workspace/src:/github/workspace/src/platform/ps2/system:/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           export C_INCLUDE_PATH="${CPATH}"
           export CPLUS_INCLUDE_PATH="${CPATH}"
