@@ -15,6 +15,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container: ps2dev/ps2dev:latest
+    defaults:
+      run:
+        working-directory: /github/workspace
     steps:
       - name: Install system dependencies
         run: |
@@ -23,6 +26,7 @@ jobs:
 
       - name: Fix Git Safe Directory Perms
         run: |
+          git config --global --add safe.directory /github/workspace
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global --add safe.directory /__w/SNESticleAurora-1080P-GSM/SNESticleAurora-1080P-GSM
 
@@ -56,30 +60,26 @@ jobs:
       - name: Package checked-out source
         shell: bash
         run: |
-      - name: Build Core Components Sequentially
-        run: |
-          cd "$GITHUB_WORKSPACE"
-          make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
-
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:12}"
+          source_name="SNESticleAurora-${short_sha}-source.tar.gz"
           {
             printf 'SNESticleAurora commit: %s\n' "$GITHUB_SHA"
             printf 'Recursive submodules:\n'
             git submodule status --recursive
           } > /tmp/SOURCE-MANIFEST.txt
-          tar --exclude='./.git' --exclude='*/.git' --exclude='./build' --exclude='./.aurora_picodrive_stage2_backup' -czf "/tmp/${source_name}" -C "$GITHUB_WORKSPACE" . -C /tmp SOURCE-MANIFEST.txt
+          tar --exclude='./.git' --exclude='*/.git' --exclude='./build' --exclude='./.aurora_picodrive_stage2_backup' -czf "/tmp/${source_name}" . -C /tmp SOURCE-MANIFEST.txt
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
       - name: Build Core Components Sequentially
         run: |
-          cd "$GITHUB_WORKSPACE"
           make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
 
       - name: Strip release ELF
         shell: bash
         run: |
           set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
           STRIP="$(command -v mips64r5900el-ps2-elf-strip || true)"
           if [ -z "$STRIP" ] && [ -n "${PS2DEV:-}" ] && [ -x "$PS2DEV/ee/bin/mips64r5900el-ps2-elf-strip" ]; then STRIP="$PS2DEV/ee/bin/mips64r5900el-ps2-elf-strip"; fi
           [ -n "$STRIP" ] || STRIP="$(command -v mips64r5900el-ps2-elf-strip 2>/dev/null || true)"
@@ -92,7 +92,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
           {
             (cd build && sha256sum SNESticle.elf)
             (cd /tmp && sha256sum "$AURORA_SOURCE_NAME")
@@ -104,6 +103,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
           gh release delete continuous --cleanup-tag --yes || true
           gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" /tmp/SOURCE-MANIFEST.txt /tmp/SHA256SUMS.txt LICENSE BRANDING.md LICENSES/PicoDrive-COPYING.txt LICENSES/QuickNES-GPL-2.0.txt LICENSES/Beetle-PCE-Fast-GPL-2.0.txt LICENSES/FCEUmm-GPL-2.0.txt THIRD_PARTY.md --target "$GITHUB_SHA" --title "Continuous Build" --prerelease --notes-file CONTINUOUS_RELEASE.md
