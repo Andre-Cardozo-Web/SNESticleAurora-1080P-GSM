@@ -76,18 +76,19 @@ jobs:
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            # Força a injeção do caminho físico mestre absoluto para ignorar limpezas de variáveis feitas pelos sub-makefiles
+            # Força a injeção do caminho físico mestre absoluto para ignorar desconfigurações locais do sub-makefile
             sed -i 's/#include <libpad.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libpad.h"/g' "$IOP_FILE"
             sed -i 's/#include <libmc.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libmc.h"/g' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
 
-          echo "🩹 Hack de linkagem: Injetando cabeçalho de compatibilidade interno da Newlib para libmc..."
+          echo "🩹 Hack de linkagem: Forçando caminho absoluto mestre dentro da libmc.h da SDK..."
           SDK_MC_FILE="/usr/local/ps2dev/ps2sdk/ee/include/libmc.h"
           if [ -f "$SDK_MC_FILE" ]; then
-            # Faz o patch diretamente na libmc.h do contêiner para que ela encontre seu arquivo irmão de cabeçalho (libmc-common.h) via caminho relativo local
-            sed -i 's/#include <libmc-common.h>/#include "libmc-common.h"/g' "$SDK_MC_FILE"
+            # Corrige a inclusão interna da SDK injetando a rota física direta completa para libmc-common.h
+            sed -i 's/#include "libmc-common.h"/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libmc-common.h"/g' "$SDK_MC_FILE"
+            sed -i 's/#include <libmc-common.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libmc-common.h"/g' "$SDK_MC_FILE"
           fi
 
       - name: Rebuild mainloop_state.cpp Statically
@@ -147,13 +148,12 @@ jobs:
               }
               *pOut = 0;
               
-              // Correção definitiva de sintaxe: Modificação direta via índices de array [] para aceitar strings sem erros de tipo char*
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
-                  char *target = (char *)pOut - 3;
-                  target[0] = '0' + (rem / 100);
-                  target[1] = '0' + ((rem / 10) % 10);
-                  target[2] = '0' + (rem % 10);
+                  char *p = (char *)pOut - 3;
+                  p[0] = '0' + (rem / 100);
+                  p[1] = '0' + ((rem / 10) % 10);
+                  p[2] = '0' + (rem % 10);
               }
           }
 
