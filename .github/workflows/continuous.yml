@@ -86,3 +86,4 @@ jobs:
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
           gh release create continuous ../build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
+ 
