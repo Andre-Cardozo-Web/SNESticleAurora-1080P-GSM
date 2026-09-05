@@ -52,6 +52,7 @@ jobs:
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
       - name: Patch PS2SDK Typo Collisions and Mainfiles
+        shell: bash
         run: |
           set -euo pipefail
           echo "=== Injetando flags de compatibilidade e silenciando warnings no Makefile principal ==="
@@ -66,6 +67,7 @@ jobs:
           fi
 
       - name: Patch Obsolete IOP Headers Natively
+        shell: bash
         run: |
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
@@ -78,7 +80,6 @@ jobs:
             sed -i 's/\r//g' "$IOP_FILE"
 
             echo "🩹 Criando cabeçalho físico isolado de correção de tipos primitivos e Newlib..."
-            # Escreve um arquivo .h limpo diretamente na pasta do sistema com todas as definições exigidas
             cat << 'EOF' > src/platform/ps2/system/ps2_types_fix.h
             #ifndef PS2_TYPES_FIX_H
             #define PS2_TYPES_FIX_H
@@ -118,7 +119,6 @@ jobs:
             EOF
 
             echo "🩹 Injetando a inclusão do cabeçalho de correção no topo do mainloop_iop.cpp..."
-            # Adiciona o include antes de qualquer processamento de código
             sed -i '1i #include "ps2_types_fix.h"' "$IOP_FILE"
 
             echo "🩹 Corrigindo mapeamento de alocacao de memoria e gerenciamento da IOP..."
@@ -134,7 +134,7 @@ jobs:
             sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include "loadfile.h"/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include "sifrpc.h"/g' "$IOP_FILE"
           else
-            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp nao encontrado para aplicacao do patch."
+            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp nao encontrado para aplicação do patch."
           fi
 
           echo "🔗 Injetando cabecalhos oficiais modernos por proximidade fisica na pasta do sistema..."
@@ -154,6 +154,7 @@ jobs:
              sed -i '1i #include "ps2_types_fix.h"' "$FIFO_FILE"
           fi
       - name: Rebuild mainloop_state.cpp Natively
+        shell: bash
         run: |
           set -euo pipefail
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
@@ -236,9 +237,10 @@ jobs:
               return "mc0: pronto";
           }
           EOF
-          echo "=== Modulo recriado em C puro e protegido contra falhas de cabecalhos ==="
+          echo "=== Módulo recriado em C puro e protegido contra falhas de cabeçalhos ==="
 
       - name: Build Core Components Sequentially
+        shell: bash
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
@@ -246,10 +248,11 @@ jobs:
           export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
-          echo "=== Executando compilacao padrao ==="
+          echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
+        shell: bash
         run: |
           set -euo pipefail
           STRIP="$(command -v mips64r5900el-ps2-elf-strip || true)"
@@ -259,6 +262,7 @@ jobs:
           mv -f ../build/SNESticle.stripped.elf ../build/SNESticle.elf || mv -f build/SNESticle.stripped.elf build/SNESticle.elf || true
 
       - name: Checksums
+        shell: bash
         run: |
           set -euo pipefail
           {
@@ -269,6 +273,7 @@ jobs:
       - name: Continuous release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
