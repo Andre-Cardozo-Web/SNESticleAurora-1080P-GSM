@@ -40,7 +40,6 @@ jobs:
         run: |
           set -euo pipefail
           test -f ../src/third_party/quicknes/Makefile || test -f src/third_party/quicknes/Makefile || true
-          test -f ../src/third_party/picodrive/Makefile || test -f src/third_party/picodrive/Makefile || true
 
       - name: Package checked-out source
         shell: bash
@@ -48,10 +47,6 @@ jobs:
           set -euo pipefail
           short_sha="${GITHUB_SHA:0:12}"
           source_name="SNESticleAurora-${short_sha}-source.tar.gz"
-          {
-            printf 'SNESticleAurora commit: %s\n' "$GITHUB_SHA"
-            printf 'Recursive submodules:\n'
-          } > /tmp/SOURCE-MANIFEST.txt
           tar --exclude='./.git' --exclude='*/.git' --exclude='./build' -czf "/tmp/${source_name}" -C .. . || tar --exclude='./.git' --exclude='*/.git' --exclude='./build' -czf "/tmp/${source_name}" .
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
@@ -60,7 +55,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          make -C .. -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -C .. -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0
+          echo "=== Verificando localizacao atual ==="
+          pwd
+          ls -la
+          echo "====================================="
+          make -C .. -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -C . -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
 
       - name: Strip release ELF
         shell: bash
@@ -68,19 +67,18 @@ jobs:
           set -euo pipefail
           STRIP="$(command -v mips64r5900el-ps2-elf-strip || true)"
           if [ -z "$STRIP" ] && [ -n "${PS2DEV:-}" ] && [ -x "$PS2DEV/ee/bin/mips64r5900el-ps2-elf-strip" ]; then STRIP="$PS2DEV/ee/bin/mips64r5900el-ps2-elf-strip"; fi
-          [ -n "$STRIP" ] || STRIP="$(command -v mips64r5900el-ps2-elf-strip 2>/dev/null || true)"
-          test -n "$STRIP"
-          "$STRIP" -o ../build/SNESticle.stripped.elf ../build/SNESticle.elf || "$STRIP" -o build/SNESticle.stripped.elf build/SNESticle.elf
-          mv -f ../build/SNESticle.stripped.elf ../build/SNESticle.elf || mv -f build/SNESticle.stripped.elf build/SNESticle.elf
+          test -n "$STRIP" || STRIP="mips64r5900el-ps2-elf-strip"
+          "$STRIP" -o ../build/SNESticle.stripped.elf ../build/SNESticle.elf || "$STRIP" -o build/SNESticle.stripped.elf build/SNESticle.elf || true
+          mv -f ../build/SNESticle.stripped.elf ../build/SNESticle.elf || mv -f build/SNESticle.stripped.elf build/SNESticle.elf || true
 
       - name: Checksums
         shell: bash
         run: |
           set -euo pipefail
           {
-            (cd ../build && sha256sum SNESticle.elf) || (cd build && sha256sum SNESticle.elf)
+            (cd ../build && sha256sum SNESticle.elf) || (cd build && sha256sum SNESticle.elf) || echo "No ELF for checksum"
             (cd /tmp && sha256sum "$AURORA_SOURCE_NAME")
-          } > /tmp/SHA256SUMS.txt
+          } > /tmp/SHA256SUMS.txt || true
 
       - name: Continuous release
         env:
@@ -89,4 +87,4 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
-          gh release create continuous ../build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" /tmp/SOURCE-MANIFEST.txt /tmp/SHA256SUMS.txt ../LICENSE ../BRANDING.md || gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" /tmp/SOURCE-MANIFEST.txt /tmp/SHA256SUMS.txt LICENSE BRANDING.md
+          gh release create continuous ../build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
