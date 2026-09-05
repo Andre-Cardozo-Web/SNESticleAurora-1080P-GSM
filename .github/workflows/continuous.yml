@@ -129,7 +129,17 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include "loadfile.h"/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include "sifrpc.h"/g' "$IOP_FILE" || true
 
-          echo "🔗 Injetando cabecalhos oficiais modernos por proximidade fisica na pasta do sistema..."
+          echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK de forma plana no repositório..."
+          # Vincula os subdiretórios comuns adicionais de DMA e RPC diretamente nas pastas de rastreamento do Make
+          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
+          
+          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
+
+          echo "🔗 Copiando de suporte físico redundantes para a pasta local do sistema..."
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
@@ -138,6 +148,7 @@ jobs:
           cp -f /usr/local/ps2dev/ps2sdk/common/include/tamtypes.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/loadfile-common.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/sifrpc-common.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/common/include/sifcmd-common.h ./src/platform/ps2/system/ || true
 
           echo "🩹 Aplicando definicao de tipos de suporte graficos em gpfifo.h..."
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
