@@ -11,9 +11,9 @@
 
 // Inclusões ajustadas combinando caminhos do PS2SDK e diretórios externos do repositório
 #include "mainloop_exec.h"                         // Procura na pasta local/nativa do PS2
-#include "../../../nes/quicknes/quicknes_bridge.h"   // Já funcionou! Mantido.
-#include "base/storage.h"                           // Acessa direto usando o mapeamento global 'base/'
-#include "render/audmixbuffer.h"                     // Acessa direto usando o mapeamento global 'render/'
+#include "../../../nes/quicknes/quicknes_bridge.h"   // Já funcionou perfeitamente!
+#include "../../../../common/base/storage.h"           // Voltando 4 níveis para sair de 'src' e achar a raiz 'common/base'
+#include "../../../../common/render/audmixbuffer.h"   // Voltando 4 níveis para sair de 'src' e achar a raiz 'common/render'
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
