@@ -638,7 +638,8 @@ SRCS := \
 	src/platform/ps2/ui/uiCover.cpp \
 	src/platform/ps2/ui/uiLog.cpp \
 	src/platform/ps2/ui/uiMenu.cpp \
-		src/platform/ps2/ui/uiNetwork.cpp \
+    src/platform/ps2/ui/uiNetwork.cpp \
+	src/platform/ps2/ui/uiNetwork.cpp \
 	src/platform/ps2/ui/uiVideo.cpp \
 	src/platform/ps2/system/version.cpp \
 	src/common/render/wavfile.cpp \
@@ -677,7 +678,6 @@ SRCS := \
 	src/pce/system/pcerom.cpp \
 	src/pce/beetle/pce_bridge.cpp \
 	src/pce/beetle/pcesystem_beetle.cpp
-
 
 OBJS := \
 	$(patsubst src/%.c,$(OBJ_DIR)/%.o,$(filter %.c,$(SRCS))) \
