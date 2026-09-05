@@ -75,18 +75,12 @@ jobs:
           sed -i 's/\r//g' "$IOP_FILE" || true
 
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade absoluta no diretório raiz de buscas..."
+          # Mapeia _ALIGN para o atributo GNU __attribute__((aligned(x))) para impedir quebras em chaves de struct/union pós-fixadas
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
-          #include <climits>
-          #include <stdint.h>
-          #include <stddef.h>
           
-          #ifndef INT_MAX
-          #define INT_MAX 2147483647
-          #endif
-          
-          #define _ALIGN(x) alignas(x)
+          #define _ALIGN(x) __attribute__((aligned(x)))
           #define _INLINE inline
           #define _inline inline
           
@@ -107,8 +101,7 @@ jobs:
           typedef unsigned char      uint8;
           typedef unsigned long long uint64;
           
-          // Definições de paletas e cores exigidas por rendersurface.h
-          typedef struct { uint8 r, g, b, a; } Color32T;
+          typedef struct { Uint8 r, g, b, a; } Color32T;
           typedef struct { Color32T entries[256]; } PaletteT;
           
           #ifndef FALSE
@@ -117,10 +110,6 @@ jobs:
           #ifndef TRUE
           #define TRUE 1
           #endif
-          #ifdef NULL
-          #undef NULL
-          #endif
-          #define NULL nullptr
           
           #ifdef __cplusplus
           extern "C" {
@@ -136,6 +125,7 @@ jobs:
           EOF
 
           # Cria réplicas do fix nas pastas de destino do compilador para proximidade física imediata
+          mkdir -p src/platform/ps2/system src/platform/ps2/gs src/common/render src/third_party/fceumm-fds/src/ || true
           cp -f ./ps2_types_fix.h ./src/ps2_types_fix.h || true
           cp -f ./ps2_types_fix.h ./src/platform/ps2/system/ps2_types_fix.h || true
           cp -f ./ps2_types_fix.h ./src/platform/ps2/gs/ps2_types_fix.h || true
@@ -153,14 +143,23 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Forçando a inclusão física do patch de tipos diretamente via sed no topo do mainloop_iop.cpp..."
-          sed -i '1i #include "ps2_types_fix.h"' "$IOP_FILE" || true
-
-          echo "🩹 Resolvendo conflito de declaração duplicada da struct pal em FCEUmm..."
+          echo "🩹 Resolvendo conflito de declaração duplicada e anônima da struct pal em FCEUmm..."
           PAL_FILE="src/third_party/fceumm-fds/src/palette.h"
           if [ -f "$PAL_FILE" ]; then
-             sed -i 's/typedef struct/struct/g' "$PAL_FILE" || true
-             sed -i 's/} pal;/};/g' "$PAL_FILE" || true
+             cat << 'EOF' > "$PAL_FILE"
+             #ifndef FCEU_PALETTE_H
+             #define FCEU_PALETTE_H
+             struct pal { unsigned char r, g, b; };
+             extern struct pal *palo;
+             void FCEU_DrawNTSCControlBars(unsigned char *XBuf);
+             #endif
+             EOF
+          fi
+
+          echo "🩹 Resolvendo conflito de re-declaração prévia da struct PaletteT em bmpfile.h..."
+          BMP_FILE="src/common/media/bmpfile.h"
+          if [ -f "$BMP_FILE" ]; then
+             sed -i 's/struct PaletteT;/\/\/ struct PaletteT;/g' "$BMP_FILE" || true
           fi
 
           echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK de forma plana no repositório..."
@@ -182,12 +181,6 @@ jobs:
           cp -f /usr/local/ps2dev/ps2sdk/common/include/loadfile-common.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/sifrpc-common.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/sifcmd-common.h ./src/platform/ps2/system/ || true
-
-          echo "🩹 Aplicando definicao de tipos de suporte graficos no topo de gpfifo.h..."
-          FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
-          if [ -f "$FIFO_FILE" ]; then
-             sed -i '1i #include "ps2_types_fix.h"' "$FIFO_FILE" || true
-          fi
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
@@ -276,14 +269,11 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Exportando variaveis de ambiente de barramento de busca nativas do GCC ==="
-          export CPATH="/github/workspace:/github/workspace/src:/github/workspace/src/platform/ps2/system:/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
-          export C_INCLUDE_PATH="${CPATH}"
-          export CPLUS_INCLUDE_PATH="${CPATH}"
-          
-          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          echo "=== Injetando fix de compatibilidade via diretiva -include no compilador ==="
+          # Removemos CPATH para salvar os cabeçalhos internos do C++ (<cstdlib>) e passamos o include forçado local nas flags mestre do projeto
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
