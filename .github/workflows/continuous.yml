@@ -26,22 +26,26 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Fix Git Safe Directory and Container Links
+      - name: Save Absolute Path Mappings
         run: |
-          REAL_PATH=$(pwd)
+          # Salva o caminho real do repositorio em um arquivo fixo global dentro do container
+          pwd > /tmp/repo_path.txt
+          REAL_PATH=$(cat /tmp/repo_path.txt)
           git config --global --add safe.directory "$REAL_PATH"
-          rm -rf /src
-          ln -s "$REAL_PATH" /src
-          echo "Link mestre configurado com sucesso!"
+          echo "Caminho real mapeado: $REAL_PATH"
 
       - name: Patch PicoDrive Duplicate Macro
         run: |
+          REAL_PATH=$(cat /tmp/repo_path.txt)
+          cd "$REAL_PATH"
           sed -i 's/#define FAMEC_NO_GOTOS/\/\/ #define FAMEC_NO_GOTOS/g' src/third_party/picodrive/cpu/fame/famec.c || true
 
       - name: Verify required emulator submodules
         shell: bash
         run: |
           set -euo pipefail
+          REAL_PATH=$(cat /tmp/repo_path.txt)
+          cd "$REAL_PATH"
           test -f src/third_party/quicknes/Makefile || true
           test -f src/third_party/picodrive/Makefile || true
           echo "Recursive submodules:"
@@ -51,6 +55,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          REAL_PATH=$(cat /tmp/repo_path.txt)
+          cd "$REAL_PATH"
           short_sha="${GITHUB_SHA:0:12}"
           source_name="SNESticleAurora-${short_sha}-source.tar.gz"
           {
@@ -66,12 +72,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          REAL_PATH=$(cat /tmp/repo_path.txt)
+          cd "$REAL_PATH"
           make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
 
       - name: Strip release ELF
         shell: bash
         run: |
           set -euo pipefail
+          REAL_PATH=$(cat /tmp/repo_path.txt)
+          cd "$REAL_PATH"
           STRIP="$(command -v mips64r5900el-ps2-elf-strip || true)"
           if [ -z "$STRIP" ] && [ -n "${PS2DEV:-}" ] && [ -x "$PS2DEV/ee/bin/mips64r5900el-ps2-elf-strip" ]; then STRIP="$PS2DEV/ee/bin/mips64r5900el-ps2-elf-strip"; fi
           [ -n "$STRIP" ] || STRIP="$(command -v mips64r5900el-ps2-elf-strip 2>/dev/null || true)"
@@ -84,6 +94,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          REAL_PATH=$(cat /tmp/repo_path.txt)
+          cd "$REAL_PATH"
           {
             (cd build && sha256sum SNESticle.elf)
             (cd /tmp && sha256sum "$AURORA_SOURCE_NAME")
@@ -95,5 +107,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          REAL_PATH=$(cat /tmp/repo_path.txt)
+          cd "$REAL_PATH"
           gh release delete continuous --cleanup-tag --yes || true
           gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" /tmp/SOURCE-MANIFEST.txt /tmp/SHA256SUMS.txt LICENSE BRANDING.md LICENSES/PicoDrive-COPYING.txt LICENSES/QuickNES-GPL-2.0.txt LICENSES/Beetle-PCE-Fast-GPL-2.0.txt LICENSES/FCEUmm-GPL-2.0.txt THIRD_PARTY.md --target "$GITHUB_SHA" --title "Continuous Build" --prerelease --notes-file CONTINUOUS_RELEASE.md
