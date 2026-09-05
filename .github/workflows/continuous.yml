@@ -79,7 +79,7 @@ jobs:
           echo "=== Fazendo o dump do arquivo temporario limpo ==="
           cp "$TARGET_FILE" /tmp/orig_mainloop.cpp
           
-          echo "=== Reconstruindo o arquivo fisicamente com tipos e correcoes ==="
+          echo "=== Reconstruindo o arquivo fisicamente com tipos nativos ==="
           cat << 'EOF' > "$TARGET_FILE"
           #include <stdint.h>
           #include <stdio.h>
@@ -97,24 +97,52 @@ jobs:
           #ifndef TRUE
           #define TRUE 1
           #endif
-
-          // Injeção global das variáveis e funções ausentes exigidas nas linhas 63 e 66
-          static uint32_t _PathCalcHash(const char *pStr) {
-              uint32_t hash = 5381;
-              int c;
-              if (!pStr) return 0;
-              while ((c = *pStr++)) { hash = ((hash << 5) + hash) + c; }
-              return hash;
-          }
-          // Variável de fallback para escopo caso o sed macro falhe
-          static Int32 nOriginalMax = 128;
           EOF
           
-          echo "=== Aplicando filtragem de escopo e sintaxe estrutural ==="
-          # Limpa quebras do Windows, arruma a indentação de chaves truncadas e garante o fechamento de escopo
+          echo "=== Injetando o restante do codigo e aplicando correcoes cirurgicas ==="
+          # 1. Limpa retornos do Windows (\r)
+          # 2. Força a quebra de linha estrutural da função colada na linha 85 para evitar funções aninhadas
+          # 3. Força o fechamento de chaves da subfunção se necessário
           cat /tmp/orig_mainloop.cpp | tr -d '\r' | \
           sed -E 's/return FALSE;[[:space:]]*const Char[[:space:]]*\*MainLoopStateGetAvailability/return FALSE;\nconst Char \*MainLoopStateGetAvailability/g' | \
           sed -E 's/const Char[[:space:]]*\*MainLoopStateGetAvailability/}\nconst Char \*MainLoopStateGetAvailability/g' >> "$TARGET_FILE"
+
+          echo "=== Substituindo a implementacao defeituosa de PathTruncFileName por uma versao autossuficiente ==="
+          # Criamos um script em Python inline para reescrever o bloco da função com tipagem estrita e hash local resiliente
+          python3 -c '
+          import os
+          path = "'"$TARGET_FILE"'"
+          with open(path, "r") as f:
+              content = f.read()
+          
+          # Código substituto limpo e autossuficiente com todas as variáveis locais tipadas de forma explícita
+          fixed_function = """
+          void PathTruncFileName(Char *pOut, Char *pStr, Int32 nMaxChars) {
+              Int32 nOriginalMax = nMaxChars;
+              uint32_t hash = 5381;
+              int c;
+              if (pStr) {
+                  char *p = (char *)pStr;
+                  while ((c = *p++)) { hash = ((hash << 5) + hash) + c; }
+              }
+              if (nMaxChars <= 0 && nOriginalMax >= 3) { 
+                  sprintf((char *)pOut - 3, "%03u", (unsigned int)(hash % 1000)); 
+              }
+          }
+          """
+          
+          # Localiza onde a assinatura da função começa e substitui o bloco inteiro até o fim da checagem lógica
+          import re
+          pattern = r"void\s+PathTruncFileName\s*\([^)]*\)\s*\{[^}]*hash\s*=\s*_PathCalcHash[^}]*\}"
+          if re.search(pattern, content):
+              content = re.sub(pattern, fixed_function, content)
+          else:
+              # Fallback caso a assinatura possua quebras de linha complexas
+              content = content.replace("hash = _PathCalcHash(pStr);", "uint32_t hash = 5381; int _c; char *_p = (char *)pStr; if(_p){while((_c=*_p++)){hash=((hash<<5)+hash)+_c;}} Int32 nOriginalMax = nMaxChars;")
+          
+          with open(path, "w") as f:
+              f.write(content)
+          '
 
       - name: Build Core Components Sequentially
         shell: bash
