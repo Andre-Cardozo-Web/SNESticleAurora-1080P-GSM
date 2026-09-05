@@ -41,7 +41,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         { 
             m_iSelect++; 
             if (m_iSelect > hi)  m_iSelect = lo; 
-        }
+            }
     }
 
     if (trigger & PAD_LEFT)  dir = -1; 
@@ -53,7 +53,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         {
         case 0: 
             { 
-                // Corrigido para acessar a variavel nativa de controle de video do barramento do gsKit
+                // Corrigido para acessar a variavel nativa de controle de video do barramento do gSKit
                 Int32 modeIndex = g_GskVideoMode + dir; 
                 if (modeIndex < 0) modeIndex = 2; 
                 if (modeIndex > 2) modeIndex = 0; 
