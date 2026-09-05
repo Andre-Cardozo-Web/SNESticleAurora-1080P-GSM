@@ -18,6 +18,7 @@
 #include "../../../md/picodrive/picodrive_bridge.h"
 #include "system/quicknes_bridge.h"
 
+
 extern "C" {
 #include "audio.h"
 }
