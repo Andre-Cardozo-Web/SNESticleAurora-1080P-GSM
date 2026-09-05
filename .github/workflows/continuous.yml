@@ -72,8 +72,7 @@ jobs:
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
           if [ -f "$IOP_FILE" ]; then
-            echo "🩹 Atualizando o cabeçalho legado iopheap.h para o padrão moderno kernel.h no mainloop_iop.cpp..."
-            # Substitui a inclusão obsoleta iopheap.h por kernel.h e alloc.h que contêm o gerenciamento moderno de heap da IOP
+            echo "🩹 Atualizando o cabeçalho legado iopheap.h para o padrão moderno no mainloop_iop.cpp..."
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <alloc.h>/g' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
@@ -86,12 +85,14 @@ jobs:
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
           
-          echo "=== Reconstruindo mainloop_state.cpp de forma 100% autonoma ==="
+          echo "=== Reconstruindo mainloop_state.cpp com mapeamento unificado de size_t ==="
           cat << 'EOF' > "$TARGET_FILE"
           #include <stddef.h>
 
-          #ifndef _SIZE_T_DECLARED
-          #define _SIZE_T_DECLARED
+          // Definição unificada para impedir que string.h ou stdio.h quebrem por falta de tipo
+          #ifndef _SIZE_T_DEFINED
+          #define _SIZE_T_DEFINED
+          typedef decltype(sizeof(0)) size_t;
           #endif
 
           #include <stdio.h>
@@ -168,7 +169,7 @@ jobs:
               return "mc0: pronto";
           }
           EOF
-          echo "=== Arquivo substituído e mapeado com tipos primitivos do GCC ==="
+          echo "=== Arquivo substituído e compatibilizado de forma global para size_t ==="
 
       - name: Build Core Components Sequentially
         shell: bash
