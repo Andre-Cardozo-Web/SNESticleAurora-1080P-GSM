@@ -52,7 +52,6 @@ jobs:
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
       - name: Patch PS2SDK Typo Collisions and Mainfiles
-        shell: bash
         run: |
           set -euo pipefail
           echo "=== Injetando flags de compatibilidade e silenciando warnings no Makefile principal ==="
@@ -67,7 +66,6 @@ jobs:
           fi
 
       - name: Patch Obsolete IOP Headers Natively
-        shell: bash
         run: |
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
@@ -79,9 +77,10 @@ jobs:
             sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            echo "🩹 Desativando chamada obsoleta sifrpc.h ja coberta pelo kernel mestre..."
-            # Comenta de forma cirúrgica a linha 76 para impedir erros de busca por arquivos descontinuados
+            echo "🩹 Desativando chamadas obsoletas de RPC e carregamento de arquivos ja cobertas pelo kernel mestre..."
+            # Comenta cirurgicamente as linhas 76 e 77 que apontavam para cabeçalhos descontinuados no contêiner
             sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/\/\/ #include <sifrpc.h>/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/\/\/ #include <loadfile.h>/g' "$IOP_FILE"
             
             echo "🩹 Atualizando chamadas legadas para a sintaxe unificada moderna..."
             sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include <memcard.h>/g' "$IOP_FILE"
@@ -96,7 +95,6 @@ jobs:
           cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
 
       - name: Rebuild mainloop_state.cpp Natively
-        shell: bash
         run: |
           set -euo pipefail
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
@@ -182,7 +180,6 @@ jobs:
           echo "=== Módulo recriado em C puro e protegido contra falhas de cabeçalhos ==="
 
       - name: Build Core Components Sequentially
-        shell: bash
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
@@ -194,7 +191,6 @@ jobs:
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
-        shell: bash
         run: |
           set -euo pipefail
           STRIP="$(command -v mips64r5900el-ps2-elf-strip || true)"
@@ -204,7 +200,6 @@ jobs:
           mv -f ../build/SNESticle.stripped.elf ../build/SNESticle.elf || mv -f build/SNESticle.stripped.elf build/SNESticle.elf || true
 
       - name: Checksums
-        shell: bash
         run: |
           set -euo pipefail
           {
@@ -215,7 +210,6 @@ jobs:
       - name: Continuous release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
