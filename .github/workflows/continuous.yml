@@ -98,6 +98,7 @@ jobs:
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
+
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
@@ -217,4 +218,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
-          gh release create continuous ../build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
+          gh release create continuous ../build/SNESticle.elf 
+          "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || 
+          gh release create continuous build/SNESticle.elf 
+          "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
