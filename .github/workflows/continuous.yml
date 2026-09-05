@@ -99,18 +99,21 @@ jobs:
           #endif
           EOF
           
-          echo "=== Aplicando dupla filtragem de escopo e sintaxe ==="
+          echo "=== Aplicando filtragem de escopo, sintaxe e definicao de variaveis ==="
+          # 1. Trata quebras do Windows (\r)
+          # 2. Corrige a quebra de linha da função colada na linha 85
+          # 3. Fecha a chave do escopo anterior se a regex falhar
+          # 4. Injeta a declaração faltante de 'Int32 nOriginalMax = nMaxChars;' logo no início da função PathTruncFileName para sanar o erro da linha 65
           cat /tmp/orig_mainloop.cpp | tr -d '\r' | \
           sed -E 's/return FALSE;[[:space:]]*const Char[[:space:]]*\*MainLoopStateGetAvailability/return FALSE;\nconst Char \*MainLoopStateGetAvailability/g' | \
-          sed -E 's/const Char[[:space:]]*\*MainLoopStateGetAvailability/}\nconst Char \*MainLoopStateGetAvailability/g' >> "$TARGET_FILE"
+          sed -E 's/const Char[[:space:]]*\*MainLoopStateGetAvailability/}\nconst Char \*MainLoopStateGetAvailability/g' | \
+          sed -E 's/void PathTruncFileName\([[:space:]]*Char[[:space:]]*\*pOut,[[:space:]]*Char[[:space:]]*\*pStr,[[:space:]]*Int32[[:space:]]*nMaxChars\)[[:space:]]*\{/void PathTruncFileName\(Char \*pOut, Char \*pStr, Int32 nMaxChars\) \{\n    Int32 nOriginalMax = nMaxChars;/g' >> "$TARGET_FILE"
 
       - name: Build Core Components Sequentially
         shell: bash
         run: |
           set -euo pipefail
           echo "=== Executando compilacao padrão com supressão global de warnings ==="
-          # Injeta as flags de desativação de warnings diretamente nas variáveis de ambiente do Make
-          # Isso anula o -Werror interno das subpastas da SDK do PS2
           make AUTO_INSTALL=yes \
             CFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error" \
             CXXFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error" \
