@@ -13,7 +13,7 @@
 // Caminhos relativos corrigidos apontando para os diretórios reais mapeados no repositório
 #include "../system/mainloop_exec.h"              // Voltar para ps2/, entrar em system/ (OK)
 #include "../../../nes/quicknes/quicknes_bridge.h"   // Voltar para src/, entrar em nes/quicknes/ (OK)
-#include "../../../nes/system/storage.h"            // Voltar para src/, entrar em nes/system/ onde fica o gerenciador de armazenamento
+#include "../system/storage.h"              // Voltar para ps2/, entrar em system/ onde realmente está o storage do PS2
 #include "../../../common/render/audmixbuffer.h"   // Voltar para src/, entrar em common/render/ (OK)
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
