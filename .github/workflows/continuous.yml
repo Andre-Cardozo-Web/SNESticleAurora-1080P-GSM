@@ -73,10 +73,6 @@ jobs:
           if [ -f "$IOP_FILE" ]; then
             echo "🩹 Higienizando quebras invisíveis do Windows no mainloop_iop.cpp..."
             sed -i 's/\r//g' "$IOP_FILE"
-            
-            echo "🩹 Restaurando e limpando o arquivo original para re-aplicacao controlada..."
-            git checkout "$IOP_FILE" || true
-            sed -i 's/\r//g' "$IOP_FILE"
 
             echo "🩹 Criando cabeçalho físico isolado de correção de tipos primitivos e Newlib..."
             cat << 'EOF' > src/platform/ps2/system/ps2_types_fix.h
@@ -132,8 +128,6 @@ jobs:
             sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "libpad.h"/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include "loadfile.h"/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include "sifrpc.h"/g' "$IOP_FILE"
-          else
-            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp nao encontrado para aplicação do patch."
           fi
 
           echo "🔗 Injetando cabecalhos oficiais modernos por proximidade fisica na pasta do sistema..."
