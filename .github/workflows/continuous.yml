@@ -75,7 +75,6 @@ jobs:
           sed -i 's/\r//g' "$IOP_FILE" || true
 
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade absoluta no diretório raiz de buscas..."
-          # Adiciona o mapeamento da macro de alinhamento obsoleta _ALIGN para alignas nativa do C++ moderno e define INT_MAX de segurança
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
@@ -88,6 +87,8 @@ jobs:
           #endif
           
           #define _ALIGN(x) alignas(x)
+          #define _INLINE inline
+          #define _inline inline
           
           typedef int                Bool;
           typedef unsigned int       Uint32;
@@ -103,7 +104,12 @@ jobs:
           
           typedef unsigned int       uint32;
           typedef unsigned short     uint16;
+          typedef unsigned char      uint8;
           typedef unsigned long long uint64;
+          
+          // Definições de paletas e cores exigidas por rendersurface.h
+          typedef struct { uint8 r, g, b, a; } Color32T;
+          typedef struct { Color32T entries[256]; } PaletteT;
           
           #ifndef FALSE
           #define FALSE 0
@@ -149,6 +155,13 @@ jobs:
 
           echo "🩹 Forçando a inclusão física do patch de tipos diretamente via sed no topo do mainloop_iop.cpp..."
           sed -i '1i #include "ps2_types_fix.h"' "$IOP_FILE" || true
+
+          echo "🩹 Resolvendo conflito de declaração duplicada da struct pal em FCEUmm..."
+          PAL_FILE="src/third_party/fceumm-fds/src/palette.h"
+          if [ -f "$PAL_FILE" ]; then
+             sed -i 's/typedef struct/struct/g' "$PAL_FILE" || true
+             sed -i 's/} pal;/};/g' "$PAL_FILE" || true
+          fi
 
           echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK de forma plana no repositório..."
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
