@@ -9,7 +9,7 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Caminhos corrigidos subindo um nível para localizar a pasta pai system
+// Caminhos corrigidos subindo um nível para localizar a pasta pai system a partir de ui
 #include "../system/mainloop_exec.h"
 #include "../system/picodrive_bridge.h"
 #include "../system/quicknes_bridge.h"
