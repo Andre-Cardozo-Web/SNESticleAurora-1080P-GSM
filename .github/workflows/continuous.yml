@@ -15,6 +15,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container: ps2dev/ps2dev:latest
+    defaults:
+      run:
+        working-directory: /github/workspace
     steps:
       - name: Install system dependencies
         run: |
@@ -28,16 +31,14 @@ jobs:
 
       - name: Fix Git Safe Directory Perms
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory /github/workspace
 
       - name: Patch PicoDrive Duplicate Macro
-        working-directory: ${{ github.workspace }}
         run: |
           sed -i 's/#define FAMEC_NO_GOTOS/\/\/ #define FAMEC_NO_GOTOS/g' src/third_party/picodrive/cpu/fame/famec.c || true
 
       - name: Verify required emulator submodules
         shell: bash
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           test -f src/third_party/quicknes/Makefile || true
@@ -47,7 +48,6 @@ jobs:
 
       - name: Package checked-out source
         shell: bash
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           short_sha="${GITHUB_SHA:0:12}"
@@ -62,13 +62,11 @@ jobs:
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
       - name: Build Core Components Sequentially
-        working-directory: ${{ github.workspace }}
         run: |
           make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
 
       - name: Strip release ELF
         shell: bash
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           STRIP="$(command -v mips64r5900el-ps2-elf-strip || true)"
@@ -81,7 +79,6 @@ jobs:
 
       - name: Checksums
         shell: bash
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           {
@@ -93,7 +90,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
