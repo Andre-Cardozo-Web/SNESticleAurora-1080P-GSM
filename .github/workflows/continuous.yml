@@ -79,7 +79,7 @@ jobs:
           echo "=== Fazendo o dump do arquivo temporario limpo ==="
           cp "$TARGET_FILE" /tmp/orig_mainloop.cpp
           
-          echo "=== Reconstruindo o arquivo fisicamente com tipos nativos e patch estatico ==="
+          echo "=== Reconstruindo o arquivo fisicamente com tipos nativos ==="
           cat << 'EOF' > "$TARGET_FILE"
           #include <stdint.h>
           #include <stdio.h>
@@ -97,27 +97,22 @@ jobs:
           #ifndef TRUE
           #define TRUE 1
           #endif
-
-          // Injetando uma macro global para redefinir e anular a chamada defeituosa de PathTruncFileName
-          #define PathTruncFileName(pOut, pStr, nMaxChars) \
-          do { \
-              Int32 nOriginalMax = nMaxChars; \
-              uint32_t hash = 5381; \
-              int _c; char *_p = (char *)(pStr); \
-              if(_p){while((_c=*_p++)){hash=((hash<<5)+hash)+_c;}} \
-              if ((nMaxChars) <= 0 && nOriginalMax >= 3) { \
-                  sprintf((char *)(pOut) - 3, "%03u", (unsigned int)(hash % 1000)); \
-              } \
-          } while(0)
           EOF
           
           echo "=== Aplicando filtragem de escopo e anexando o codigo original ==="
-          # 1. Limpa retornos do Windows (\r)
-          # 2. Corrige a quebra de linha da função colada na linha 85 para evitar funções aninhadas
-          # 3. Garante o fechamento correto de chaves
           cat /tmp/orig_mainloop.cpp | tr -d '\r' | \
           sed -E 's/return FALSE;[[:space:]]*const Char[[:space:]]*\*MainLoopStateGetAvailability/return FALSE;\nconst Char \*MainLoopStateGetAvailability/g' | \
           sed -E 's/const Char[[:space:]]*\*MainLoopStateGetAvailability/}\nconst Char \*MainLoopStateGetAvailability/g' >> "$TARGET_FILE"
+
+          echo "=== Injetando correções posicionais cirúrgicas por correspondência de bloco ==="
+          # Como a assinatura está por volta da linha 70, aplicamos uma substituição robusta na linha que contém a abertura da função.
+          # Injetamos o fallback do algoritmo _PathCalcHash e declaramos nOriginalMax localmente.
+          sed -i '/void PathTruncFileName/,/{/ {
+              /{/a\    uint32_t hash = 5381; int _c; char *_p = (char *)pStr; if(_p){while((_c=*_p++)){hash=((hash<<5)+hash)+_c;}} Int32 nOriginalMax = nMaxChars;
+          }' "$TARGET_FILE"
+
+          # Substitui qualquer chamada subsequente interna de atribuição para casar com a nossa variável calculada
+          sed -i 's/hash = _PathCalcHash(pStr);/\/\/ hash calculada localmente/g' "$TARGET_FILE"
 
       - name: Build Core Components Sequentially
         shell: bash
