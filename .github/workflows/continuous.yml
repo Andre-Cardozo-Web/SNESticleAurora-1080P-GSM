@@ -96,11 +96,17 @@ jobs:
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp nao encontrado para aplicacao do patch."
           fi
 
-          echo "🔗 Injetando cabecalhos oficiais modernos por proximidade fisica na pasta do sistema..."
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
+          echo "🔗 Vinculando a árvore de arquivos de inclusão mestre da PS2SDK de forma local..."
+          # Cria links de todos os cabeçalhos de sistema e de barramento da SDK moderna diretamente na raiz local do loop
+          # Isso blinda tamtypes.h no loadfile.h e impede erros em sub-makefiles isolados do emulador
+          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
+          
+          # Fallback duplicado na raiz comum src/
+          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
