@@ -53,6 +53,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         {
         case 0: 
             { 
+                // Corrigido para acessar a variavel nativa de controle de video do barramento do gsKit
                 Int32 modeIndex = g_GskVideoMode + dir; 
                 if (modeIndex < 0) modeIndex = 2; 
                 if (modeIndex > 2) modeIndex = 0; 
