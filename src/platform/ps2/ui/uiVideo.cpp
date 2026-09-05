@@ -235,7 +235,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
                 Int32 mode = (Int32)SNPPURenderGetObjLimitMode() + dir; 
                 if (mode < 0) mode = SNPPU_LIMIT_MODE_NUM - 1; 
                 if (mode >= SNPPU_OBJ_LIMIT_MODE_NUM) mode = 0; 
-                SNPPURenderSetObjLimitMode((Uint8)mode); 
+                SNPPURenderSetObjMode((Uint8)mode); 
             } 
             break;
         case 31: 
