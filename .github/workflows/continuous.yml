@@ -148,9 +148,10 @@ jobs:
           echo "🩹 Forçando a inclusão física do patch de tipos diretamente via sed no topo do mainloop_iop.cpp..."
           sed -i '1i #include "ps2_types_fix.h"' "$IOP_FILE" || true
 
-          echo "🩹 Substituindo chamadas antigas de NULL por nullptr estrito em IOPLoadModule para desviar de tamtypes.h..."
-          # Substitui de forma literal as ocorrências na passagem de argumentos que colidiam na compilação do áudio e do ps2link
-          sed -i 's/IOPLoadModule(\([^,]*\), ppSearchPaths, 0, NULL)/IOPLoadModule(\1, ppSearchPaths, 0, nullptr)/g' "$IOP_FILE" || true
+          echo "🩹 Higienizando globalmente todas as passagens de NULL para nullptr em IOPLoadModule..."
+          # Altera as passagens de argumentos individuais e duplicadas em lote para desviar do tamtypes.h de forma definitiva
+          sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*NULL,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, nullptr, 0, nullptr)/g' "$IOP_FILE" || true
+          sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*ppSearchPaths,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, ppSearchPaths, 0, nullptr)/g' "$IOP_FILE" || true
 
           echo "🩹 Resolvendo conflito de declaração duplicada e anônima da struct pal em FCEUmm de forma linear..."
           [ -f "$PAL_FILE" ] && printf '#ifndef FCEU_PALETTE_H\n#define FCEU_PALETTE_H\nstruct pal { unsigned char r, g, b; };\nextern struct pal *palo;\nvoid FCEU_DrawNTSCControlBars(unsigned char *XBuf);\n#endif\n' > "$PAL_FILE" || true
