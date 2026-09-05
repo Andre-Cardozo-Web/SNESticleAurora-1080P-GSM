@@ -56,9 +56,7 @@ jobs:
           set -euo pipefail
           mkdir -p src/platform/ps2/system
           curl -sL "https://githubusercontent.com" -o src/platform/ps2/system/mainloop_state.cpp
-          curl -sL "https://githubusercontent.com" -o src/platform/ps2/system/mainloop_state.cpp
-
-
+          
       - name: Build Core Components Sequentially
         shell: bash
         run: |
