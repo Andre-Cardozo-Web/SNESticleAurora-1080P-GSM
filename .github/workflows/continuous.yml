@@ -66,7 +66,7 @@ jobs:
             sed -i 's/typedef signed char          SBYTE;/#ifndef _EE\ntypedef signed char          SBYTE;\n#endif/g' "$TYPES_FILE"
           fi
 
-      - name: Patch Obsolete IOP Headers
+      - name: Patch Obsolete IOP Headers and Link Core SDK
         shell: bash
         run: |
           set -euo pipefail
@@ -76,14 +76,16 @@ jobs:
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            # Retorna para a sintaxe limpa padrão de colchetes angulares <...>, pois forçaremos a busca na raiz do Make
-            sed -i 's/#include ".*libpad.h"/#include <libpad.h>/g' "$IOP_FILE"
-            sed -i 's/#include ".*libmc.h"/#include <libmc.h>/g' "$IOP_FILE"
+            # Altera o include para mapear diretamente as portas nativas físicas unificadas
             sed -i 's/#include <libpad.h>/#include <libpad.h>/g' "$IOP_FILE"
             sed -i 's/#include <libmc.h>/#include <libmc.h>/g' "$IOP_FILE"
-          else
-            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
+
+          echo "🔗 Criando links simbólicos diretos da SDK moderna na raiz do projeto para interceptar sub-makefiles..."
+          # Cria links de todos os arquivos de include da PS2SDK na raiz de buscas '.' do projeto
+          # Isso garante o casamento de arquivos como libmc-common.h independente das flags locais do make filho
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h . || true
+          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h src/ || true
 
       - name: Rebuild mainloop_state.cpp Statically
         shell: bash
@@ -176,11 +178,10 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
-          # Injeta a flag de busca -I diretamente no escopo mestre de CFLAGS e CXXFLAGS apontando para a pasta raiz de includes do contêiner.
-          # Isso força o compilador a achar libmc-common.h de forma automática e transparente em qualquer nível.
-          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          # Mantém as flags injetadas e adiciona a busca local na pasta raiz '.' e 'src/'
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
