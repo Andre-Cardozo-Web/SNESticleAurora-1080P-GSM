@@ -58,8 +58,8 @@ jobs:
 
       - name: Build Core Components Sequentially
         run: |
-                make "$GITHUB_WORKSPACE/src/third_party/picodrive/picodrive_libretro_ps2.a" BUILD_PICODRIVE=0 || true
-                make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
+           make "$GITHUB_WORKSPACE/third_party/picodrive/picodrive_libretro_ps2.a" BUILD_PICODRIVE=0 || true
+           make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
 
       - name: Strip release ELF
         shell: bash
