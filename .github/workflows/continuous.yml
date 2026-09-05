@@ -69,7 +69,7 @@ jobs:
 
       - name: Build Core Components Sequentially
         run: |
-          make -f Makefile -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -f Makefile -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
+          make -C .. -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -C .. -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
 
       - name: Strip release ELF
         shell: bash
@@ -80,15 +80,15 @@ jobs:
           [ -n "$STRIP" ] || STRIP="$(command -v mips64r5900el-ps2-elf-strip 2>/dev/null || true)"
           [ -n "$STRIP" ] || STRIP="$(find "${PS2DEV:-$HOME/.local/ps2dev}" "$HOME/.local/ps2dev" "$HOME/ps2dev" /usr/local/ps2dev /opt/ps2dev -type f -name mips64r5900el-ps2-elf-strip -print -quit 2>/dev/null || true)"
           test -n "$STRIP"
-          "$STRIP" -o build/SNESticle.stripped.elf build/SNESticle.elf
-          mv -f build/SNESticle.stripped.elf build/SNESticle.elf
+          ../mips64r5900el-ps2-elf-strip -o ../build/SNESticle.stripped.elf ../build/SNESticle.elf || "$STRIP" -o build/SNESticle.stripped.elf build/SNESticle.elf
+          mv -f build/SNESticle.stripped.elf build/SNESticle.elf || mv -f ../build/SNESticle.stripped.elf ../build/SNESticle.elf
 
       - name: Checksums
         shell: bash
         run: |
           set -euo pipefail
           {
-            (cd build && sha256sum SNESticle.elf)
+            (cd build && sha256sum SNESticle.elf) || (cd ../build && sha256sum SNESticle.elf)
             (cd /tmp && sha256sum "$AURORA_SOURCE_NAME")
           } > /tmp/SHA256SUMS.txt
 
@@ -99,4 +99,4 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
-          gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" /tmp/SOURCE-MANIFEST.txt /tmp/SHA256SUMS.txt LICENSE BRANDING.md LICENSES/PicoDrive-COPYING.txt LICENSES/QuickNES-GPL-2.0.txt LICENSES/Beetle-PCE-Fast-GPL-2.0.txt LICENSES/FCEUmm-GPL-2.0.txt THIRD_PARTY.md --target "$GITHUB_SHA" --title "Continuous Build" --prerelease --notes-file CONTINUOUS_RELEASE.md
+          gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" /tmp/SOURCE-MANIFEST.txt /tmp/SHA256SUMS.txt LICENSE BRANDING.md LICENSES/PicoDrive-COPYING.txt LICENSES/QuickNES-GPL-2.0.txt LICENSES/Beetle-PCE-Fast-GPL-2.0.txt LICENSES/FCEUmm-GPL-2.0.txt THIRD_PARTY.md --target "$GITHUB_SHA" --title "Continuous Build" --prerelease --notes-file CONTINUOUS_RELEASE.md || gh release create continuous ../build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" /tmp/SOURCE-MANIFEST.txt /tmp/SHA256SUMS.txt LICENSE BRANDING.md LICENSES/PicoDrive-COPYING.txt LICENSES/QuickNES-GPL-2.0.txt LICENSES/Beetle-PCE-Fast-GPL-2.0.txt LICENSES/FCEUmm-GPL-2.0.txt THIRD_PARTY.md --target "$GITHUB_SHA" --title "Continuous Build" --prerelease --notes-file CONTINUOUS_RELEASE.md
