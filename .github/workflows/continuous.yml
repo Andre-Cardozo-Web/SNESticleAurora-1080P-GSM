@@ -51,14 +51,14 @@ jobs:
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
-      - name: Patch PS2SDK Typo Collisions and Makefiles
+      - name: Patch PS2SDK Typo Collisions and Mainfiles
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Aplicando flags de compatibilidade e suprimindo warnings de unused no Makefile ==="
+          echo "=== Injetando Tipos Globais e flags no Makefile ==="
           if [ -f "Makefile" ]; then
-            # Injeta flags para aceitar char assinado e desativar erros por variaveis/funcoes nao utilizadas (-Wno-unused)
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -D_EE /g' Makefile
+            # Injeta as definições de tipo como macros globais do compilador (-DBool=int, etc) e desativa warnings restritivos
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -DBool=int -DUint32=uint32_t -DInt32=int32_t -DChar=char -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -75,9 +75,12 @@ jobs:
           echo "=== Garantindo o arquivo local original ==="
           git checkout src/platform/ps2/system/mainloop_state.cpp || true
           
-          echo "=== Injetando mapeamento isolado de tipos no topo ==="
-          # Injeta os tipos basicos e inclui o cabeçalho stdint.h de forma limpa
-          sed -i '1s/^/#include <stdint.h>\n#ifndef Bool\ntypedef int Bool;\n#endif\n#ifndef Uint32\ntypedef uint32_t Uint32;\n#endif\n#ifndef Int32\ntypedef int32_t Int32;\n#endif\n#ifndef Char\ntypedef char Char;\n#endif\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n/' src/platform/ps2/system/mainloop_state.cpp
+          echo "=== Corrigindo erro de indentacao/sintaxe colada da linha 85 ==="
+          # Insere uma quebra de linha correta para separar a declaração da função MainLoopStateGetAvailability()
+          sed -i 's/return FALSE;const Char \*MainLoopStateGetAvailability()/return FALSE;\nconst Char \*MainLoopStateGetAvailability()/g' src/platform/ps2/system/mainloop_state.cpp
+
+          echo "=== Injetando stdint.h e macros de fallback no topo ==="
+          sed -i '1s/^/#include <stdint.h>\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n/' src/platform/ps2/system/mainloop_state.cpp
 
       - name: Build Core Components Sequentially
         shell: bash
