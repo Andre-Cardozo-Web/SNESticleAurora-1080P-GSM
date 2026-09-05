@@ -72,13 +72,15 @@ jobs:
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
           if [ -f "$IOP_FILE" ]; then
-            echo "🩹 Atualizando os cabeçalhos legados de IOP, Pad e Memory Card no mainloop_iop.cpp..."
+            echo "🩹 Atualizando os cabeçalhos legados de IOP e Pad de controles no mainloop_iop.cpp..."
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            # Força o redirecionamento absoluto para as portas físicas corretas da PS2SDK moderna no contêiner
-            sed -i 's/#include <libpad.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libpad.h"/g' "$IOP_FILE"
-            sed -i 's/#include <libmc.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libmc.h"/g' "$IOP_FILE"
+            # Retorna para a sintaxe limpa padrão de colchetes angulares <...>, pois forçaremos a busca na raiz do Make
+            sed -i 's/#include ".*libpad.h"/#include <libpad.h>/g' "$IOP_FILE"
+            sed -i 's/#include ".*libmc.h"/#include <libmc.h>/g' "$IOP_FILE"
+            sed -i 's/#include <libpad.h>/#include <libpad.h>/g' "$IOP_FILE"
+            sed -i 's/#include <libmc.h>/#include <libmc.h>/g' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
@@ -143,9 +145,9 @@ jobs:
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
                   char *target = (char *)pOut - 3;
-                  target[0] = '0' + (rem / 100);
-                  target[1] = '0' + ((rem / 10) % 10);
-                  target[2] = '0' + (rem % 10);
+                  target = '0' + (rem / 100);
+                  target = '0' + ((rem / 10) % 10);
+                  target = '0' + (rem % 10);
               }
           }
 
@@ -174,9 +176,11 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
-          export CFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          # Injeta a flag de busca -I diretamente no escopo mestre de CFLAGS e CXXFLAGS apontando para a pasta raiz de includes do contêiner.
+          # Isso força o compilador a achar libmc-common.h de forma automática e transparente em qualquer nível.
+          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
