@@ -11,10 +11,10 @@
 
 // Caminhos globais estáveis corrigidos direto a partir do barramento raiz exigido pelo Makefile
 // Caminhos relativos corrigidos apontando para os diretórios reais mapeados no repositório
-#include "../system/mainloop_exec.h"        // Voltar para ps2/, entrar em system/
-#include "../../../nes/quicknes/quicknes_bridge.h" // Voltar 3 níveis até src/, entrar em nes/quicknes/
-#include "../system/storage.h"              // Voltar para ps2/, entrar em system/
-#include "../../../common/render/audmixbuffer.h" // Voltar 3 níveis até src/, entrar em common/render/
+#include "../system/mainloop_exec.h"              // Voltar para ps2/, entrar em system/ (OK)
+#include "../../../nes/quicknes/quicknes_bridge.h"   // Voltar para src/, entrar em nes/quicknes/ (OK)
+#include "../../../nes/system/storage.h"            // Voltar para src/, entrar em nes/system/ onde fica o gerenciador de armazenamento
+#include "../../../common/render/audmixbuffer.h"   // Voltar para src/, entrar em common/render/ (OK)
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
