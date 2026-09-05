@@ -71,10 +71,4 @@ static Bool _MainLoopSramUsbReady() {
 #if MAINLOOP_HISTORY
 Uint32 _History[16384 * 2]; 
 Uint32 _nHistory = 0;
-void _MainLoopSaveHistory() 
-{ 
-    FileWriteMem("host:game.hst", _History, _nHistory * sizeof(Uint32)); 
-    printf("History written\n"); 
-}
-#endif
 
