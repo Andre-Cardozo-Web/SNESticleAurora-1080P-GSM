@@ -72,35 +72,29 @@ jobs:
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
           if [ -f "$IOP_FILE" ]; then
-            echo "🩹 Aplicando regex flexivel de caminhos absolutos no mainloop_iop.cpp..."
-            # Remove retornos de carro do Windows para higienizar o arquivo de stream
+            echo "🩹 Higienizando quebras invisíveis do Windows no mainloop_iop.cpp..."
             sed -i 's/\r//g' "$IOP_FILE"
             
-            # Substituições clássicas de heap obsoletas
+            echo "🩹 Atualizando cabeçalhos obsoletos de alocação de memória da IOP..."
             sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            # Regex robusta: Substitui o include por caminhos absolutos físicos do contêiner ignorando espaços ou tabulações
+            echo "🩹 Forçando caminhos absolutos reais e unificados para Joysticks e Memcard..."
+            # Injeta a rota física direta mestre do contêiner Docker, anulando a limpeza de caminhos feita pelo sub-makefile
             sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libpad.h"/g' "$IOP_FILE"
-            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/memcard.h"/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/memcard.h"/g' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
 
-          echo "🩹 Hack de compatibilidade Newlib: Forçando mapeamento interno em memcard.h..."
-          SDK_MC_FILE="/usr/local/ps2dev/ps2sdk/ee/include/memcard.h"
-          if [ -f "$SDK_MC_FILE" ]; then
-            sed -i -E 's/#include[[:space:]]*[<"]mc-common.h[">]/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/mc-common.h"/g' "$SDK_MC_FILE"
-          fi
-
-      - name: Rebuild mainloop_state.cpp Statically
+      - name: Rebuild mainloop_state.cpp Natively
         shell: bash
         run: |
           set -euo pipefail
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
           
-          echo "=== Reconstruindo mainloop_state.cpp de forma 100% isolada ==="
+          echo "=== Reconstruindo mainloop_state.cpp de forma 100% isolada e sem includes ==="
           cat << 'EOF' > "$TARGET_FILE"
           typedef int          Bool;
           typedef unsigned int Uint32;
@@ -150,6 +144,7 @@ jobs:
               }
               *pOut = 0;
               
+              // Aritmética vetorial por deslocamento de ponteiro aceita de forma estrita pelo mips64r5900el-g++
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
                   char *target = (char *)pOut;
