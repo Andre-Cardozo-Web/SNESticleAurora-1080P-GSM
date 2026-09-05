@@ -13,10 +13,10 @@
 #include "embedded_irx.h"
 #include "memcard.h"
 
-// Cabeçalhos de integração adicionados para resolver escopo
-#include "mainloop_exec.h"
-#include "picodrive_bridge.h"
-#include "quicknes_bridge.h"
+// Caminhos globais corrigidos com o prefixo canônico exigido pelo Makefile
+#include "system/mainloop_exec.h"
+#include "system/picodrive_bridge.h"
+#include "system/quicknes_bridge.h"
 
 extern "C" {
 #include "audio.h"
