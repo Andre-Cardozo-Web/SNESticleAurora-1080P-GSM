@@ -159,6 +159,8 @@ void MainLoopStatePrimeRomIdentityCRC(Uint32 uCRC)
     _MainLoop_StateRomCRCValid = TRUE;
 }
 
+/* --- Funções de Interface Oficial de Consulta de Estado --- */
+
 Int32 MainLoopStateGetSlot() 
 { 
     return _MainLoop_StateSlot; 
