@@ -72,8 +72,12 @@ jobs:
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
           if [ -f "$IOP_FILE" ]; then
-            echo "🩹 Atualizando o cabeçalho legado iopheap.h para o padrão moderno no mainloop_iop.cpp..."
-            sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <alloc.h>/g' "$IOP_FILE"
+            echo "🩹 Atualizando o cabeçalho legado iopheap.h e alloc.h para os padrões modernos..."
+            # Remove iopheap.h e alloc.h obsoletos, injetando kernel.h e stdlib.h para compatibilidade
+            sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
+            sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
+          else
+            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
 
       - name: Rebuild mainloop_state.cpp Statically
@@ -85,8 +89,6 @@ jobs:
           
           echo "=== Reconstruindo mainloop_state.cpp de forma 100% isolada e sem includes ==="
           cat << 'EOF' > "$TARGET_FILE"
-          // Removidos todos os includes de cabeçalho padrão para impedir erros de size_t e wint_t na Newlib
-
           typedef int          Bool;
           typedef unsigned int Uint32;
           typedef int          Int32;
@@ -135,7 +137,6 @@ jobs:
               }
               *pOut = 0;
               
-              // Formatação cirúrgica manual em C puro substituindo o sprintf() para evitar o include de stdio.h
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
                   char *target = (char *)pOut - 3;
