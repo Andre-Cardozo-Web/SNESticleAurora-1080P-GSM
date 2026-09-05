@@ -77,10 +77,11 @@ jobs:
             sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            echo "🩹 Desativando chamadas obsoletas de RPC e carregamento de arquivos ja cobertas pelo kernel mestre..."
-            # Comenta cirurgicamente as linhas 76 e 77 que apontavam para cabeçalhos descontinuados no contêiner
+            echo "🩹 Desativando chamadas obsoletas de RPC, carregamento de arquivos e rede..."
+            # Comenta de forma cirúrgica as linhas de cabeçalhos descontinuados ou reformulados na SDK moderna
             sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/\/\/ #include <sifrpc.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/\/\/ #include <loadfile.h>/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]ps2ip.h[">]/\/\/ #include <ps2ip.h>/g' "$IOP_FILE"
             
             echo "🩹 Atualizando chamadas legadas para a sintaxe unificada moderna..."
             sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include <memcard.h>/g' "$IOP_FILE"
