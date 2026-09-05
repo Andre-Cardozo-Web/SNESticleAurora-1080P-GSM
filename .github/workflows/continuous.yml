@@ -55,30 +55,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Criando arquivo de inclusao forcada global ==="
-          # Define as estruturas de tipo de forma isolada e injeta no topo absoluto de qualquer arquivo via compilador
-          cat << 'EOF' > /tmp/ps2_types_fix.h
-          #ifndef PS2_TYPES_FIX_H
-          #define PS2_TYPES_FIX_H
-          #include <stdint.h>
-          #include <stdio.h>
-          typedef int          Bool;
-          typedef uint32_t     Uint32;
-          typedef int32_t      Int32;
-          typedef char         Char;
-          #ifndef FALSE
-          #define FALSE 0
-          #endif
-          #ifndef TRUE
-          #define TRUE 1
-          #endif
-          #endif
-          EOF
-
-          echo "=== Ajustando as flags de compilacao no Makefile ==="
+          echo "=== Injetando flags de compatibilidade e silenciando warnings no Makefile principal ==="
           if [ -f "Makefile" ]; then
-            # Adiciona a flag -include para forçar o GCC a processar o arquivo de tipos antes de encostar na linha 1 do código
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -include \/tmp\/ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -93,21 +72,38 @@ jobs:
           set -euo pipefail
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
+          
           echo "=== Garantindo o arquivo local original ==="
           git checkout "$TARGET_FILE" || true
           
-          echo "=== Reconstruindo o arquivo para sanar erros estruturais e de sintaxe colada ==="
+          echo "=== Fazendo o dump do arquivo temporario limpo ==="
+          # Salva o arquivo original
           cp "$TARGET_FILE" /tmp/orig_mainloop.cpp
           
-          # Injeta os cabeçalhos de sistema necessários no topo físico do arquivo reconstruído
+          echo "=== Reconstruindo o arquivo fisicamente com tipos e correcoes ==="
+          # Criamos o arquivo do zero inserindo as definições nativas no topo de forma absoluta
           cat << 'EOF' > "$TARGET_FILE"
           #include <stdint.h>
           #include <stdio.h>
           #include <string.h>
+          
+          // Definições explícitas de tipos locais para sanar erros do compilador da PS2SDK
+          typedef int          Bool;
+          typedef uint32_t     Uint32;
+          typedef int32_t      Int32;
+          typedef char         Char;
+          
+          #ifndef FALSE
+          #define FALSE 0
+          #endif
+          #ifndef TRUE
+          #define TRUE 1
+          #endif
           EOF
           
-          # Restaura o código-fonte aplicando o espaçamento correto que evita o erro de função aninhada na linha 85
-          cat /tmp/orig_mainloop.cpp | sed 's/return FALSE;const Char \*MainLoopStateGetAvailability()/return FALSE;\nconst Char \*MainLoopStateGetAvailability()/g' >> "$TARGET_FILE"
+          # Adiciona o conteúdo original removendo os caracteres de fim de linha do Windows (\r) para evitar falhas no sed
+          # E aplica a quebra de linha cirúrgica para separar a função grudada que quebrava o escopo
+          cat /tmp/orig_mainloop.cpp | tr -d '\r' | sed 's/return FALSE;const Char \*MainLoopStateGetAvailability()/return FALSE;\nconst Char \*MainLoopStateGetAvailability()/g' >> "$TARGET_FILE"
 
       - name: Build Core Components Sequentially
         shell: bash
