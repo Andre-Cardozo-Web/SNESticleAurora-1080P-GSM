@@ -52,7 +52,6 @@ jobs:
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
       - name: Patch PS2SDK Typo Collisions and Mainfiles
-        shell: bash
         run: |
           set -euo pipefail
           echo "=== Injetando flags de compatibilidade e silenciando warnings no Makefile principal ==="
@@ -66,8 +65,7 @@ jobs:
             sed -i 's/typedef signed char          SBYTE;/#ifndef _EE\ntypedef signed char          SBYTE;\n#endif/g' "$TYPES_FILE"
           fi
 
-      - name: Patch Obsolete IOP Headers and Flatten SDK
-        shell: bash
+      - name: Patch Obsolete IOP Headers Natively
         run: |
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
@@ -75,36 +73,32 @@ jobs:
             echo "🩹 Higienizando quebras invisíveis do Windows no mainloop_iop.cpp..."
             sed -i 's/\r//g' "$IOP_FILE"
             
-            echo "🩹 Atualizando cabeçalhos obsoletos de alocação de memória da IOP..."
+            echo "🩹 Restaurando e limpando o arquivo original para re-aplicacao controlada..."
+            git checkout "$IOP_FILE" || true
+            sed -i 's/\r//g' "$IOP_FILE"
+
+            echo "🩹 Corrigindo mapeamento de alocacao de memoria e reativando loadfile moderno..."
             sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            echo "🩹 Desativando chamadas obsoletas de RPC, carregamento de arquivos e rede..."
             sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/\/\/ #include <sifrpc.h>/g' "$IOP_FILE"
-            sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/\/\/ #include <loadfile.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]ps2ip.h[">]/\/\/ #include <ps2ip.h>/g' "$IOP_FILE"
             
-            echo "🩹 Atualizando chamadas legadas para a sintaxe unificada moderna..."
+            echo "🩹 Compatibilizando cabecalhos legados para a arvore moderna..."
             sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include <memcard.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include <libpad.h>/g' "$IOP_FILE"
+
+            echo "🩹 Injetando tipos primitivos customizados locais faltantes no topo de mainloop_iop.cpp..."
+            sed -i '1s/^/typedef int Bool;\ntypedef unsigned int Uint32;\ntypedef int Int32;\ntypedef char Char;\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n/' "$IOP_FILE"
           else
-            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
+            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp nao encontrado para aplicacao do patch."
           fi
 
-          echo "🔗 Vinculando a árvore de arquivos de inclusão mestre da PS2SDK de forma global no escopo 'src/'..."
-          # Cria links de todos os cabeçalhos de sistema e de barramento da SDK moderna diretamente na raiz de buscas mestre do projeto
-          # Isso blinda tamtypes.h no gs.h e impede erros em sub-makefiles isolados do emulador
-          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
-          
-          # Garante cópias físicas locais na pasta do loop de estado para manter o progresso obtido
+          echo "🔗 Injetando cabecalhos oficiais modernos por proximidade fisica na pasta do sistema..."
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
-
       - name: Rebuild mainloop_state.cpp Natively
-        shell: bash
         run: |
           set -euo pipefail
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
@@ -187,22 +181,20 @@ jobs:
               return "mc0: pronto";
           }
           EOF
-          echo "=== Módulo recriado em C puro e protegido contra falhas de cabeçalhos ==="
+          echo "=== Modulo recriado em C puro e protegido contra falhas de cabecalhos ==="
 
       - name: Build Core Components Sequentially
-        shell: bash
         run: |
           set -euo pipefail
-          echo "=== Exportando variaveis de ambiente globais com rotas unificadas da PS2SDK ==="
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
+          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
-          echo "=== Executando compilacao padrão ==="
+          echo "=== Executando compilacao padrao ==="
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
-        shell: bash
         run: |
           set -euo pipefail
           STRIP="$(command -v mips64r5900el-ps2-elf-strip || true)"
@@ -212,23 +204,16 @@ jobs:
           mv -f ../build/SNESticle.stripped.elf ../build/SNESticle.elf || mv -f build/SNESticle.stripped.elf build/SNESticle.elf || true
 
       - name: Checksums
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            (cd ../build && sha256sum SNESticle.elf) || (cd build && sha256sum SNESticle.elf) || echo "No ELF for checksum"
-      - name: Checksums
-        shell: bash
         run: |
           set -euo pipefail
           {
             (cd ../build && sha256sum SNESticle.elf) || (cd build && sha256sum SNESticle.elf) || echo "No ELF for checksum"
             (cd /tmp && sha256sum "$AURORA_SOURCE_NAME")
           } > /tmp/SHA256SUMS.txt || true
+
       - name: Continuous release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
