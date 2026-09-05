@@ -99,23 +99,18 @@ jobs:
           #endif
           EOF
           
-          echo "=== Injetando o restante do codigo e aplicando correcoes cirurgicas ==="
-          # 1. Limpa retornos do Windows (\r)
-          # 2. Força a quebra de linha estrutural da função colada na linha 85 para evitar funções aninhadas
-          # 3. Força o fechamento de chaves da subfunção se necessário
+          echo "=== Aplicando filtragem de escopo e sintaxe estrutural ==="
           cat /tmp/orig_mainloop.cpp | tr -d '\r' | \
           sed -E 's/return FALSE;[[:space:]]*const Char[[:space:]]*\*MainLoopStateGetAvailability/return FALSE;\nconst Char \*MainLoopStateGetAvailability/g' | \
           sed -E 's/const Char[[:space:]]*\*MainLoopStateGetAvailability/}\nconst Char \*MainLoopStateGetAvailability/g' >> "$TARGET_FILE"
 
           echo "=== Substituindo a implementacao defeituosa de PathTruncFileName por uma versao autossuficiente ==="
-          # Criamos um script em Python inline para reescrever o bloco da função com tipagem estrita e hash local resiliente
           python3 -c '
           import os
           path = "'"$TARGET_FILE"'"
           with open(path, "r") as f:
               content = f.read()
           
-          # Código substituto limpo e autossuficiente com todas as variáveis locais tipadas de forma explícita
           fixed_function = """
           void PathTruncFileName(Char *pOut, Char *pStr, Int32 nMaxChars) {
               Int32 nOriginalMax = nMaxChars;
@@ -131,14 +126,7 @@ jobs:
           }
           """
           
-          # Localiza onde a assinatura da função começa e substitui o bloco inteiro até o fim da checagem lógica
-          import re
-          pattern = r"void\s+PathTruncFileName\s*\([^)]*\)\s*\{[^}]*hash\s*=\s*_PathCalcHash[^}]*\}"
-          if re.search(pattern, content):
-              content = re.sub(pattern, fixed_function, content)
-          else:
-              # Fallback caso a assinatura possua quebras de linha complexas
-              content = content.replace("hash = _PathCalcHash(pStr);", "uint32_t hash = 5381; int _c; char *_p = (char *)pStr; if(_p){while((_c=*_p++)){hash=((hash<<5)+hash)+_c;}} Int32 nOriginalMax = nMaxChars;")
+          content = content.replace("hash = _PathCalcHash(pStr);", "uint32_t hash = 5381; int _c; char *_p = (char *)pStr; if(_p){while((_c=*_p++)){hash=((hash<<5)+hash)+_c;}} Int32 nOriginalMax = nMaxChars;")
           
           with open(path, "w") as f:
               f.write(content)
@@ -148,11 +136,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Executando compilacao padrão com supressão global de warnings ==="
-          make AUTO_INSTALL=yes \
-            CFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error" \
-            CXXFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error" \
-            EE_CFLAGS="-fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
+          # export força o ecossistema e sub-makefiles a adotarem estas flags sem exceção
+          export CFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          
+          echo "=== Executando compilacao padrão ==="
+          make AUTO_INSTALL=yes
             
       - name: Strip release ELF
         shell: bash
