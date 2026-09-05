@@ -55,22 +55,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Verificando localizacao atual ==="
-          pwd
-          ls -la
-          echo "====================================="
-          
-          # Tenta rodar o make na raiz usando as definições padrão do PS2SDK
-          if make -f Makefile AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0; then
-            echo "Build concluído na raiz com sucesso."
-          # Se falhar por falta de alvo, tenta entrar na pasta src e compilar lá dentro
-          elif [ -f src/Makefile ]; then
-            echo "Tentando compilar dentro da pasta src..."
-            cd src && make AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0
-          else
-            echo "Nenhum Makefile válido pôde ser processado."
-            exit 1
-          fi
+          echo "=== Executando compilacao padrão ==="
+          # Executa o make limpando configurações antigas e chamando as definições locais
+          make AUTO_INSTALL=yes
 
       - name: Strip release ELF
         shell: bash
