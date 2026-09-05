@@ -9,7 +9,7 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Caminhos canônicos absolutos corrigidos para rodar direto pelo barramento raiz exigido pelo Makefile
+// Caminhos globais estáveis corrigidos direto a partir do barramento raiz exigido pelo Makefile
 #include "system/mainloop_exec.h"
 #include "system/quicknes_bridge.h"
 #include "system/storage.h"
@@ -41,7 +41,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         { 
             m_iSelect++; 
             if (m_iSelect > hi)  m_iSelect = lo; 
-        }
+            }
     }
 
     if (trigger & PAD_LEFT)  dir = -1; 
