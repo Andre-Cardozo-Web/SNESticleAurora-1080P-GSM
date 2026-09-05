@@ -55,12 +55,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "🩹 Corrigindo Makefile para suportar tipos de dados assinados..."
+          echo "=== Aplicando flags de compatibilidade de tipos no Makefile ==="
           if [ -f "Makefile" ]; then
             sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -D_EE /g' Makefile
           fi
           
-          echo "🩹 Isolando redefinições do InfoNES no cabeçalho de tipos..."
+          echo "=== Isolando conflitos de definicao do InfoNES ==="
           TYPES_FILE="src/nes/core/InfoNES_Types.h"
           if [ -f "$TYPES_FILE" ]; then
             sed -i 's/typedef signed char          SBYTE;/#ifndef _EE\ntypedef signed char          SBYTE;\n#endif/g' "$TYPES_FILE"
@@ -71,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p src/platform/ps2/system
-          # Restaurando o arquivo local original caso o curl esteja vazio para evitar um arquivo de 0 bytes
+          echo "=== Restaurando o arquivo local original para evitar arquivo corrompido ou vazio ==="
           git checkout src/platform/ps2/system/mainloop_state.cpp || true
 
       - name: Build Core Components Sequentially
