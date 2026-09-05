@@ -22,6 +22,10 @@ extern "C" {
 
 #include "mainloop_shared.h"
 #include "mainloop_state.h"
+#include "nes/quicknes/quicknes_bridge.h"
+#include "sega/picodrive/picodrive_bridge.h"
+#include "pce/beetle/pce_bridge.h"
+
 /* --- Definições Globais do Core do Emulador --- */
 static MainLoopStateDeviceE _MainLoop_StateDevice = MAINLOOP_STATEDEVICE_AUTO;
 static MainLoopSramDeviceE  _MainLoop_SramDevice  = MAINLOOP_SRAMDEVICE_AUTO;
@@ -34,7 +38,6 @@ Uint32 _MainLoop_StateRomCRC = 0;
 extern const char *_RomName;
 extern const char *_SramPath;
 extern const char *_MainLoop_SaveTitle;
-
 
 #if MAINLOOP_HISTORY
 extern Uint32 _nHistory;
@@ -80,15 +83,14 @@ void PathTruncFileName(Char *pOut, Char *pStr, Int32 nMaxChars)
 
 int PathGetMaxFileNameLength(const char *pPath)
 {
-    if ((pPath[0] == 'm' && pPath[1] == 'c') ||
-        (pPath[0] == 'm' && pPath[1] == 'm' &&
-         pPath[2] == 'c' && pPath[3] == 'e'))
+    if ((pPath == 'm' && pPath == 'c') ||
+        (pPath == 'm' && pPath == 'm' &&
+         pPath == 'c' && pPath == 'e'))
     {
         return 32;
     }
     return 256;
 }
-
 static const Char *_MainLoopSramGetSystemDirectoryName()
 {
     if (_pSystem == _pNes)  return "NES";
@@ -108,6 +110,7 @@ static Bool _MainLoopSramUsbReady()
     if (!MassStorageIsEnabled()) return FALSE;
     return stat("mass0:/", &Status) == 0 ? TRUE : FALSE;
 }
+
 void MainLoopSramSetDevice(MainLoopSramDeviceE eDevice)
 {
     if (eDevice < MAINLOOP_SRAMDEVICE_AUTO || eDevice >= MAINLOOP_SRAMDEVICE_NUM)
@@ -166,7 +169,7 @@ static Bool _MainLoopSystemCopyDirectory(Char *pOut, Int32 nOutBytes, const Char
     nChars = snprintf(pOut, (size_t)nOutBytes, "%s", pDirectory);
     if (nChars < 0 || nChars >= nOutBytes)
     {
-        pOut[0] = '\0';
+        pOut = '\0';
         return FALSE;
     }
     return TRUE;
@@ -174,7 +177,7 @@ static Bool _MainLoopSystemCopyDirectory(Char *pOut, Int32 nOutBytes, const Char
 
 static Bool _MainLoopSystemTryWritableRoot(Char *pOut, Int32 nOutBytes, const Char *pRoot)
 {
-    Char Directory[512];
+    Char Directory;
     int nChars;
     if (!pRoot || !*pRoot) return FALSE;
     if (!_MainLoopSramEnsureOneDir(pRoot)) return FALSE;
@@ -187,8 +190,8 @@ static Bool _MainLoopSystemTryWritableRoot(Char *pOut, Int32 nOutBytes, const Ch
 static Bool _MainLoopSystemFileAtRoot(Char *pOut, Int32 nOutBytes, const Char *pRoot, const Char *pFileName)
 {
     struct stat Status;
-    Char Directory[512];
-    Char FilePath[1024];
+    Char Directory;
+    Char FilePath;
     int nChars;
 
     if (!pOut || nOutBytes <= 0 || !pRoot || !*pRoot || !pFileName || !*pFileName) return FALSE;
@@ -208,7 +211,7 @@ Bool MainLoopFindSystemFileDirectory(Char *pOut, Int32 nOutBytes, const Char *pF
     Int32 i;
 
     if (!pOut || nOutBytes <= 0 || !pFileName || !*pFileName) return FALSE;
-    pOut[0] = '\0';
+    pOut = '\0';
 
     for (i = 0; pPreferredRoots[i]; ++i)
     {
@@ -230,12 +233,12 @@ Bool MainLoopEnsureSystemDirectory(Char *pOut, Int32 nOutBytes)
     static const Char *pPreferredRoots[] = { "mass0:/SNESticle", "mass1:/SNESticle", "mass:/SNESticle", NULL };
     const Char *pRoot;
     Bool bMemCard;
-    Char Directory[512];
+    Char Directory;
     int nChars;
     Int32 i;
 
     if (!pOut || nOutBytes <= 0) return FALSE;
-    pOut[0] = '\0';
+    pOut = '\0';
 
     for (i = 0; pPreferredRoots[i]; ++i)
     {
