@@ -22,10 +22,6 @@ extern "C" {
 
 #include "mainloop_shared.h"
 #include "mainloop_state.h"
-#include "nes/quicknes/quicknes_bridge.h"
-#include "sega/picodrive/picodrive_bridge.h"
-#include "pce/beetle/pce_bridge.h"
-
 /* --- Definições Globais do Core do Emulador --- */
 static MainLoopStateDeviceE _MainLoop_StateDevice = MAINLOOP_STATEDEVICE_AUTO;
 static MainLoopSramDeviceE  _MainLoop_SramDevice  = MAINLOOP_SRAMDEVICE_AUTO;
@@ -33,6 +29,12 @@ static Int32 _MainLoop_StateSlot = 0;
 Bool _bStateSaved = FALSE;
 Bool _MainLoop_StateRomCRCValid = FALSE;
 Uint32 _MainLoop_StateRomCRC = 0;
+
+/* --- Referências Externas de Barramento do Sistema --- */
+extern const char *_RomName;
+extern const char *_SramPath;
+extern const char *_MainLoop_SaveTitle;
+
 
 #if MAINLOOP_HISTORY
 extern Uint32 _nHistory;
