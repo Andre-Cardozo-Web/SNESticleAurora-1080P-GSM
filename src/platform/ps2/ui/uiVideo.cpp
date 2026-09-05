@@ -12,17 +12,11 @@
 // Inclusões resolvidas de forma global através das diretivas de inclusão do Makefile
 #include "mainloop_exec.h"
 #include "../../../nes/quicknes/quicknes_bridge.h"   // Este já funciona bem relativo
-// Declarações externas das funções globais do sistema (Forward Declarations)
-extern Bool HddSupportIsEnabled(void);
-extern void HddSupportSetEnabled(Bool enabled);
-extern Bool MmceSupportIsEnabled(void);
-extern void MmceSupportSetEnabled(Bool enabled);
-extern Bool SmbSupportIsEnabled(void);
-extern void SmbSupportSetEnabled(Bool enabled);
-extern Bool Aud_IsInitialized(void);
-extern void Aud_Setvol(int volume);
 extern void MainResetEmulator(void);
 extern void ExecOSD(int core, void *params);
+extern void BgmSetVolume(int volume);               // Adicionado para controle de volume do menu
+extern Bool MassStorageIsEnabled(void);             // Adicionado para controle do pendrive USB
+extern void MassStorageSetEnabled(Bool enabled);    // Adicionado para controle do pendrive USB
 #include "audmixbuffer.h"                           // O Makefile localiza este automaticamente em common/render/
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
