@@ -567,49 +567,7 @@ static Bool _MainLoopSwcCartSramBuildPath(
     PathTruncFileName(SaveName, s_SwcCartSRAMName, nBaseMax);
     n = snprintf(
         pPath, (size_t)nPathBytes,
-        "%s/%s.%s", Directory, SaveName, pExtension);
-    return n >= 0 && n < nPathBytes ? TRUE : FALSE;
-}
-
-/* --- Adicionando as variaveis necessarias para evitar o erro do escopo --- */
-static Uint32 _uInputFrame = 0;
-static Uint8 _uInputChecksum[512];
-
-void _MainLoopResetInputChecksums()
-/* ---- Definição externa das variáveis de sincronismo de entrada ---- */
-extern Uint32 _uInputFrame;
-extern Uint8  _uInputChecksum[];
-
-void _MainLoopResetInputChecksums()
-/* ---- Definição externa das variáveis de sincronismo de entrada ---- */
-extern Uint32 _uInputFrame;
-extern Uint8  _uInputChecksum[];
-
-void _MainLoopResetInputChecksums()
-/* ---- Definição externa das variáveis de sincronismo de entrada ---- */
-extern Uint32 _uInputFrame;
-extern Uint8  _uInputChecksum[];
-
-void _MainLoopResetInputChecksums()
-/* ---- Definição externa das variáveis de sincronismo de entrada ---- */
-extern Uint32 _uInputFrame;
-extern Uint8  _uInputChecksum[];
-
-void _MainLoopResetInputChecksums()
-{
-	_uInputFrame = 0;
-	memset(_uInputChecksum, 0, 16); // Zera o buffer de checksum de forma segura
-}
-
-#if MAINLOOP_HISTORY
-Uint32 _History[16384 * 2];
-Uint32 _nHistory = 0;
-#endif
-
-#if MAINLOOP_HISTORY
-void _MainLoopSaveHistory()
-{
-    FileWriteMem("host:game.hst", _History, _nHistory * sizeof(Uint32));
+       "host:game.hst", _History, _nHistory * sizeof(Uint32));
     printf("History written\n");
 }
 #endif
