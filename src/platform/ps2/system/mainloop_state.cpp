@@ -30,6 +30,11 @@ extern "C" {
 extern Uint32 _nHistory;
 #endif
 
+/* --- Variáveis Globais de Controle de Dispositivo e Estado --- */
+static MainLoopStateDeviceE _MainLoop_StateDevice = MAINLOOP_STATEDEVICE_AUTO;
+static MainLoopSramDeviceE  _MainLoop_SramDevice  = MAINLOOP_SRAMDEVICE_AUTO;
+static Int32 _MainLoop_StateSlot = 0;
+
 static Uint32 _PathCalcHash(const char *pStr)
 {
     Uint32 hash = 0;
@@ -81,8 +86,6 @@ int PathGetMaxFileNameLength(const char *pPath)
     return 256;
 }
 
-static MainLoopSramDeviceE _MainLoop_SramDevice = MAINLOOP_SRAMDEVICE_AUTO;
-
 static const Char *_MainLoopSramGetSystemDirectoryName()
 {
     if (_pSystem == _pNes)  return "NES";
@@ -128,7 +131,6 @@ const Char *MainLoopSramGetDeviceName()
         default:                          return "USB -> MC fallback";
     }
 }
-
 const Char *MainLoopSramGetBrowseRoot()
 {
     if (_MainLoop_SramDevice == MAINLOOP_SRAMDEVICE_USB)
@@ -254,6 +256,7 @@ Bool MainLoopEnsureSystemDirectory(Char *pOut, Int32 nOutBytes)
     }
     return _MainLoopSystemCopyDirectory(pOut, nOutBytes, Directory);
 }
+
 Bool MainLoopEnsureSwcDirectory(Char *pOut, Int32 nOutBytes)
 {
     Char SystemDirectory[512];
@@ -304,7 +307,6 @@ static void _MainLoopSramBuildPath(Char *pPath, Int32 nPathBytes, const Char *pR
     PathTruncFileName(SaveName, _RomName, PathGetMaxFileNameLength(Directory) - nSuffixBytes);
     snprintf(pPath, nPathBytes, "%s/%s.%s", Directory, SaveName, pExtension);
 }
-
 static void _MainLoopSramBuildCopiedMcPath(Char *pPath, Int32 nPathBytes, const Char *pRoot, Bool bLegacyRoot)
 {
     Char Directory[512];
@@ -425,6 +427,7 @@ static Bool _MainLoopStateGetSwcBaseName(Char *pOut, Int32 nOutBytes)
     if (i > 0 && i < n && pOut[i - 1] == '_') pOut[i - 1] = 0;
     return pOut[0] ? TRUE : FALSE;
 }
+
 static Bool _MainLoopStateIsSwc()
 {
     return (_pSystem == _pSnes && _pSnes && _pSnes->IsSuperWildCard()) ? TRUE : FALSE;
@@ -465,20 +468,71 @@ void MainLoopStatePrimeRomIdentityCRC(Uint32 uCRC)
     _MainLoop_StateRomCRCValid = TRUE;
 }
 
-Int32 MainLoopStateGetSlot() { return 0; }
-MainLoopStateDeviceE MainLoopStateGetDevice() { return _MainLoop_StateDevice; }
-const Char *MainLoopStateGetDeviceName() { return "Auto"; }
-const Char *MainLoopStateGetLastMessage() { return "Operation completed."; }
-Int32 MainLoopStateGetUnformattedCard() { return -1; }
-Bool MainLoopStateHasDeviceChoice() { return TRUE; }
-void MainLoopStateForgetDeviceChoice() {}
-void MainLoopStateSetDevice(MainLoopStateDeviceE eDevice) {}
-Bool MainLoopStateDeviceAvailable(MainLoopStateDeviceE eDevice) { return TRUE; }
-void MainLoopStateCycleSlot() {}
-void MainLoopStateCycleDevice() {}
-void MainLoopStateSettingsLoad() {}
-Bool MainLoopStateSettingsSave() { return TRUE; }
-const Char *MainLoopStateGetAvailability() { return "Ready."; }
+Int32 MainLoopStateGetSlot() 
+{ 
+    return _MainLoop_StateSlot; 
+}
+
+MainLoopStateDeviceE MainLoopStateGetDevice() 
+{ 
+    return _MainLoop_StateDevice; 
+}
+
+const Char *MainLoopStateGetDeviceName() 
+{ 
+    return "Auto"; 
+}
+
+const Char *MainLoopStateGetLastMessage() 
+{ 
+    return "Operation completed."; 
+}
+
+Int32 MainLoopStateGetUnformattedCard() 
+{ 
+    return -1; 
+}
+
+Bool MainLoopStateHasDeviceChoice() 
+{ 
+    return TRUE; 
+}
+
+void MainLoopStateForgetDeviceChoice() 
+{
+}
+
+void MainLoopStateSetDevice(MainLoopStateDeviceE eDevice) 
+{
+    _MainLoop_StateDevice = eDevice;
+}
+
+Bool MainLoopStateDeviceAvailable(MainLoopStateDeviceE eDevice) 
+{ 
+    return TRUE; 
+}
+
+void MainLoopStateCycleSlot() 
+{
+}
+
+void MainLoopStateCycleDevice() 
+{
+}
+
+void MainLoopStateSettingsLoad() 
+{
+}
+
+Bool MainLoopStateSettingsSave() 
+{ 
+    return TRUE; 
+}
+
+const Char *MainLoopStateGetAvailability() 
+{ 
+    return "Ready."; 
+}
 
 #if MAINLOOP_HISTORY
 Uint32 _History[16384 * 2];
