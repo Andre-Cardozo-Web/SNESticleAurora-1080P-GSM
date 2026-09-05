@@ -72,12 +72,13 @@ jobs:
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
           if [ -f "$IOP_FILE" ]; then
-            echo "🩹 Atualizando os cabeçalhos legados de IOP e Pad de controles no mainloop_iop.cpp..."
+            echo "🩹 Atualizando os cabeçalhos legados de IOP, Pad e Memory Card no mainloop_iop.cpp..."
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            # Força o redirecionamento absoluto para o arquivo físico mestre do contêiner, eliminando dependência do make local
+            # Força o redirecionamento absoluto para as portas físicas corretas da PS2SDK moderna no contêiner
             sed -i 's/#include <libpad.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libpad.h"/g' "$IOP_FILE"
+            sed -i 's/#include <libmc.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libmc.h"/g' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
