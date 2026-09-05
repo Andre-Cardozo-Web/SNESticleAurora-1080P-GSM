@@ -72,25 +72,19 @@ jobs:
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
           if [ -f "$IOP_FILE" ]; then
-            echo "🩹 Fazendo patches cirúrgicos e forçando caminhos absolutos no mainloop_iop.cpp..."
+            echo "🩹 Fazendo patches cirúrgicos de portabilidade moderna no mainloop_iop.cpp..."
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            # Força a injeção do caminho físico mestre absoluto para ignorar desconfigurações locais do sub-makefile
-            sed -i 's/#include <libpad.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libpad.h"/g' "$IOP_FILE"
-            sed -i 's/#include <libmc.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libmc.h"/g' "$IOP_FILE"
+            # Limpa qualquer patch absoluto anterior para retornar à estrutura limpa nativa do compilador
+            sed -i 's/#include ".*libpad.h"/#include <libpad.h>/g' "$IOP_FILE"
+            sed -i 's/#include ".*libmc.h"/#include <memcard.h>/g' "$IOP_FILE"
+            
+            # Substitui de forma estrita as chamadas obsoletas pelos arquivos unificados oficiais da PS2SDK moderna
+            sed -i 's/#include <libpad.h>/#include <libpad.h>/g' "$IOP_FILE"
+            sed -i 's/#include <libmc.h>/#include <memcard.h>/g' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
-          fi
-
-          echo "🩹 Hack de linkagem: Forçando caminho absoluto mestre global compartilhado dentro da libmc.h da SDK..."
-          SDK_MC_FILE="/usr/local/ps2dev/ps2sdk/ee/include/libmc.h"
-          if [ -f "$SDK_MC_FILE" ]; then
-            # Corrige a inclusão interna apontando estritamente para o diretório /common/include/ onde mc-common.h reside fisicamente no contêiner
-            sed -i 's/#include <libmc-common.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/mc-common.h"/g' "$SDK_MC_FILE"
-            sed -i 's/#include "libmc-common.h"/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/mc-common.h"/g' "$SDK_MC_FILE"
-            sed -i 's/#include <mc-common.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/mc-common.h"/g' "$SDK_MC_FILE"
-            sed -i 's/#include ".*mc-common.h"/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/mc-common.h"/g' "$SDK_MC_FILE"
           fi
 
       - name: Rebuild mainloop_state.cpp Natively
@@ -150,7 +144,7 @@ jobs:
               }
               *pOut = 0;
               
-              // Codificação vetorial por deslocamento aceita de forma estável sem casts pelo compilador mips64r5900el-g++
+              // Ajuste de sintaxe vetorial por deslocamento de ponteiro aceito de forma limpa pelo mips64r5900el-g++
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
                   char *target = (char *)pOut;
@@ -185,9 +179,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
-          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          export CFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
@@ -218,7 +212,4 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
-           gh release create continuous ../build/SNESticle.elf 
-           "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || 
-             gh release create continuous build/SNESticle.elf 
-              "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
+          gh release create continuous ../build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
