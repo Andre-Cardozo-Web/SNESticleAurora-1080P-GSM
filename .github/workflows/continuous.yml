@@ -28,14 +28,10 @@ jobs:
 
       - name: Fix Git Safe Directory and Container Links
         run: |
-          # Descobre dinamicamente onde o GitHub clonou o codigo na maquina fisica
           REAL_PATH=$(pwd)
           git config --global --add safe.directory "$REAL_PATH"
-          
-          # Remove a pasta /src padrao vazia do container e cria o link mestre definitivo
           rm -rf /src
           ln -s "$REAL_PATH" /src
-          
           echo "Link mestre configurado com sucesso!"
 
       - name: Patch PicoDrive Duplicate Macro
@@ -67,7 +63,9 @@ jobs:
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
       - name: Build Core Components Sequentially
+        shell: bash
         run: |
+          set -euo pipefail
           make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 || make -j8 AUTO_INSTALL=yes LTO_LINK_JOBS=2
 
       - name: Strip release ELF
