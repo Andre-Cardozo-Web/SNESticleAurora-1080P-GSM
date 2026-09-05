@@ -77,16 +77,18 @@ jobs:
             git checkout "$IOP_FILE" || true
             sed -i 's/\r//g' "$IOP_FILE"
 
-            echo "🩹 Corrigindo mapeamento de alocacao de memoria e reativando loadfile moderno..."
+            echo "🩹 Corrigindo mapeamento de alocacao de memoria e gerenciamento da IOP..."
             sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
+            echo "🩹 Redirecionando includes de RPC e Rede obsoletos..."
             sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/\/\/ #include <sifrpc.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*[<"]ps2ip.h[">]/\/\/ #include <ps2ip.h>/g' "$IOP_FILE"
             
-            echo "🩹 Compatibilizando cabecalhos legados para a arvore moderna..."
-            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include <memcard.h>/g' "$IOP_FILE"
-            sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include <libpad.h>/g' "$IOP_FILE"
+            echo "🩹 Redirecionando chamadas de Joystick e Cartao para arquivos locais copiados..."
+            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include "memcard.h"/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "libpad.h"/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include "loadfile.h"/g' "$IOP_FILE"
 
             echo "🩹 Injetando tipos primitivos customizados locais faltantes no topo de mainloop_iop.cpp..."
             sed -i '1s/^/typedef int Bool;\ntypedef unsigned int Uint32;\ntypedef int Int32;\ntypedef char Char;\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n/' "$IOP_FILE"
@@ -97,8 +99,8 @@ jobs:
           echo "🔗 Injetando cabecalhos oficiais modernos por proximidade fisica na pasta do sistema..."
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
-
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
@@ -218,7 +220,4 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
-          gh release create continuous ../build/SNESticle.elf 
-          "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || 
-          gh release create continuous build/SNESticle.elf 
-          "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
+          gh release create continuous ../build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
