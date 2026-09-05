@@ -56,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Criando arquivo de inclusao forcada global ==="
-          # Cria um arquivo de cabeçalho global autossuficiente para corrigir os tipos sem poluir o escopo com macros -D
+          # Define as estruturas de tipo de forma isolada e injeta no topo absoluto de qualquer arquivo via compilador
           cat << 'EOF' > /tmp/ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
@@ -77,7 +77,7 @@ jobs:
 
           echo "=== Ajustando as flags de compilacao no Makefile ==="
           if [ -f "Makefile" ]; then
-            # Usa a flag -include para forçar o GCC a ler o nosso arquivo de tipos no inicio de QUALQUER arquivo .cpp compilado
+            # Adiciona a flag -include para forçar o GCC a processar o arquivo de tipos antes de encostar na linha 1 do código
             sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -include \/tmp\/ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
@@ -97,17 +97,16 @@ jobs:
           git checkout "$TARGET_FILE" || true
           
           echo "=== Reconstruindo o arquivo para sanar erros estruturais e de sintaxe colada ==="
-          # Salva uma cópia temporária do arquivo original
           cp "$TARGET_FILE" /tmp/orig_mainloop.cpp
           
-          # Recria o arquivo injetando o cabeçalho stdint e aplicando uma correcao cirurgica de quebra de linha na linha 85
+          # Injeta os cabeçalhos de sistema necessários no topo físico do arquivo reconstruído
           cat << 'EOF' > "$TARGET_FILE"
           #include <stdint.h>
           #include <stdio.h>
           #include <string.h>
           EOF
           
-          # Adiciona o conteúdo original, mas filtrando e corrigindo a expressão colada que quebrava o escopo da função
+          # Restaura o código-fonte aplicando o espaçamento correto que evita o erro de função aninhada na linha 85
           cat /tmp/orig_mainloop.cpp | sed 's/return FALSE;const Char \*MainLoopStateGetAvailability()/return FALSE;\nconst Char \*MainLoopStateGetAvailability()/g' >> "$TARGET_FILE"
 
       - name: Build Core Components Sequentially
