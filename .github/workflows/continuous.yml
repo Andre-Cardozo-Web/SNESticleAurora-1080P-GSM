@@ -99,45 +99,21 @@ jobs:
           #endif
           EOF
           
-          echo "=== Aplicando filtragem de escopo e sintaxe estrutural ==="
+          echo "=== Aplicando filtragem de escopo, sintaxe estrutural e correção de variáveis ==="
+          # 1. Limpa retornos do Windows (\r)
+          # 2. Intercepta a atribuição defeituosa e injeta inline a declaração e cálculo de hash local (DJB2) + a variável nOriginalMax faltante de forma explícita
+          # 3. Corrige a quebra de linha da função colada na linha 85 para evitar funções aninhadas
+          # 4. Garante o fechamento correto do escopo inserindo o caractere '}' se necessário
           cat /tmp/orig_mainloop.cpp | tr -d '\r' | \
+          sed -E 's/[[:space:]]*hash[[:space:]]*=[[:space:]]*_PathCalcHash\([[:space:]]*pStr[[:space:]]*\);/uint32_t hash = 5381; int _c; char *_p = (char *)pStr; if(_p){while((_c=*_p++)){hash=((hash<<5)+hash)+_c;}} Int32 nOriginalMax = nMaxChars;/g' | \
           sed -E 's/return FALSE;[[:space:]]*const Char[[:space:]]*\*MainLoopStateGetAvailability/return FALSE;\nconst Char \*MainLoopStateGetAvailability/g' | \
           sed -E 's/const Char[[:space:]]*\*MainLoopStateGetAvailability/}\nconst Char \*MainLoopStateGetAvailability/g' >> "$TARGET_FILE"
-
-          echo "=== Substituindo a implementacao defeituosa de PathTruncFileName por uma versao autossuficiente ==="
-          python3 -c '
-          import os
-          path = "'"$TARGET_FILE"'"
-          with open(path, "r") as f:
-              content = f.read()
-          
-          fixed_function = """
-          void PathTruncFileName(Char *pOut, Char *pStr, Int32 nMaxChars) {
-              Int32 nOriginalMax = nMaxChars;
-              uint32_t hash = 5381;
-              int c;
-              if (pStr) {
-                  char *p = (char *)pStr;
-                  while ((c = *p++)) { hash = ((hash << 5) + hash) + c; }
-              }
-              if (nMaxChars <= 0 && nOriginalMax >= 3) { 
-                  sprintf((char *)pOut - 3, "%03u", (unsigned int)(hash % 1000)); 
-              }
-          }
-          """
-          
-          content = content.replace("hash = _PathCalcHash(pStr);", "uint32_t hash = 5381; int _c; char *_p = (char *)pStr; if(_p){while((_c=*_p++)){hash=((hash<<5)+hash)+_c;}} Int32 nOriginalMax = nMaxChars;")
-          
-          with open(path, "w") as f:
-              f.write(content)
-          '
 
       - name: Build Core Components Sequentially
         shell: bash
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
-          # export força o ecossistema e sub-makefiles a adotarem estas flags sem exceção
           export CFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
