@@ -9,7 +9,7 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Caminhos corrigidos utilizando o prefixo relativo para subir um nível até a pasta pai system a partir de ui
+// Caminhos corrigidos utilizando o prefixo relativo para subir um nível até a pasta pai system
 #include "../system/mainloop_exec.h"
 #include "../system/picodrive_bridge.h"
 #include "../system/quicknes_bridge.h"
