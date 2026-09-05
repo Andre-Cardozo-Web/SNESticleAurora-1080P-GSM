@@ -85,12 +85,8 @@ jobs:
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
           
-          echo "=== Reconstruindo mainloop_state.cpp com correção abrangente de escopo wchar/POSIX ==="
+          echo "=== Reconstruindo mainloop_state.cpp de forma limpa ==="
           cat << 'EOF' > "$TARGET_FILE"
-          // Força o carregamento de tipos largos de caracteres do sistema (wint_t) para blindar a Newlib
-          #include <wchar.h>
-          #include <stddef.h>
-
           #include <stdio.h>
           #include <string.h>
 
@@ -165,7 +161,7 @@ jobs:
               return "mc0: pronto";
           }
           EOF
-          echo "=== Arquivo substituído e compatibilizado contra colisões no sys/_types.h ==="
+          echo "=== Arquivo substituído com sucesso! ==="
 
       - name: Build Core Components Sequentially
         shell: bash
@@ -174,7 +170,9 @@ jobs:
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
           export CFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          
+          # Força a flag de inclusão nativa de cabeçalho stddef.h na chamada global do compilador EE do PS2 (-include stddef.h)
+          export EE_CFLAGS="-fsigned-char -include stddef.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
