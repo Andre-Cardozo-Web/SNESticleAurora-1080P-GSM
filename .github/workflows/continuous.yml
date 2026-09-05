@@ -76,7 +76,7 @@ jobs:
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            # Limpa caminhos antigos e força o include mestre padrão
+            # Restaura caminhos limpos padrões pois forçaremos os caminhos via CFLAGS mestre
             sed -i 's/#include ".*libpad.h"/#include <libpad.h>/g' "$IOP_FILE"
             sed -i 's/#include ".*libmc.h"/#include <libmc.h>/g' "$IOP_FILE"
             sed -i 's/#include <libpad.h>/#include <libpad.h>/g' "$IOP_FILE"
@@ -142,7 +142,7 @@ jobs:
               }
               *pOut = 0;
               
-              // Correção definitiva de sintaxe utilizando atribuição de vetor indexado para C++
+              // Correção estrita de sintaxe utilizando mutação por indexação de vetor
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
                   char *target = (char *)pOut - 3;
