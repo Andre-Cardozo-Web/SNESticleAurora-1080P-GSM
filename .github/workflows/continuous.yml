@@ -66,6 +66,19 @@ jobs:
             sed -i 's/typedef signed char          SBYTE;/#ifndef _EE\ntypedef signed char          SBYTE;\n#endif/g' "$TYPES_FILE"
           fi
 
+      - name: Patch Obsolete IOP Headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
+          if [ -f "$IOP_FILE" ]; then
+            echo "🩹 Atualizando o cabeçalho legado iopheap.h para o padrão moderno kernel.h no mainloop_iop.cpp..."
+            # Substitui a inclusão obsoleta iopheap.h por kernel.h e alloc.h que contêm o gerenciamento moderno de heap da IOP
+            sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <alloc.h>/g' "$IOP_FILE"
+          else
+            echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
+          fi
+
       - name: Rebuild mainloop_state.cpp Statically
         shell: bash
         run: |
@@ -73,26 +86,18 @@ jobs:
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
           
-          echo "=== Reconstruindo mainloop_state.cpp com mapeamento mestre de tipos POSIX e C ==="
+          echo "=== Reconstruindo mainloop_state.cpp de forma 100% autonoma ==="
           cat << 'EOF' > "$TARGET_FILE"
-          // Carrega size_t, ptrdiff_t e wchar_t de forma nativa e unificada pelo GCC interno
           #include <stddef.h>
 
-          // Definições explícitas de fallback de tipos de sistema para satisfazer a Newlib e impedir erros no sys/_types.h
-          #ifndef _WINT_T
-          #define _WINT_T
-          typedef unsigned int wint_t;
-          #endif
-
-          #ifndef _SIZE_T
-          #define _SIZE_T
-          typedef decltype(sizeof(0)) size_t;
+          #ifndef _SIZE_T_DECLARED
+          #define _SIZE_T_DECLARED
           #endif
 
           #include <stdio.h>
           #include <string.h>
 
-          // Definições nativas com tipos primitivos estáveis do hardware do PS2
+          // Definições nativas com tipos primitivos do GCC mips para evitar colisões com stdint.h externos
           typedef int          Bool;
           typedef unsigned int Uint32;
           typedef int          Int32;
@@ -163,7 +168,7 @@ jobs:
               return "mc0: pronto";
           }
           EOF
-          echo "=== Arquivo substituído e compatibilizado contra colisões no sys/_types.h ==="
+          echo "=== Arquivo substituído e mapeado com tipos primitivos do GCC ==="
 
       - name: Build Core Components Sequentially
         shell: bash
