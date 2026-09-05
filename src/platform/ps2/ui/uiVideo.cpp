@@ -12,8 +12,8 @@
 // Inclusões resolvidas de forma global através das diretivas de inclusão do Makefile
 #include "mainloop_exec.h"
 #include "../../../nes/quicknes/quicknes_bridge.h"   // Este já funciona bem relativo
-#include "storage.h"                                // O Makefile vai gerenciar esta pasta
-#include "audmixbuffer.h"                           // O Makefile vai gerenciar esta pasta
+// #include "storage.h"                               // COMENTADO: Arquivo não é mais necessário/utilizado no projeto
+#include "audmixbuffer.h"                           // O Makefile localiza este automaticamente em common/render/
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
