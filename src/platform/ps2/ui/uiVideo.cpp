@@ -12,7 +12,17 @@
 // Inclusões resolvidas de forma global através das diretivas de inclusão do Makefile
 #include "mainloop_exec.h"
 #include "../../../nes/quicknes/quicknes_bridge.h"   // Este já funciona bem relativo
-#include "../system/mainloop_globals.h"              // Voltando para ps2/ e entrando na pasta system/
+// Declarações externas das funções globais do sistema (Forward Declarations)
+extern Bool HddSupportIsEnabled(void);
+extern void HddSupportSetEnabled(Bool enabled);
+extern Bool MmceSupportIsEnabled(void);
+extern void MmceSupportSetEnabled(Bool enabled);
+extern Bool SmbSupportIsEnabled(void);
+extern void SmbSupportSetEnabled(Bool enabled);
+extern Bool Aud_IsInitialized(void);
+extern void Aud_Setvol(int volume);
+extern void MainResetEmulator(void);
+extern void ExecOSD(int core, void *params);
 #include "audmixbuffer.h"                           // O Makefile localiza este automaticamente em common/render/
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
