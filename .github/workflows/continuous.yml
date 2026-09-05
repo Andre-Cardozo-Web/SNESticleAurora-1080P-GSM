@@ -55,10 +55,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Injetando Tipos Globais e flags no Makefile ==="
+          echo "=== Limpando flags globais e definindo apenas flags de compatibilidade ==="
           if [ -f "Makefile" ]; then
-            # Injeta as definições de tipo como macros globais do compilador (-DBool=int, etc) e desativa warnings restritivos
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -DBool=int -DUint32=uint32_t -DInt32=int32_t -DChar=char -D_EE /g' Makefile
+            # Removeu as macros -D globais que colidiam com tipos estruturais e manteve apenas a supressão de warnings
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -76,11 +76,26 @@ jobs:
           git checkout src/platform/ps2/system/mainloop_state.cpp || true
           
           echo "=== Corrigindo erro de indentacao/sintaxe colada da linha 85 ==="
-          # Insere uma quebra de linha correta para separar a declaração da função MainLoopStateGetAvailability()
           sed -i 's/return FALSE;const Char \*MainLoopStateGetAvailability()/return FALSE;\nconst Char \*MainLoopStateGetAvailability()/g' src/platform/ps2/system/mainloop_state.cpp
 
-          echo "=== Injetando stdint.h e macros de fallback no topo ==="
-          sed -i '1s/^/#include <stdint.h>\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n/' src/platform/ps2/system/mainloop_state.cpp
+          echo "=== Injetando bloco de tipos locais isolados para evitar conflitos de macros ==="
+          # Criamos um arquivo temporário contendo as definições de tipo limpas usando tipos padrão do C
+          cat << 'EOF' > /tmp/types_patch.h
+          #include <stdint.h>
+          typedef int          Bool;
+          typedef uint32_t     Uint32;
+          typedef int32_t      Int32;
+          typedef char         Char;
+          #ifndef FALSE
+          #define FALSE 0
+          #endif
+          #ifndef TRUE
+          #define TRUE 1
+          #endif
+          EOF
+
+          # Injeta o bloco de tipos diretamente na linha 1 do arquivo para que todo o escopo interno o reconheça de forma segura
+          sed -i '1r /tmp/types_patch.h' src/platform/ps2/system/mainloop_state.cpp
 
       - name: Build Core Components Sequentially
         shell: bash
