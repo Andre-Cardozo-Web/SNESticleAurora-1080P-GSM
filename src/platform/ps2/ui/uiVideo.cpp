@@ -9,12 +9,11 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Caminhos relativos corrigidos apontando para os diretórios reais mapeados no repositório
-#include "../system/mainloop_exec.h"              // Voltar para ps2/, entrar em system/ (OK)
-#include "../../../nes/quicknes/quicknes_bridge.h"   // Voltar para src/, entrar em nes/quicknes/ (OK)
-#include "../../../common/base/storage.h"           // Caminho definitivo mapeado a partir da raiz do repositório
-#include "../../../common/render/audmixbuffer.h"   // Voltar para src/, entrar em common/render/ (OK)
-
+// Inclusões diretas mapeadas através dos caminhos globais do Makefile
+#include "mainloop_exec.h"
+#include "quicknes_bridge.h"
+#include "storage.h"
+#include "audmixbuffer.h"
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
