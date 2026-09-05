@@ -59,7 +59,9 @@ jobs:
           pwd
           ls -la
           echo "====================================="
-          make -f "$GITHUB_WORKSPACE/Makefile" AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 SNESticle.elf
+          make -f "$GITHUB_WORKSPACE/Makefile" AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 SNESticle || \
+          make -f "$GITHUB_WORKSPACE/Makefile" AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0 release || \
+          make -f "$GITHUB_WORKSPACE/Makefile" AUTO_INSTALL=yes LTO_LINK_JOBS=2 BUILD_PICODRIVE=0
 
       - name: Strip release ELF
         shell: bash
