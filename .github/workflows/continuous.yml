@@ -73,9 +73,15 @@ jobs:
           PAL_FILE="src/third_party/fceumm-fds/src/palette.h"
           BMP_FILE="src/common/media/bmpfile.h"
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
+          SDK_TAM_FILE="/usr/local/ps2dev/ps2sdk/common/include/tamtypes.h"
           
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           sed -i 's/\r//g' "$IOP_FILE" || true
+
+          echo "🩹 Remendando diretamente a tamtypes.h na raiz global da PS2SDK do contêiner..."
+          if [ -f "$SDK_TAM_FILE" ]; then
+             sed -i 's/#define NULL (void \*)0/#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL (void *)0\n#endif/g' "$SDK_TAM_FILE" || true
+          fi
 
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade absoluta no diretório raiz de buscas..."
           cat << 'EOF' > ./ps2_types_fix.h
@@ -149,7 +155,6 @@ jobs:
           sed -i '1i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"' "$IOP_FILE" || true
 
           echo "🩹 Substituindo cirurgicamente todas as passagens de NULL por nullptr estrito nas assinaturas de IOPLoadModule..."
-          # Abordagem de Regex total: Varre e limpa de forma estrita as chamadas literais que causavam conflitos com a SDK
           sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*NULL,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, nullptr, 0, nullptr)/g' "$IOP_FILE" || true
           sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*ppSearchPaths,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, ppSearchPaths, 0, nullptr)/g' "$IOP_FILE" || true
           sed -i 's/const unsigned char \*embed_data = NULL;/const unsigned char *embed_data = nullptr;/g' "$IOP_FILE" || true
