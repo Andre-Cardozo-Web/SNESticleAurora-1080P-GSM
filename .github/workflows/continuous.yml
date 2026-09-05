@@ -73,32 +73,27 @@ jobs:
             echo "🩹 Higienizando quebras invisíveis do Windows no mainloop_iop.cpp..."
             sed -i 's/\r//g' "$IOP_FILE"
             
-            echo "🩹 Restaurando e limpando o arquivo original para re-aplicacao controlada..."
+            echo "🩹 Restaurando e garantindo integridade do arquivo original..."
             git checkout "$IOP_FILE" || true
             sed -i 's/\r//g' "$IOP_FILE"
 
-            echo "🩹 Corrigindo mapeamento de alocacao de memoria e gerenciamento da IOP..."
+            echo "🩹 Corrigindo mapeamento de alocacao de memoria e reatando headers de sistema..."
             sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            echo "🩹 Redirecionando includes de RPC e Rede obsoletos..."
+            echo "🩹 Desativando dependencias de rede obsoletas..."
             sed -i -E 's/#include[[:space:]]*[<"]ps2ip.h[">]/\/\/ #include <ps2ip.h>/g' "$IOP_FILE"
             
-            echo "🩹 Redirecionando chamadas para arquivos locais copiados..."
-            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include "memcard.h"/g' "$IOP_FILE"
-            sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "libpad.h"/g' "$IOP_FILE"
-            sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include "loadfile.h"/g' "$IOP_FILE"
-            sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include "sifrpc.h"/g' "$IOP_FILE"
-
-            echo "🩹 Injetando tipos primitivos customizados, climits e redefinindo NULL de segurança..."
-            sed -i '1s/^/#include <climits>\ntypedef int Bool;\ntypedef unsigned int Uint32;\ntypedef unsigned long long Uint64;\ntypedef __int128 Uint128;\ntypedef int Int32;\ntypedef char Char;\n#ifndef FALSE\n#define FALSE 0\n#endif\n#ifndef TRUE\n#define TRUE 1\n#endif\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr\n/' "$IOP_FILE"
+            echo "🩹 Forçando redirecionamento limpo para os cabeçalhos oficiais..."
+            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include <memcard.h>/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include <libpad.h>/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp nao encontrado para aplicacao do patch."
           fi
 
-          echo "🔗 Unificando a árvore de arquivos de inclusão mestre da PS2SDK de forma local..."
-          # Vincula os diretórios comuns e de arquitetura diretamente nas duas pastas de rastreamento do SNESticle
-          # Isso blinda sifrpc-common.h, loadfile-common.h e tamtypes.h simultaneamente
+          echo "🔗 Criando mapeamento de links simbólicos para a árvore moderna da SDK..."
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
@@ -106,22 +101,6 @@ jobs:
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
-
-          # Cópias redundantes adicionais de suporte físico
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/sifrpc.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/tamtypes.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/loadfile-common.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/sifrpc-common.h ./src/platform/ps2/system/ || true
-
-          echo "🩹 Aplicando definicao de tipos de suporte graficos em gpfifo.h..."
-          FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
-          if [ -f "$FIFO_FILE" ]; then
-             sed -i '1s/^/typedef int Int32;\ntypedef unsigned int Uint32;\ntypedef unsigned long long Uint64;\ntypedef __int128 Uint128;\n/' "$FIFO_FILE"
-          fi
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
@@ -205,15 +184,19 @@ jobs:
               return "mc0: pronto";
           }
           EOF
-          echo "=== Modulo recriado em C puro e protegido contra falhas de cabecalhos ==="
+          echo "=== Módulo recriado em C puro e protegido contra falhas de cabeçalhos ==="
 
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
-          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          echo "=== Injetando e injetando definições de tipos customizados de forma global nas flags mestre ==="
+          # Usamos o argumento do compilador -D para definir Int32, Char, Bool, Uint16 e Float32 diretamente no topo de QUALQUER arquivo processado pelo make.
+          # Adicionamos também o include automático da biblioteca <climits> por linha de comando para sanar o erro do INT_MAX.
+          GLOBAL_TYPES="-D_EE -D_SIZE_T_DEFINED -include climits -DNULL=nullptr -DBool=int -DInt32=int -DChar=char -DUint32='unsigned int' -DUint16='unsigned short' -DFloat32=float -DUint128=__int128 -DFALSE=0 -DTRUE=1"
+          
+          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include ${GLOBAL_TYPES} -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include ${GLOBAL_TYPES} -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include ${GLOBAL_TYPES} -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error"
           
           echo "=== Executando compilacao padrao ==="
           make AUTO_INSTALL=yes
