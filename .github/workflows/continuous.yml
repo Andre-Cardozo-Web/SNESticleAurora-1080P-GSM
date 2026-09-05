@@ -83,13 +83,14 @@ jobs:
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
 
-          echo "🩹 Hack de linkagem: Forçando caminho absoluto mestre dentro da libmc.h da SDK..."
+          echo "🩹 Hack de linkagem: Forçando caminho absoluto mestre global compartilhado dentro da libmc.h da SDK..."
           SDK_MC_FILE="/usr/local/ps2dev/ps2sdk/ee/include/libmc.h"
           if [ -f "$SDK_MC_FILE" ]; then
-            # Corrige a inclusão interna da SDK injetando a rota física direta completa para mc-common.h (nome oficial moderno)
-            sed -i 's/#include <libmc-common.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/mc-common.h"/g' "$SDK_MC_FILE"
-            sed -i 's/#include "libmc-common.h"/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/mc-common.h"/g' "$SDK_MC_FILE"
-            sed -i 's/#include <mc-common.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/mc-common.h"/g' "$SDK_MC_FILE"
+            # Corrige a inclusão interna apontando estritamente para o diretório /common/include/ onde mc-common.h reside fisicamente no contêiner
+            sed -i 's/#include <libmc-common.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/mc-common.h"/g' "$SDK_MC_FILE"
+            sed -i 's/#include "libmc-common.h"/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/mc-common.h"/g' "$SDK_MC_FILE"
+            sed -i 's/#include <mc-common.h>/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/mc-common.h"/g' "$SDK_MC_FILE"
+            sed -i 's/#include ".*mc-common.h"/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/mc-common.h"/g' "$SDK_MC_FILE"
           fi
 
       - name: Rebuild mainloop_state.cpp Natively
@@ -149,7 +150,7 @@ jobs:
               }
               *pOut = 0;
               
-              // Codificação vetorial por deslocamento de ponteiro estrito aceita sem casts pelo g++ do contêiner
+              // Codificação vetorial por deslocamento aceita de forma estável sem casts pelo compilador mips64r5900el-g++
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
                   char *target = (char *)pOut;
@@ -184,9 +185,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
-          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
@@ -217,4 +218,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
-          gh release create continuous ../build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
+           gh release create continuous ../build/SNESticle.elf 
+           "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || 
+             gh release create continuous build/SNESticle.elf 
+              "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
