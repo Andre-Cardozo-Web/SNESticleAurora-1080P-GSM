@@ -74,21 +74,27 @@ jobs:
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Criando cabeçalho físico isolado de correção de tipos primitivos e Newlib..."
-          cat << 'EOF' > src/platform/ps2/system/ps2_types_fix.h
+          echo "🩹 Criando cabeçalho físico mestre global de compatibilidade absoluta..."
+          # Escreve um cabeçalho centralizado com todos os casamentos de tipos primitivos exigidos pelo g++ do contêiner
+          cat << 'EOF' > /tmp/ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
           #include <climits>
           #include <stdint.h>
+          #include <stddef.h>
           
           typedef int                Bool;
           typedef unsigned int       Uint32;
           typedef unsigned short     Uint16;
+          typedef unsigned char      Uint8;
           typedef unsigned long long Uint64;
           typedef __int128           Uint128;
           typedef int                Int32;
           typedef char               Char;
           typedef float              Float32;
+          
+          typedef unsigned short     uint16;
+          typedef unsigned long long uint64;
           
           #ifndef FALSE
           #define FALSE 0
@@ -107,14 +113,16 @@ jobs:
           void* SifAllocIopHeap(int size);
           int SifLoadIopHeap(const char *path, void *iop_mem);
           void* SifFreeIopHeap(void *iop_mem);
+          void InputInit(int mode);
           #ifdef __cplusplus
           }
           #endif
           #endif
           EOF
 
-          echo "🩹 Injetando a inclusão do cabeçalho de correção no topo do mainloop_iop.cpp..."
-          sed -i '1i #include "ps2_types_fix.h"' "$IOP_FILE" || true
+          # Copia o fix central para a raiz de compilação comum de busca
+          cp -f /tmp/ps2_types_fix.h ./ps2_types_fix.h || true
+          cp -f /tmp/ps2_types_fix.h ./src/ps2_types_fix.h || true
 
           echo "🩹 Corrigindo mapeamento de alocacao de memoria e gerenciamento da IOP..."
           sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE" || true
@@ -123,14 +131,13 @@ jobs:
           echo "🩹 Redirecionando includes de RPC e Rede obsoletos..."
           sed -i -E 's/#include[[:space:]]*[<"]ps2ip.h[">]/\/\/ #include <ps2ip.h>/g' "$IOP_FILE" || true
           
-          echo "🩹 Redirecionando chamadas de Joystick e Cartao para arquivos locais copiados..."
-          sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include "memcard.h"/g' "$IOP_FILE" || true
-          sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "libpad.h"/g' "$IOP_FILE" || true
-          sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include "loadfile.h"/g' "$IOP_FILE" || true
-          sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include "sifrpc.h"/g' "$IOP_FILE" || true
+          echo "🩹 Redirecionando chamadas de Joystick e Cartao para os arquivos da arvore..."
+          sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include <memcard.h>/g' "$IOP_FILE" || true
+          sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include <libpad.h>/g' "$IOP_FILE" || true
+          sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
+          sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
           echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK de forma plana no repositório..."
-          # Vincula os subdiretórios comuns adicionais de DMA e RPC diretamente nas pastas de rastreamento do Make
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
@@ -139,7 +146,7 @@ jobs:
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
 
-          echo "🔗 Copiando de suporte físico redundantes para a pasta local do sistema..."
+          echo "🔗 Copiando cabeçalhos oficiais modernos para suporte local do compilador..."
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
@@ -149,11 +156,6 @@ jobs:
           cp -f /usr/local/ps2dev/ps2sdk/common/include/loadfile-common.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/sifrpc-common.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/sifcmd-common.h ./src/platform/ps2/system/ || true
-
-          echo "🩹 Aplicando definicao de tipos de suporte graficos em gpfifo.h..."
-          FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
-          cp -f src/platform/ps2/system/ps2_types_fix.h src/platform/ps2/gs/ || true
-          sed -i '1i #include "ps2_types_fix.h"' "$FIFO_FILE" || true
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
@@ -242,9 +244,12 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          export CFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          echo "=== Exportando variaveis de ambiente globais com injeção forçada de cabeçalho ==="
+          # Injetamos a flag -include ps2_types_fix.h diretamente na raiz das chamadas CFLAGS mestre.
+          # Isso obriga o GCC a carregar e definir o fix de tipos em ABSOLUTAMENTE QUALQUER ARQUIVO antes de ler seu código nativo.
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
