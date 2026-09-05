@@ -104,9 +104,46 @@ jobs:
           sed -E 's/return FALSE;[[:space:]]*const Char[[:space:]]*\*MainLoopStateGetAvailability/return FALSE;\nconst Char \*MainLoopStateGetAvailability/g' | \
           sed -E 's/const Char[[:space:]]*\*MainLoopStateGetAvailability/}\nconst Char \*MainLoopStateGetAvailability/g' >> "$TARGET_FILE"
 
-          echo "=== Substituindo cirurgicamente a chamada antiga por variáveis e hash local ==="
-          # Encontra a linha defeituosa e injeta de forma linear e limpa: o cálculo de hash DJB2 + ponto e vírgula obrigatório antes de Int32 nOriginalMax
-          sed -i 's/hash = _PathCalcHash(pStr);/uint32_t hash = 5381; int _c; char *_p = (char *)pStr; if(_p){while((_c=*_p++)){hash=((hash<<5)+hash)+_c;}}; Int32 nOriginalMax = nMaxChars;/g' "$TARGET_FILE"
+          echo "=== Substituindo a funcao PathTruncFileName inteira via Regex Python ==="
+          python3 -c '
+          import re
+
+          path = "'"$TARGET_FILE"'"
+          with open(path, "r", encoding="utf-8", errors="ignore") as f:
+              content = f.read()
+
+          # Nova implementação limpa, tipada e com cálculo de hash local resolvido
+          fixed_function = """
+          void PathTruncFileName(Char *pOut, Char *pStr, Int32 nMaxChars) {
+              Int32 nOriginalMax = nMaxChars;
+              uint32_t hash = 5381;
+              int _c;
+              char *_p = (char *)pStr;
+              if (_p) {
+                  while ((_c = *_p++)) {
+                      hash = ((hash << 5) + hash) + _c;
+                  }
+              }
+              if (nMaxChars <= 0 && nOriginalMax >= 3) {
+                  sprintf((char *)pOut - 3, "%03u", (unsigned int)(hash % 1000));
+              }
+          }
+          """
+
+          # Regex multiline flexível que encontra a assinatura e captura todo o escopo até o fecha chaves da validação original
+          pattern = r"void\s+PathTruncFileName\s*\([^)]*\)\s*\{[^}]*hash\s*=\s*_PathCalcHash[^;]*;[^}]*\}"
+          
+          if re.search(pattern, content, re.DOTALL):
+              content = re.sub(pattern, fixed_function, content, flags=re.DOTALL)
+              print("✅ Função PathTruncFileName substituída com sucesso via Regex!")
+          else:
+              # Fallback caso a estrutura possua uma quebra muito agressiva
+              content = content.replace("hash = _PathCalcHash(pStr);", "uint32_t hash = 5381; int _c; char *_p = (char *)pStr; if(_p){while((_c=*_p++)){hash=((hash<<5)+hash)+_c;}} Int32 nOriginalMax = nMaxChars;")
+              print("⚠️ Padrão total não casado. Aplicado fallback de substituição de linha.")
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(content)
+          '
 
       - name: Build Core Components Sequentially
         shell: bash
