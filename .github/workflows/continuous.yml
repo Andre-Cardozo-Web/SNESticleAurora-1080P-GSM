@@ -75,13 +75,19 @@ jobs:
           sed -i 's/\r//g' "$IOP_FILE" || true
 
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade absoluta no diretório raiz de buscas..."
-          # Escreve um arquivo de inclusão isolado injetando a compatibilidade completa exigida pela Newlib/g++ moderna e os tipos de som/UI faltantes
+          # Adiciona o mapeamento da macro de alinhamento obsoleta _ALIGN para alignas nativa do C++ moderno e define INT_MAX de segurança
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
           #include <climits>
           #include <stdint.h>
           #include <stddef.h>
+          
+          #ifndef INT_MAX
+          #define INT_MAX 2147483647
+          #endif
+          
+          #define _ALIGN(x) alignas(x)
           
           typedef int                Bool;
           typedef unsigned int       Uint32;
@@ -142,7 +148,7 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
           echo "🩹 Forçando a inclusão física do patch de tipos diretamente via sed no topo do mainloop_iop.cpp..."
-          sed -i '1i #include "ps2_types_fix.h"\n#include <climits>' "$IOP_FILE" || true
+          sed -i '1i #include "ps2_types_fix.h"' "$IOP_FILE" || true
 
           echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK de forma plana no repositório..."
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
