@@ -12,12 +12,31 @@
 // Inclusões resolvidas de forma global através das diretivas de inclusão do Makefile
 #include "mainloop_exec.h"
 #include "../../../nes/quicknes/quicknes_bridge.h"   // Este já funciona bem relativo
+// Declarações externas das funções globais do sistema (Forward Declarations)
+extern Bool HddSupportIsEnabled(void);
+extern void HddSupportSetEnabled(Bool enabled);
+extern Bool MmceSupportIsEnabled(void);
+extern void MmceSupportSetEnabled(Bool enabled);
+extern Bool SmbSupportIsEnabled(void);
+extern void SmbSupportSetEnabled(Bool enabled);
+extern Bool Aud_IsInitialized(void);
+extern void Aud_Setvol(int volume);
 extern void MainResetEmulator(void);
 extern void ExecOSD(int core, void *params);
-extern void BgmSetVolume(int volume);               // Adicionado para controle de volume do menu
-extern Bool MassStorageIsEnabled(void);             // Adicionado para controle do pendrive USB
-extern void MassStorageSetEnabled(Bool enabled);    // Adicionado para controle do pendrive USB
-#include "audmixbuffer.h"                           // O Makefile localiza este automaticamente em common/render/
+extern void BgmSetVolume(int volume);               // Volume da música de fundo
+extern Bool MassStorageIsEnabled(void);             // Status do Pendrive USB
+extern void MassStorageSetEnabled(Bool enabled);    // Ativar/Desativar Pendrive USB
+extern Bool BgmIsEnabled(void);                     // Status da música de fundo (Faltando)
+extern void BgmSetEnabled(Bool enabled);            // Ativar/Desativar música de fundo (Faltando)
+extern int  BgmGetVolume(void);                     // Obter volume da música de fundo (Faltando)
+extern int  AudMixGameGetVolume(void);              // Obter volume do jogo (Faltando)
+extern void AudMixGameSetVolume(int volume);        // Definir volume do jogo (Faltando)
+extern void MainLoopReinitVideoMode(Int32 mode);    // Reinicializar Modo de Vídeo (Faltando)
+extern void GSK_SetWidescreen(Bool wide);           // Configurar Widescreen (Faltando)
+extern void GSK_SetOverscan(int overscan);          // Configurar Overscan (Faltando)
+extern void GSK_SetDisplayOffset(int x, int y);     // Configurar Deslocamento de Tela (Faltando)
+extern void VideoSettingsSave(void);                // Salvar Configurações de Vídeo (Faltando)
+#include "audmixbuffer.h"                           // O Makefile localiza este automaticamente em common
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
