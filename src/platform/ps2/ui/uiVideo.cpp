@@ -41,7 +41,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         { 
             m_iSelect++; 
             if (m_iSelect > hi)  m_iSelect = lo; 
-            }
+        }
     }
 
     if (trigger & PAD_LEFT)  dir = -1; 
@@ -53,7 +53,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         {
         case 0: 
             { 
-                Int32 modeIndex = MainLoopGetVideoMode() + dir; 
+                Int32 modeIndex = g_GskVideoMode + dir; 
                 if (modeIndex < 0) modeIndex = 2; 
                 if (modeIndex > 2) modeIndex = 0; 
                 MainLoopReinitVideoMode(modeIndex); 
