@@ -137,7 +137,6 @@ jobs:
               }
               *pOut = 0;
               
-              // Correção de sintaxe: Indexação por array para mutar os caracteres sem gerar erros de ponteiro char*
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
                   char *target = (char *)pOut - 3;
@@ -175,8 +174,8 @@ jobs:
           export CFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           
-          # Mantém o subdiretório de includes essenciais periféricos da ps2sdk ativo globalmente
-          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          # Injeta o subdiretório absoluto de mapeamento de joysticks libpad da ps2sdk modernas para liberar o include global
+          export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/ee/include -I/usr/local/ps2dev/ps2sdk/ee/include/libpad -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
