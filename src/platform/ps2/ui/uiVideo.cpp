@@ -12,7 +12,7 @@
 // Inclusões resolvidas de forma global através das diretivas de inclusão do Makefile
 #include "mainloop_exec.h"
 #include "../../../nes/quicknes/quicknes_bridge.h"   // Este já funciona bem relativo
-// #include "storage.h"                               // COMENTADO: Arquivo não é mais necessário/utilizado no projeto
+#include "mainloop_globals.h"                       // Declara as funções globais de hardware, HDD, SMB e áudio do PS2
 #include "audmixbuffer.h"                           // O Makefile localiza este automaticamente em common/render/
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
