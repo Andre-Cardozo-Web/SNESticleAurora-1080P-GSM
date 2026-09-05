@@ -72,20 +72,32 @@ jobs:
           set -euo pipefail
           IOP_FILE="src/platform/ps2/system/mainloop_iop.cpp"
           if [ -f "$IOP_FILE" ]; then
-            echo "🩹 Higienizando quebras invisíveis do Windows no mainloop_iop.cpp..."
+            echo "🩹 Atualizando os cabeçalhos legados de IOP e Pad de controles no mainloop_iop.cpp..."
+            # Remove quebras do Windows para higienizar o arquivo de stream
             sed -i 's/\r//g' "$IOP_FILE"
             
-            echo "🩹 Atualizando cabeçalhos obsoletos de alocação de memória da IOP..."
+            # Limpa patches absolutos mutados e retorna para a sintaxe limpa padrão de colchetes angulares <...>
             sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
             
-            echo "🩹 Forçando caminhos absolutos reais e unificados para Joysticks e Memcard..."
-            # Injeta a rota física direta mestre do contêiner Docker, anulando a limpeza de caminhos feita pelo sub-makefile
-            sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include "\/usr\/local\/ps2dev\/ps2sdk\/ee\/include\/libpad.h"/g' "$IOP_FILE"
-            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include "\/usr\/local\/ps2dev\/ps2sdk\/common\/include\/memcard.h"/g' "$IOP_FILE"
+            # Redireciona a chamada antiga libmc.h para carregar o arquivo unificado moderno memcard.h da PS2SDK
+            sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include <memcard.h>/g' "$IOP_FILE"
+            sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include <libpad.h>/g' "$IOP_FILE"
           else
             echo "⚠️ Aviso: Arquivo mainloop_iop.cpp não encontrado para aplicação do patch."
           fi
+
+          echo "🔗 Injetando arquivos mestre de compatibilidade física na raiz de buscas do projeto..."
+          # Faz uma cópia direta dos cabeçalhos oficiais modernos para dentro da pasta raiz de buscas do Makefile (-I.)
+          # Isso anula qualquer limpeza de variável ou erro de caminho vindo dos sub-makefiles do SNESticle
+          cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
+          
+          # Fallback duplicado na raiz comum src/
+          cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/ || true
 
       - name: Rebuild mainloop_state.cpp Natively
         shell: bash
@@ -144,7 +156,6 @@ jobs:
               }
               *pOut = 0;
               
-              // Aritmética vetorial por deslocamento de ponteiro aceita de forma estrita pelo mips64r5900el-g++
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
                   char *target = (char *)pOut;
@@ -183,7 +194,7 @@ jobs:
           export CXXFLAGS="-I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
-          echo "=== Executando compilacao padrão ==="
+          echo "=== Executando compilacao padrão === "
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
@@ -212,4 +223,3 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
-          gh release create continuous ../build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
