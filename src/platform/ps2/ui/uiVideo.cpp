@@ -12,8 +12,8 @@
 // Inclusões ajustadas combinando caminhos do PS2SDK e mapeamentos globais do Makefile
 #include "mainloop_exec.h"                         // Procura na pasta local/nativa do PS2
 #include "../../../nes/quicknes/quicknes_bridge.h"   // Já funcionou perfeitamente!
-#include "storage.h"                                // Removidos os prefixos para o Makefile localizar nativamente
-#include "audmixbuffer.h"                           // Removidos os prefixos para o Makefile localizar nativamente
+#include "../../../common/base/storage.h"           // Voltando 3 níveis para acessar a pasta common base
+#include "../../../common/render/audmixbuffer.h"   // Voltando 3 níveis para acessar a pasta common render
 
 void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
 {
