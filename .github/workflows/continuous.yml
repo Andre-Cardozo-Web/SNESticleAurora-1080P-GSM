@@ -19,7 +19,7 @@ jobs:
       - name: Install system dependencies
         run: |
           apk update
-          apk add --no-cache git make python3 bash python3-dev build-base github-cli
+          apk add --no-cache git make python3 bash python3-dev build-base github-cli curl
 
       - uses: actions/checkout@v4
         with:
@@ -51,16 +51,18 @@ jobs:
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
 
-      - name: Restore and Patch mainloop_state.cpp
+      - name: Restore and Patch mainloop_state.cpp Natively
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p src/platform/ps2/system
           curl -sL "https://githubusercontent.com" -o src/platform/ps2/system/mainloop_state.cpp
 
+      - name: Build Core Components Sequentially
         shell: bash
-       run: |
+        run: |
           set -euo pipefail
           echo "=== Executando compilacao padrão ==="
-          # Executa o make limpando configurações antigas e chamando as definições locais
           make AUTO_INSTALL=yes
 
       - name: Strip release ELF
@@ -90,4 +92,3 @@ jobs:
           set -euo pipefail
           gh release delete continuous --cleanup-tag --yes || true
           gh release create continuous ../build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" LICENSE BRANDING.md || true
- 
