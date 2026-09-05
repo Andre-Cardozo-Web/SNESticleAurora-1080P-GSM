@@ -16,26 +16,18 @@ jobs:
     runs-on: ubuntu-latest
     container: ps2dev/ps2dev:latest
     steps:
-      - name: Verify required emulator submodules
-        shell: bash
+      - name: Install system dependencies
         run: |
-          set -euo pipefail
-          # Libera a pasta no Git para evitar o erro de permissao do container Docker
+          apk update
+          apk add --no-cache git make python3 bash python3-dev build-base
+
+      - name: Configure Git Safe Directory
+        run: |
           git config --global --add safe.directory /__w/SNESticleAurora-1080P-GSM/SNESticleAurora-1080P-GSM
-          
-          test -f src/third_party/quicknes/Makefile
-          test -f src/third_party/picodrive/Makefile
-          test -f src/third_party/beetle-pce-fast/Makefile
-          test -f src/third_party/beetle-pce-fast/COPYING
-          test -f src/third_party/fceumm-fds/Makefile
-          test -f src/third_party/fceumm-fds/Copying
-          test -f src/third_party/fceumm-fds/src/fds.c
-          test -f tools/Makefile.beetle-pce-fast-ps2
-          test -f tools/Makefile.fceumm-fds-ps2
-          test -f tools/prepare_fceumm_fds_sources.py
-          test -f tools/namespace_fceumm_fds_archive.py
-          echo "Recursive submodules:"
-          git submodule status --recursive
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
           fetch-depth: 0
 
       - name: Patch PicoDrive Duplicate Macro
@@ -106,7 +98,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Instala a ferramenta de release do GitHub caso ela nao exista no container de PS2
           if ! command -v gh &> /dev/null; then apk add --no-cache github-cli; fi
           gh release delete continuous --cleanup-tag --yes || true
           gh release create continuous build/SNESticle.elf "$AURORA_SOURCE_BUNDLE" /tmp/SOURCE-MANIFEST.txt /tmp/SHA256SUMS.txt LICENSE BRANDING.md LICENSES/PicoDrive-COPYING.txt LICENSES/QuickNES-GPL-2.0.txt LICENSES/Beetle-PCE-Fast-GPL-2.0.txt LICENSES/FCEUmm-GPL-2.0.txt THIRD_PARTY.md --target "$GITHUB_SHA" --title "Continuous Build" --prerelease --notes-file CONTINUOUS_RELEASE.md
