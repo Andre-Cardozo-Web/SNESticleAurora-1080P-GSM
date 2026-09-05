@@ -9,12 +9,12 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Caminhos corrigidos subindo um nível para localizar a pasta pai system
-#include "../system/mainloop_exec.h"
-#include "../system/picodrive_bridge.h"
-#include "../system/quicknes_bridge.h"
-#include "../system/snes_bridge.h"
-#include "../system/storage.h"
+// Caminhos canônicos corrigidos apontando direto para a raiz do barramento system
+#include "system/mainloop_exec.h"
+#include "system/picodrive_bridge.h"
+#include "system/quicknes_bridge.h"
+#include "system/snes_bridge.h"
+#include "system/storage.h"
 #include "audmixbuffer.h"
 
 // Declarações internas da tela de vídeo do emulador
@@ -233,7 +233,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
         case 29: 
             { 
                 Int32 mode = (Int32)SNPPURenderGetObjLimitMode() + dir; 
-                if (mode < 0) mode = SNPPU_OBJ_LIMIT_MODE_NUM - 1; 
+                if (mode < 0) mode = SNPPU_LIMIT_MODE_NUM - 1; // Ajustado para corresponder ao enum correto se necessário
                 if (mode >= SNPPU_OBJ_LIMIT_MODE_NUM) mode = 0; 
                 SNPPURenderSetObjLimitMode((Uint8)mode); 
             } 
