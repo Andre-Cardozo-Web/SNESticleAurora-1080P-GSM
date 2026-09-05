@@ -11,7 +11,7 @@
 
 // Caminhos globais estáveis corrigidos direto a partir do barramento raiz exigido pelo Makefile
 #include "system/mainloop_exec.h"
-#include "system/quicknes_bridge.h"
+#include "../../../nes/quicknes/quicknes_bridge.h"
 #include "system/storage.h"
 #include "audmixbuffer.h"
 
