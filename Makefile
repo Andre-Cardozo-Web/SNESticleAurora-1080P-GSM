@@ -6,8 +6,9 @@
 EE_BIN = build/SNESticle.elf
 OBJ_DIR = build/obj
 
-# Variável padrão da PS2SDK para incluir diretórios do projeto
-EE_INCLUDES := -I. -Isrc -Isrc/platform/ps2 -Isrc/platform/ps2/system -Isrc/platform/ps2/ui -Isrc/third_party
+# Varredura profunda automática para incluir todas as subpastas dentro de 'src'
+# Isso garante que qualquer arquivo .h seja localizado, não importa onde esteja
+EE_INCLUDES := -I. -Isrc $(shell find src -type d | sed 's/^/-I/') -Isrc/third_party
 
 # Força os caminhos a entrarem nas flags de compilação C e C++
 EE_CFLAGS   += $(EE_INCLUDES)
