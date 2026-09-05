@@ -73,15 +73,9 @@ jobs:
           PAL_FILE="src/third_party/fceumm-fds/src/palette.h"
           BMP_FILE="src/common/media/bmpfile.h"
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
-          SDK_TAM_FILE="/usr/local/ps2dev/ps2sdk/common/include/tamtypes.h"
           
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           sed -i 's/\r//g' "$IOP_FILE" || true
-
-          echo "🩹 Remendando diretamente a tamtypes.h na raiz global da PS2SDK do contêiner..."
-          if [ -f "$SDK_TAM_FILE" ]; then
-             sed -i 's/#define NULL (void \*)0/#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL (void *)0\n#endif/g' "$SDK_TAM_FILE" || true
-          fi
 
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade absoluta no diretório raiz de buscas..."
           cat << 'EOF' > ./ps2_types_fix.h
@@ -151,14 +145,9 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Forçando a inclusão do fix e a definição direta de INT_MAX no topo do mainloop_iop.cpp..."
-          sed -i '1i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"' "$IOP_FILE" || true
-
-          echo "🩹 Substituindo cirurgicamente todas as passagens de NULL por nullptr estrito nas assinaturas de IOPLoadModule..."
-          sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*NULL,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, nullptr, 0, nullptr)/g' "$IOP_FILE" || true
-          sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*ppSearchPaths,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, ppSearchPaths, 0, nullptr)/g' "$IOP_FILE" || true
-          sed -i 's/const unsigned char \*embed_data = NULL;/const unsigned char *embed_data = nullptr;/g' "$IOP_FILE" || true
-          sed -i 's/NULL };/nullptr };/g' "$IOP_FILE" || true
+          echo "🩹 Injetando neutralização estrita da macro NULL legada apenas no código local do mainloop_iop.cpp..."
+          # Injeta o fix e força o nullptr após os cabeçalhos de sistema serem chamados, poupando a Newlib externa
+          sed -i '1i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
           echo "🩹 Resolvendo conflito de declaração duplicada e anônima da struct pal em FCEUmm de forma linear..."
           [ -f "$PAL_FILE" ] && printf '#ifndef FCEU_PALETTE_H\n#define FCEU_PALETTE_H\nstruct pal { unsigned char r, g, b; };\nextern struct pal *palo;\nvoid FCEU_DrawNTSCControlBars(unsigned char *XBuf);\n#endif\n' > "$PAL_FILE" || true
