@@ -77,11 +77,9 @@ jobs:
           git checkout "$TARGET_FILE" || true
           
           echo "=== Fazendo o dump do arquivo temporario limpo ==="
-          # Salva o arquivo original
           cp "$TARGET_FILE" /tmp/orig_mainloop.cpp
           
           echo "=== Reconstruindo o arquivo fisicamente com tipos e correcoes ==="
-          # Criamos o arquivo do zero inserindo as definições nativas no topo de forma absoluta
           cat << 'EOF' > "$TARGET_FILE"
           #include <stdint.h>
           #include <stdio.h>
@@ -101,9 +99,8 @@ jobs:
           #endif
           EOF
           
-          # Adiciona o conteúdo original removendo os caracteres de fim de linha do Windows (\r) para evitar falhas no sed
-          # E aplica a quebra de linha cirúrgica para separar a função grudada que quebrava o escopo
-          cat /tmp/orig_mainloop.cpp | tr -d '\r' | sed 's/return FALSE;const Char \*MainLoopStateGetAvailability()/return FALSE;\nconst Char \*MainLoopStateGetAvailability()/g' >> "$TARGET_FILE"
+          # Regex aprimorada no sed para capturar qualquer variação de espaçamento ou tabulação antes da declaração colada
+          cat /tmp/orig_mainloop.cpp | tr -d '\r' | sed -E 's/return FALSE;[[:space:]]*const Char[[:space:]]*\*MainLoopStateGetAvailability/return FALSE;\nconst Char \*MainLoopStateGetAvailability/g' >> "$TARGET_FILE"
 
       - name: Build Core Components Sequentially
         shell: bash
