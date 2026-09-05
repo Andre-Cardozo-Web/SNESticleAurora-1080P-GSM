@@ -158,7 +158,6 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
                 AudMixPceSetVolume(v); 
             } 
             break;
-
         case 55: 
             SnesAudioSetRate(SNSPCDSP_SAMPLERATE); 
             if (_pSystem == _pSnes && _AudMix) _AudMix->SetSampleRate(SNSPCDSP_SAMPLERATE); 
