@@ -643,6 +643,11 @@ SRCS := \
 	src/platform/ps2/system/version.cpp \
 	src/common/render/wavfile.cpp \
 	src/common/debug/dbgterm.cpp \
+		src/platform/ps2/ui/uiNetwork.cpp \
+	src/platform/ps2/ui/uiVideo.cpp \
+	src/platform/ps2/system/version.cpp \
+	src/common/render/wavfile.cpp \
+	src/common/debug/dbgterm.cpp \
 	src/platform/ps2/system/mainloop_state.cpp \
 	src/platform/ps2/system/mainloop_iop.cpp \
 	src/platform/ps2/system/mainloop_net.cpp \
@@ -662,6 +667,10 @@ SRCS := \
 	src/platform/ps2/system/mainloop_bgm.cpp \
 	src/platform/ps2/system/global_alloc.cpp \
 	src/platform/ps2/system/embedded_irx.cpp \
+	src/platform/ps2/ui/uiBrowser.cpp \
+	src/platform/ps2/ui/uiCover.cpp \
+	src/platform/ps2/ui/uiLog.cpp \
+	src/platform/ps2/ui/uiMenu.cpp \
 	src/nes/system/nesrom.cpp \
 	src/nes/quicknes/quicknes_bridge.cpp \
 	src/nes/quicknes/nessystem_quicknes.cpp \
