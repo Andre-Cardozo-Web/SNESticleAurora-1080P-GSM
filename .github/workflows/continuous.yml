@@ -75,15 +75,12 @@ jobs:
             echo "🩹 Atualizando os cabeçalhos legados de IOP e Pad de controles no mainloop_iop.cpp..."
             sed -i 's/#include <iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE"
             sed -i 's/#include <alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE"
-            
-            # Altera o include para mapear diretamente as portas nativas físicas unificadas
             sed -i 's/#include <libpad.h>/#include <libpad.h>/g' "$IOP_FILE"
             sed -i 's/#include <libmc.h>/#include <libmc.h>/g' "$IOP_FILE"
           fi
 
           echo "🔗 Criando links simbólicos diretos da SDK moderna na raiz do projeto para interceptar sub-makefiles..."
-          # Cria links de todos os arquivos de include da PS2SDK na raiz de buscas '.' do projeto
-          # Isso garante o casamento de arquivos como libmc-common.h independente das flags locais do make filho
+          # Vincula os arquivos de cabeçalho da SDK de forma local para impedir falhas de caminhos de busca como o libmc-common.h
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h . || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h src/ || true
 
@@ -144,12 +141,13 @@ jobs:
               }
               *pOut = 0;
               
+              // Ajuste de sintaxe: Atribuição por índices de vetor para evitar erros de ponteiro char* no compilador
               if (nMaxChars <= 0 && nOriginalMax >= 3) {
                   unsigned int rem = hash % 1000;
                   char *target = (char *)pOut - 3;
-                  target = '0' + (rem / 100);
-                  target = '0' + ((rem / 10) % 10);
-                  target = '0' + (rem % 10);
+                  target[0] = '0' + (rem / 100);
+                  target[1] = '0' + ((rem / 10) % 10);
+                  target[2] = '0' + (rem % 10);
               }
           }
 
@@ -178,7 +176,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Exportando variaveis de ambiente globais para anular o -Werror da SDK ==="
-          # Mantém as flags injetadas e adiciona a busca local na pasta raiz '.' e 'src/'
           export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
