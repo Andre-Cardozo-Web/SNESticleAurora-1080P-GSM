@@ -9,7 +9,7 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Caminhos corrigidos utilizando o prefixo relativo para subir um nível até a pasta pai system
+// Caminhos corrigidos subindo um nível para localizar a pasta pai system a partir de ui
 #include "../system/mainloop_exec.h"
 #include "../system/picodrive_bridge.h"
 #include "../system/quicknes_bridge.h"
@@ -235,7 +235,7 @@ void CVideoScreen::Input(Uint32 buttons, Uint32 trigger)
                 Int32 mode = (Int32)SNPPURenderGetObjLimitMode() + dir; 
                 if (mode < 0) mode = SNPPU_LIMIT_MODE_NUM - 1; 
                 if (mode >= SNPPU_OBJ_LIMIT_MODE_NUM) mode = 0; 
-                SNPPURenderSetObjMode((Uint8)mode); 
+                SNPPURenderSetObjLimitMode((Uint8)mode); 
             } 
             break;
         case 31: 
