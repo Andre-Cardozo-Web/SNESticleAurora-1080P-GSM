@@ -9,7 +9,7 @@
 #include "mainloop_menu.h"
 #include "mainloop_ui.h"
 
-// Caminhos globais corrigidos direto a partir do barramento raiz system exigido pelo Makefile
+// Caminhos canônicos corrigidos apontando direto para a raiz do barramento system exigido pelo Makefile
 #include "system/mainloop_exec.h"
 #include "system/picodrive_bridge.h"
 #include "system/quicknes_bridge.h"
