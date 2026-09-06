@@ -50,7 +50,6 @@ jobs:
           tar --exclude='./.git' --exclude='*/.git' --exclude='./build' -czf "/tmp/${source_name}" -C .. . || tar --exclude='./.git' --exclude='*/.git' --exclude='./build' -czf "/tmp/${source_name}" .
           echo "AURORA_SOURCE_NAME=${source_name}" >> "$GITHUB_ENV"
           echo "AURORA_SOURCE_BUNDLE=/tmp/${source_name}" >> "$GITHUB_ENV"
-
       - name: Patch PS2SDK Typo Collisions and Mainfiles
         shell: bash
         run: |
@@ -66,6 +65,7 @@ jobs:
           if [ -f "$TYPES_FILE" ]; then
             sed -i 's/typedef signed char          SBYTE;/#ifndef _EE\ntypedef signed char          SBYTE;\n#endif/g' "$TYPES_FILE"
           fi
+
       - name: Patch Obsolete IOP Headers Natively
         run: |
           set -euo pipefail
@@ -77,6 +77,8 @@ jobs:
           DATAIO_FILE="src/common/base/dataio.h"
           MC_FILE="src/platform/ps2/memcard/memcard.h"
           LOCAL_TAM_FILE="src/tamtypes.h"
+          ZSTD_COMP_H="src/third_party/picodrive/pico/cd/libchdr/deps/zstd-1.5.6/programs/../lib/common/compiler.h"
+          ZSTD_COMP_H2="../src/third_party/picodrive/pico/cd/libchdr/deps/zstd-1.5.6/programs/../lib/common/compiler.h"
           
           NESROM_H="src/nes/system/nesrom.h"
           NESSYS_H="src/nes/system/nessystem.h"
@@ -88,6 +90,12 @@ jobs:
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
+          echo "🩹 Remendando a falta de inclusão de tamanho primitivo no arquivo compiler.h da ZSTD..."
+          if [ -f "$ZSTD_COMP_H" ]; then
+             sed -i '1i #include <stddef.h>\n#include <cstddef>' "$ZSTD_COMP_H" || true
+          elif [ -f "$ZSTD_COMP_H2" ]; then
+             sed -i '1i #include <stddef.h>\n#include <cstddef>' "$ZSTD_COMP_H2" || true
+          fi
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos, estruturas gráficas e de diretório..."
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
@@ -95,11 +103,9 @@ jobs:
           #include <stddef.h>
           #include <stdint.h>
           #include <dirent.h>
-          
           #define _ALIGN(x) __attribute__((aligned(x)))
           #define _INLINE inline
           #define _inline inline
-          
           typedef int                Bool;
           typedef unsigned int       Uint32;
           typedef unsigned short     Uint16;
@@ -111,7 +117,6 @@ jobs:
           typedef char               Int8;
           typedef char               Char;
           typedef float              Float32;
-          
           typedef uint8_t  u8;
           typedef uint16_t u16;
           typedef uint32_t u32;
@@ -120,30 +125,20 @@ jobs:
           typedef int16_t  s16;
           typedef int32_t  s32;
           typedef int64_t  s64;
-          
           typedef unsigned int       uint32;
           typedef unsigned short     uint16;
           typedef unsigned char      uint8;
           typedef unsigned long long uint64;
-          
           typedef struct { Uint8 r, g, b, a; } Color32T;
           typedef struct { Color32T entries; } PaletteT;
-          
-          typedef struct {
-              uint32_t sw;
-          } qword_t __attribute__((aligned(16)));
-          
-          typedef struct dabe_fix {
-             int dummy;
-          } io_dirent_t;
-          
+          typedef struct { uint32_t sw; } qword_t __attribute__((aligned(16)));
+          typedef struct dabe_fix { int dummy; } io_dirent_t;
           #ifndef FALSE
           #define FALSE 0
           #endif
           #ifndef TRUE
           #define TRUE 1
           #endif
-          
           #ifdef __cplusplus
           extern "C" {
           #endif
@@ -187,7 +182,6 @@ jobs:
           void GPFifoSetTex(u32 tbp, u32 tbw, u32 texwidthlog2, u32 texheightlog2, u32 tpsm, u32 cbp, u32 cbw, u32 cpsm, int filter);
           #endif
           EOF
-
           echo "🩹 Sanando erros de inicialização de parâmetros implícitos nos arquivos de cabeçalhos..."
           [ -f "$NESROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$NESROM_H" || true
           [ -f "$NESSYS_H" ] && sed -i 's/return NULL;/return 0;/g' "$NESSYS_H" || true
@@ -240,95 +234,51 @@ jobs:
 
           echo "🩹 Resolvendo conflito da struct PaletteT em bmpfile.h..."
           [ -f "$BMP_FILE" ] && sed -i 's/struct PaletteT;/\/\/ struct PaletteT;/g' "$BMP_FILE" || true
+
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
           TARGET_FILE="src/platform/ps2/system/mainloop_state.cpp"
           mkdir -p src/platform/ps2/system
-          
-          echo "=== Reconstruindo mainloop_state.cpp de forma 100% isolada e sem includes ==="
+          echo "=== Reconstruindo mainloop_state.cpp ==="
           cat << 'EOF' > "$TARGET_FILE"
           typedef int          Bool;
           typedef unsigned int Uint32;
           typedef int          Int32;
           typedef char         Char;
-
           #ifndef FALSE
           #define FALSE 0
           #endif
           #ifndef TRUE
           #define TRUE 1
           #endif
-
-          typedef enum {
-              MAINLOOP_STATEDEVICE_AUTO,
-              MAINLOOP_STATEDEVICE_MC0,
-              MAINLOOP_STATEDEVICE_MC1,
-              MAINLOOP_STATEDEVICE_USB
-          } MainLoopStateDeviceE;
-
-          typedef enum {
-              MAINLOOP_SRAMDEVICE_AUTO,
-              MAINLOOP_SRAMDEVICE_MC0,
-              MAINLOOP_SRAMDEVICE_MC1,
-              MAINLOOP_SRAMDEVICE_USB
-          } MainLoopSramDeviceE;
-
+          typedef enum { MAINLOOP_STATEDEVICE_AUTO, MAINLOOP_STATEDEVICE_MC0, MAINLOOP_STATEDEVICE_MC1, MAINLOOP_STATEDEVICE_USB } MainLoopStateDeviceE;
+          typedef enum { MAINLOOP_SRAMDEVICE_AUTO, MAINLOOP_SRAMDEVICE_MC0, MAINLOOP_SRAMDEVICE_MC1, MAINLOOP_SRAMDEVICE_USB } MainLoopSramDeviceE;
           static MainLoopStateDeviceE _MainLoop_StateDevice = MAINLOOP_STATEDEVICE_AUTO;
           static MainLoopSramDeviceE  _MainLoop_SramDevice  = MAINLOOP_SRAMDEVICE_AUTO;
-
           void PathTruncFileName(Char *pOut, Char *pStr, Int32 nMaxChars) {
               Int32 nOriginalMax = nMaxChars;
               unsigned int hash = 5381;
               int _c;
               char *_p = (char *)pStr;
-              if (_p) {
-                  while ((_c = *_p++)) {
-                      hash = ((hash << 5) + hash) + _c;
-                  }
-              }
+              if (_p) { while ((_c = *_p++)) { hash = ((hash << 5) + hash) + _c; } }
               _p = (char *)pStr;
-              if (_p && _p != pOut) {
-                  while (*_p && nMaxChars > 0) {
-                      *pOut++ = *_p++;
-                      nMaxChars--;
-                  }
-              }
+              if (_p && _p != pOut) { while (*_p && nMaxChars > 0) { *pOut++ = *_p++; nMaxChars--; } }
           }
-
-          static const Char *_MainLoopSramGetSystemDirectoryName() {
-              return "SNESTICLE";
-          }
-
-          static const Char *_MainLoopSramRoot(MainLoopSramDeviceE eDevice) {
-              if (eDevice == MAINLOOP_SRAMDEVICE_USB) return "mass:";
-              return "mc0:";
-          }
-
-          static Bool _MainLoopSramUsbReady() {
-              return TRUE;
-          }
-
-          const Char *MainLoopStateGetAvailability() {
-              if (_MainLoopSramUsbReady()) return "mass: pronto";
-              return "mc0: pronto";
-          }
+          static const Char *_MainLoopSramGetSystemDirectoryName() { return "SNESTICLE"; }
+          static const Char *_MainLoopSramRoot(MainLoopSramDeviceE eDevice) { if (eDevice == MAINLOOP_SRAMDEVICE_USB) return "mass:"; return "mc0:"; }
+          static Bool _MainLoopSramUsbReady() { return TRUE; }
+          const Char *MainLoopStateGetAvailability() { if (_MainLoopSramUsbReady()) return "mass: pronto"; return "mc0: pronto"; }
           EOF
-          echo "=== Módulo recriado em C puro e protegido contra falhas de cabeçalhos ==="
 
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Forçando mapeamento de includes por variáveis nativas de ambiente ==="
           export C_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           export CPLUS_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
-          
-          # Injeta de forma global e direta no compilador o silenciamento estrito para passar o mainloop_iop.cpp em lote
           export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-misleading-indentation -D_EE"
-          
-          echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
