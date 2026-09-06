@@ -77,8 +77,6 @@ jobs:
           DATAIO_FILE="src/common/base/dataio.h"
           MC_FILE="src/platform/ps2/memcard/memcard.h"
           LOCAL_TAM_FILE="src/tamtypes.h"
-          ZSTD_COMP_H="src/third_party/picodrive/pico/cd/libchdr/deps/zstd-1.5.6/programs/../lib/common/compiler.h"
-          ZSTD_COMP_H2="../src/third_party/picodrive/pico/cd/libchdr/deps/zstd-1.5.6/programs/../lib/common/compiler.h"
           
           NESROM_H="src/nes/system/nesrom.h"
           NESSYS_H="src/nes/system/nessystem.h"
@@ -90,12 +88,9 @@ jobs:
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Remendando a falta de inclusão de tamanho primitivo no arquivo compiler.h da ZSTD..."
-          if [ -f "$ZSTD_COMP_H" ]; then
-             sed -i '1i #include <stddef.h>\n#include <cstddef>' "$ZSTD_COMP_H" || true
-          elif [ -f "$ZSTD_COMP_H2" ]; then
-             sed -i '1i #include <stddef.h>\n#include <cstddef>' "$ZSTD_COMP_H2" || true
-          fi
+          echo "🩹 Buscando e forçando dinamicamente stddef.h em todos os compiler.h da árvore ZSTD..."
+          # Essa busca por varredura garante a correção do ptrdiff_t independentemente do aninhamento de diretórios
+          find . -name "compiler.h" -exec sed -i '1i #include <stddef.h>\n#include <cstddef>' {} + 2>/dev/null || true
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos, estruturas gráficas e de diretório..."
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
@@ -263,7 +258,7 @@ jobs:
               char *_p = (char *)pStr;
               if (_p) { while ((_c = *_p++)) { hash = ((hash << 5) + hash) + _c; } }
               _p = (char *)pStr;
-              if (_p && _p != pOut) { while (*_p && nMaxChars > 0) { *pOut++ = *_p++; nMaxChars--; } }
+              if (_p && _p != pOut) { Custom_Hash: while (*_p && nMaxChars > 0) { *pOut++ = *_p++; nMaxChars--; } }
           }
           static const Char *_MainLoopSramGetSystemDirectoryName() { return "SNESTICLE"; }
           static const Char *_MainLoopSramRoot(MainLoopSramDeviceE eDevice) { if (eDevice == MAINLOOP_SRAMDEVICE_USB) return "mass:"; return "mc0:"; }
@@ -274,11 +269,15 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
+          echo "=== Forçando mapeamento de includes por variáveis nativas de ambiente ==="
           export C_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           export CPLUS_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
+          
           export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-misleading-indentation -D_EE"
+          
+          echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
