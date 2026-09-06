@@ -75,9 +75,10 @@ jobs:
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
           
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
+          git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Criando cabeçalho físico mestre de compatibilidade absoluta..."
+          echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primários..."
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
@@ -126,7 +127,7 @@ jobs:
           #endif
           EOF
 
-          # Cria réplicas do fix nas pastas de destino do projeto para inclusão direta
+          # Cria réplicas do fix nas pastas de destino do projeto para proximidade física imediata
           mkdir -p src/platform/ps2/system src/platform/ps2/gs src/common/render src/third_party/fceumm-fds/src/ || true
           cp -f ./ps2_types_fix.h ./src/ps2_types_fix.h || true
           cp -f ./ps2_types_fix.h ./src/platform/ps2/system/ps2_types_fix.h || true
@@ -145,16 +146,17 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização da macro NULL, climits e fix de tipos CIRURGICAMENTE após a linha de unistd.h..."
-          # Injeta o bloco logo após a inclusão de <unistd.h>. Isso blinda o C++ padrão e prepara o ambiente antes de ler mainloop_shared.h
-          sed -i '/#include <unistd.h>/a #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
+          echo "🩹 Injetando a definição do fix e o INT_MAX estritamente no meio do arquivo..."
+          # Injeta antes de ler as estruturas do próprio emulador para não poluir os cabeçalhos de C++ padrão do topo do arquivo
+          sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"' "$IOP_FILE" || true
 
           echo "🩹 Desativando chamada de rede legada não suportada pela PS2SDK moderna..."
           sed -i 's/_MainLoopConfigureNetwork(/\/\/ _MainLoopConfigureNetwork(/g' "$IOP_FILE" || true
 
-          echo "🩹 Substituindo todas as passagens de NULL por nullptr estrito nas assinaturas de IOPLoadModule..."
-          sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*NULL,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, nullptr, 0, nullptr)/g' "$IOP_FILE" || true
-          sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*ppSearchPaths,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, ppSearchPaths, 0, nullptr)/g' "$IOP_FILE" || true
+          echo "🩹 Substituindo cirurgicamente todas as passagens de NULL por nullptr nas assinaturas de IOPLoadModule..."
+          # Varre substituições de strings de ponteiros nulos locais para contornar tamtypes.h sem quebrar as inclusões padrão
+          sed -i 's/ppSearchPaths, 0, NULL/ppSearchPaths, 0, nullptr/g' "$IOP_FILE" || true
+          sed -i 's/NULL, 0, NULL/nullptr, 0, nullptr/g' "$IOP_FILE" || true
           sed -i 's/const unsigned char \*embed_data = NULL;/const unsigned char *embed_data = nullptr;/g' "$IOP_FILE" || true
           sed -i 's/NULL };/nullptr };/g' "$IOP_FILE" || true
 
@@ -266,6 +268,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Compilando com rotas padrões limpas ==="
+          # Removemos totalmente o include forçado global para que o C++ padrão use seu ecossistema nativo sem colisões
           export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
