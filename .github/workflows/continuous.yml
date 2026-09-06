@@ -56,8 +56,8 @@ jobs:
           set -euo pipefail
           echo "=== Injetando flags de compatibilidade estáveis no Makefile principal ==="
           if [ -f "Makefile" ]; then
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -D_GLIBCXX_USE_C99=1 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
-            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -D_GLIBCXX_USE_C99=1 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -87,92 +87,6 @@ jobs:
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
-          echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos, estruturas gráficas e de diretório..."
-          cat << 'EOF' > ./ps2_types_fix.h
-          #ifndef PS2_TYPES_FIX_H
-          #define PS2_TYPES_FIX_H
-          #include <stddef.h>
-          #include <stdint.h>
-          #include <dirent.h>
-          #define _ALIGN(x) __attribute__((aligned(x)))
-          #define _INLINE inline
-          #define _inline inline
-          typedef int                Bool;
-          typedef unsigned int       Uint32;
-          typedef unsigned short     Uint16;
-          typedef unsigned char      Uint8;
-          typedef unsigned long long Uint64;
-          typedef __int128           Uint128;
-          typedef int                Int32;
-          typedef short              Int16;
-          typedef char               Int8;
-          typedef char               Char;
-          typedef float              Float32;
-          typedef uint8_t  u8;
-          typedef uint16_t u16;
-          typedef uint32_t u32;
-          typedef uint64_t u64;
-          typedef int8_t   s8;
-          typedef int16_t  s16;
-          typedef int32_t  s32;
-          typedef int64_t  s64;
-          typedef unsigned int       uint32;
-          typedef unsigned short     uint16;
-          typedef unsigned char      uint8;
-          typedef unsigned long long uint64;
-          typedef struct { Uint8 r, g, b, a; } Color32T;
-          typedef struct { Color32T entries; } PaletteT;
-          typedef struct { uint32_t sw; } qword_t __attribute__((aligned(16)));
-          typedef struct dabe_fix { int dummy; } io_dirent_t;
-          #ifndef FALSE
-          #define FALSE 0
-          #endif
-          #ifndef TRUE
-          #define TRUE 1
-          #endif
-          #ifdef __cplusplus
-          extern "C" {
-          #endif
-          void* SifAllocIopHeap(int size);
-          int SifLoadIopHeap(const char *path, void *iop_mem);
-          void* SifFreeIopHeap(void *iop_mem);
-          void InputInit(int mode);
-          #ifdef __cplusplus
-          }
-          #endif
-          #endif
-          EOF
-
-          mkdir -p src/platform/ps2/system src/platform/ps2/gs src/common/render src/third_party/fceumm-fds/src/ || true
-          cp -f ./ps2_types_fix.h ./src/ps2_types_fix.h || true
-          cp -f ./ps2_types_fix.h ./src/platform/ps2/system/ps2_types_fix.h || true
-          cp -f ./ps2_types_fix.h ./src/platform/ps2/gs/ps2_types_fix.h || true
-          cp -f ./ps2_types_fix.h ./src/platform/ps2/memcard/ps2_types_fix.h || true
-          cp -f ./ps2_types_fix.h "$LOCAL_TAM_FILE" || true
-
-          echo "🩹 Sobrescrevendo gpprim.h com o fix mestre de u32..."
-          cat << 'EOF' > "$PRIM_FILE"
-          #ifndef GPPRIM_H
-          #define GPPRIM_H
-          #include "ps2_types_fix.h"
-          void GPPrimLine(int x1, int y1, int x2, int y2, int z, u32 colour);
-          void GPPrimRect(int x1, int y1, int x2, int y2, int z, u32 colour);
-          void GPPrimTexRect(int x1, int y1, int u1, int v1, int x2, int y2, int u2, int v2, int z, u32 colour, unsigned int abe);
-          void GPPrimTexRectAbs(u32 x1, u32 y1, u32 u1, u32 v1, u32 x2, u32 y2, u32 u2, u32 v2, u32 z, u32 colour, unsigned abe);
-          #endif
-          EOF
-
-          echo "🩹 Sobrescrevendo gpfifo.h com o fix mestre de u32..."
-          cat << 'EOF' > "$FIFO_FILE"
-          #ifndef GPFIFO_H
-          #define GPFIFO_H
-          #include "ps2_types_fix.h"
-          void GPFifoInit(void *pBuffer, int nSize);
-          void GPFifoQueuePacket(qword_t *pPacket, int nQWords);
-          void GPFifoFlush();
-          void GPFifoSetTex(u32 tbp, u32 tbw, u32 texwidthlog2, u32 texheightlog2, u32 tpsm, u32 cbp, u32 cbw, u32 cpsm, int filter);
-          #endif
-          EOF
           echo "🩹 Sanando erros de inicialização de parâmetros implícitos nos arquivos de cabeçalhos..."
           [ -f "$NESROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$NESROM_H" || true
           [ -f "$NESSYS_H" ] && sed -i 's/return NULL;/return 0;/g' "$NESSYS_H" || true
@@ -269,10 +183,10 @@ jobs:
           export C_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           export CPLUS_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           
-          # Injeta a inclusao forçada de stddef.h no compilador de ambiente, resolvendo a ZSTD por completo de forma nativa
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Xcompiler -include -Xcompiler stddef.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Xcompiler -include -Xcompiler stddef.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Xcompiler -include -Xcompiler stddef.h -Wno-misleading-indentation -D_EE"
+          # Parâmetros nativos -include forçam o GCC a carregar as tabelas de tipos primitivos por cima de qualquer submódulo
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -include stddef.h -include cstddef -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -include stddef.h -include cstddef -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -include stddef.h -include cstddef -Wno-misleading-indentation -D_EE"
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
