@@ -192,9 +192,11 @@ jobs:
              sed -i '1i #include "ps2_types_fix.h"' "$MC_FILE" || true
           fi
 
-          echo "🩹 Forçando a injeção do fix de tipos diretamente na linha 1 de gpprim.h para resolver u32 do driver do GS..."
+          echo "🩹 Injetando o fix de tipos cirurgicamente LOGO ABAIXO da definição de proteção interna do gpprim.h..."
           if [ -f "$PRIM_FILE" ]; then
-             sed -i '1i #include "ps2_types_fix.h"' "$PRIM_FILE" || true
+             git checkout "$PRIM_FILE" || true
+             sed -i 's/\r//g' "$PRIM_FILE" || true
+             sed -i '/#define GPPRIM_H/a #include "ps2_types_fix.h"' "$PRIM_FILE" || true
           fi
 
           echo "🩹 Desativando chamada de rede legada não suportada pela PS2SDK moderna..."
@@ -223,7 +225,7 @@ jobs:
           echo "🩹 Aplicando definicao de tipos de suporte graficos no topo de gpfifo.h..."
           [ -f "$FIFO_FILE" ] && sed -i '1i #include "ps2_types_fix.h"' "$FIFO_FILE" || true
 
-          echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK de forma plana no repositório..."
+          echo "🔗 Criando mapeamento plano e unificando caminhos de inclusao da PS2SDK..."
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
@@ -231,15 +233,9 @@ jobs:
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
 
-          echo "🔗 Copiando cabeçalhos oficiais modernos para suporte local do compilador..."
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/sifrpc.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/loadfile-common.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/sifrpc-common.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/sifcmd-common.h ./src/platform/ps2/system/ || true
+          echo "🔗 Executando copias dos cabecalhos oficiais da SDK em laco compacto de seguranca..."
+          # Estrutura limpa de loop em linha unica para evitar que o navegador quebre comandos compridos por espaco
+          for h in libpad.h memcard.h loadfile.h sifrpc.h mc-common.h loadfile-common.h sifrpc-common.h sifcmd-common.h; do cp -f /usr/local/ps2dev/ps2sdk/ee/include/$h ./src/platform/ps2/system/ 2>/dev/null || cp -f /usr/local/ps2dev/ps2sdk/common/include/$h ./src/platform/ps2/system/ 2>/dev/null || true; done
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
