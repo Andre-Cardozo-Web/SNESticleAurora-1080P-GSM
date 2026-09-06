@@ -57,7 +57,6 @@ jobs:
           set -euo pipefail
           echo "=== Injetando flags de compatibilidade e permissive no Makefile principal ==="
           if [ -f "Makefile" ]; then
-            # Adiciona -fpermissive e -std=gnu++17 para aceitar as macros de NULL legadas da SDK antiga sem quebrar
             sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
@@ -75,11 +74,11 @@ jobs:
           BMP_FILE="src/common/media/bmpfile.h"
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
           
-          echo "🩹 Higienizando e restaurando o arquivo original para estado limpo..."
+          echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Criando cabeçalho físico mestre de tipos primitivos para g++..."
+          echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos..."
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
@@ -146,11 +145,19 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando unicamente as macros locais após o bloco de includes nativos do emulador..."
-          sed -i '/#include "mainloop_shared.h"/a #define INT_MAX 2147483647\n#include "ps2_types_fix.h"' "$IOP_FILE" || true
+          echo "🩹 Injetando neutralização da macro NULL, climits e fix de tipos e mainloop.h..."
+          # Injeta antes do core nativo do emulador, e força definições de variáveis globais locais ocultas ausentes
+          sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\nextern char _SramPath[256];\nextern char _MainLoop_SaveTitle[256];' "$IOP_FILE" || true
 
           echo "🩹 Desativando chamada de rede legada não suportada pela PS2SDK moderna..."
           sed -i 's/_MainLoopConfigureNetwork(/\/\/ _MainLoopConfigureNetwork(/g' "$IOP_FILE" || true
+
+          echo "🩹 Substituindo cirurgicamente todas as passagens literais de NULL por nullptr estrito nas chamadas de IOPLoadModule..."
+          # Sanitização por regex direta nas assinaturas de módulos e paths de carregamento para desviar de tamtypes.h
+          sed -i 's/"FREESD.IRX", ppSearchPaths, 0, NULL/"FREESD.IRX", ppSearchPaths, 0, nullptr/g' "$IOP_FILE" || true
+          sed -i 's/"rom0:LIBSD", NULL, 0, NULL/"rom0:LIBSD", nullptr, 0, nullptr/g' "$IOP_FILE" || true
+          sed -i 's/"AUDSRV.IRX", ppSearchPaths, 0, NULL/"AUDSRV.IRX", ppSearchPaths, 0, nullptr/g' "$IOP_FILE" || true
+          sed -i 's/"PS2LINK.IRX", ppSearchPaths, 0, NULL/"PS2LINK.IRX", ppSearchPaths, 0, nullptr/g' "$IOP_FILE" || true
 
           echo "🩹 Resolvendo conflito da struct pal em FCEUmm de forma linear..."
           [ -f "$PAL_FILE" ] && printf '#ifndef FCEU_PALETTE_H\n#define FCEU_PALETTE_H\nstruct pal { unsigned char r, g, b; };\nextern struct pal *palo;\nvoid FCEU_DrawNTSCControlBars(unsigned char *XBuf);\n#endif\n' > "$PAL_FILE" || true
@@ -161,7 +168,7 @@ jobs:
           echo "🩹 Aplicando definicao de tipos de suporte graficos no topo de gpfifo.h..."
           [ -f "$FIFO_FILE" ] && sed -i '1i #include "ps2_types_fix.h"' "$FIFO_FILE" || true
 
-          echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK..."
+          echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK de forma plana no repositório..."
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
@@ -170,7 +177,7 @@ jobs:
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
 
-          echo "🔗 Copiando cabeçalhos oficiais modernos..."
+          echo "🔗 Copiando cabeçalhos oficiais modernos para suporte local do compilador..."
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
@@ -259,8 +266,7 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Injetando -fpermissive e -std=gnu++17 nas variáveis de ambiente globais ==="
-          # Garante o rebaixamento de erros de tipagem estrita de ponteiros nulos herdados em sub-makefiles
+          echo "=== Executando compilação com suporte permissive ==="
           export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
