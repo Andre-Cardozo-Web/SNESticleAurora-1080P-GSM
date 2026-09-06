@@ -56,8 +56,8 @@ jobs:
           set -euo pipefail
           echo "=== Injetando flags de compatibilidade estáveis no Makefile principal ==="
           if [ -f "Makefile" ]; then
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
-            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -Dptrdiff_t=__PTRDIFF_TYPE__ -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -Dptrdiff_t=__PTRDIFF_TYPE__ -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -87,10 +87,6 @@ jobs:
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
-
-          echo "🩹 Buscando e forçando dinamicamente stddef.h em todos os compiler.h da árvore ZSTD..."
-          # Essa busca por varredura garante a correção do ptrdiff_t independentemente do aninhamento de diretórios
-          find . -name "compiler.h" -exec sed -i '1i #include <stddef.h>\n#include <cstddef>' {} + 2>/dev/null || true
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos, estruturas gráficas e de diretório..."
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
@@ -258,7 +254,7 @@ jobs:
               char *_p = (char *)pStr;
               if (_p) { while ((_c = *_p++)) { hash = ((hash << 5) + hash) + _c; } }
               _p = (char *)pStr;
-              if (_p && _p != pOut) { Custom_Hash: while (*_p && nMaxChars > 0) { *pOut++ = *_p++; nMaxChars--; } }
+              if (_p && _p != pOut) { while (*_p && nMaxChars > 0) { *pOut++ = *_p++; nMaxChars--; } }
           }
           static const Char *_MainLoopSramGetSystemDirectoryName() { return "SNESTICLE"; }
           static const Char *_MainLoopSramRoot(MainLoopSramDeviceE eDevice) { if (eDevice == MAINLOOP_SRAMDEVICE_USB) return "mass:"; return "mc0:"; }
@@ -273,11 +269,10 @@ jobs:
           export C_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           export CPLUS_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-misleading-indentation -D_EE"
-          
-          echo "=== Executando compilacao padrão ==="
+          # Injeta a definição mestre -Dptrdiff_t diretamente nas macros globais do GCC para blindar a ZSTD por atacado
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Dptrdiff_t=__PTRDIFF_TYPE__ -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Dptrdiff_t=__PTRDIFF_TYPE__ -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Dptrdiff_t=__PTRDIFF_TYPE__ -Wno-misleading-indentation -D_EE"
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
