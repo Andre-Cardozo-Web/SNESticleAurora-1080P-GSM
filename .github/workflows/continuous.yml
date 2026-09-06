@@ -55,9 +55,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Injetando flags de compatibilidade e permissive no Makefile principal ==="
+          echo "=== Injetando flags de compatibilidade de forma física e fixa no Makefile ==="
           if [ -f "Makefile" ]; then
+            # Modifica as regras originais do Makefile injetando diretamente -fpermissive para anular o erro de void*
             sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -272,12 +274,10 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Injetando a variavel mestre inviolavel DECPFLAGS para travar o permissive ==="
-          # A variavel DECPFLAGS atua diretamente nas entranhas da SDK do PS2 e nao pode ser limpa pelo Makefile do emulador
-          export DECPFLAGS="-fpermissive -std=gnu++17 -Wno-unused-variable -Wno-error"
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include ${DECPFLAGS}"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include ${DECPFLAGS}"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-misleading-indentation -D_EE ${DECPFLAGS}"
+          echo "=== Compilando através das regras fixas do Makefile ==="
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-misleading-indentation -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
