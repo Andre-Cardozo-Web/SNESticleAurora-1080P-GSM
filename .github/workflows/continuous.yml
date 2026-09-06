@@ -75,8 +75,6 @@ jobs:
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
           DATAIO_FILE="src/common/base/dataio.h"
           MC_FILE="src/platform/ps2/memcard/memcard.h"
-          GLOBAL_SDK_TAM="/usr/local/ps2dev/ps2sdk/common/include/tamtypes.h"
-          LOCAL_TAM_FILE="src/tamtypes.h"
           
           NESROM_H="src/nes/system/nesrom.h"
           NESSYS_H="src/nes/system/nessystem.h"
@@ -87,33 +85,6 @@ jobs:
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
-
-          echo "🩹 Forçando a escrita mestre estruturada em tamtypes.h injetando qword_t alinhada de 128-bits..."
-          cat << 'EOF' > /tmp/tamtypes_clean.h
-          #ifndef TAMTYPES_H
-          #define TAMTYPES_H
-          #include <stddef.h>
-          #include <stdint.h>
-          #ifndef NULL
-          #define NULL 0
-          #endif
-          typedef uint8_t  u8;
-          typedef uint16_t u16;
-          typedef uint32_t u32;
-          typedef uint64_t u64;
-          typedef int8_t   s8;
-          typedef int16_t  s16;
-          typedef int32_t  s32;
-          typedef int64_t  s64;
-          
-          typedef struct {
-              uint32_t sw;
-          } qword_t __attribute__((aligned(16)));
-          #endif
-          EOF
-
-          cp -f /tmp/tamtypes_clean.h "$GLOBAL_SDK_TAM" || true
-          cp -f /tmp/tamtypes_clean.h "$LOCAL_TAM_FILE" || true
 
           echo "🩹 Sanando erros de inicialização de parâmetros implícitos nos arquivos de cabeçalhos..."
           [ -f "$NESROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$NESROM_H" || true
@@ -193,8 +164,9 @@ jobs:
           echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e cabeçalhos mestre no ponto técnico correto..."
           sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
-          echo "🩹 Injetando os cabeçalhos mestre de tamanhos stddef.h e cstddef na linha 1 para amparar unistd.h..."
-          sed -i '1i #include <stddef.h>\n#include <cstddef>' "$IOP_FILE" || true
+          echo "🩹 Injetando os cabeçalhos de tamanho stddef.h e cstddef LOGO APÓS stdlib.h para amparar unistd.h de forma segura..."
+          # Isso garante a carga correta do ptrdiff_t na Newlib sem quebrar o escopo de wcstombs do topo do arquivo
+          sed -i '/#include <stdlib.h>/a #include <stddef.h>\n#include <cstddef>' "$IOP_FILE" || true
 
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
           if [ -f "$MC_FILE" ]; then
