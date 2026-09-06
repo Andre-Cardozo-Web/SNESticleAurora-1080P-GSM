@@ -145,8 +145,12 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e mainloop.h APÓS os cabeçalhos de C++ padrão..."
-          sed -i '/#include <stdlib.h>/a #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
+          echo "🩹 Injetando neutralização da macro NULL, climits e fix de tipos CIRURGICAMENTE após a linha de unistd.h..."
+          # Injeta o bloco logo após a inclusão de <unistd.h>. Isso blinda o C++ padrão e prepara o ambiente antes de ler mainloop_shared.h
+          sed -i '/#include <unistd.h>/a #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
+
+          echo "🩹 Desativando chamada de rede legada não suportada pela PS2SDK moderna..."
+          sed -i 's/_MainLoopConfigureNetwork(/\/\/ _MainLoopConfigureNetwork(/g' "$IOP_FILE" || true
 
           echo "🩹 Substituindo todas as passagens de NULL por nullptr estrito nas assinaturas de IOPLoadModule..."
           sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*NULL,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, nullptr, 0, nullptr)/g' "$IOP_FILE" || true
