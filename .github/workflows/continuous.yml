@@ -65,7 +65,6 @@ jobs:
           if [ -f "$TYPES_FILE" ]; then
             sed -i 's/typedef signed char          SBYTE;/#ifndef _EE\ntypedef signed char          SBYTE;\n#endif/g' "$TYPES_FILE"
           fi
-
       - name: Patch Obsolete IOP Headers Natively
         run: |
           set -euo pipefail
@@ -73,6 +72,7 @@ jobs:
           PAL_FILE="src/third_party/fceumm-fds/src/palette.h"
           BMP_FILE="src/common/media/bmpfile.h"
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
+          DATAIO_FILE="src/common/base/dataio.h"
           
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           git checkout "$IOP_FILE" || true
@@ -145,8 +145,8 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e mainloop.h..."
-          sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\nextern char _SramPath;\nextern char _MainLoop_SaveTitle;' "$IOP_FILE" || true
+          echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e cabeçalhos mestre..."
+          sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"' "$IOP_FILE" || true
 
           echo "🩹 Desativando chamada de rede legada não suportada pela PS2SDK moderna..."
           sed -i 's/_MainLoopConfigureNetwork(/\/\/ _MainLoopConfigureNetwork(/g' "$IOP_FILE" || true
@@ -159,6 +159,11 @@ jobs:
           sed -i 's/"rom0:LIBSD", NULL, 0, NULL/"rom0:LIBSD", nullptr, 0, nullptr/g' "$IOP_FILE" || true
           sed -i 's/"AUDSRV.IRX", ppSearchPaths, 0, NULL/"AUDSRV.IRX", ppSearchPaths, 0, nullptr/g' "$IOP_FILE" || true
           sed -i 's/"PS2LINK.IRX", ppSearchPaths, 0, NULL/"PS2LINK.IRX", ppSearchPaths, 0, nullptr/g' "$IOP_FILE" || true
+
+          echo "🩹 Corrigindo o retorno inválido de ponteiro nulo (NULL) em dataio.h para literal 0..."
+          if [ -f "$DATAIO_FILE" ]; then
+             sed -i 's/return NULL;/return 0;/g' "$DATAIO_FILE" || true
+          fi
 
           echo "🩹 Resolvendo conflito da struct pal em FCEUmm de forma linear..."
           [ -f "$PAL_FILE" ] && printf '#ifndef FCEU_PALETTE_H\n#define FCEU_PALETTE_H\nstruct pal { unsigned char r, g, b; };\nextern struct pal *palo;\nvoid FCEU_DrawNTSCControlBars(unsigned char *XBuf);\n#endif\n' > "$PAL_FILE" || true
@@ -173,12 +178,11 @@ jobs:
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
-          
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
 
-          echo "🔗 Copiando cabeçalhos oficiais modernos para suporte local do compilador..."
+          echo "🔗 Executando cópias de cabeçalhos oficiais em formato contínuo e linear de segurança..."
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
