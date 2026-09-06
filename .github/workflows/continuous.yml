@@ -87,8 +87,7 @@ jobs:
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Restaurando FORCE a definição original limpa da SDK para expor wcstombs e mbstowcs..."
-          # Desfaz o patch antigo na raiz do contêiner voltando a macro ao padrão original limpo exigido pela Newlib
+          echo "🩹 Restaurando a definição original limpa da SDK para reativar wcstombs e mbstowcs..."
           if [ -f "$GLOBAL_SDK_TAM" ]; then
              sed -i 's/#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL (void \*)0\n#endif/#define NULL (void *)0/g' "$GLOBAL_SDK_TAM" || true
              sed -i 's/#ifdef __cplusplus.*#define NULL (void \*)0/#define NULL (void *)0/g' "$GLOBAL_SDK_TAM" || true
@@ -172,8 +171,9 @@ jobs:
           echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e cabeçalhos mestre no ponto técnico correto..."
           sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
-          echo "🩹 Injetando a definição do tipo nativo ptrdiff_t na linha 1 absoluta para desarmar unistd.h..."
-          sed -i '1i typedef __PTRDIFF_TYPE__ ptrdiff_t;' "$IOP_FILE" || true
+          echo "🩹 Injetando os cabeçalhos mestre de tamanhos stddef.h e cstddef na linha 1 para amparar unistd.h..."
+          # Isso garante a carga nativa e oficial de ptrdiff_t e size_t pelo ecossistema do próprio GCC
+          sed -i '1i #include <stddef.h>\n#include <cstddef>' "$IOP_FILE" || true
 
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
           if [ -f "$MC_FILE" ]; then
