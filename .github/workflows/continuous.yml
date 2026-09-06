@@ -55,11 +55,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Injetando flags de compatibilidade e inclusao forçada de tipos no Makefile ==="
+          echo "=== Injetando flags de compatibilidade estáveis no Makefile principal ==="
           if [ -f "Makefile" ]; then
-            # O parametro -include força o ps2_types_fix.h a ser injetado no topo de cada arquivo compilado do emulador
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -std=gnu++17 -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
-            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -std=gnu++17 -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -74,6 +73,7 @@ jobs:
           PAL_FILE="src/third_party/fceumm-fds/src/palette.h"
           BMP_FILE="src/common/media/bmpfile.h"
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
+          PRIM_FILE="src/platform/ps2/gs/gpprim.h"
           DATAIO_FILE="src/common/base/dataio.h"
           MC_FILE="src/platform/ps2/memcard/memcard.h"
           GLOBAL_SDK_TAM="/usr/local/ps2dev/ps2sdk/common/include/tamtypes.h"
@@ -160,6 +160,19 @@ jobs:
           cp -f ./ps2_types_fix.h ./src/platform/ps2/memcard/ps2_types_fix.h || true
           cp -f ./ps2_types_fix.h "$GLOBAL_SDK_TAM" || true
           cp -f ./ps2_types_fix.h "$LOCAL_TAM_FILE" || true
+
+          echo "🩹 Sobrescrevendo fisicamente e forçando a estrutura de gpprim.h com o fix mestre de u32..."
+          cat << 'EOF' > "$PRIM_FILE"
+          #ifndef GPPRIM_H
+          #define GPPRIM_H
+          #include "ps2_types_fix.h"
+
+          void GPPrimLine(int x1, int y1, int x2, int y2, int z, u32 colour);
+          void GPPrimRect(int x1, int y1, int x2, int y2, int z, u32 colour);
+          void GPPrimTexRect(int x1, int y1, int u1, int v1, int x2, int y2, int u2, int v2, int z, u32 colour, unsigned int abe);
+          void GPPrimTexRectAbs(u32 x1, u32 y1, u32 u1, u32 v1, u32 x2, u32 y2, u32 u2, u32 v2, u32 z, u32 colour, unsigned abe);
+          #endif
+          EOF
 
           echo "🩹 Sanando erros de inicialização de parâmetros implícitos nos arquivos de cabeçalhos..."
           [ -f "$NESROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$NESROM_H" || true
@@ -308,9 +321,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Executando compilação através das regras limpas do Makefile ==="
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-misleading-indentation -D_EE"
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-misleading-indentation -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
