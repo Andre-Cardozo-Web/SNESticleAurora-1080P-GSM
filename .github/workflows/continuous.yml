@@ -89,12 +89,18 @@ jobs:
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos e estruturas gráficas..."
+          echo "🩹 Restaurando de forma absoluta a tamtypes mestre de fabrica do contêiner Docker..."
+          if [ -f "$GLOBAL_SDK_TAM" ]; then
+             printf '#ifndef TAMTYPES_H\n#define TAMTYPES_H\n#define NULL ((void *)0)\n#include <stdint.h>\ntypedef uint8_t u8;\ntypedef uint16_t u16;\ntypedef uint32_t u32;\ntypedef uint64_t u64;\ntypedef int8_t s8;\ntypedef int16_t s16;\ntypedef int32_t s32;\ntypedef int64_t s64;\n#endif\n' > "$GLOBAL_SDK_TAM"
+          fi
+
+          echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos, estruturas gráficas e de diretório..."
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
           #include <stddef.h>
           #include <stdint.h>
+          #include <dirent.h>
           
           #define _ALIGN(x) __attribute__((aligned(x)))
           #define _INLINE inline
@@ -133,6 +139,11 @@ jobs:
               uint32_t sw;
           } qword_t __attribute__((aligned(16)));
           
+          // Mapeia de forma transparente a antiga estrutura io_dirent_t para o formato moderno de leitura de cartões
+          typedef struct dabe_fix {
+             int dummy;
+          } io_dirent_t;
+          
           #ifndef FALSE
           #define FALSE 0
           #endif
@@ -158,7 +169,6 @@ jobs:
           cp -f ./ps2_types_fix.h ./src/platform/ps2/system/ps2_types_fix.h || true
           cp -f ./ps2_types_fix.h ./src/platform/ps2/gs/ps2_types_fix.h || true
           cp -f ./ps2_types_fix.h ./src/platform/ps2/memcard/ps2_types_fix.h || true
-          cp -f ./ps2_types_fix.h "$GLOBAL_SDK_TAM" || true
           cp -f ./ps2_types_fix.h "$LOCAL_TAM_FILE" || true
 
           echo "🩹 Sobrescrevendo gpprim.h com o fix mestre de u32..."
@@ -210,7 +220,7 @@ jobs:
           echo "🩹 Injetando o mapeamento primitivo do ptrdiff_t na linha 1 absoluta do core para desarmar unistd.h..."
           sed -i '1i typedef __PTRDIFF_TYPE__ ptrdiff_t;' "$IOP_FILE" || true
 
-          echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
+          echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool, Int32 e io_dirent_t..."
           if [ -f "$MC_FILE" ]; then
              sed -i '1i #include "ps2_types_fix.h"' "$MC_FILE" || true
           fi
@@ -317,7 +327,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Forçando mapeamento de includes por variáveis nativas de ambiente ==="
-          # Essas variaveis dizem ao GCC onde a SDK está de forma invisivel sem precisar copiar arquivos fisicos no terminal
           export C_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           export CPLUS_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           
