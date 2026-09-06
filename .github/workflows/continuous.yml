@@ -145,15 +145,16 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização da macro NULL, climits e fix de tipos e mainloop.h..."
-          # Injeta antes do core nativo do emulador, e força definições de variáveis globais locais ocultas ausentes
-          sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\nextern char _SramPath[256];\nextern char _MainLoop_SaveTitle[256];' "$IOP_FILE" || true
+          echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e mainloop.h..."
+          sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\nextern char _SramPath;\nextern char _MainLoop_SaveTitle;' "$IOP_FILE" || true
 
           echo "🩹 Desativando chamada de rede legada não suportada pela PS2SDK moderna..."
           sed -i 's/_MainLoopConfigureNetwork(/\/\/ _MainLoopConfigureNetwork(/g' "$IOP_FILE" || true
 
-          echo "🩹 Substituindo cirurgicamente todas as passagens literais de NULL por nullptr estrito nas chamadas de IOPLoadModule..."
-          # Sanitização por regex direta nas assinaturas de módulos e paths de carregamento para desviar de tamtypes.h
+          echo "🩹 Substituindo cirurgicamente todas as passagens de NULL que colidiam no mainloop_iop.cpp..."
+          sed -i 's/embed_data = NULL;/embed_data = nullptr;/g' "$IOP_FILE" || true
+          sed -i 's/NULL };/0 };/g' "$IOP_FILE" || true
+          sed -i 's/"rom0:PADMAN", NULL, 0, NULL/"rom0:PADMAN", nullptr, 0, nullptr/g' "$IOP_FILE" || true
           sed -i 's/"FREESD.IRX", ppSearchPaths, 0, NULL/"FREESD.IRX", ppSearchPaths, 0, nullptr/g' "$IOP_FILE" || true
           sed -i 's/"rom0:LIBSD", NULL, 0, NULL/"rom0:LIBSD", nullptr, 0, nullptr/g' "$IOP_FILE" || true
           sed -i 's/"AUDSRV.IRX", ppSearchPaths, 0, NULL/"AUDSRV.IRX", ppSearchPaths, 0, nullptr/g' "$IOP_FILE" || true
