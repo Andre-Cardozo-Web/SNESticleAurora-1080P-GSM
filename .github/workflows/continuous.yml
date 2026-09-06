@@ -80,10 +80,10 @@ jobs:
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Corrigindo a definição poluída do NULL diretamente no src/tamtypes.h do repositório..."
-          # Altera a macro de forma definitiva para responder nullptr no C++ e (void*)0 no C puro
+          echo "🩹 Sobrescrevendo o src/tamtypes.h local por printf estruturado à prova de falhas de regex..."
+          # Força a macro NULL do emulador a atuar estritamente como nullptr no C++ moderno e 0 no C puro
           if [ -f "$LOCAL_TAM_FILE" ]; then
-             sed -i 's/#define NULL (void \*)0/#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL (void *)0\n#endif/g' "$LOCAL_TAM_FILE" || true
+             printf '#ifndef TAMTYPES_H\n#define FCEU_TAMTYPES_H\n#define TAMTYPES_H\n#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL 0\n#endif\n#include <stdint.h>\ntypedef uint8_t u8;\ntypedef uint16_t u16;\ntypedef uint32_t u32;\ntypedef uint64_t u64;\ntypedef int8_t s8;\ntypedef int16_t s16;\ntypedef int32_t s32;\ntypedef int64_t s64;\n#endif\n' > "$LOCAL_TAM_FILE"
           fi
 
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos..."
@@ -186,7 +186,6 @@ jobs:
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
-          
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
