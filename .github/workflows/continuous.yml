@@ -146,7 +146,6 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
           echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e mainloop.h APÓS os cabeçalhos de C++ padrão..."
-          # Injeta de forma cirúrgica logo após a inclusão de <stdlib.h>. Isso protege o C++ padrão e prepara o ambiente antes de mainloop_shared.h
           sed -i '/#include <stdlib.h>/a #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
           echo "🩹 Substituindo todas as passagens de NULL por nullptr estrito nas assinaturas de IOPLoadModule..."
