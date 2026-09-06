@@ -75,6 +75,8 @@ jobs:
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
           DATAIO_FILE="src/common/base/dataio.h"
           MC_FILE="src/platform/ps2/memcard/memcard.h"
+          GLOBAL_SDK_TAM="/usr/local/ps2dev/ps2sdk/common/include/tamtypes.h"
+          LOCAL_TAM_FILE="src/tamtypes.h"
           
           NESROM_H="src/nes/system/nesrom.h"
           NESSYS_H="src/nes/system/nessystem.h"
@@ -85,6 +87,18 @@ jobs:
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
+
+          echo "🩹 Restaurando FORCE a definição original limpa de fábrica da tamtypes mestre do contêiner..."
+          if [ -f "$GLOBAL_SDK_TAM" ]; then
+             sed -i 's/#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL (void \*)0\n#endif/#define NULL (void *)0/g' "$GLOBAL_SDK_TAM" || true
+             sed -i 's/#ifdef __cplusplus.*#define NULL (void \*)0/#define NULL (void *)0/g' "$GLOBAL_SDK_TAM" || true
+             sed -i 's/#ifndef TAMTYPES_H.*/#ifndef TAMTYPES_H\n#define TAMTYPES_H\n#define NULL ((void *)0)/g' "$GLOBAL_SDK_TAM" || true
+          fi
+
+          echo "🩹 Restaurando o arquivo local src/tamtypes.h do repositório..."
+          if [ -f "$LOCAL_TAM_FILE" ]; then
+             git checkout "$LOCAL_TAM_FILE" || true
+          fi
 
           echo "🩹 Sanando erros de inicialização de parâmetros implícitos nos arquivos de cabeçalhos..."
           [ -f "$NESROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$NESROM_H" || true
@@ -164,9 +178,8 @@ jobs:
           echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e cabeçalhos mestre no ponto técnico correto..."
           sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
-          echo "🩹 Injetando os cabeçalhos de tamanho stddef.h e cstddef LOGO APÓS stdlib.h para amparar unistd.h de forma segura..."
-          # Isso garante a carga correta do ptrdiff_t na Newlib sem quebrar o escopo de wcstombs do topo do arquivo
-          sed -i '/#include <stdlib.h>/a #include <stddef.h>\n#include <cstddef>' "$IOP_FILE" || true
+          echo "🩹 Injetando isolamento estrito de ptrdiff_t e max_align_t CIRURGICAMENTE uma linha antes de ler unistd.h..."
+          sed -i '/#include <unistd.h>/i #include <stddef.h>\ntypedef __PTRDIFF_TYPE__ ptrdiff_t;\n#define _MAX_ALIGN_T_' "$IOP_FILE" || true
 
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
           if [ -f "$MC_FILE" ]; then
