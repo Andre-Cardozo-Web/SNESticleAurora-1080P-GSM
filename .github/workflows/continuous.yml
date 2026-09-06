@@ -55,10 +55,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Injetando flags de compatibilidade e permissive no Makefile principal ==="
+          echo "=== Injetando substituicao global de NULL por nullptr no Makefile principal ==="
           if [ -f "Makefile" ]; then
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
-            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            # Altera cirurgicamente as flags de compilação nativas do Makefile adicionando -DNULL=nullptr e -fpermissive de forma fixa
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -std=gnu++17 -DNULL=nullptr -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -std=gnu++17 -DNULL=nullptr -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -80,10 +81,9 @@ jobs:
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Sobrescrevendo o src/tamtypes.h local por printf estruturado à prova de falhas de regex..."
-          # Força a macro NULL do emulador a atuar estritamente como nullptr no C++ moderno e 0 no C puro
+          echo "🩹 Sobrescrevendo o src/tamtypes.h local por definicao segura e unificada..."
           if [ -f "$LOCAL_TAM_FILE" ]; then
-             printf '#ifndef TAMTYPES_H\n#define FCEU_TAMTYPES_H\n#define TAMTYPES_H\n#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL 0\n#endif\n#include <stdint.h>\ntypedef uint8_t u8;\ntypedef uint16_t u16;\ntypedef uint32_t u32;\ntypedef uint64_t u64;\ntypedef int8_t s8;\ntypedef int16_t s16;\ntypedef int32_t s32;\ntypedef int64_t s64;\n#endif\n' > "$LOCAL_TAM_FILE"
+             printf '#ifndef FCEU_TAMTYPES_H\n#define FCEU_TAMTYPES_H\n#include <stdint.h>\ntypedef uint8_t u8;\ntypedef uint16_t u16;\ntypedef uint32_t u32;\ntypedef uint64_t u64;\ntypedef int8_t s8;\ntypedef int16_t s16;\ntypedef int32_t s32;\ntypedef int64_t s64;\n#endif\n' > "$LOCAL_TAM_FILE"
           fi
 
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos..."
@@ -278,10 +278,11 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Executando compilação através das regras fixas do Makefile ==="
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-misleading-indentation -D_EE"
+          echo "=== Executando compilação através das regras fixas com override de NULL ==="
+          # Injeta a definição estrita do token -DNULL=nullptr para interceptar e neutralizar tamtypes.h global antes do build
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -DNULL=nullptr -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -DNULL=nullptr -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -DNULL=nullptr -fpermissive -std=gnu++17 -Wno-misleading-indentation -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
