@@ -56,8 +56,8 @@ jobs:
           set -euo pipefail
           echo "=== Injetando flags de compatibilidade estáveis no Makefile principal ==="
           if [ -f "Makefile" ]; then
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
-            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -D_GLIBCXX_USE_C99=1 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -D_GLIBCXX_USE_C99=1 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -87,11 +87,6 @@ jobs:
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
-
-          echo "🩹 Varrendo e injetando stddef.h e cstddef no ponto correto de todos os headers de ZSTD..."
-          # Essa expressao localiza a macro guard interna e acopla a correcao na linha de baixo de forma inviolavel
-          find . -name "compiler.h" -exec sed -i '/#define ZSTD_COMPILER_H/a #include <stddef.h>\n#include <cstddef>' {} + 2>/dev/null || true
-          find . -name "compiler.h" -exec sed -i '/#define ZSTD_PORTABILITY_MACROS_H/a #include <stddef.h>\n#include <cstddef>' {} + 2>/dev/null || true
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos, estruturas gráficas e de diretório..."
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
@@ -274,9 +269,10 @@ jobs:
           export C_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           export CPLUS_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
           
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-misleading-indentation -D_EE"
+          # Injeta a inclusao forçada de stddef.h no compilador de ambiente, resolvendo a ZSTD por completo de forma nativa
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Xcompiler -include -Xcompiler stddef.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Xcompiler -include -Xcompiler stddef.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Xcompiler -include -Xcompiler stddef.h -Wno-misleading-indentation -D_EE"
           make AUTO_INSTALL=yes
             
       - name: Strip release ELF
