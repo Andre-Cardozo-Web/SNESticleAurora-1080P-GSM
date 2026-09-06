@@ -55,11 +55,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Injetando substituicao global de NULL por nullptr no Makefile principal ==="
+          echo "=== Injetando flags de compatibilidade e permissive no Makefile mestre ==="
           if [ -f "Makefile" ]; then
-            # Altera cirurgicamente as flags de compilação nativas do Makefile adicionando -DNULL=nullptr e -fpermissive de forma fixa
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -std=gnu++17 -DNULL=nullptr -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
-            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -std=gnu++17 -DNULL=nullptr -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -76,10 +75,17 @@ jobs:
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
           DATAIO_FILE="src/common/base/dataio.h"
           LOCAL_TAM_FILE="src/tamtypes.h"
+          GLOBAL_SDK_TAM="/usr/local/ps2dev/ps2sdk/common/include/tamtypes.h"
           
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
+
+          echo "🩹 Remendando diretamente a tamtypes.h interna na raiz mestre da PS2SDK do contêiner Docker..."
+          # Altera cirurgicamente a definição de NULL do próprio sistema operacional do contêiner para adotar nullptr no g++
+          if [ -f "$GLOBAL_SDK_TAM" ]; then
+             sed -i 's/#define NULL (void \*)0/#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL (void *)0\n#endif/g' "$GLOBAL_SDK_TAM" || true
+          fi
 
           echo "🩹 Sobrescrevendo o src/tamtypes.h local por definicao segura e unificada..."
           if [ -f "$LOCAL_TAM_FILE" ]; then
@@ -189,16 +195,6 @@ jobs:
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
-
-          echo "🔗 Copiando cabeçalhos oficiais modernos para suporte local do compilador..."
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/ee/include/sifrpc.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/loadfile-common.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/sifrpc-common.h ./src/platform/ps2/system/ || true
-          cp -f /usr/local/ps2dev/ps2sdk/common/include/sifcmd-common.h ./src/platform/ps2/system/ || true
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
@@ -278,11 +274,10 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Executando compilação através das regras fixas com override de NULL ==="
-          # Injeta a definição estrita do token -DNULL=nullptr para interceptar e neutralizar tamtypes.h global antes do build
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -DNULL=nullptr -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -DNULL=nullptr -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -DNULL=nullptr -fpermissive -std=gnu++17 -Wno-misleading-indentation -D_EE"
+          echo "=== Executando compilação através das regras fixas do "Makefile" ==="
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-misleading-indentation -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
