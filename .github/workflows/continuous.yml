@@ -57,7 +57,6 @@ jobs:
           set -euo pipefail
           echo "=== Injetando flags de compatibilidade estáveis no Makefile principal ==="
           if [ -f "Makefile" ]; then
-            # Remove o -fpermissive global e aplica silenciadores padrão de warnings limpos
             sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
             sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
@@ -75,24 +74,16 @@ jobs:
           BMP_FILE="src/common/media/bmpfile.h"
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
           DATAIO_FILE="src/common/base/dataio.h"
-          LOCAL_TAM_FILE="src/tamtypes.h"
           MC_FILE="src/platform/ps2/memcard/memcard.h"
           
-          # Arquivos mapeados no log com erros de conversão implícita de NULL (void*) para ponteiros de objetos
           NESROM_H="src/nes/system/nesrom.h"
           NESSYS_H="src/nes/system/nessystem.h"
           SEGAROM_H="src/sega/system/segarom.h"
           PCEROM_H="src/pce/system/pcerom.h"
           UISCREEN_H="src/platform/ps2/ui/uiScreen.h"
 
-          echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
-          git checkout "$IOP_FILE" || true
+          echo "🩹 Higienizando quebras de linha em formato crlf do mainloop_iop.cpp..."
           sed -i 's/\r//g' "$IOP_FILE" || true
-
-          echo "🩹 Deixando o src/tamtypes.h local intocado em conformidade estrita..."
-          if [ -f "$LOCAL_TAM_FILE" ]; then
-             git checkout "$LOCAL_TAM_FILE" || true
-          fi
 
           echo "🩹 Sanando erros de inicialização de parâmetros implícitos nos arquivos de cabeçalhos..."
           [ -f "$NESROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$NESROM_H" || true
@@ -169,8 +160,11 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e cabeçalhos mestre no ponto correto..."
+          echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e cabeçalhos mestre no ponto técnico correto..."
           sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
+
+          echo "🩹 Injetando stddef.h na linha 1 absoluta do arquivo para blindar unistd.h com ptrdiff_t nativo..."
+          sed -i '1i #include <stddef.h>' "$IOP_FILE" || true
 
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
           if [ -f "$MC_FILE" ]; then
