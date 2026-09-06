@@ -55,10 +55,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Injetando flags de compatibilidade de forma fixa no Makefile ==="
+          echo "=== Injetando flags de compatibilidade estáveis no Makefile principal ==="
           if [ -f "Makefile" ]; then
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
-            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            # Remove o -fpermissive global e aplica silenciadores padrão de warnings limpos
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            sed -i 's/EE_CXXFLAGS =/EE_CXXFLAGS = -fsigned-char -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -75,22 +76,30 @@ jobs:
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
           DATAIO_FILE="src/common/base/dataio.h"
           LOCAL_TAM_FILE="src/tamtypes.h"
-          GLOBAL_SDK_TAM="/usr/local/ps2dev/ps2sdk/common/include/tamtypes.h"
           MC_FILE="src/platform/ps2/memcard/memcard.h"
           
+          # Arquivos mapeados no log com erros de conversão implícita de NULL (void*) para ponteiros de objetos
+          NESROM_H="src/nes/system/nesrom.h"
+          NESSYS_H="src/nes/system/nessystem.h"
+          SEGAROM_H="src/sega/system/segarom.h"
+          PCEROM_H="src/pce/system/pcerom.h"
+          UISCREEN_H="src/platform/ps2/ui/uiScreen.h"
+
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Remendando diretamente a tamtypes.h interna na raiz mestre da PS2SDK do contêiner Docker..."
-          if [ -f "$GLOBAL_SDK_TAM" ]; then
-             sed -i 's/#define NULL (void \*)0/#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL (void *)0\n#endif/g' "$GLOBAL_SDK_TAM" || true
+          echo "🩹 Deixando o src/tamtypes.h local intocado em conformidade estrita..."
+          if [ -f "$LOCAL_TAM_FILE" ]; then
+             git checkout "$LOCAL_TAM_FILE" || true
           fi
 
-          echo "🩹 Sobrescrevendo o src/tamtypes.h local por definicao segura e unificada..."
-          if [ -f "$LOCAL_TAM_FILE" ]; then
-             printf '#ifndef FCEU_TAMTYPES_H\n#define FCEU_TAMTYPES_H\n#include <stdint.h>\ntypedef uint8_t u8;\ntypedef uint16_t u16;\ntypedef uint32_t u32;\ntypedef uint64_t u64;\ntypedef int8_t s8;\ntypedef int16_t s16;\ntypedef int32_t s32;\ntypedef int64_t s64;\n#endif\n' > "$LOCAL_TAM_FILE"
-          fi
+          echo "🩹 Sanando erros de inicialização de parâmetros implícitos nos arquivos de cabeçalhos..."
+          [ -f "$NESROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$NESROM_H" || true
+          [ -f "$NESSYS_H" ] && sed -i 's/return NULL;/return 0;/g' "$NESSYS_H" || true
+          [ -f "$SEGAROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$SEGAROM_H" || true
+          [ -f "$PCEROM_H" ] && sed -i 's/Uint8 \*pBuffer=NULL/Uint8 *pBuffer=0/g' "$PCEROM_H" || true
+          [ -f "$UISCREEN_H" ] && sed -i 's/m_pMsgFunc =NULL;/m_pMsgFunc = 0;/g' "$UISCREEN_H" || true
 
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos..."
           cat << 'EOF' > ./ps2_types_fix.h
@@ -160,9 +169,8 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e cabeçalhos mestre ANTES de ler mainloop_shared.h..."
-          # Alinha os tipos de forma cirúrgica na janela perfeita após os includes do GCC e antes das dependências locais do emulador
-          sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#include <stddef.h>' "$IOP_FILE" || true
+          echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e cabeçalhos mestre no ponto correto..."
+          sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
           if [ -f "$MC_FILE" ]; then
@@ -291,7 +299,7 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Executando compilação através das regras fixas do Makefile ==="
+          echo "=== Executando compilação através das regras limpas do Makefile ==="
           export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-misleading-indentation -D_EE"
