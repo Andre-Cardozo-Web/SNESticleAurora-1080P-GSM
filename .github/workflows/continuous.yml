@@ -76,7 +76,6 @@ jobs:
           PRIM_FILE="src/platform/ps2/gs/gpprim.h"
           DATAIO_FILE="src/common/base/dataio.h"
           MC_FILE="src/platform/ps2/memcard/memcard.h"
-          GLOBAL_SDK_TAM="/usr/local/ps2dev/ps2sdk/common/include/tamtypes.h"
           LOCAL_TAM_FILE="src/tamtypes.h"
           
           NESROM_H="src/nes/system/nesrom.h"
@@ -88,11 +87,6 @@ jobs:
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
-
-          echo "🩹 Restaurando de forma absoluta a tamtypes mestre de fabrica do contêiner Docker..."
-          if [ -f "$GLOBAL_SDK_TAM" ]; then
-             printf '#ifndef TAMTYPES_H\n#define TAMTYPES_H\n#define NULL ((void *)0)\n#include <stdint.h>\ntypedef uint8_t u8;\ntypedef uint16_t u16;\ntypedef uint32_t u32;\ntypedef uint64_t u64;\ntypedef int8_t s8;\ntypedef int16_t s16;\ntypedef int32_t s32;\ntypedef int64_t s64;\n#endif\n' > "$GLOBAL_SDK_TAM"
-          fi
 
           echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos, estruturas gráficas e de diretório..."
           cat << 'EOF' > ./ps2_types_fix.h
@@ -139,7 +133,6 @@ jobs:
               uint32_t sw;
           } qword_t __attribute__((aligned(16)));
           
-          // Mapeia de forma transparente a antiga estrutura io_dirent_t para o formato moderno de leitura de cartões
           typedef struct dabe_fix {
              int dummy;
           } io_dirent_t;
@@ -217,8 +210,9 @@ jobs:
           echo "🩹 Injetando os cabeçalhos de tamanhos stddef.h e o fix mestre de tipos LOGO ABAIXO de kernel.h..."
           sed -i '/#include <kernel.h>/a #include <stddef.h>\n#include "ps2_types_fix.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
-          echo "🩹 Injetando o mapeamento primitivo do ptrdiff_t na linha 1 absoluta do core para desarmar unistd.h..."
-          sed -i '1i typedef __PTRDIFF_TYPE__ ptrdiff_t;' "$IOP_FILE" || true
+          echo "🩹 Injetando assinaturas falsas seguras de mbstowcs e wcstombs para desarmar conflito de stdlib.h..."
+          # Isso faz o G++ aceitar a existencia das funções no escopo global e pular a trava do sistema
+          sed -i '1i #include <stddef.h>\ntypedef __PTRDIFF_TYPE__ ptrdiff_t;\nnamespace std { using ::mbstowcs; using ::wcstombs; }\nextern \"C\" size_t mbstowcs(wchar_t*, const char*, size_t);\nextern \"C\" size_t wcstombs(char*, const wchar_t*, size_t);' "$IOP_FILE" || true
 
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool, Int32 e io_dirent_t..."
           if [ -f "$MC_FILE" ]; then
