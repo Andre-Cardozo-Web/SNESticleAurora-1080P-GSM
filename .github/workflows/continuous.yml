@@ -77,7 +77,7 @@ jobs:
           echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Criando cabeçalho físico mestre de compatibilidade absoluta no diretório raiz de buscas..."
+          echo "🩹 Criando cabeçalho físico mestre de compatibilidade absoluta..."
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
@@ -126,7 +126,7 @@ jobs:
           #endif
           EOF
 
-          # Cria réplicas do fix nas pastas de destino do compilador para proximidade física imediata
+          # Cria réplicas do fix nas pastas de destino do projeto para inclusão direta
           mkdir -p src/platform/ps2/system src/platform/ps2/gs src/common/render src/third_party/fceumm-fds/src/ || true
           cp -f ./ps2_types_fix.h ./src/ps2_types_fix.h || true
           cp -f ./ps2_types_fix.h ./src/platform/ps2/system/ps2_types_fix.h || true
@@ -145,14 +145,20 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização estrita da macro NULL legada apenas no código local do mainloop_iop.cpp..."
-          # Injeta o fix e força o nullptr após os cabeçalhos de sistema serem chamados, poupando a Newlib externa
-          sed -i '1i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
+          echo "🩹 Injetando neutralização da macro NULL, climits e fix de tipos APÓS os cabeçalhos padrões..."
+          # Injeta o remendo cirurgicamente logo após a inclusão de mainloop_shared.h. Isso impede que os cabeçalhos mestre do C++ quebrem.
+          sed -i '/#include "mainloop_shared.h"/a #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
-          echo "🩹 Resolvendo conflito de declaração duplicada e anônima da struct pal em FCEUmm de forma linear..."
+          echo "🩹 Substituindo todas as passagens de NULL por nullptr estrito nas assinaturas de IOPLoadModule..."
+          sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*NULL,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, nullptr, 0, nullptr)/g' "$IOP_FILE" || true
+          sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*ppSearchPaths,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, ppSearchPaths, 0, nullptr)/g' "$IOP_FILE" || true
+          sed -i 's/const unsigned char \*embed_data = NULL;/const unsigned char *embed_data = nullptr;/g' "$IOP_FILE" || true
+          sed -i 's/NULL };/nullptr };/g' "$IOP_FILE" || true
+
+          echo "🩹 Resolvendo conflito da struct pal em FCEUmm de forma linear..."
           [ -f "$PAL_FILE" ] && printf '#ifndef FCEU_PALETTE_H\n#define FCEU_PALETTE_H\nstruct pal { unsigned char r, g, b; };\nextern struct pal *palo;\nvoid FCEU_DrawNTSCControlBars(unsigned char *XBuf);\n#endif\n' > "$PAL_FILE" || true
 
-          echo "🩹 Resolvendo conflito de re-declaração prévia da struct PaletteT em bmpfile.h..."
+          echo "🩹 Resolvendo conflito da struct PaletteT em bmpfile.h..."
           [ -f "$BMP_FILE" ] && sed -i 's/struct PaletteT;/\/\/ struct PaletteT;/g' "$BMP_FILE" || true
 
           echo "🩹 Aplicando definicao de tipos de suporte graficos no topo de gpfifo.h..."
@@ -256,10 +262,11 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Injetando fix de compatibilidade via diretiva -include no compilador ==="
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          echo "=== Compilando com rotas padrões limpas ==="
+          # Removemos totalmente o include forçado para liberar as chamadas nativas de stdlib do GCC
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
