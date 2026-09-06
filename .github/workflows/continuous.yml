@@ -73,6 +73,7 @@ jobs:
           PAL_FILE="src/third_party/fceumm-fds/src/palette.h"
           BMP_FILE="src/common/media/bmpfile.h"
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
+          PRIM_FILE="src/platform/ps2/gs/gpprim.h"
           DATAIO_FILE="src/common/base/dataio.h"
           MC_FILE="src/platform/ps2/memcard/memcard.h"
           GLOBAL_SDK_TAM="/usr/local/ps2dev/ps2sdk/common/include/tamtypes.h"
@@ -189,6 +190,11 @@ jobs:
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
           if [ -f "$MC_FILE" ]; then
              sed -i '1i #include "ps2_types_fix.h"' "$MC_FILE" || true
+          fi
+
+          echo "🩹 Forçando a injeção do fix de tipos diretamente na linha 1 de gpprim.h para resolver u32 do driver do GS..."
+          if [ -f "$PRIM_FILE" ]; then
+             sed -i '1i #include "ps2_types_fix.h"' "$PRIM_FILE" || true
           fi
 
           echo "🩹 Desativando chamada de rede legada não suportada pela PS2SDK moderna..."
