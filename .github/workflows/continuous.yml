@@ -88,29 +88,12 @@ jobs:
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Restaurando FORCE a definição original limpa de fábrica da tamtypes mestre do contêiner..."
-          if [ -f "$GLOBAL_SDK_TAM" ]; then
-             sed -i 's/#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL (void \*)0\n#endif/#define NULL (void *)0/g' "$GLOBAL_SDK_TAM" || true
-             sed -i 's/#ifdef __cplusplus.*#define NULL (void \*)0/#define NULL (void *)0/g' "$GLOBAL_SDK_TAM" || true
-             sed -i 's/#ifndef TAMTYPES_H.*/#ifndef TAMTYPES_H\n#define TAMTYPES_H\n#define NULL ((void *)0)/g' "$GLOBAL_SDK_TAM" || true
-          fi
-
-          echo "🩹 Restaurando o arquivo local src/tamtypes.h do repositório..."
-          if [ -f "$LOCAL_TAM_FILE" ]; then
-             git checkout "$LOCAL_TAM_FILE" || true
-          fi
-
-          echo "🩹 Sanando erros de inicialização de parâmetros implícitos nos arquivos de cabeçalhos..."
-          [ -f "$NESROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$NESROM_H" || true
-          [ -f "$NESSYS_H" ] && sed -i 's/return NULL;/return 0;/g' "$NESSYS_H" || true
-          [ -f "$SEGAROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$SEGAROM_H" || true
-          [ -f "$PCEROM_H" ] && sed -i 's/Uint8 \*pBuffer=NULL/Uint8 *pBuffer=0/g' "$PCEROM_H" || true
-          [ -f "$UISCREEN_H" ] && sed -i 's/m_pMsgFunc =NULL;/m_pMsgFunc = 0;/g' "$UISCREEN_H" || true
-
-          echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos..."
+          echo "🩹 Criando cabeçalho físico mestre de compatibilidade de tipos primitivos e estruturas gráficas..."
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
+          #include <stddef.h>
+          #include <stdint.h>
           
           #define _ALIGN(x) __attribute__((aligned(x)))
           #define _INLINE inline
@@ -128,6 +111,15 @@ jobs:
           typedef char               Char;
           typedef float              Float32;
           
+          typedef uint8_t  u8;
+          typedef uint16_t u16;
+          typedef uint32_t u32;
+          typedef uint64_t u64;
+          typedef int8_t   s8;
+          typedef int16_t  s16;
+          typedef int32_t  s32;
+          typedef int64_t  s64;
+          
           typedef unsigned int       uint32;
           typedef unsigned short     uint16;
           typedef unsigned char      uint8;
@@ -135,6 +127,10 @@ jobs:
           
           typedef struct { Uint8 r, g, b, a; } Color32T;
           typedef struct { Color32T entries; } PaletteT;
+          
+          typedef struct {
+              uint32_t sw;
+          } qword_t __attribute__((aligned(16)));
           
           #ifndef FALSE
           #define FALSE 0
@@ -161,6 +157,15 @@ jobs:
           cp -f ./ps2_types_fix.h ./src/platform/ps2/system/ps2_types_fix.h || true
           cp -f ./ps2_types_fix.h ./src/platform/ps2/gs/ps2_types_fix.h || true
           cp -f ./ps2_types_fix.h ./src/platform/ps2/memcard/ps2_types_fix.h || true
+          cp -f ./ps2_types_fix.h "$GLOBAL_SDK_TAM" || true
+          cp -f ./ps2_types_fix.h "$LOCAL_TAM_FILE" || true
+
+          echo "🩹 Sanando erros de inicialização de parâmetros implícitos nos arquivos de cabeçalhos..."
+          [ -f "$NESROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$NESROM_H" || true
+          [ -f "$NESSYS_H" ] && sed -i 's/return NULL;/return 0;/g' "$NESSYS_H" || true
+          [ -f "$SEGAROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$SEGAROM_H" || true
+          [ -f "$PCEROM_H" ] && sed -i 's/Uint8 \*pBuffer=NULL/Uint8 *pBuffer=0/g' "$PCEROM_H" || true
+          [ -f "$UISCREEN_H" ] && sed -i 's/m_pMsgFunc =NULL;/m_pMsgFunc = 0;/g' "$UISCREEN_H" || true
 
           echo "🩹 Corrigindo mapeamento de alocacao de memoria e gerenciamento da IOP..."
           sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE" || true
@@ -175,11 +180,11 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e cabeçalhos mestre no ponto técnico correto..."
+          echo "🩹 Injetando neutralização da macro NULL, climits, e cabeçalhos mestre no ponto técnico correto..."
           sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
-          echo "🩹 Injetando isolamento estrito de ptrdiff_t e max_align_t CIRURGICAMENTE uma linha antes de ler unistd.h..."
-          sed -i '/#include <unistd.h>/i #include <stddef.h>\ntypedef __PTRDIFF_TYPE__ ptrdiff_t;\n#define _MAX_ALIGN_T_' "$IOP_FILE" || true
+          echo "🩹 Injetando os cabeçalhos mestre de tamanhos stddef.h na linha 1 absoluta para amparar todo o escopo do GCC..."
+          sed -i '1i #include <stddef.h>\n#include "ps2_types_fix.h"' "$IOP_FILE" || true
 
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
           if [ -f "$MC_FILE" ]; then
