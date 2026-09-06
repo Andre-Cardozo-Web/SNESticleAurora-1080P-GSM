@@ -205,11 +205,12 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização da macro NULL, climits, e cabeçalhos mestre no ponto técnico correto..."
+          echo "🩹 Injetando neutralização da macro NULL, e cabeçalhos mestre no ponto técnico correto..."
           sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
-          echo "🩹 Injetando os cabeçalhos mestre de tamanhos stddef.h na linha 1 absoluta do core..."
-          sed -i '1i #include <stddef.h>\n#include "ps2_types_fix.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
+          echo "🩹 Injetando os cabeçalhos de tamanhos stddef.h e o fix mestre de tipos LOGO ABAIXO de kernel.h..."
+          # Isso garante a reinstalação do u32 no escopo exato após o kernel.h limpar as macros do sistema
+          sed -i '/#include <kernel.h>/a #include <stddef.h>\n#include "ps2_types_fix.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
           if [ -f "$MC_FILE" ]; then
@@ -239,8 +240,7 @@ jobs:
           echo "🩹 Resolvendo conflito da struct PaletteT em bmpfile.h..."
           [ -f "$BMP_FILE" ] && sed -i 's/struct PaletteT;/\/\/ struct PaletteT;/g' "$BMP_FILE" || true
 
-          echo "🔗 Unificando a SDK por atalhos e aliases de variáveis para travar o tamanho de linha de tela..."
-          # Define apelidos curtos para reduzir as linhas compridas que quebravam o seu navegador ao meio
+          echo "🔗 Unificando caminhos de inclusao da PS2SDK por aliases estáveis de variáveis..."
           export S="/usr/local/ps2dev/ps2sdk"
           export D="./src/platform/ps2/system/"
           ln -sf $S/common/include/*.h $D || true
