@@ -55,9 +55,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Injetando flags de compatibilidade e silenciando warnings no Makefile principal ==="
+          echo "=== Injetando flags de compatibilidade e permissive no Makefile principal ==="
           if [ -f "Makefile" ]; then
-            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
+            # Adiciona -fpermissive e -std=gnu++17 para aceitar as macros de NULL legadas da SDK antiga sem quebrar
+            sed -i 's/EE_CFLAGS =/EE_CFLAGS = -fsigned-char -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE /g' Makefile
           fi
           
           echo "=== Isolando conflitos de definicao do InfoNES ==="
@@ -73,19 +74,12 @@ jobs:
           PAL_FILE="src/third_party/fceumm-fds/src/palette.h"
           BMP_FILE="src/common/media/bmpfile.h"
           FIFO_FILE="src/platform/ps2/gs/gpfifo.h"
-          SDK_TAM_FILE="/usr/local/ps2dev/ps2sdk/common/include/tamtypes.h"
           
-          echo "🩹 Higienizando e limpando o arquivo original para re-aplicacao controlada..."
+          echo "🩹 Higienizando e restaurando o arquivo original para estado limpo..."
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Remendando de forma segura a definição de NULL na tamtypes.h mestre da SDK do contêiner..."
-          # Altera cirurgicamente a macro NULL global da SDK para responder nullptr caso o compilador seja C++
-          if [ -f "$SDK_TAM_FILE" ]; then
-             sed -i 's/#define NULL (void \*)0/#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL (void *)0\n#endif/g' "$SDK_TAM_FILE" || true
-          fi
-
-          echo "🩹 Criando cabeçalho físico mestre de compatibilidade absoluta..."
+          echo "🩹 Criando cabeçalho físico mestre de tipos primitivos para g++..."
           cat << 'EOF' > ./ps2_types_fix.h
           #ifndef PS2_TYPES_FIX_H
           #define PS2_TYPES_FIX_H
@@ -134,7 +128,6 @@ jobs:
           #endif
           EOF
 
-          # Cria réplicas do fix nas pastas de destino do projeto para proximidade física imediata
           mkdir -p src/platform/ps2/system src/platform/ps2/gs src/common/render src/third_party/fceumm-fds/src/ || true
           cp -f ./ps2_types_fix.h ./src/ps2_types_fix.h || true
           cp -f ./ps2_types_fix.h ./src/platform/ps2/system/ps2_types_fix.h || true
@@ -153,8 +146,8 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização da macro NULL, climits e fix de tipos APÓS os cabeçalhos de C++ padrão..."
-          sed -i '/#include <stdlib.h>/a #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"' "$IOP_FILE" || true
+          echo "🩹 Injetando unicamente as macros locais após o bloco de includes nativos do emulador..."
+          sed -i '/#include "mainloop_shared.h"/a #define INT_MAX 2147483647\n#include "ps2_types_fix.h"' "$IOP_FILE" || true
 
           echo "🩹 Desativando chamada de rede legada não suportada pela PS2SDK moderna..."
           sed -i 's/_MainLoopConfigureNetwork(/\/\/ _MainLoopConfigureNetwork(/g' "$IOP_FILE" || true
@@ -168,7 +161,7 @@ jobs:
           echo "🩹 Aplicando definicao de tipos de suporte graficos no topo de gpfifo.h..."
           [ -f "$FIFO_FILE" ] && sed -i '1i #include "ps2_types_fix.h"' "$FIFO_FILE" || true
 
-          echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK de forma plana no repositório..."
+          echo "🔗 Unificando a árvore mestre completa de inclusões da PS2SDK..."
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
@@ -177,12 +170,13 @@ jobs:
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
 
-          echo "🔗 Copiando cabeçalhos oficiais modernos para suporte local do compilador..."
+          echo "🔗 Copiando cabeçalhos oficiais modernos..."
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/sifrpc.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/mc-common.h ./src/platform/ps2/system/ || true
+          cp -f /usr/local/ps2dev/ps2sdk/common/include/tamtypes.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/loadfile-common.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/sifrpc-common.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/common/include/sifcmd-common.h ./src/platform/ps2/system/ || true
@@ -265,10 +259,11 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Compilando com rotas padrões limpas ==="
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -include ps2_types_fix.h -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          echo "=== Injetando -fpermissive e -std=gnu++17 nas variáveis de ambiente globais ==="
+          # Garante o rebaixamento de erros de tipagem estrita de ponteiros nulos herdados em sub-makefiles
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
