@@ -166,11 +166,22 @@ jobs:
           #ifndef GPPRIM_H
           #define GPPRIM_H
           #include "ps2_types_fix.h"
-
           void GPPrimLine(int x1, int y1, int x2, int y2, int z, u32 colour);
           void GPPrimRect(int x1, int y1, int x2, int y2, int z, u32 colour);
           void GPPrimTexRect(int x1, int y1, int u1, int v1, int x2, int y2, int u2, int v2, int z, u32 colour, unsigned int abe);
           void GPPrimTexRectAbs(u32 x1, u32 y1, u32 u1, u32 v1, u32 x2, u32 y2, u32 u2, u32 v2, u32 z, u32 colour, unsigned abe);
+          #endif
+          EOF
+
+          echo "🩹 Sobrescrevendo fisicamente e forçando a estrutura de gpfifo.h com o fix mestre de u32..."
+          cat << 'EOF' > "$FIFO_FILE"
+          #ifndef GPFIFO_H
+          #define GPFIFO_H
+          #include "ps2_types_fix.h"
+          void GPFifoInit(void *pBuffer, int nSize);
+          void GPFifoQueuePacket(qword_t *pPacket, int nQWords);
+          void GPFifoFlush();
+          void GPFifoSetTex(u32 tbp, u32 tbw, u32 texwidthlog2, u32 texheightlog2, u32 tpsm, u32 cbp, u32 cbw, u32 cpsm, int filter);
           #endif
           EOF
 
@@ -197,8 +208,8 @@ jobs:
           echo "🩹 Injetando neutralização da macro NULL, climits, e cabeçalhos mestre no ponto técnico correto..."
           sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
-          echo "🩹 Injetando os cabeçalhos mestre de tamanhos stddef.h na linha 1 absoluta para amparar todo o escopo do GCC..."
-          sed -i '1i #include <stddef.h>\n#include "ps2_types_fix.h"' "$IOP_FILE" || true
+          echo "🩹 Injetando os cabeçalhos mestre de tamanhos stddef.h na linha 1 absoluta do core..."
+          sed -i '1i #include <stddef.h>\n#include "ps2_types_fix.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
           if [ -f "$MC_FILE" ]; then
@@ -228,19 +239,18 @@ jobs:
           echo "🩹 Resolvendo conflito da struct PaletteT em bmpfile.h..."
           [ -f "$BMP_FILE" ] && sed -i 's/struct PaletteT;/\/\/ struct PaletteT;/g' "$BMP_FILE" || true
 
-          echo "🩹 Aplicando definicao de tipos de suporte graficos no topo de gpfifo.h..."
-          [ -f "$FIFO_FILE" ] && sed -i '1i #include "ps2_types_fix.h"' "$FIFO_FILE" || true
-
-          echo "🔗 Criando mapeamento plano e unificando caminhos de inclusao da PS2SDK..."
-          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
-          ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
-
-          echo "🔗 Executando copias dos cabecalhos oficiais da SDK em laco compacto de seguranca..."
-          for h in libpad.h memcard.h loadfile.h sifrpc.h mc-common.h loadfile-common.h sifrpc-common.h sifcmd-common.h; do cp -f /usr/local/ps2dev/ps2sdk/ee/include/$h ./src/platform/ps2/system/ 2>/dev/null || cp -f /usr/local/ps2dev/ps2sdk/common/include/$h ./src/platform/ps2/system/ 2>/dev/null || true; done
+          echo "🔗 Unificando a SDK por atalhos e aliases de variáveis para travar o tamanho de linha de tela..."
+          # Define apelidos curtos para reduzir as linhas compridas que quebravam o seu navegador ao meio
+          export S="/usr/local/ps2dev/ps2sdk"
+          export D="./src/platform/ps2/system/"
+          ln -sf $S/common/include/*.h $D || true
+          ln -sf $S/ee/include/*.h $D || true
+          ln -sf $S/ee/include/libpad/*.h $D || true
+          ln -sf $S/common/include/*.h ./src/ || true
+          ln -sf $S/ee/include/*.h ./src/ || true
+          ln -sf $S/ee/include/libpad/*.h ./src/ || true
+          cp -f $S/ee/include/*.h $D 2>/dev/null || true
+          cp -f $S/common/include/*.h $D 2>/dev/null || true
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
