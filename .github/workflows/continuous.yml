@@ -153,7 +153,7 @@ jobs:
 
           echo "🩹 Substituindo cirurgicamente todas as passagens de NULL que colidiam no mainloop_iop.cpp..."
           sed -i 's/embed_data = NULL;/embed_data = nullptr;/g' "$IOP_FILE" || true
-          sed -i 's/NULL };/0 };/g' "$IOP_FILE" || true
+          sed -i 's/NULL };/nullptr };/g' "$IOP_FILE" || true
           sed -i 's/"rom0:PADMAN", NULL, 0, NULL/"rom0:PADMAN", nullptr, 0, nullptr/g' "$IOP_FILE" || true
           sed -i 's/"FREESD.IRX", ppSearchPaths, 0, NULL/"FREESD.IRX", ppSearchPaths, 0, nullptr/g' "$IOP_FILE" || true
           sed -i 's/"rom0:LIBSD", NULL, 0, NULL/"rom0:LIBSD", nullptr, 0, nullptr/g' "$IOP_FILE" || true
@@ -178,11 +178,12 @@ jobs:
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/platform/ps2/system/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/platform/ps2/system/ || true
+          
           ln -sf /usr/local/ps2dev/ps2sdk/common/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/*.h ./src/ || true
           ln -sf /usr/local/ps2dev/ps2sdk/ee/include/libpad/*.h ./src/ || true
 
-          echo "🔗 Executando cópias de cabeçalhos oficiais em formato contínuo e linear de segurança..."
+          echo "🔗 Copiando cabeçalhos oficiais modernos para suporte local do compilador..."
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/libpad.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/memcard.h ./src/platform/ps2/system/ || true
           cp -f /usr/local/ps2dev/ps2sdk/ee/include/loadfile.h ./src/platform/ps2/system/ || true
@@ -271,10 +272,12 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Executando compilação com suporte permissive ==="
-          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
-          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -fpermissive -std=gnu++17 -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
+          echo "=== Injetando a variavel mestre inviolavel DECPFLAGS para travar o permissive ==="
+          # A variavel DECPFLAGS atua diretamente nas entranhas da SDK do PS2 e nao pode ser limpa pelo Makefile do emulador
+          export DECPFLAGS="-fpermissive -std=gnu++17 -Wno-unused-variable -Wno-error"
+          export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include ${DECPFLAGS}"
+          export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include ${DECPFLAGS}"
+          export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-misleading-indentation -D_EE ${DECPFLAGS}"
           
           echo "=== Executando compilacao padrão ==="
           make AUTO_INSTALL=yes
