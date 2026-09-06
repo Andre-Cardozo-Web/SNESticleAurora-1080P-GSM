@@ -145,9 +145,9 @@ jobs:
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]sifrpc.h[">]/#include <sifrpc.h>/g' "$IOP_FILE" || true
 
-          echo "🩹 Injetando neutralização da macro NULL, climits e fix de tipos APÓS os cabeçalhos padrões..."
-          # Injeta o remendo cirurgicamente logo após a inclusão de mainloop_shared.h. Isso impede que os cabeçalhos mestre do C++ quebrem.
-          sed -i '/#include "mainloop_shared.h"/a #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
+          echo "🩹 Injetando neutralização da macro NULL, climits, fix de tipos e mainloop.h APÓS os cabeçalhos de C++ padrão..."
+          # Injeta de forma cirúrgica logo após a inclusão de <stdlib.h>. Isso protege o C++ padrão e prepara o ambiente antes de mainloop_shared.h
+          sed -i '/#include <stdlib.h>/a #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
           echo "🩹 Substituindo todas as passagens de NULL por nullptr estrito nas assinaturas de IOPLoadModule..."
           sed -i -E 's/IOPLoadModule\(([^,]*),[[:space:]]*NULL,[[:space:]]*0,[[:space:]]*NULL\)/IOPLoadModule(\1, nullptr, 0, nullptr)/g' "$IOP_FILE" || true
@@ -263,7 +263,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== Compilando com rotas padrões limpas ==="
-          # Removemos totalmente o include forçado para liberar as chamadas nativas de stdlib do GCC
           export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-error -D_EE"
