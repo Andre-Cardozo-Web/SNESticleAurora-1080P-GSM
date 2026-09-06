@@ -87,11 +87,9 @@ jobs:
           git checkout "$IOP_FILE" || true
           sed -i 's/\r//g' "$IOP_FILE" || true
 
-          echo "🩹 Restaurando a definição original limpa da SDK para reativar wcstombs e mbstowcs..."
-          if [ -f "$GLOBAL_SDK_TAM" ]; then
-             sed -i 's/#ifdef __cplusplus\n#define NULL nullptr\n#else\n#define NULL (void \*)0\n#endif/#define NULL (void *)0/g' "$GLOBAL_SDK_TAM" || true
-             sed -i 's/#ifdef __cplusplus.*#define NULL (void \*)0/#define NULL (void *)0/g' "$GLOBAL_SDK_TAM" || true
-          fi
+          echo "🩹 Sobrescrevendo a tamtypes.h global poluída da SDK por uma estrutura limpa e compatível com C++..."
+          # Isso limpa permanentemente o cache corrompido do contêiner Docker injetando stddef de forma mestre
+          printf '#ifndef TAMTYPES_H\n#define TAMTYPES_H\n#include <stddef.h>\n#include <stdint.h>\n#ifndef NULL\n#define NULL 0\n#endif\ntypedef uint8_t u8;\ntypedef uint16_t u16;\ntypedef uint32_t u32;\ntypedef uint64_t u64;\ntypedef int8_t s8;\ntypedef int16_t s16;\ntypedef int32_t s32;\ntypedef int64_t s64;\n#endif\n' > "$GLOBAL_SDK_TAM" || true
 
           echo "🩹 Sanando erros de inicialização de parâmetros implícitos nos arquivos de cabeçalhos..."
           [ -f "$NESROM_H" ] && sed -i 's/Uint8 \*pBuffer = NULL/Uint8 *pBuffer = 0/g' "$NESROM_H" || true
