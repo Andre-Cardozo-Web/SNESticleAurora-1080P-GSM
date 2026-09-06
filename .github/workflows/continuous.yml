@@ -161,7 +161,7 @@ jobs:
           cp -f ./ps2_types_fix.h "$GLOBAL_SDK_TAM" || true
           cp -f ./ps2_types_fix.h "$LOCAL_TAM_FILE" || true
 
-          echo "🩹 Sobrescrevendo fisicamente e forçando a estrutura de gpprim.h com o fix mestre de u32..."
+          echo "🩹 Sobrescrevendo gpprim.h com o fix mestre de u32..."
           cat << 'EOF' > "$PRIM_FILE"
           #ifndef GPPRIM_H
           #define GPPRIM_H
@@ -173,7 +173,7 @@ jobs:
           #endif
           EOF
 
-          echo "🩹 Sobrescrevendo fisicamente e forçando a estrutura de gpfifo.h com o fix mestre de u32..."
+          echo "🩹 Sobrescrevendo gpfifo.h com o fix mestre de u32..."
           cat << 'EOF' > "$FIFO_FILE"
           #ifndef GPFIFO_H
           #define GPFIFO_H
@@ -195,11 +195,7 @@ jobs:
           echo "🩹 Corrigindo mapeamento de alocacao de memoria e gerenciamento da IOP..."
           sed -i -E 's/#include[[:space:]]*<iopheap.h>/#include <kernel.h>\n#include <stdlib.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*<alloc.h>/\/\/ #include <alloc.h>/g' "$IOP_FILE" || true
-          
-          echo "🩹 Redirecionando includes de RPC e Rede obsoletos..."
           sed -i -E 's/#include[[:space:]]*[<"]ps2ip.h[">]/\/\/ #include <ps2ip.h>/g' "$IOP_FILE" || true
-          
-          echo "🩹 Redirecionando chamadas de Joystick e Cartao para os arquivos da arvore..."
           sed -i -E 's/#include[[:space:]]*[<"]libmc.h[">]/#include <memcard.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]libpad.h[">]/#include <libpad.h>/g' "$IOP_FILE" || true
           sed -i -E 's/#include[[:space:]]*[<"]loadfile.h[">]/#include <loadfile.h>/g' "$IOP_FILE" || true
@@ -209,8 +205,10 @@ jobs:
           sed -i '/#include "mainloop_shared.h"/i #define INT_MAX 2147483647\n#include "ps2_types_fix.h"\n#include "mainloop.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
 
           echo "🩹 Injetando os cabeçalhos de tamanhos stddef.h e o fix mestre de tipos LOGO ABAIXO de kernel.h..."
-          # Isso garante a reinstalação do u32 no escopo exato após o kernel.h limpar as macros do sistema
           sed -i '/#include <kernel.h>/a #include <stddef.h>\n#include "ps2_types_fix.h"\n#ifdef NULL\n#undef NULL\n#endif\n#define NULL nullptr' "$IOP_FILE" || true
+
+          echo "🩹 Injetando o mapeamento primitivo do ptrdiff_t na linha 1 absoluta do core para desarmar unistd.h..."
+          sed -i '1i typedef __PTRDIFF_TYPE__ ptrdiff_t;' "$IOP_FILE" || true
 
           echo "🩹 Forçando a injeção do fix de tipos diretamente no topo de memcard.h para amparar Bool e Int32..."
           if [ -f "$MC_FILE" ]; then
@@ -239,18 +237,6 @@ jobs:
 
           echo "🩹 Resolvendo conflito da struct PaletteT em bmpfile.h..."
           [ -f "$BMP_FILE" ] && sed -i 's/struct PaletteT;/\/\/ struct PaletteT;/g' "$BMP_FILE" || true
-
-          echo "🔗 Unificando caminhos de inclusao da PS2SDK por aliases estáveis de variáveis..."
-          export S="/usr/local/ps2dev/ps2sdk"
-          export D="./src/platform/ps2/system/"
-          ln -sf $S/common/include/*.h $D || true
-          ln -sf $S/ee/include/*.h $D || true
-          ln -sf $S/ee/include/libpad/*.h $D || true
-          ln -sf $S/common/include/*.h ./src/ || true
-          ln -sf $S/ee/include/*.h ./src/ || true
-          ln -sf $S/ee/include/libpad/*.h ./src/ || true
-          cp -f $S/ee/include/*.h $D 2>/dev/null || true
-          cp -f $S/common/include/*.h $D 2>/dev/null || true
       - name: Rebuild mainloop_state.cpp Natively
         run: |
           set -euo pipefail
@@ -330,7 +316,11 @@ jobs:
       - name: Build Core Components Sequentially
         run: |
           set -euo pipefail
-          echo "=== Executando compilação através das regras limpas do Makefile ==="
+          echo "=== Forçando mapeamento de includes por variáveis nativas de ambiente ==="
+          # Essas variaveis dizem ao GCC onde a SDK está de forma invisivel sem precisar copiar arquivos fisicos no terminal
+          export C_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
+          export CPLUS_INCLUDE_PATH="/usr/local/ps2dev/ps2sdk/common/include:/usr/local/ps2dev/ps2sdk/ee/include"
+          
           export CFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export CXXFLAGS="-I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-error"
           export EE_CFLAGS="-fsigned-char -I. -Isrc -I/usr/local/ps2dev/ps2sdk/common/include -I/usr/local/ps2dev/ps2sdk/ee/include -Wno-misleading-indentation -D_EE"
